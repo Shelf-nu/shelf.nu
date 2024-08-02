@@ -134,3 +134,47 @@ const QRScannerComponent = () => {
   );
 };
 ```
+
+### `useDisabled`
+
+The `useDisabled` hook is used to determine if a button should be disabled during navigation. By default, it operates with the navigation state, but it can optionally accept a fetcher to use as the state.
+
+**Usage:**
+
+```typescript
+/** Without fetcher, using default navigation */
+const isDisabled = useDisabled();
+
+/** Without fetcher */
+const isDisabled = useDisabled(fetcher);
+```
+
+**Parameters:**
+
+- `fetcher` (optional): An object that contains the state to be used. If not provided, the navigation state will be used.
+
+**Returns:**
+
+- `boolean`: Returns `true` if the form is processing and the button should be disabled, otherwise `false`.
+
+**Example:**
+
+```typescript
+import { useDisabled } from './path/to/hooks';
+
+const MyComponent = () => {
+  const fetcher = useFetcher();
+  const isDisabled = useDisabled(fetcher);
+
+  return (
+    <button disabled={isDisabled}>
+      Submit
+    </button>
+  );
+};
+```
+
+**Dependencies:**
+
+- `useNavigation`: A hook that provides the current navigation state.
+- `isFormProcessing`: A function that checks if the form is currently processing based on the state.
