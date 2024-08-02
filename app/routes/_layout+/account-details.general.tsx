@@ -113,16 +113,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
           reason = payload?.reason;
         }
 
-        await sendEmail({
+        void sendEmail({
           to: ADMIN_EMAIL || "support@shelf.nu",
           subject: "Delete account request",
-          text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n\n Reason: ${reason}`,
+          text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n\n Reason: ${reason}\n\n`,
+        });
+
+        void sendEmail({
+          to: payload.email,
+          subject: "Delete account request received",
+          text: `We have received your request to delete your account. It will be processed within 72 hours.\n\n Kind regards,\nthe Shelf team \n\n`,
         });
 
         sendNotification({
           title: "Account deletion request",
           message:
-            "Your request has been sent to the admin and will be processed within 24 hours.",
+            "Your request has been sent to the admin and will be processed within 24 hours. You will receive an email confirmation.",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
