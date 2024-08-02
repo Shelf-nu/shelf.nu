@@ -171,12 +171,15 @@ export async function createScanNote({
     const { assetId, organizationId } = await getQr(qrId);
     if (assetId) {
       if (userId && userId != "anonymous") {
-        const { firstName, lastName } = await getUserByID(userId)
-        const userName = (firstName ? firstName.trim() : "") + " " + (lastName ? lastName.trim() : "")
+        const { firstName, lastName } = await getUserByID(userId);
+        const userName =
+          (firstName ? firstName.trim() : "") +
+          " " +
+          (lastName ? lastName.trim() : "");
         if (manuallyGenerated) {
-          message = `*${userName}* manually updated the GPS coordinates to *${latitude}, ${longitude}*`;
+          message = `**${userName}** manually updated the GPS coordinates to *${latitude}, ${longitude}*.`;
         } else {
-          message = `*${userName}* performed a scan of the asset QR code`;
+          message = `**${userName}** performed a scan of the asset QR code.`;
         }
         return await createNote({
           content: message,
