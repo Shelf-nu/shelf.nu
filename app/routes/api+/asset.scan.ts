@@ -49,6 +49,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await createScan({
       userAgent: request.headers.get("user-agent") as string,
+      userId: userId,
       qrId: qr.id,
       deleted: false,
       latitude: latitude,
