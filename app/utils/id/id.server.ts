@@ -1,5 +1,5 @@
 import { init } from "@paralleldrive/cuid2";
-import { isQrId } from ".";
+import { hasNumber } from ".";
 import { DEFAULT_CUID_LENGTH } from "../constants";
 import { FINGERPRINT } from "../env";
 import { ShelfError } from "../error";
@@ -35,7 +35,6 @@ export function id(length?: number) {
      * In that case we generate a random number between 0 and 9 and replace the charactear at its own index.
      * We have to make sure we never replace the first character because it must be a letter.
      * */
-    const hasNumber = (str: string) => /\d/.test(str);
 
     if (!hasNumber(generatedId)) {
       const randomNumber = Math.floor(Math.random() * 10);

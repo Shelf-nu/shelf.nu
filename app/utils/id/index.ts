@@ -10,12 +10,20 @@ export function isQrId(id: string): boolean {
   const possibleLengths = [DEFAULT_CUID_LENGTH, LEGACY_CUID_LENGTH];
   const length = id.length;
 
+  // @TODO - temporary disabled number check due to bug and corrupted ids
+  // /**
+  //  * 1. The string must contain only lowercase letters and digits.
+  //  * 2. The string must start with a lowercase letter.
+  //  * 3. The string must contain at least one digit.
+  //  */
+  // const regex = /^(?=.*\d)[a-z][0-9a-z]*$/;
+
   /**
-   * 1. The string must contain only lowercase letters and digits.
+   * Adjusted criteria:
+   * 1. The string must contain only lowercase letters.
    * 2. The string must start with a lowercase letter.
-   * 3. The string must contain at least one digit.
    */
-  const regex = /^(?=.*\d)[a-z][0-9a-z]*$/;
+  const regex = /^[a-z][0-9a-z]*$/;
 
   // Validate the ID against the criteria
   if (
@@ -27,4 +35,8 @@ export function isQrId(id: string): boolean {
   }
 
   return true;
+}
+
+export function hasNumber(str: string) {
+  return /\d/.test(str);
 }
