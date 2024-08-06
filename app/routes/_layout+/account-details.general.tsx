@@ -15,6 +15,7 @@ import { DeleteUser } from "~/components/user/delete-user";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
+import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
 import { sendResetPasswordLink } from "~/modules/auth/service.server";
 import {
@@ -31,7 +32,6 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateFormSchema = z.object({

@@ -1,7 +1,7 @@
 import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
-import { sendEmail } from "~/utils/mail.server";
 import { normalizeQrData } from "~/utils/qr";
 
 export async function createReport({
