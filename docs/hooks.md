@@ -135,7 +135,7 @@ const QRScannerComponent = () => {
 };
 ```
 
-### `useDisabled`
+## `useDisabled`
 
 The `useDisabled` hook is used to determine if a button should be disabled during navigation. By default, it operates with the navigation state, but it can optionally accept a fetcher to use as the state.
 
@@ -178,3 +178,11 @@ const MyComponent = () => {
 
 - `useNavigation`: A hook that provides the current navigation state.
 - `isFormProcessing`: A function that checks if the form is currently processing based on the state.
+
+## useUserRoleHelper
+
+The `useUserRoleHelper` hook is helps you to always know the roles of the current user and also returns some helper boolean values to make it easier to check for specific roles.
+
+**Dependencies:**
+
+- `useRouteLoaderData`: 
