@@ -183,6 +183,39 @@ const MyComponent = () => {
 
 The `useUserRoleHelper` hook is helps you to always know the roles of the current user and also returns some helper boolean values to make it easier to check for specific roles.
 
+The useUserRoleHelper function returns an object(roles) and helper boolean attributes:
+
+- `roles`: enum that provides role of the current user
+- `isAdministrator`: A boolean value indicating whether the user has the 'ADMIN' role.
+- `isOwner`: A boolean value indicating whether the user has the OWNER role.
+- `isAdministratorOrOwner`: A boolean value indicating whether the user has either the 'ADMIN' or 'OWNER'role.
+- `isSelfService`: A boolean value indicating whether the user has the 'SELF_SERVICE' role.
+- `isBase`: A boolean value indicating whether the user has the 'BASE' role.
+- `isBaseOrSelfService`: A boolean value indicating whether the user has either the BASE or 'SELF_SERVICE' role.
+
+**Usage:**
+The "New Asset" button is rendered only if isAdministratorOrOwner is true.
+```typescript
+import React from 'react';
+import { useUserRoleHelper } from '~/hooks/user-user-role-helper';
+
+export default function AssetIndexPage() {
+  const { isAdministratorOrOwner } = useUserRoleHelper();
+
+  return (
+    <div>
+      <header>
+        {isAdministratorOrOwner && (
+          <button>
+            New Asset
+          </button>
+        )}
+      </header>
+    </div>
+  );
+}
+```
+
 **Dependencies:**
 
-- `useRouteLoaderData`: 
+- `useRouteLoaderData`: hook from `@remix-run/react` that returns the loader data for a given route by ID.
