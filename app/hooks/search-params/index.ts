@@ -199,7 +199,7 @@ export function useClearValueFromParams(...keys: string[]): Function {
   const isAssetIndexPage = useIsAssetIndexPage();
 
   function clearValuesFromParams() {
-    if (isAssetIndexPage && currentOrganization && currentOrganization?.id) {
+    if (isAssetIndexPage && currentOrganization) {
       destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
@@ -217,8 +217,7 @@ export function useClearValueFromParams(...keys: string[]): Function {
 export function useCookieDestroy() {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
-  // const isAssetIndexPage = useIsAssetIndexPage();
-  const isAssetIndexPage = false;
+  const isAssetIndexPage = useIsAssetIndexPage();
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
