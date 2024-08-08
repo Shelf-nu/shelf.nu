@@ -206,6 +206,7 @@ export async function generatePdfContent(
           ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
           : undefined,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      protocolTimeout: 60000, // Increase the timeout to 60 seconds
     });
 
     console.log("browser", browser);
