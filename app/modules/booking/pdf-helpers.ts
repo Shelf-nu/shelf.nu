@@ -193,7 +193,9 @@ export async function generatePdfContent(
         : undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-  const fullHtmlContent = `
+
+  try {
+    const fullHtmlContent = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -208,22 +210,37 @@ export async function generatePdfContent(
     </body>
     </html>
   `;
-  const newPage = await browser.newPage();
-  await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
+    const newPage = await browser.newPage();
+    await newPage.setContent(fullHtmlContent, {
+      waitUntil: "networkidle0",
+      timeout: 60000,
+    });
 
-  const pdfBuffer = await newPage.pdf({
-    format: "A4",
-    displayHeaderFooter: true,
-    headerTemplate: headerTemplate || "",
-    margin: {
-      top: "120px",
-      bottom: "30px",
-      left: "20px",
-      right: "20px",
-      ...(styles || {}),
-    },
-  });
+    const pdfBuffer = await newPage.pdf({
+      format: "A4",
+      displayHeaderFooter: true,
+      headerTemplate: headerTemplate || "",
+      margin: {
+        top: "120px",
+        bottom: "30px",
+        left: "20px",
+        right: "20px",
+        ...(styles || {}),
+      },
+    });
 
-  await browser.close();
-  return pdfBuffer;
+    return pdfBuffer;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Error generating PDF content",
+      status: 500,
+      label: "Booking",
+    });
+  } finally {
+    // Ensures that the browser is closed, even in the case of an error(possible memory leak)
+    if (browser) {
+      await browser.close();
+    }
+  }
 }
