@@ -199,13 +199,14 @@ export async function generatePdfContent(
     console.log("LAUNCHING PUPETEER");
     console.log("CHROME_EXECUTABLE_PATH", CHROME_EXECUTABLE_PATH);
     console.log("NODE_ENV", NODE_ENV);
-    console.log("pupeeteer", puppeteer);
+    console.log("pupeeteer", JSON.stringify(puppeteer, null, 2));
     const browser = await puppeteer.launch({
       executablePath:
         NODE_ENV !== "development"
           ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
           : undefined,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      dumpio: true,
     });
 
     console.log("browser", browser);
