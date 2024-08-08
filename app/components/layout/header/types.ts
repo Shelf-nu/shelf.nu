@@ -45,7 +45,12 @@ export type Action = {
 };
 
 /** The button variant. Default is primary */
-export type ButtonVariant = "primary" | "secondary" | "tertiary" | "link";
+export type ButtonVariant =
+  | "primary"
+  | "secondary"
+  | "tertiary"
+  | "link"
+  | "danger";
 
 /** Width of the button. Default is auto */
 export type ButtonWidth = "auto" | "full";

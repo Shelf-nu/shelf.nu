@@ -64,6 +64,10 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       link: tw(
         `border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800`
       ),
+      danger: tw(
+        `border-error-600 bg-error-600 text-white focus:ring-2`,
+        disabled ? "border-error-300 bg-error-300" : "hover:bg-error-800"
+      ),
     };
 
     const sizes = {

@@ -18,7 +18,6 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
 import { Table, Td, Tr } from "~/components/table";
-import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { deleteUser, getUserByID } from "~/modules/user/service.server";
@@ -207,9 +206,6 @@ export default function Area51UserPage() {
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
-          <div className="flex gap-3">
-            <DeleteUser user={user} />
-          </div>
         </div>
         <div className="flex gap-2">
           <div className="w-[400px]">

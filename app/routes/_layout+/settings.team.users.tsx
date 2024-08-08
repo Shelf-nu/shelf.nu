@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { createInvite } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
@@ -27,7 +28,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
 import {
   PermissionAction,
   PermissionEntity,

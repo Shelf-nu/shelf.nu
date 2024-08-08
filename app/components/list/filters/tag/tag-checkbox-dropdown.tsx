@@ -6,7 +6,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useTagSearch } from "~/components/category/useTagSearch";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params";
 import type { WithDateFields } from "~/modules/types";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons/library";

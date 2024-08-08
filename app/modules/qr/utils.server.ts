@@ -10,7 +10,7 @@ import { createQr, getQrByAssetId, getQrByKitId } from "./service.server";
 const label: ErrorLabel = "QR";
 
 export function getQrBaseUrl() {
-  return URL_SHORTENER ? `${URL_SHORTENER}/qr` : `${SERVER_URL}/qr`;
+  return URL_SHORTENER ? `https://${URL_SHORTENER}` : `${SERVER_URL}/qr`;
 }
 
 export async function generateCode({

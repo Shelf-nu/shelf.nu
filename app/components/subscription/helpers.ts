@@ -12,7 +12,7 @@ export const FREE_PLAN = {
 				Automatic Upgrades, 
 				Server Maintenance
 			`,
-      slogan: "Free forever. No credit card required.",
+      slogan: "For personal use or hobby use.",
     },
   },
   unit_amount: 0,
