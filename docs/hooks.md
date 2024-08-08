@@ -195,6 +195,7 @@ The useUserRoleHelper function returns an object(roles) and helper boolean attri
 
 **Usage:**
 The "New Asset" button is rendered only if isAdministratorOrOwner is true.
+
 ```typescript
 import React from 'react';
 import { useUserRoleHelper } from '~/hooks/user-user-role-helper';

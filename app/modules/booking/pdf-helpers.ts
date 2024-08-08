@@ -196,6 +196,10 @@ export async function generatePdfContent(
   styles?: Record<string, string>
 ) {
   try {
+    console.log("LAUNCHING PUPETEER");
+    console.log("CHROME_EXECUTABLE_PATH", CHROME_EXECUTABLE_PATH);
+    console.log("NODE_ENV", NODE_ENV);
+    console.log("pupeeteer", puppeteer);
     const browser = await puppeteer.launch({
       executablePath:
         NODE_ENV !== "development"
@@ -203,6 +207,8 @@ export async function generatePdfContent(
           : undefined,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
+
+    console.log("browser", browser);
     const fullHtmlContent = `
     <!DOCTYPE html>
     <html lang="en">
@@ -218,9 +224,12 @@ export async function generatePdfContent(
     </body>
     </html>
   `;
-    const newPage = await browser.newPage();
-    await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
 
+    console.log("FULL HTML CONTENT", fullHtmlContent);
+
+    const newPage = await browser.newPage();
+    console.log("NEW PAGE", newPage);
+    await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
     const pdfBuffer = await newPage.pdf({
       format: "A4",
       displayHeaderFooter: true,
@@ -233,6 +242,8 @@ export async function generatePdfContent(
         ...(styles || {}),
       },
     });
+
+    console.log("PDF BUFFER", pdfBuffer);
 
     await browser.close();
     return pdfBuffer;
