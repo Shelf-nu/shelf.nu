@@ -35,10 +35,12 @@ FROM base AS release
 
 # Install packages needed for pupeteer
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y chromium chromium-sandbox && \
+    apt-get install --no-install-recommends -y chromium chromium-sandbox dbus dbus-x11 && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 ENV CHROME_EXECUTABLE_PATH="/usr/bin/chromium"
+ENV DBUS_SESSION_BUS_ADDRESS autolaunch:
+
 
 COPY --from=build /src/node_modules /src/node_modules
 COPY --from=build /src/app/database /src/app/database
