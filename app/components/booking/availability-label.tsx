@@ -226,6 +226,9 @@ export function getKitAvailabilityStatus(
     BookingStatus.OVERDUE,
   ] as BookingStatus[];
 
+  /**
+   * Important to make sure the bookings are overlapping the period of the current booking
+   */
   const someAssetHasUnavailableBooking =
     kitBookings.length > 0 &&
     kitBookings.some(
