@@ -33,13 +33,17 @@ RUN npm prune --omit=dev
 # Finally, build the production image with minimal footprint
 FROM base AS release
 
-# Install packages needed for pupeteer
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y chromium chromium-sandbox dbus dbus-x11 && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV CHROME_EXECUTABLE_PATH="/usr/bin/chromium"
-ENV DBUS_SESSION_BUS_ADDRESS autolaunch:
+# Set environment variables
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    CHROME_EXECUTABLE_PATH="/usr/bin/chromium"
 
 
 COPY --from=build /src/node_modules /src/node_modules
