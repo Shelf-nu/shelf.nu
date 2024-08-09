@@ -27,7 +27,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
+import { sendEmail } from "~/emails/mail.server";
 import {
   PermissionAction,
   PermissionEntity,
