@@ -23,12 +23,14 @@ export function TeamUsersActionsDropdown({
   name,
   teamMemberId,
   email,
+  useButtonTrigger = true,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
   name?: string;
   teamMemberId?: string;
   email: string;
+  useButtonTrigger?: boolean;
 }) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
@@ -41,10 +43,21 @@ export function TeamUsersActionsDropdown({
         onOpenChange={(open) => setOpen(open)}
         open={open}
       >
-        <DropdownMenuTrigger className="size-6 pr-2 outline-none focus-visible:border-0">
-          <i className="inline-block px-3 py-0 text-gray-400 ">
-            {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
-          </i>
+        <DropdownMenuTrigger className="size-6 pr-2 outline-none focus-visible:border-0 w-full">
+          {useButtonTrigger ? (
+            <Button
+              variant="secondary"
+              to="#"
+              width="full"
+              data-test-id="userActionsButton"
+            >
+              <span className="flex items-center gap-2">Actions</span>
+            </Button>
+          ) : (
+            <i className="inline-block px-3 py-0 text-gray-400 ">
+              {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
+            </i>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"

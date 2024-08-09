@@ -117,7 +117,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/assets?${cookieParams.toString()}`);
     }
-
     let [
       tierLimit,
       {
@@ -645,7 +644,7 @@ const ListAssetContent = ({
   );
 };
 
-const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
+export const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   const visibleTags = tags?.slice(0, 2);
   const remainingTags = tags?.slice(2);
 

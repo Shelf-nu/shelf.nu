@@ -1,8 +1,9 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json, Outlet, useLoaderData } from "@remix-run/react";
+import { json, Outlet, useLoaderData, useParams } from "@remix-run/react";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
+import When from "~/components/when/when";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -54,19 +55,26 @@ export default function TeamSettings() {
     { to: "nrm", content: "Non-registered members" },
   ];
 
+  const params = useParams();
+
   return (
-    <div className="h-full rounded border bg-white p-4 md:px-10 md:py-8">
-      <h1 className="text-[18px] font-semibold">
-        {isPersonalOrg ? "Team" : `${orgName}’s team`}
-      </h1>
-      <p className="mb-6 text-sm text-gray-600">
-        Manage your existing team and give team members custody to certain
-        assets.
-      </p>
-
-      <HorizontalTabs items={TABS} />
-
-      <Outlet />
-    </div>
+    <>
+      <When truthy={!params.userId}>
+        <div className="h-full rounded border bg-white p-4 md:px-10 md:py-8">
+          <h1 className="text-[18px] font-semibold">
+            {isPersonalOrg ? "Team" : `${orgName}’s team`}
+          </h1>
+          <p className="mb-6 text-sm text-gray-600">
+            Manage your existing team and give team members custody to certain
+            assets.
+          </p>
+          <HorizontalTabs items={TABS} />
+          <Outlet />
+        </div>
+      </When>
+      <When truthy={!!params?.userId?.length}>
+        <Outlet />
+      </When>
+    </>
   );
 }
