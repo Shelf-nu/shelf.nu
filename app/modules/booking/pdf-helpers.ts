@@ -204,7 +204,8 @@ export async function generatePdfContent(
       NODE_ENV !== "development"
         ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
         : undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disabled-gpu"],
+    dumpio: true,
   });
   console.log("browser", browser);
 
