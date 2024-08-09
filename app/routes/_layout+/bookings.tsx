@@ -167,15 +167,17 @@ export default function BookingsIndexPage({
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**
-   * We have 3 cases when we should render index:
+   * We have 4 cases when we should render index:
    * 1. When we are on the index route
    * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
    * 3. When we are on the assets.$assetId.bookings page
+   * 4. When we are on the settings.team.users.$userId.bookings
    */
   const shouldRenderIndex =
     currentRoute?.handle?.name === ("bookings.index" as string) ||
     currentRoute?.handle?.name === "bookings.new" ||
-    currentRoute?.handle?.name === "$assetId.bookings";
+    currentRoute?.handle?.name === "$assetId.bookings" ||
+    currentRoute?.handle?.name === "$userId.bookings";
 
   const isAssetBookingsPage =
     currentRoute?.handle?.name === "$assetId.bookings";
