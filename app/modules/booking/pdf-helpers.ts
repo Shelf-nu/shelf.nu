@@ -195,19 +195,20 @@ export async function generatePdfContent(
   headerTemplate?: string,
   styles?: Record<string, string>
 ) {
-  console.log("LAUNCHING PUPETEER");
-  console.log("CHROME_EXECUTABLE_PATH", CHROME_EXECUTABLE_PATH);
-  console.log("NODE_ENV", NODE_ENV);
-  console.log("pupeeteer", JSON.stringify(puppeteer, null, 2));
   const browser = await puppeteer.launch({
     executablePath:
       NODE_ENV !== "development"
         ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
         : undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disabled-gpu"],
-    dumpio: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+    ],
+    // @ts-ignore
+    headless: "new",
   });
-  console.log("browser", browser);
 
   try {
     const fullHtmlContent = `
@@ -226,10 +227,7 @@ export async function generatePdfContent(
     </html>
   `;
 
-    console.log("FULL HTML CONTENT", fullHtmlContent);
-
     const newPage = await browser.newPage();
-    console.log("NEW PAGE", newPage);
 
     await newPage.setContent(fullHtmlContent, {
       waitUntil: "networkidle0",
@@ -248,7 +246,6 @@ export async function generatePdfContent(
         ...(styles || {}),
       },
     });
-    console.log("PDF BUFFER", pdfBuffer);
 
     return pdfBuffer;
   } catch (cause) {
