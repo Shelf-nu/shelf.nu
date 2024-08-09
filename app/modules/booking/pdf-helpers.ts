@@ -195,21 +195,20 @@ export async function generatePdfContent(
   headerTemplate?: string,
   styles?: Record<string, string>
 ) {
-  try {
-    console.log("LAUNCHING PUPETEER");
-    console.log("CHROME_EXECUTABLE_PATH", CHROME_EXECUTABLE_PATH);
-    console.log("NODE_ENV", NODE_ENV);
-    console.log("pupeeteer", JSON.stringify(puppeteer, null, 2));
-    const browser = await puppeteer.launch({
-      executablePath:
-        NODE_ENV !== "development"
-          ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
-          : undefined,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      dumpio: true,
-    });
+  console.log("LAUNCHING PUPETEER");
+  console.log("CHROME_EXECUTABLE_PATH", CHROME_EXECUTABLE_PATH);
+  console.log("NODE_ENV", NODE_ENV);
+  console.log("pupeeteer", JSON.stringify(puppeteer, null, 2));
+  const browser = await puppeteer.launch({
+    executablePath:
+      NODE_ENV !== "development"
+        ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
+        : undefined,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  console.log("browser", browser);
 
-    console.log("browser", browser);
+  try {
     const fullHtmlContent = `
     <!DOCTYPE html>
     <html lang="en">
@@ -230,7 +229,12 @@ export async function generatePdfContent(
 
     const newPage = await browser.newPage();
     console.log("NEW PAGE", newPage);
-    await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
+
+    await newPage.setContent(fullHtmlContent, {
+      waitUntil: "networkidle0",
+      timeout: 60000,
+    });
+
     const pdfBuffer = await newPage.pdf({
       format: "A4",
       displayHeaderFooter: true,
@@ -243,10 +247,8 @@ export async function generatePdfContent(
         ...(styles || {}),
       },
     });
-
     console.log("PDF BUFFER", pdfBuffer);
 
-    await browser.close();
     return pdfBuffer;
   } catch (cause) {
     throw new ShelfError({
@@ -255,5 +257,10 @@ export async function generatePdfContent(
       status: 500,
       label: "Booking",
     });
+  } finally {
+    // Ensures that the browser is closed, even in the case of an error(possible memory leak)
+    if (browser) {
+      await browser.close();
+    }
   }
 }
