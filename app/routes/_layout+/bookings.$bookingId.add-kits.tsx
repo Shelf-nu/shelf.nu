@@ -111,6 +111,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               availableToBook: true,
               custody: true,
               bookings: {
+                /**
+                 * Important to make sure the bookings are overlapping the period of the current booking
+                 */
                 where: {
                   ...(booking.from &&
                     booking.to && {
