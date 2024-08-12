@@ -32,6 +32,7 @@ export const ZXingScanner = ({
        * - ^(https?:\/\/[^\/]+\/ matches the protocol, domain, and the initial slash.
        * - (?:qr\/)? optionally matches the /qr/ part.
        * - ([a-zA-Z0-9]+))$ matches the QR ID which is the last segment of the URL.
+       * - $ ensures that there are no additional parts after the QR ID.
        */
       // Regex to match both old and new QR code structures
       const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
