@@ -158,8 +158,10 @@ export type RouteHandleWithName = {
 
 export default function BookingsIndexPage({
   className,
+  includeBulkActions = true,
 }: {
   className?: string;
+  includeBulkActions?: boolean;
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
@@ -205,7 +207,7 @@ export default function BookingsIndexPage({
           }}
         />
         <List
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={includeBulkActions ? <BulkActionsDropdown /> : undefined}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           className="overflow-x-visible md:overflow-x-auto"

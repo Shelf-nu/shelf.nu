@@ -43,7 +43,7 @@ export function TeamUsersActionsDropdown({
         onOpenChange={(open) => setOpen(open)}
         open={open}
       >
-        <DropdownMenuTrigger className="size-6 pr-2 outline-none focus-visible:border-0 w-full">
+        <DropdownMenuTrigger className="size-6 w-full pr-2 outline-none focus-visible:border-0">
           {useButtonTrigger ? (
             <Button
               variant="secondary"

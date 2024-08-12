@@ -9,12 +9,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-} from "~/utils/http.server";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -122,5 +117,5 @@ export const handle = {
 };
 
 export default function UserBookingsPage() {
-  return <BookingsIndexPage className="!mt-0" />;
+  return <BookingsIndexPage className="!mt-0" includeBulkActions={false} />;
 }

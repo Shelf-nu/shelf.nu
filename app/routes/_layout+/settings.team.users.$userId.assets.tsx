@@ -1,30 +1,24 @@
-import { json, LoaderFunctionArgs, redirect } from "@remix-run/node";
-import { requirePermission } from "~/utils/roles.server";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
-import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
-import { Asset, Kit, Category, Custody, Tag } from "@prisma/client";
-import { List } from "~/components/list";
+import type { Asset, Kit, Category, Custody, Tag } from "@prisma/client";
 import {
   TooltipProvider,
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@radix-ui/react-tooltip";
-import { useLoaderData, useNavigate } from "@remix-run/react";
-import { Badge } from "~/components/shared/badge";
+import { json, redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { useNavigate } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
-import { Image } from "~/components/shared/image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight, KitIcon } from "~/components/icons/library";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { Image } from "~/components/shared/image";
 import { Th, Td } from "~/components/table";
 import When from "~/components/when/when";
 import {
@@ -32,16 +26,23 @@ import {
   useClearValueFromParams,
 } from "~/hooks/search-params";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
-import { ListItemTagsColumn } from "./assets._index";
-import { Button } from "~/components/shared/button";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   getFiltersFromRequest,
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
+import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

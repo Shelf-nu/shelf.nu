@@ -11,6 +11,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import {
   getUserByID,
@@ -20,7 +21,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/emails/mail.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -48,7 +48,7 @@ export const loader = async ({
       action: PermissionAction.read,
     });
 
-    const { userId: selectedUserId } = params;
+    const selectedUserId = params.userId as string;
     const user = await getUserByID(selectedUserId);
     const userName =
       (user.firstName ? user.firstName.trim() : "") +
@@ -196,14 +196,14 @@ export default function UserPage() {
                   : "/static/images/asset-placeholder.jpg"
               }
               alt="team-member"
-              className="size-14 rounded mr-4"
+              className="mr-4 size-14 rounded"
             />
           ),
         }}
         subHeading={user.email}
         classNames="-mt-5"
       ></Header>
-      <AbsolutePositionedHeaderActions className="hidden md:flex w-full">
+      <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
         <TeamUsersActionsDropdown
           userId={user.id}
           email={user.email}

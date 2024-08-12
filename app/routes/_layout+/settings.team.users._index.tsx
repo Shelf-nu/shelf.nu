@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, Link, redirect, useNavigate } from "@remix-run/react";
+import { json, Link, redirect } from "@remix-run/react";
 import { z } from "zod";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ChevronRight } from "~/components/icons/library";
@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { createInvite } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
@@ -27,7 +28,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/emails/mail.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -322,7 +322,6 @@ const STATUS_FILTERS = {
 };
 
 export default function UserTeamSetting() {
-  const navigate = useNavigate();
   return (
     <div>
       <p className="mb-6 text-xs text-gray-600">
@@ -356,7 +355,6 @@ export default function UserTeamSetting() {
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={UserRow}
-          navigate={(itemId) => navigate(`${itemId}/assets`)}
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Role</Th>
@@ -376,23 +374,13 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
-              <img src={item.img} alt="custodian" className="size-10 rounded" />
-            </div>
-            <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {item.name}
-              </span>
-              <div>{item.email}</div>
-            </div>
-          </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
-        </div>
+        {item.status === "ACCEPTED" ? (
+          <Link to={`${item.id}/assets`}>
+            <TeamMemberDetails details={item} />
+          </Link>
+        ) : (
+          <TeamMemberDetails details={item} />
+        )}
       </Td>
       <Td className="hidden md:table-cell">{item.role}</Td>
       <Td className="hidden md:table-cell">
@@ -438,3 +426,27 @@ const InviteStatusBadge = ({ status }: { status: InviteStatuses }) => {
     </span>
   );
 };
+
+const TeamMemberDetails = ({
+  details,
+}: {
+  details: TeamMembersWithUserOrInvite;
+}) => (
+    <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+      <div className="flex items-center gap-3">
+        <div className="flex size-12 shrink-0 items-center justify-center">
+          <img src={details.img} alt="custodian" className="size-10 rounded" />
+        </div>
+        <div className="min-w-[130px]">
+          <span className="word-break mb-1 block font-medium">
+            {details.name}
+          </span>
+          <div>{details.email}</div>
+        </div>
+      </div>
+
+      <button className="block md:hidden">
+        <ChevronRight />
+      </button>
+    </div>
+  );
