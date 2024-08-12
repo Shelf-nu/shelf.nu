@@ -164,6 +164,17 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     const path = pathParts.join("/");
     const serverUrl = process.env.SERVER_URL;
 
+    /**
+     * The following conditions need to be met for the middleware to redirect to a QR code. In the rest of the cases, it just redirects to app root.
+     * - The path should NOT include any special characters
+     * - The path should start with a small letter
+     * - The path should only have small letters and optional number
+     * - The path's length should fit within the allowed character lengths(10 for new and 25 for legacy QR codes)
+     */
+
+    console.log(`urlShortener middleware: Processing ${path}`);
+    return next();
+
     // Check if the path is a single segment and a valid CUID
     if (pathParts.length === 1 && isQrId(path)) {
       const redirectUrl = `${serverUrl}/qr/${path}`;
