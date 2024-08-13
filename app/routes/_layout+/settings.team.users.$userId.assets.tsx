@@ -1,5 +1,6 @@
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { useNavigate } from "@remix-run/react";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   getFiltersFromRequest,
@@ -14,7 +15,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { AssetsList } from "./assets._index";
-import { useNavigate } from "@remix-run/react";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
