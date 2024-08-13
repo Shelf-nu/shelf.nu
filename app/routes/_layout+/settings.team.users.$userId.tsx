@@ -216,12 +216,8 @@ export default function UserPage() {
               className="mr-4 size-14 rounded"
             />
           ),
-          "right-of-title": (
-            <Badge
-              color={"#808080"}
-              withDot={false}
-              className="  mt-[7px] self-start"
-            >
+          "append-to-title": (
+            <Badge color={"#808080"} withDot={false}>
               {userOrgRole}
             </Badge>
           ),
