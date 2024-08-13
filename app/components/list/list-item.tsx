@@ -5,17 +5,21 @@ export interface ListItemData {
   [x: string]: any;
 }
 
+export interface ListItemProps {
+  item: ListItemData;
+  children: React.ReactNode;
+  navigate?: (id: string, item: ListItemData) => void;
+  className?: string;
+  onClick?: (id: string) => void;
+}
+
 export const ListItem = ({
   item,
   children,
   navigate,
   className,
-}: {
-  item: ListItemData;
-  children: React.ReactNode;
-  navigate?: (id: string, item: ListItemData) => void;
-  className?: string;
-}) => (
+  onClick,
+}: ListItemProps) => (
   <tr
     // onClick={navigate ? () => navigate(item.id, item) : undefined}
     onClick={(event) => {
@@ -28,7 +32,7 @@ export const ListItem = ({
 
         // Call the navigate function if it exists
         navigate(item.id, item);
-      }
+      } else onClick && onClick(item.id);
     }}
     className={tw(
       "hover:bg-gray-50",

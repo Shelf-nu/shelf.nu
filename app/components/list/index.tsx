@@ -73,6 +73,7 @@ export type ListProps = {
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
   bulkActions?: React.ReactElement;
+  onItemClick?: (itemId: string) => void;
 };
 
 /**
@@ -89,6 +90,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     customEmptyStateContent,
     emptyStateClassName,
     bulkActions,
+    onItemClick,
   }: ListProps,
   ref
 ) {
@@ -216,6 +218,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   item={item}
                   key={`${item.id}-${i}`}
                   navigate={navigate}
+                  onClick={onItemClick}
                 >
                   {bulkActions && !isBaseOrSelfService ? (
                     <BulkListItemCheckbox item={item} />
