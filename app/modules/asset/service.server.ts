@@ -2455,25 +2455,24 @@ export async function bulkDeleteAssets({
       select: { id: true, mainImage: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all assets */
       await tx.asset.deleteMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
       });
-
-      /** Deleting images of the assets (if any) */
-      const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
-
-      await Promise.all(
-        assetsWithImages.map((asset) =>
-          deleteOtherImages({
-            userId,
-            assetId: asset.id,
-            data: { path: `main-image-${asset.id}.jpg` },
-          })
-        )
-      );
     });
+
+    /** Deleting images of the assets (if any) */
+    const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
+    await Promise.all(
+      assetsWithImages.map((asset) =>
+        deleteOtherImages({
+          userId,
+          assetId: asset.id,
+          data: { path: `main-image-${asset.id}.jpg` },
+        })
+      )
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,
