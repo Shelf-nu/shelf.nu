@@ -223,7 +223,6 @@ export default function UserPage() {
           ),
         }}
         subHeading={user.email}
-        classNames="-mt-5"
       ></Header>
       <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
         <TeamUsersActionsDropdown

@@ -139,6 +139,10 @@ export default function UserAssetsPage() {
   return <AssetsList />;
 }
 
+export const handle = {
+  name: "$userId.assets",
+};
+
 const AssetsList = () => {
   const navigate = useNavigate();
   const hasFiltersToClear = useSearchParamHasValue(
