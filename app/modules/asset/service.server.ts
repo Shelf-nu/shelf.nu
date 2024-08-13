@@ -253,13 +253,9 @@ async function getAssetsFromView(params: {
           { tags: { none: {} } },
         ];
       } else {
-        where.asset.tags = {
-          some: {
-            id: {
-              in: tagsIds,
-            },
-          },
-        };
+        where.asset.AND = tagsIds.map((tagId) => ({
+          tags: { some: { id: tagId } },
+        }));
       }
     }
 
@@ -525,17 +521,11 @@ async function getAssets(params: {
       if (tagsIds.includes("untagged")) {
         where.OR = [
           ...(where.OR ?? []),
-          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { every: { id: { in: tagsIds } } } },
           { tags: { none: {} } },
         ];
       } else {
-        where.tags = {
-          some: {
-            id: {
-              in: tagsIds,
-            },
-          },
-        };
+        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
       }
     }
 
