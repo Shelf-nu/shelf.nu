@@ -393,7 +393,6 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             userId={item.userId}
             name={item.name}
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
-            useButtonTrigger={false}
           />
         ) : null}
       </Td>
@@ -432,21 +431,21 @@ const TeamMemberDetails = ({
 }: {
   details: TeamMembersWithUserOrInvite;
 }) => (
-    <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-12 shrink-0 items-center justify-center">
-          <img src={details.img} alt="custodian" className="size-10 rounded" />
-        </div>
-        <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">
-            {details.name}
-          </span>
-          <div>{details.email}</div>
-        </div>
+  <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+    <div className="flex items-center gap-3">
+      <div className="flex size-12 shrink-0 items-center justify-center">
+        <img src={details.img} alt="custodian" className="size-10 rounded" />
       </div>
-
-      <button className="block md:hidden">
-        <ChevronRight />
-      </button>
+      <div className="min-w-[130px]">
+        <span className="word-break mb-1 block font-medium">
+          {details.name}
+        </span>
+        <div>{details.email}</div>
+      </div>
     </div>
-  );
+
+    <button className="block md:hidden">
+      <ChevronRight />
+    </button>
+  </div>
+);

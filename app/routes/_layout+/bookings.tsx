@@ -158,10 +158,10 @@ export type RouteHandleWithName = {
 
 export default function BookingsIndexPage({
   className,
-  includeBulkActions = true,
+  disableBulkActions = false,
 }: {
   className?: string;
-  includeBulkActions?: boolean;
+  disableBulkActions?: boolean;
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
@@ -175,11 +175,15 @@ export default function BookingsIndexPage({
    * 3. When we are on the assets.$assetId.bookings page
    * 4. When we are on the settings.team.users.$userId.bookings
    */
-  const shouldRenderIndex =
-    currentRoute?.handle?.name === ("bookings.index" as string) ||
-    currentRoute?.handle?.name === "bookings.new" ||
-    currentRoute?.handle?.name === "$assetId.bookings" ||
-    currentRoute?.handle?.name === "$userId.bookings";
+
+  const allowedRoutes = [
+    "bookings.index",
+    "bookings.new",
+    "$assetId.bookings",
+    "$userId.bookings",
+  ];
+
+  const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
   const isAssetBookingsPage =
     currentRoute?.handle?.name === "$assetId.bookings";
@@ -207,7 +211,7 @@ export default function BookingsIndexPage({
           }}
         />
         <List
-          bulkActions={includeBulkActions ? <BulkActionsDropdown /> : undefined}
+          bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           className="overflow-x-visible md:overflow-x-auto"

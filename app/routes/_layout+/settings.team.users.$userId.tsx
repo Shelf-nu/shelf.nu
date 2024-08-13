@@ -9,6 +9,7 @@ import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
+import { Button } from "~/components/shared/button";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -208,6 +209,11 @@ export default function UserPage() {
           userId={user.id}
           email={user.email}
           inviteStatus="ACCEPTED"
+          customTrigger={
+            <Button variant="secondary" width="full">
+              <span className="flex items-center gap-2">Actions</span>
+            </Button>
+          }
         />
       </AbsolutePositionedHeaderActions>
       <HorizontalTabs items={TABS} />

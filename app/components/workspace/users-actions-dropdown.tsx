@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import {
@@ -23,14 +24,14 @@ export function TeamUsersActionsDropdown({
   name,
   teamMemberId,
   email,
-  useButtonTrigger = true,
+  customTrigger,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
   name?: string;
   teamMemberId?: string;
   email: string;
-  useButtonTrigger?: boolean;
+  customTrigger?: ReactNode;
 }) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
@@ -44,15 +45,8 @@ export function TeamUsersActionsDropdown({
         open={open}
       >
         <DropdownMenuTrigger className="size-6 w-full pr-2 outline-none focus-visible:border-0">
-          {useButtonTrigger ? (
-            <Button
-              variant="secondary"
-              to="#"
-              width="full"
-              data-test-id="userActionsButton"
-            >
-              <span className="flex items-center gap-2">Actions</span>
-            </Button>
+          {customTrigger ? (
+            customTrigger
           ) : (
             <i className="inline-block px-3 py-0 text-gray-400 ">
               {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
