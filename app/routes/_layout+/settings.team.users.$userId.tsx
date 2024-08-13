@@ -9,6 +9,7 @@ import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -27,6 +28,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { organizationRolesMap } from "./settings.team";
 
 export type UserFriendlyRoles =
   | "Administrator"
@@ -50,7 +52,16 @@ export const loader = async ({
     });
 
     const selectedUserId = params.userId as string;
-    const user = await getUserByID(selectedUserId);
+    const user = await getUserByID(selectedUserId, {
+      userOrganizations: {
+        where: {
+          organizationId: currentOrganization.id,
+        },
+        select: {
+          roles: true,
+        },
+      },
+    });
     const userName =
       (user.firstName ? user.firstName.trim() : "") +
       " " +
@@ -183,7 +194,12 @@ export default function UserPage() {
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
   ];
-
+  /**
+   * We assume that the user has only one role in the organization
+   * and we get the first role
+   * We get the first organization as in the query it was already scoped to the current organization
+   */
+  const userOrgRole = organizationRolesMap[user.userOrganizations[0].roles[0]];
   return (
     <>
       <Header
@@ -199,6 +215,15 @@ export default function UserPage() {
               alt="team-member"
               className="mr-4 size-14 rounded"
             />
+          ),
+          "right-of-title": (
+            <Badge
+              color={"#808080"}
+              withDot={false}
+              className="  mt-[7px] self-start"
+            >
+              {userOrgRole}
+            </Badge>
           ),
         }}
         subHeading={user.email}

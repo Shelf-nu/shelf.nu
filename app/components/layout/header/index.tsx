@@ -7,7 +7,7 @@ import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
 
-type SlotKeys = "left-of-title";
+type SlotKeys = "left-of-title" | "right-of-title";
 
 export default function Header({
   title = null,
@@ -27,7 +27,9 @@ export default function Header({
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
-  slots?: Record<SlotKeys, ReactNode>;
+  slots?: {
+    [key in SlotKeys]?: ReactNode;
+  };
 }) {
   const data = useLoaderData<{
     header?: HeaderData;
@@ -66,6 +68,7 @@ export default function Header({
               header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
             )}
           </div>
+          {slots?.["right-of-title"] || null}
         </div>
       )}
     </header>
