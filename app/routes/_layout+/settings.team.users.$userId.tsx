@@ -3,26 +3,20 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, Outlet, redirect, useLoaderData } from "@remix-run/react";
-import { z } from "zod";
+import { json, Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { db } from "~/database/db.server";
-import { sendEmail } from "~/emails/mail.server";
-import { revokeAccessEmailText } from "~/modules/invite/helpers";
-import {
-  getUserByID,
-  revokeAccessToOrganization,
-} from "~/modules/user/service.server";
+import { getUserByID } from "~/modules/user/service.server";
+import { resolveUserAction } from "~/modules/user/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -44,7 +38,7 @@ export const loader = async ({
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { currentOrganization } = await requirePermission({
+    const { currentOrganization, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMemberProfile,
@@ -52,13 +46,26 @@ export const loader = async ({
     });
 
     const selectedUserId = params.userId as string;
+
     const user = await getUserByID(selectedUserId, {
       userOrganizations: {
         where: {
-          organizationId: currentOrganization.id,
+          organizationId,
         },
         select: {
           roles: true,
+        },
+      },
+      teamMembers: {
+        where: {
+          organizationId,
+        },
+        include: {
+          receivedInvites: {
+            where: {
+              organizationId,
+            },
+          },
         },
       },
     });
@@ -97,83 +104,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
-
-    const { intent } = parseData(
-      formData,
-      z.object({
-        intent: z.enum(["delete", "revokeAccess", "resend", "cancelInvite"]),
-      }),
-      {
-        additionalData: {
-          organizationId,
-        },
-      }
-    );
-
-    switch (intent) {
-      case "revokeAccess": {
-        const { userId: targetUserId } = parseData(
-          formData,
-          z.object({
-            userId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        const user = await revokeAccessToOrganization({
-          userId: targetUserId,
-          organizationId,
-        });
-
-        const org = await db.organization
-          .findUniqueOrThrow({
-            where: {
-              id: organizationId,
-            },
-            select: {
-              name: true,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Organization not found",
-              additionalData: { organizationId },
-              label: "Team",
-            });
-          });
-
-        await sendEmail({
-          to: user.email,
-          subject: `Access to ${org.name} has been revoked`,
-          text: revokeAccessEmailText({ orgName: org.name }),
-        });
-
-        sendNotification({
-          title: `Access revoked`,
-          message: `User with email ${user.email} no longer has access to this organization`,
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
-        return redirect("/settings/team/users");
-      }
-
-      default: {
-        throw new ShelfError({
-          cause: null,
-          message: "Invalid action",
-          additionalData: { intent },
-          label: "Team",
-        });
-      }
-    }
+    return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -189,7 +120,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const { user } = useLoaderData<typeof loader>();
-
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -216,30 +146,29 @@ export default function UserPage() {
               className="mr-4 size-14 rounded"
             />
           ),
-          "right-of-title": (
-            <Badge
-              color={"#808080"}
-              withDot={false}
-              className="  mt-[7px] self-start"
-            >
+          "append-to-title": (
+            <Badge color={"#808080"} withDot={false}>
               {userOrgRole}
             </Badge>
           ),
         }}
         subHeading={user.email}
-        classNames="-mt-5"
       ></Header>
       <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
-        <TeamUsersActionsDropdown
-          userId={user.id}
-          email={user.email}
-          inviteStatus="ACCEPTED"
-          customTrigger={
-            <Button variant="secondary" width="full">
-              <span className="flex items-center gap-2">Actions</span>
-            </Button>
-          }
-        />
+        <When truthy={userOrgRole !== "Owner"}>
+          <TeamUsersActionsDropdown
+            userId={user.id}
+            email={user.email}
+            teamMemberId={user.teamMembers[0].id}
+            inviteStatus={user?.teamMembers?.[0]?.receivedInvites?.[0]?.status}
+            isSSO={user.sso}
+            customTrigger={(disabled) => (
+              <Button variant="secondary" width="full" disabled={disabled}>
+                Actions
+              </Button>
+            )}
+          />
+        </When>
       </AbsolutePositionedHeaderActions>
       <HorizontalTabs items={TABS} />
 

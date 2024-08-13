@@ -121,3 +121,7 @@ export default function UserAssetsPage() {
     />
   );
 }
+
+export const handle = {
+  name: "$userId.assets",
+};

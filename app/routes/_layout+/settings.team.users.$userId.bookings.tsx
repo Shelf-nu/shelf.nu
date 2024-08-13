@@ -113,7 +113,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export const handle = {
-  name: "$assetId.bookings",
+  name: "$userId.bookings",
 };
 
 export default function UserBookingsPage() {

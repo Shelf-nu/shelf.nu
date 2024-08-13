@@ -22,6 +22,7 @@ export interface TeamMembersWithUserOrInvite {
   status: InviteStatuses;
   role: UserFriendlyRoles;
   userId: string | null;
+  sso: boolean;
 }
 
 export async function getPaginatedAndFilterableSettingUsers({
@@ -147,6 +148,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         status: "ACCEPTED",
         role: organizationRolesMap[um.roles[0]],
         userId: um.user.id,
+        sso: um.user.sso,
       }));
 
     /**
@@ -161,6 +163,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         status: invite.status,
         role: organizationRolesMap[invite?.roles[0]],
         userId: null,
+        sso: false,
       });
     }
 

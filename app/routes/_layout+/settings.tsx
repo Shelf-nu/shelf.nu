@@ -1,9 +1,10 @@
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import { Link, Outlet, useMatches } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { data } from "~/utils/http.server";
@@ -44,10 +45,21 @@ export default function SettingsPage() {
     );
   }
 
+  const matches = useMatches();
+  const currentRoute = matches.at(-1);
   return (
     <>
       <Header hidePageDescription />
-      <HorizontalTabs items={items} />
+      <When
+        truthy={
+          !["$userId.assets", "$userId.bookings"].includes(
+            // @ts-expect-error
+            currentRoute?.handle?.name
+          )
+        }
+      >
+        <HorizontalTabs items={items} />
+      </When>
       <div>
         <Outlet />
       </div>

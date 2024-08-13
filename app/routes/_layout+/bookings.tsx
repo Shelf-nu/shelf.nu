@@ -185,12 +185,15 @@ export default function BookingsIndexPage({
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
-  const isAssetBookingsPage =
-    currentRoute?.handle?.name === "$assetId.bookings";
+  /** A bookings page that is a child of another nested layout */
+  const isChildBookingsPage = [
+    "$assetId.bookings",
+    "$userId.bookings",
+  ].includes(currentRoute?.handle?.name);
 
   return shouldRenderIndex ? (
     <>
-      {!isAssetBookingsPage ? (
+      {!isChildBookingsPage ? (
         <Header>
           <Button
             to="new"
