@@ -254,17 +254,16 @@ async function getAssetsFromView(params: {
         tagsIds = tagsIds.filter((id) => id !== "untagged");
 
         // Filter for assets that are untagged only
-        where.asset.AND = [
-          // @ts-expect-error
-          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+        where.asset.OR = [
+          ...(where.asset.OR || []), // Preserve existing AND conditions if any
           { tags: { none: {} } }, // Include assets with no tags
         ];
       }
 
       // If there are other tags specified, apply AND condition
       if (tagsIds.length > 0) {
-        where.asset.AND = [
-          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+        where.asset.OR = [
+          ...(where.asset.OR || []), // Preserve existing AND conditions if any
           { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
         ];
       }
@@ -302,6 +301,7 @@ async function getAssetsFromView(params: {
       if (hasWithoutCustody && hasSpecificTeamMembers) {
         // If both conditions are true, logically ensure no results are returned
         where.asset.AND = [
+          //@ts-expect-error
           ...(where.asset.AND ?? []),
           { custody: { is: null } }, // Assets without custody
           {
@@ -1447,6 +1447,8 @@ export async function getPaginatedAndFilterableAssets({
     locationIds,
     teamMemberIds,
   } = paramsValues;
+
+  console.log("Received", teamMemberIds);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;

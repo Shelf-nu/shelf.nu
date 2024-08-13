@@ -66,6 +66,14 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/assets?${cookieParams.toString()}`);
     }
+
+    /**
+     * We have to protect against bad actors adding teamMember param in the url and getting the assets from another team member
+     * In this view there could only be 1 team member this is scoped to and that is the user we are currently viewing: selectedUserId
+     * */
+    const filtersSearchParams = new URLSearchParams(filters);
+    filtersSearchParams.set("teamMember", selectedUserId as string);
+
     const {
       search,
       totalAssets,
@@ -86,9 +94,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      filters:
-        `teamMember=${selectedUserId}` +
-        (filters.length > 0 ? "&" + filters : ""),
+      filters: filtersSearchParams.toString(),
     });
 
     const modelName = {
