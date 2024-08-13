@@ -10,20 +10,14 @@ export function isQrId(id: string): boolean {
   const possibleLengths = [DEFAULT_CUID_LENGTH, LEGACY_CUID_LENGTH];
   const length = id.length;
 
-  // @TODO - temporary disabled number check due to bug and corrupted ids
-  // /**
-  //  * 1. The string must contain only lowercase letters and digits.
-  //  * 2. The string must start with a lowercase letter.
-  //  * 3. The string must contain at least one digit.
-  //  */
-  // const regex = /^(?=.*\d)[a-z][0-9a-z]*$/;
-
   /**
-   * Adjusted criteria:
-   * 1. The string must contain only lowercase letters.
-   * 2. The string must start with a lowercase letter.
+   * The following conditions need to be met for the middleware to redirect to a QR code. In the rest of the cases, it just redirects to app root.
+   * - The path should NOT include any special characters
+   * - The path should start with a small letter
+   * - The path should only have small letters and optional number
+   * - The path's length should fit within the allowed character lengths(10 for new and 25 for legacy QR codes)
    */
-  const regex = /^[a-z][0-9a-z]*$/;
+  const regex = /^[a-z][a-z0-9]*$/;
 
   // Validate the ID against the criteria
   if (
