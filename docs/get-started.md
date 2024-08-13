@@ -61,6 +61,9 @@ SUPABASE_URL="https://{STAGING_YOUR_INSTANCE_NAME}.supabase.co"
 SESSION_SECRET="super-duper-s3cret"
 SERVER_URL="http://localhost:3000"
 
+# Used for generating cuid with lowered chance of collision. Optional
+FINGERPRINT="a-custom-host-fingerprint"
+
 SMTP_HOST="smtp.yourhost.com"
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
@@ -172,6 +175,7 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true&connection_limit=1"
   fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}"
   fly secrets set MAPTILER_TOKEN="{YOUR_MAPTILER_TOKEN}"
+  fly secrets set FINGERPRINT=$(openssl rand -hex 32)
 
   fly secrets set SMTP_HOST="smtp.yourhost.com"
   fly secrets set SMTP_USER="you@example.com"

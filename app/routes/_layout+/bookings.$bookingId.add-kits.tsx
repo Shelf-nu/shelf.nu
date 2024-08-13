@@ -39,7 +39,6 @@ import {
 } from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import { createNotes } from "~/modules/asset/service.server";
 import {
   getBooking,
   getKitIdsByAssets,
@@ -47,6 +46,7 @@ import {
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
@@ -55,7 +55,7 @@ import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -95,6 +95,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       singular: "kit",
       plural: "kits",
     };
+    const booking = await getBooking({ id: bookingId, organizationId });
+    const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     const { page, perPage, kits, search, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
@@ -108,14 +110,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               status: true,
               availableToBook: true,
               custody: true,
-              bookings: { select: { id: true, status: true } },
+              bookings: {
+                /**
+                 * Important to make sure the bookings are overlapping the period of the current booking
+                 */
+                where: {
+                  ...(booking.from &&
+                    booking.to && {
+                      OR: [
+                        {
+                          from: { lte: booking.from },
+                          to: { gte: booking.to },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.from },
+                        },
+                      ],
+                    }),
+                },
+                select: { id: true, status: true },
+              },
             },
           },
         },
       });
-
-    const booking = await getBooking({ id: bookingId, organizationId });
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
       data({

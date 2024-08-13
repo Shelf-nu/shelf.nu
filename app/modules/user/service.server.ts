@@ -666,10 +666,20 @@ async function getUsers({
 
     /** If the search string exists, add it to the where object */
     if (search) {
-      where.email = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.OR = [
+        {
+          email: {
+            contains: search,
+            mode: "insensitive",
+          },
+        },
+        {
+          id: {
+            contains: search,
+            mode: "insensitive",
+          },
+        },
+      ];
     }
 
     const [users, totalUsers] = await Promise.all([

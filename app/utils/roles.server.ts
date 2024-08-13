@@ -6,7 +6,7 @@ import { ShelfError } from "./error";
 import type {
   PermissionAction,
   PermissionEntity,
-} from "./permissions/permission.validator.server";
+} from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
@@ -80,11 +80,16 @@ export async function requirePermission({
     userId,
   });
 
+  const role = roles ? roles[0] : undefined;
+
   return {
     organizations,
     organizationId,
     currentOrganization,
-    role: roles ? roles[0] : undefined,
+    role,
+    isSelfServiceOrBase:
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE,
   };
 }
 
@@ -101,6 +106,11 @@ export function getRoleFromGroupId(
     groupIds.includes(ssoDetails.selfServiceGroupId)
   ) {
     return OrganizationRoles.SELF_SERVICE;
+  } else if (
+    ssoDetails.baseUserGroupId &&
+    groupIds.includes(ssoDetails.baseUserGroupId)
+  ) {
+    return OrganizationRoles.BASE;
   } else {
     throw new ShelfError({
       cause: null,
@@ -108,6 +118,7 @@ export function getRoleFromGroupId(
       message:
         "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
       label: "Auth",
+      additionalData: { ssoDetails, groupIds },
     });
   }
 }

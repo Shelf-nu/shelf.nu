@@ -190,12 +190,14 @@ export async function updateOrganization({
   userId,
   currency,
   ssoDetails,
-}: Pick<Organization, "name" | "id" | "currency"> & {
+}: Pick<Organization, "id" | "currency"> & {
+  name?: string;
   userId: User["id"];
   image: File | null;
   ssoDetails?: {
     selfServiceGroupId: string;
     adminGroupId: string;
+    baseUserGroupId: string;
   };
 }) {
   try {

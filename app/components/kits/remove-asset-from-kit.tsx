@@ -27,14 +27,6 @@ export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
           className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
           width="full"
           icon="trash"
-          disabled={
-            asset.status === "CHECKED_OUT"
-              ? {
-                  reason:
-                    "You cannot remove this asset from the kit because it is currently checked out. Please check in the kit first, then try again",
-                }
-              : false
-          }
         >
           Remove
         </Button>

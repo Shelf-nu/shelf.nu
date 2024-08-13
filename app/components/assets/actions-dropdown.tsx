@@ -7,9 +7,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";

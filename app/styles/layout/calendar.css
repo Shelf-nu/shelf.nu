@@ -27,6 +27,7 @@
 
 .fc-event-main {
   color: inherit !important;
+  /* @apply !max-h-[20px]; */
 }
 .fc-event-title {
   font-weight: inherit !important;

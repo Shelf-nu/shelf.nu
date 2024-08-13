@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -24,18 +23,13 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-/**
- * In the case of bookings, when the user clicks "new", we automatically create the booking.
- * In order to not have to manage 2 different pages for new and view/edit we do some simple but big brain strategy
- * In the .new route we dont even return any html, we just create a draft booking and directly redirect to the .bookingId route.
- * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
- */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
   const assetIds = searchParams.getAll("assetId");
@@ -43,13 +37,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
+
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
     /**
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
@@ -66,11 +72,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       },
     });
 
-    const selfServiceUser = isSelfService
+    const selfServiceOrBaseUser = isSelfServiceOrBase
       ? teamMembers.find((member) => member.userId === authSession.userId)
       : undefined;
 
-    if (isSelfService && !selfServiceUser) {
+    if (isSelfServiceOrBase && !selfServiceOrBaseUser) {
       throw new ShelfError({
         cause: null,
         message:
@@ -82,8 +88,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         showModal: true,
-        isSelfService,
-        selfServiceUser,
+        isSelfServiceOrBase,
+        selfServiceOrBaseUser,
         teamMembers,
         assetIds: assetIds.length ? assetIds : undefined,
       }),
@@ -104,13 +110,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const formData = await request.formData();
 
@@ -122,7 +127,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian, assetIds } = payload;
+    const { name, custodian, assetIds, description } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -144,11 +149,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         custodianTeamMemberId: custodian?.id,
         organizationId,
         name,
+        description,
         from,
         to,
         assetIds,
         creatorId: authSession.userId,
-        ...(isSelfService && {
+        ...(isSelfServiceOrBase && {
           custodianUserId: authSession.userId,
         }),
       },
@@ -190,7 +196,7 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceUser, assetIds } =
+  const { isSelfServiceOrBase, selfServiceOrBaseUser, assetIds } =
     useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
 
@@ -210,11 +216,11 @@ export default function NewBooking() {
           endDate={endDate}
           assetIds={assetIds}
           custodianUserId={
-            isSelfService
+            isSelfServiceOrBase
               ? JSON.stringify({
-                  id: selfServiceUser?.id,
-                  name: selfServiceUser?.name,
-                  userId: selfServiceUser?.userId,
+                  id: selfServiceOrBaseUser?.id,
+                  name: selfServiceOrBaseUser?.name,
+                  userId: selfServiceOrBaseUser?.userId,
                 })
               : undefined
           }
