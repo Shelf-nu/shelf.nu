@@ -1,12 +1,11 @@
 import { useMemo } from "react";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import type { InviteStatuses } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
 import { json, Link, redirect } from "@remix-run/react";
-import { z } from "zod";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -18,16 +17,13 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
-import { sendEmail } from "~/emails/mail.server";
-import { revokeAccessEmailText } from "~/modules/invite/helpers";
-import { createInvite } from "~/modules/invite/service.server";
+
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
-import { revokeAccessToOrganization } from "~/modules/user/service.server";
+import { resolveUserAction } from "~/modules/user/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -115,201 +111,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
-
-    const { intent } = parseData(
-      formData,
-      z.object({
-        intent: z.enum(["delete", "revokeAccess", "resend", "cancelInvite"]),
-      }),
-      {
-        additionalData: {
-          organizationId,
-        },
-      }
-    );
-
-    switch (intent) {
-      case "delete": {
-        const { teamMemberId } = parseData(
-          formData,
-          z.object({
-            teamMemberId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        await db.teamMember
-          .update({
-            where: {
-              id: teamMemberId,
-            },
-            data: {
-              deletedAt: new Date(),
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to delete team member",
-              additionalData: { teamMemberId, userId, organizationId },
-              label: "Team",
-            });
-          });
-
-        return redirect(`/settings/team/users`);
-      }
-      case "revokeAccess": {
-        const { userId: targetUserId } = parseData(
-          formData,
-          z.object({
-            userId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        const user = await revokeAccessToOrganization({
-          userId: targetUserId,
-          organizationId,
-        });
-
-        const org = await db.organization
-          .findUniqueOrThrow({
-            where: {
-              id: organizationId,
-            },
-            select: {
-              name: true,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Organization not found",
-              additionalData: { organizationId },
-              label: "Team",
-            });
-          });
-
-        await sendEmail({
-          to: user.email,
-          subject: `Access to ${org.name} has been revoked`,
-          text: revokeAccessEmailText({ orgName: org.name }),
-        });
-
-        sendNotification({
-          title: `Access revoked`,
-          message: `User with email ${user.email} no longer has access to this organization`,
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
-        return redirect("/settings/team/users");
-      }
-      case "cancelInvite": {
-        const { email: inviteeEmail } = parseData(
-          formData,
-          z.object({
-            email: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        await db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-              status: InviteStatuses.PENDING,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to cancel invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          });
-
-        sendNotification({
-          title: "Invitation cancelled",
-          message: "The invitation has successfully been cancelled.",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
-        return null;
-      }
-      case "resend": {
-        const {
-          email: inviteeEmail,
-          name: teamMemberName,
-          teamMemberId,
-        } = parseData(
-          formData,
-          z.object({
-            email: z.string(),
-            name: z.string(),
-            teamMemberId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        const invite = await createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [OrganizationRoles.ADMIN],
-          userId,
-        });
-
-        if (invite) {
-          sendNotification({
-            title: "Successfully invited user",
-            message:
-              "They will receive an email in which they can complete their registration.",
-            icon: { name: "success", variant: "success" },
-            senderId: userId,
-          });
-        }
-
-        return json(data(null));
-      }
-      default: {
-        throw new ShelfError({
-          cause: null,
-          message: "Invalid action",
-          additionalData: { intent },
-          label: "Team",
-        });
-      }
-    }
+    return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -393,6 +195,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             userId={item.userId}
             name={item.name}
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
+            isSSO={item.sso || false}
           />
         ) : null}
       </Td>
