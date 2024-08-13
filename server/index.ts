@@ -14,7 +14,7 @@ import { ShelfError } from "~/utils/error";
 
 import { importDevBuild } from "./dev/server";
 import { logger } from "./logger";
-import { cache, protect, refreshSession } from "./middleware";
+import { cache, protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -36,7 +36,26 @@ const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
 
 const isProductionMode = mode === "production";
 
-const app = new Hono();
+const app = new Hono({
+  getPath: (req) => {
+    const url = new URL(req.url);
+    const host = req.headers.get("host");
+
+    if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
+      return "/" + host + url.pathname;
+    }
+
+    return url.pathname;
+  },
+});
+
+// Apply the middleware to all routes
+app.use(
+  `/${process.env.URL_SHORTENER}/:path*`,
+  urlShortener({
+    excludePaths: ["/file-assets", "/healthcheck", "/static"],
+  })
+);
 
 /**
  * Serve assets files from build/client/assets

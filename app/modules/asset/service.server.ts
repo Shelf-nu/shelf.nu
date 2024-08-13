@@ -50,6 +50,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -66,9 +67,9 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
-// @TODO: Fix the circular dependency
-// eslint-disable-next-line import/no-cycle
 import { createKitsIfNotExists } from "../kit/service.server";
+
+import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -138,7 +139,7 @@ async function getAssetsFromView(params: {
   locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
 }) {
-  const {
+  let {
     organizationId,
     orderBy,
     orderDirection,
@@ -161,7 +162,9 @@ async function getAssetsFromView(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.AssetSearchViewWhereInput = { asset: { organizationId } };
+    let where: Prisma.AssetSearchViewWhereInput = {
+      asset: { organizationId },
+    };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -245,68 +248,109 @@ async function getAssetsFromView(params: {
     }
 
     if (tagsIds && tagsIds.length > 0 && where.asset) {
+      // Check if 'untagged' is part of the selected tag IDs
       if (tagsIds.includes("untagged")) {
-        where.asset.OR = [
-          ...(where.asset.OR ?? []),
-          { tags: { some: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
+        // Remove 'untagged' from the list of tags
+        tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+        // Filter for assets that are untagged only
+        where.asset.AND = [
+          // @ts-expect-error
+          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+          { tags: { none: {} } }, // Include assets with no tags
         ];
-      } else {
-        where.asset.tags = {
-          some: {
-            id: {
-              in: tagsIds,
-            },
-          },
-        };
+      }
+
+      // If there are other tags specified, apply AND condition
+      if (tagsIds.length > 0) {
+        where.asset.AND = [
+          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+        ];
       }
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
+      // Check if 'without-location' is part of the selected location IDs
       if (locationIds.includes("without-location")) {
+        // Remove 'without-location' from the list of locations
+        locationIds = locationIds.filter((id) => id !== "without-location");
+
+        // Filter for assets that have no location only
         where.asset.OR = [
-          ...(where.asset.OR ?? []),
-          { locationId: { in: locationIds } },
-          { locationId: null },
+          ...(where.asset.OR || []), // Preserve existing OR conditions if any
+          { locationId: null }, // Include assets with no location
         ];
-      } else {
-        where.asset.location = {
-          id: { in: locationIds },
-        };
+      }
+
+      // If there are other locations specified, apply OR condition
+      if (locationIds.length > 0) {
+        where.asset.OR = [
+          ...(where.asset.OR || []), // Preserve existing OR conditions if any
+          { locationId: { in: locationIds } }, // Filter by remaining locations
+        ];
       }
     }
 
-    if (teamMemberIds && teamMemberIds.length && where.asset) {
-      where.asset.OR = [
-        ...(where.asset.OR ?? []),
-        {
-          custody: { teamMemberId: { in: teamMemberIds } },
-        },
-        {
-          bookings: {
-            some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              status: {
-                in: ["ONGOING", "OVERDUE"], // Only get bookings that are ongoing or overdue as those are the only states when the asset is actually in custody
+    if (teamMemberIds && teamMemberIds.length > 0 && where.asset) {
+      // Check if "without-custody" is selected
+      const hasWithoutCustody = teamMemberIds.includes("without-custody");
+      // Check if there are other specific team members
+      const hasSpecificTeamMembers = teamMemberIds.some(
+        (id) => id !== "without-custody"
+      );
+      if (hasWithoutCustody && hasSpecificTeamMembers) {
+        // If both conditions are true, logically ensure no results are returned
+        where.asset.AND = [
+          ...(where.asset.AND ?? []),
+          { custody: { is: null } }, // Assets without custody
+          {
+            custody: {
+              teamMemberId: {
+                in: teamMemberIds.filter((id) => id !== "without-custody"),
               },
             },
-          },
-        },
-        {
-          bookings: {
-            some: {
-              custodianUserId: { in: teamMemberIds },
-              status: {
-                in: ["ONGOING", "OVERDUE"],
+          }, // Assets with specific team members
+        ];
+      } else {
+        // Combine conditions using AND to ensure all filters apply together
+        where.asset.AND = [
+          // Preserve any existing AND conditions
+          ...(where.asset.AND ?? []),
+          hasWithoutCustody
+            ? {
+                /** If without custody is selected, get assets without custody  */
+                custody: { is: null },
+              }
+            : {
+                // Use OR to match assets that are in custody of specified team members
+                OR: [
+                  // Assets directly assigned to the specified team members
+                  { custody: { teamMemberId: { in: teamMemberIds } } },
+                  // Assets assigned to the specified team members through an ongoing or overdue booking
+                  {
+                    bookings: {
+                      some: {
+                        custodianTeamMemberId: { in: teamMemberIds },
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
+                  },
+                  // Assets assigned to a user who is a member of the specified team through an ongoing or overdue booking
+                  {
+                    bookings: {
+                      some: {
+                        custodianUserId: { in: teamMemberIds },
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
+                  },
+                  // Assets in custody of a user who is in the specified team
+                  { custody: { custodian: { userId: { in: teamMemberIds } } } },
+                ],
               },
-            },
-          },
-        },
-        { custody: { custodian: { userId: { in: teamMemberIds } } } },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
+        ];
+      }
     }
 
     /**
@@ -524,17 +568,11 @@ async function getAssets(params: {
       if (tagsIds.includes("untagged")) {
         where.OR = [
           ...(where.OR ?? []),
-          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { every: { id: { in: tagsIds } } } },
           { tags: { none: {} } },
         ];
       } else {
-        where.tags = {
-          some: {
-            id: {
-              in: tagsIds,
-            },
-          },
-        };
+        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
       }
     }
 
@@ -710,6 +748,7 @@ export async function createAsset({
         : {
             create: [
               {
+                id: id(),
                 version: 0,
                 errorCorrection: ErrorCorrection["L"],
                 user,
@@ -1063,96 +1102,6 @@ export async function updateAssetMainImage({
   }
 }
 
-/** Creates a singular note */
-export async function createNote({
-  content,
-  type,
-  userId,
-  assetId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetId: Asset["id"];
-}) {
-  try {
-    const data = {
-      content,
-      type: type || "COMMENT",
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-      asset: {
-        connect: {
-          id: assetId,
-        },
-      },
-    };
-
-    return await db.note.create({
-      data,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating a note",
-      additionalData: { type, userId, assetId },
-      label,
-    });
-  }
-}
-
-/** Creates multiple notes with the same content */
-export async function createNotes({
-  content,
-  type,
-  userId,
-  assetIds,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetIds: Asset["id"][];
-}) {
-  try {
-    const data = assetIds.map((id) => ({
-      content,
-      type: type || "COMMENT",
-      userId,
-      assetId: id,
-    }));
-
-    return await db.note.createMany({
-      data,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating notes",
-      additionalData: { type, userId, assetIds },
-      label,
-    });
-  }
-}
-
-export async function deleteNote({
-  id,
-  userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
-  try {
-    return await db.note.deleteMany({
-      where: { id, userId },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while deleting the note",
-      additionalData: { id, userId },
-      label,
-    });
-  }
-}
-
 function extractMainImageName(path: string): string | null {
   const match = path.match(/main-image-[\w-]+\.\w+/);
   if (match) {
@@ -1456,6 +1405,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeSearchFromView = false,
   excludeLocationQuery = false,
+  filters = "",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1464,13 +1414,18 @@ export async function getPaginatedAndFilterableAssets({
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
   excludeLocationQuery?: boolean;
+  filters?: string;
   /**
    * Set to true if you want the query to be performed by directly accessing the assets table
    *  instead of the AssetSearchView
    */
   excludeSearchFromView?: boolean;
 }) {
-  const searchParams = getCurrentSearchParams(request);
+  const currentFilterParams = new URLSearchParams(filters || "");
+  const searchParams = filters
+    ? currentFilterParams
+    : getCurrentSearchParams(request);
+
   const paramsValues = getParamsValues(searchParams);
   const status =
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
@@ -1894,6 +1849,7 @@ export async function createAssetsFromBackupImport({
             qrCodes: {
               create: [
                 {
+                  id: id(),
                   version: 0,
                   errorCorrection: ErrorCorrection["L"],
                   userId,
@@ -2298,132 +2254,6 @@ export async function updateAssetQrCode({
       message: "Something went wrong while updating asset QR code",
       label,
       additionalData: { assetId, organizationId, newQrId },
-    });
-  }
-}
-
-export async function createBulkKitChangeNotes({
-  newlyAddedAssets,
-  removedAssets,
-  userId,
-  kit,
-}: {
-  newlyAddedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  removedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  userId: User["id"];
-  kit: Kit;
-}) {
-  try {
-    const user = await db.user
-      .findFirstOrThrow({
-        where: { id: userId },
-        select: { firstName: true, lastName: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "User not found",
-          additionalData: { userId },
-          label,
-        });
-      });
-
-    for (const asset of [...newlyAddedAssets, ...removedAssets]) {
-      const isAssetRemoved = removedAssets.some((a) => a.id === asset.id);
-      const isNewlyAdded = newlyAddedAssets.some((a) => a.id === asset.id);
-      const newKit = isAssetRemoved ? null : kit;
-      const currentKit = asset.kit ? asset.kit : null;
-
-      if (isNewlyAdded || isAssetRemoved) {
-        await createKitChangeNote({
-          currentKit,
-          newKit,
-          firstName: user.firstName ?? "",
-          lastName: user.lastName ?? "",
-          assetName: asset.title,
-          assetId: asset.id,
-          userId,
-          isRemoving: isAssetRemoved,
-        });
-      }
-    }
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating bulk kit change notes",
-      additionalData: {
-        userId,
-        newlyAddedAssetsIds: newlyAddedAssets.map((a) => a.id),
-        removedAssetsIds: removedAssets.map((a) => a.id),
-      },
-      label,
-    });
-  }
-}
-
-export async function createKitChangeNote({
-  currentKit,
-  newKit,
-  firstName,
-  lastName,
-  assetName,
-  assetId,
-  userId,
-  isRemoving,
-}: {
-  currentKit: Pick<Kit, "id" | "name"> | null;
-  newKit: Pick<Kit, "id" | "name"> | null;
-  firstName: string;
-  lastName: string;
-  assetName: Asset["title"];
-  assetId: Asset["id"];
-  userId: User["id"];
-  isRemoving: boolean;
-}) {
-  try {
-    const fullName = `${firstName.trim()} ${lastName.trim()}`;
-    let message = "";
-
-    /** User is changing from kit to another */
-    if (currentKit && newKit && currentKit.id !== newKit.id) {
-      message = `**${fullName}** changed kit of **${assetName.trim()}** from **[${currentKit.name.trim()}](/kits/${
-        currentKit.id
-      })** to **[${newKit.name.trim()}](/kits/${newKit.id})**`;
-    }
-
-    /** User is adding asset to a kit for first time */
-    if (newKit && !currentKit) {
-      message = `**${fullName}** added asset to **[${newKit.name.trim()}](/kits/${
-        newKit.id
-      })**`;
-    }
-
-    /** User is removing the asset from kit */
-    if (isRemoving && !newKit) {
-      message = `**${fullName}** removed asset from **[${currentKit?.name.trim()}](/kits/${currentKit?.id})**`;
-    }
-
-    if (!message) {
-      return;
-    }
-
-    await createNote({
-      content: message,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while creating a kit change note. Please try again or contact support",
-      additionalData: { userId, assetId },
-      label,
     });
   }
 }

@@ -14,7 +14,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
-import { createNote } from "~/modules/asset/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -30,7 +30,7 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";

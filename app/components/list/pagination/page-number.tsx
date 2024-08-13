@@ -1,5 +1,7 @@
 import { useMemo } from "react";
-import { NavLink, useSearchParams } from "@remix-run/react";
+import { NavLink } from "@remix-run/react";
+import { useSearchParams } from "~/hooks/search-params";
+
 import { getParamsValues } from "~/utils/list";
 import { mergeSearchParams } from "~/utils/merge-search-params";
 import { tw } from "~/utils/tw";

@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { NewNoteSchema } from "~/components/assets/notes/new";
-import { createNote, deleteNote } from "~/modules/asset/service.server";
+import { createNote, deleteNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
@@ -15,7 +15,7 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export function loader({ params }: LoaderFunctionArgs) {

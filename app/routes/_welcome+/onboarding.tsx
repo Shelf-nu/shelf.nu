@@ -4,12 +4,7 @@ import type {
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import {
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -17,7 +12,9 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { sendEmail } from "~/emails/mail.server";
 import { onboardingEmailText } from "~/emails/onboarding-email";
+import { useSearchParams } from "~/hooks/search-params";
 import {
   getAuthUserById,
   signInWithEmail,
@@ -31,7 +28,6 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {

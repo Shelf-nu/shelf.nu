@@ -960,7 +960,7 @@ export const ArrowRightIcon = (props: SVGProps<SVGSVGElement>) => (
   >
     <path
       d="M1.66666 7.00008H13.3333M13.3333 7.00008L7.5 1.16675M13.3333 7.00008L7.5 12.8334"
-      stroke="#344054"
+      stroke="currentColor"
       strokeWidth="1.67"
       strokeLinecap="round"
       strokeLinejoin="round"

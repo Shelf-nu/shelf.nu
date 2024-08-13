@@ -8,10 +8,14 @@ import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
+export type UserFriendlyRoles =
+  | "Administrator"
+  | "Owner"
+  | "Base"
+  | "Self service";
 
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -38,6 +42,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.BASE]: "Base",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 

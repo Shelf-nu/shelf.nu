@@ -21,8 +21,9 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
+import When from "~/components/when/when";
 import { usePosition } from "~/hooks/use-position";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
 import {
   getAsset,
@@ -45,7 +46,8 @@ import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -227,14 +229,19 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const isSelfService = useUserIsSelfService();
+  const { roles } = useUserRoleHelper();
+  const canUpdateAvailability = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   return (
     <div>
       <ContextualModal />
       <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex">
         <div className="flex-1 overflow-hidden">
-          <Card className="my-3 px-[-4] py-[-5]">
+          <Card className="my-3 px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
@@ -340,7 +347,7 @@ export default function AssetOverview() {
                 text="Custom fields"
                 className="mb-8 pt-3 lg:hidden"
               />
-              <Card className="my-3 px-[-4] py-[-5]">
+              <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
                   {customFieldsValues.map((field, _index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
@@ -382,7 +389,7 @@ export default function AssetOverview() {
         </div>
 
         <div className="w-full md:w-[360px] lg:ml-4">
-          {!isSelfService ? (
+          <When truthy={canUpdateAvailability}>
             <Card className="my-3">
               <fetcher.Form
                 ref={zo.ref}
@@ -400,11 +407,13 @@ export default function AssetOverview() {
                   </div>
                   <Switch
                     name={zo.fields.availableToBook()}
-                    disabled={isSelfService || isFormProcessing(fetcher.state)} // Disable for self service users
+                    disabled={
+                      !canUpdateAvailability || isFormProcessing(fetcher.state)
+                    } // Disable for self service users
                     defaultChecked={asset?.availableToBook}
                     required
                     title={
-                      isSelfService
+                      !canUpdateAvailability
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }
@@ -413,10 +422,10 @@ export default function AssetOverview() {
                 </div>
               </fetcher.Form>
             </Card>
-          ) : null}
+          </When>
 
           {asset?.kit?.name ? (
-            <Card className="my-3 py-3">
+            <Card className="my-3 py-3 md:border">
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
                   <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
@@ -447,7 +456,11 @@ export default function AssetOverview() {
           <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
-            isSelfService={isSelfService}
+            hasPermission={userHasPermission({
+              roles,
+              entity: PermissionEntity.custody,
+              action: PermissionAction.read,
+            })}
           />
 
           {asset && (
@@ -459,7 +472,15 @@ export default function AssetOverview() {
               }}
             />
           )}
-          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          <When
+            truthy={userHasPermission({
+              roles,
+              entity: PermissionEntity.scan,
+              action: PermissionAction.read,
+            })}
+          >
+            <ScanDetails lastScan={lastScan} />
+          </When>
         </div>
       </div>
       <ContextualSidebar />

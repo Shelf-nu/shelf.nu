@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Category } from "@prisma/client";
-import { useSearchParams } from "@remix-run/react";
+
 import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import type { WithDateFields } from "~/modules/types";
 import { useCategorySearch } from "../../../category/useCategorySearch";
 import Input from "../../../forms/input";

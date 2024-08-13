@@ -8,14 +8,15 @@ import {
   type Kit,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import QRCode from "qrcode-generator";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import { gifToPng } from "~/utils/gif-to-png";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
+// eslint-disable-next-line import/no-cycle
+import { generateCode } from "./utils.server";
 import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
@@ -79,6 +80,7 @@ export async function createQr({
   kitId?: Kit["id"];
 }) {
   const data = {
+    id: id(),
     ...(userId && {
       user: {
         connect: {
@@ -114,50 +116,6 @@ export async function createQr({
   });
 }
 
-export async function generateCode({
-  version,
-  errorCorrection,
-  qr,
-  size,
-}: {
-  version: TypeNumber;
-  errorCorrection: ErrorCorrectionLevel;
-  qr: Qr;
-  size: "cable" | "small" | "medium" | "large";
-}) {
-  try {
-    const code = QRCode(version, errorCorrection);
-    code.addData(`${process.env.SERVER_URL}/qr/${qr.id}`);
-    code.make();
-
-    /** We use a margin of 0 because we handle this using canvas in the client */
-    const sizes = {
-      cable: [1, 0], // 29px => 0.8cm(0.77)
-      small: [2, 0], // 58px => 1.5cm(1.53)
-      medium: [4, 0], // 116px => 3.1cm(3.07)
-      large: [6, 0], // 174px => 4.7cm(4.6)
-    };
-    const src = await gifToPng(code.createDataURL(...sizes[size]));
-
-    return {
-      sizes,
-      code: {
-        size: size,
-        src,
-        id: qr.id,
-      },
-    };
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while generating the QR code. Please try again or contact support.",
-      additionalData: { version, errorCorrection, qr, size },
-      label,
-    });
-  }
-}
-
 /** Generates codes that are not attached to assets but attached to a certain org and user */
 export async function generateOrphanedCodes({
   userId,
@@ -172,6 +130,7 @@ export async function generateOrphanedCodes({
     const data = Array.from({ length: amount }).map(() => ({
       userId,
       organizationId,
+      id: id(),
     }));
 
     return await db.qr.createMany({
@@ -212,6 +171,7 @@ export async function generateUnclaimedCodesForPrint({
       // Generating codes also prints them so unclaimed codes are marked as printed
       // We generate a random code for the batch
       batchId: batch.id,
+      id: id(),
     }));
 
     await db.qr.createMany({

@@ -44,16 +44,14 @@ import {
 } from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 
-import {
-  createNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
   upsertBooking,
 } from "~/modules/booking/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
@@ -62,7 +60,7 @@ import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 

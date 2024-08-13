@@ -16,7 +16,8 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import When from "~/components/when/when";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteAsset,
   deleteOtherImages,
@@ -33,7 +34,8 @@ import { error, getParams, data, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -180,8 +182,7 @@ export default function AssetDetailsPage() {
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const isSelfService = useUserIsSelfService();
-
+  const { roles } = useUserRoleHelper();
   return (
     <>
       <Header
@@ -210,8 +211,15 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isSelfService ? <ActionsDropdown /> : null}
-
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.update,
+          })}
+        >
+          <ActionsDropdown />
+        </When>
         <Button
           to={`/bookings/new?assetId=${asset.id}`}
           role="link"
