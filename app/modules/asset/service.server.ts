@@ -139,7 +139,7 @@ async function getAssetsFromView(params: {
   locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
 }) {
-  const {
+  let {
     organizationId,
     orderBy,
     orderDirection,
@@ -162,7 +162,9 @@ async function getAssetsFromView(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.AssetSearchViewWhereInput = { asset: { organizationId } };
+    let where: Prisma.AssetSearchViewWhereInput = {
+      asset: { organizationId },
+    };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -246,64 +248,109 @@ async function getAssetsFromView(params: {
     }
 
     if (tagsIds && tagsIds.length > 0 && where.asset) {
+      // Check if 'untagged' is part of the selected tag IDs
       if (tagsIds.includes("untagged")) {
-        where.asset.OR = [
-          ...(where.asset.OR ?? []),
-          { tags: { some: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
+        // Remove 'untagged' from the list of tags
+        tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+        // Filter for assets that are untagged only
+        where.asset.AND = [
+          // @ts-expect-error
+          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+          { tags: { none: {} } }, // Include assets with no tags
         ];
-      } else {
-        where.asset.AND = tagsIds.map((tagId) => ({
-          tags: { some: { id: tagId } },
-        }));
+      }
+
+      // If there are other tags specified, apply AND condition
+      if (tagsIds.length > 0) {
+        where.asset.AND = [
+          ...(where.asset.AND || []), // Preserve existing AND conditions if any
+          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+        ];
       }
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
+      // Check if 'without-location' is part of the selected location IDs
       if (locationIds.includes("without-location")) {
+        // Remove 'without-location' from the list of locations
+        locationIds = locationIds.filter((id) => id !== "without-location");
+
+        // Filter for assets that have no location only
         where.asset.OR = [
-          ...(where.asset.OR ?? []),
-          { locationId: { in: locationIds } },
-          { locationId: null },
+          ...(where.asset.OR || []), // Preserve existing OR conditions if any
+          { locationId: null }, // Include assets with no location
         ];
-      } else {
-        where.asset.location = {
-          id: { in: locationIds },
-        };
+      }
+
+      // If there are other locations specified, apply OR condition
+      if (locationIds.length > 0) {
+        where.asset.OR = [
+          ...(where.asset.OR || []), // Preserve existing OR conditions if any
+          { locationId: { in: locationIds } }, // Filter by remaining locations
+        ];
       }
     }
 
-    if (teamMemberIds && teamMemberIds.length && where.asset) {
-      where.asset.OR = [
-        ...(where.asset.OR ?? []),
-        {
-          custody: { teamMemberId: { in: teamMemberIds } },
-        },
-        {
-          bookings: {
-            some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              status: {
-                in: ["ONGOING", "OVERDUE"], // Only get bookings that are ongoing or overdue as those are the only states when the asset is actually in custody
+    if (teamMemberIds && teamMemberIds.length > 0 && where.asset) {
+      // Check if "without-custody" is selected
+      const hasWithoutCustody = teamMemberIds.includes("without-custody");
+      // Check if there are other specific team members
+      const hasSpecificTeamMembers = teamMemberIds.some(
+        (id) => id !== "without-custody"
+      );
+      if (hasWithoutCustody && hasSpecificTeamMembers) {
+        // If both conditions are true, logically ensure no results are returned
+        where.asset.AND = [
+          ...(where.asset.AND ?? []),
+          { custody: { is: null } }, // Assets without custody
+          {
+            custody: {
+              teamMemberId: {
+                in: teamMemberIds.filter((id) => id !== "without-custody"),
               },
             },
-          },
-        },
-        {
-          bookings: {
-            some: {
-              custodianUserId: { in: teamMemberIds },
-              status: {
-                in: ["ONGOING", "OVERDUE"],
+          }, // Assets with specific team members
+        ];
+      } else {
+        // Combine conditions using AND to ensure all filters apply together
+        where.asset.AND = [
+          // Preserve any existing AND conditions
+          ...(where.asset.AND ?? []),
+          hasWithoutCustody
+            ? {
+                /** If without custody is selected, get assets without custody  */
+                custody: { is: null },
+              }
+            : {
+                // Use OR to match assets that are in custody of specified team members
+                OR: [
+                  // Assets directly assigned to the specified team members
+                  { custody: { teamMemberId: { in: teamMemberIds } } },
+                  // Assets assigned to the specified team members through an ongoing or overdue booking
+                  {
+                    bookings: {
+                      some: {
+                        custodianTeamMemberId: { in: teamMemberIds },
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
+                  },
+                  // Assets assigned to a user who is a member of the specified team through an ongoing or overdue booking
+                  {
+                    bookings: {
+                      some: {
+                        custodianUserId: { in: teamMemberIds },
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
+                  },
+                  // Assets in custody of a user who is in the specified team
+                  { custody: { custodian: { userId: { in: teamMemberIds } } } },
+                ],
               },
-            },
-          },
-        },
-        { custody: { custodian: { userId: { in: teamMemberIds } } } },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
+        ];
+      }
     }
 
     /**
