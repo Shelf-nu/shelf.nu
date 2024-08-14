@@ -7,6 +7,7 @@ import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -21,7 +22,6 @@ import {
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { Button } from "../shared/button";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 
 export default function AssetCustomFields({
   zo,
