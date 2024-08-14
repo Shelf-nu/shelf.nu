@@ -30,4 +30,5 @@ export const styles = {
     marginBottom: "16px",
   },
   p: { fontSize: "16px", color: "#344054" },
+  li: { fontSize: "16px", color: "#344054" },
 };
