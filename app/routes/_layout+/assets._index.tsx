@@ -337,15 +337,13 @@ export default function AssetIndexPage() {
 export const AssetsList = ({
   customEmptyState,
   disableTeamMemberFilter,
-  customAssetNavigationUrl,
   disableBulkActions,
-  onAssetClick,
+  onRowClick,
 }: {
   customEmptyState?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
-  customAssetNavigationUrl?: string;
   disableBulkActions?: boolean;
-  onAssetClick?: (assetId: string) => void;
+  onRowClick?: (id: string) => void;
 }) => {
   const navigate = useNavigate();
   const searchParams: string[] = ["category", "tag", "location"];
@@ -484,8 +482,12 @@ export const AssetsList = ({
       <List
         title="Assets"
         ItemComponent={ListAssetContent}
-        navigate={onAssetClick ? undefined : (itemId) => navigate(itemId)}
-        onItemClick={onAssetClick}
+        /**
+         * Using remix's navigate is the default behaviour, however it can receive also a custom function
+         */
+        navigate={(itemId) =>
+          onRowClick ? onRowClick(itemId) : navigate(itemId)
+        }
         className=" overflow-x-visible md:overflow-x-auto"
         bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
         customEmptyStateContent={

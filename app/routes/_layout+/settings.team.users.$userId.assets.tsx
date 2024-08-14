@@ -117,7 +117,7 @@ export default function UserAssetsPage() {
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}
-      onAssetClick={(assetId) => navigate(`/assets/${assetId}`)}
+      onRowClick={(assetId) => navigate(`/assets/${assetId}`)}
     />
   );
 }
