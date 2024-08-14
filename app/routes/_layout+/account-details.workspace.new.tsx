@@ -11,6 +11,7 @@ import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import {
   NewWorkspaceFormSchema,
   WorkspaceForm,
@@ -127,6 +128,8 @@ export default function NewWorkspace() {
     <div>
       <Header title={title} hideBreadcrumbs classNames="-mt-5" />
       <div>
+        <SuccessfulSubscriptionModal />
+
         <WorkspaceForm />
       </div>
     </div>

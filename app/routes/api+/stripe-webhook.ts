@@ -5,6 +5,7 @@ import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -108,11 +109,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
         if (isTrialSubscription) {
           /** WHen its a trial subscription, update the tier of the user */
-          await db.user
+          const user = await db.user
             .update({
               where: { customerId },
               data: {
                 tierId: tierId as TierId,
+                usedFreeTrial: true,
               },
             })
             .catch((cause) => {
@@ -124,6 +126,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 status: 500,
               });
             });
+
+          /** Send the TRIAL welcome email with instructions */
+          void sendTeamTrialWelcomeEmail({
+            email: user.email,
+          });
         }
 
         return new Response(null, { status: 200 });
