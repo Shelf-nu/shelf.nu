@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -35,7 +35,7 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -43,13 +43,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =
       getParamsValues(searchParams);
@@ -66,7 +66,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // If status is in the params, we filter based on it
         statuses: [status],
       }),
-      ...(isSelfService && {
+      ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: authSession?.userId,
       }),
@@ -209,8 +209,9 @@ export default function BookingsIndexPage({
           className="overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell" />
               <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell"> </Th>
+
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
               <Th className="hidden md:table-cell">Custodian</Th>
@@ -274,7 +275,7 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full min-w-52 whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 py-4 pr-4 md:justify-normal md:pr-6">
+        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
@@ -296,10 +297,6 @@ const ListAssetContent = ({
         </div>
       </Td>
 
-      <Td className="hidden md:table-cell">
-        {item.description ? <LineBreakText text={item.description} /> : null}
-      </Td>
-
       {/**
        * Optional label when the booking includes assets that are either:
        * 1. Marked as not available for boooking
@@ -316,6 +313,10 @@ const ListAssetContent = ({
             }
           />
         ) : null}
+      </Td>
+
+      <Td className="hidden md:table-cell">
+        {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}

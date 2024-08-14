@@ -13,7 +13,7 @@ export const UserBadge = ({
   imgClassName,
   name,
 }: UserBadgeProps) => (
-  <div className="max-w-[250px]">
+  <div className="h-6 max-w-[250px]">
     <span
       className={tw(
         "ml-1 inline-flex w-max items-center rounded-2xl bg-gray-100 px-2 py-0.5",

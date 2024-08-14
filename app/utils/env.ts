@@ -14,6 +14,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
+      URL_SHORTENER: string;
     };
   }
 }
@@ -25,6 +26,7 @@ declare global {
       SUPABASE_URL: string;
       SUPABASE_SERVICE_ROLE: string;
       SERVER_URL: string;
+      URL_SHORTENER: string;
       SUPABASE_ANON_PUBLIC: string;
       SESSION_SECRET: string;
       MAPTILER_TOKEN: string;
@@ -106,6 +108,10 @@ export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
+export const URL_SHORTENER = getEnv("URL_SHORTENER", {
+  isRequired: false,
+});
+
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
 export const FINGERPRINT = getEnv("FINGERPRINT", {
   isSecret: true,
@@ -218,5 +224,6 @@ export function getBrowserEnv() {
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
     CHROME_EXECUTABLE_PATH,
+    URL_SHORTENER,
   };
 }

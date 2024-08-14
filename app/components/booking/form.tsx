@@ -10,9 +10,14 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianUserSelect from "../custody/custodian-user-select";
@@ -22,6 +27,7 @@ import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import When from "../when/when";
 
 /**
  * Important note is that the fields are only valudated when they are not disabled
@@ -150,7 +156,18 @@ export function BookingForm({
     NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
   );
 
-  const isSelfService = useUserIsSelfService();
+  const { roles, isBaseOrSelfService } = useUserRoleHelper();
+
+  const canCheckInBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkin,
+  });
+  const canCheckOutBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkout,
+  });
 
   return (
     <div>
@@ -158,10 +175,8 @@ export function BookingForm({
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
-            {/* When the booking is Completed, there are no actions available for selfService so we don't render it */}
-            {bookingStatus?.isCompleted && isSelfService ? null : (
-              <ActionsDropdown />
-            )}
+            {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
+            <ActionsDropdown />
 
             {/*  We show the button in all cases, unless the booking is in a final state */}
             {!(
@@ -219,7 +234,7 @@ export function BookingForm({
             ) : null}
 
             {/* When booking is reserved, we show the check-out button */}
-            {bookingStatus?.isReserved && !isSelfService ? (
+            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
               <Button
                 disabled={
                   disabled ||
@@ -243,10 +258,14 @@ export function BookingForm({
               >
                 Check Out
               </Button>
-            ) : null}
+            </When>
 
-            {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
-            !isSelfService ? (
+            <When
+              truthy={
+                (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                canCheckInBooking
+              }
+            >
               <Button
                 disabled={disabled}
                 type="submit"
@@ -257,7 +276,7 @@ export function BookingForm({
               >
                 Check-in
               </Button>
-            ) : null}
+            </When>
           </AbsolutePositionedHeaderActions>
         ) : null}
         <div className="-mx-4 mb-4 md:mx-0">
@@ -345,7 +364,7 @@ export function BookingForm({
                   defaultUserId={custodianUserId}
                   disabled={inputFieldIsDisabled}
                   className={
-                    isSelfService
+                    isBaseOrSelfService
                       ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
                       : ""
                   }

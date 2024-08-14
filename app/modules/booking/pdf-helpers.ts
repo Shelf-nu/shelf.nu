@@ -59,67 +59,76 @@ export async function fetchAllPdfRelatedData(
   userId: string,
   role: OrganizationRoles | undefined
 ): Promise<PdfDbResult> {
-  const booking = await getBooking({ id: bookingId, organizationId });
+  try {
+    const booking = await getBooking({ id: bookingId, organizationId });
 
-  if (
-    role === OrganizationRoles.SELF_SERVICE &&
-    booking.custodianUserId !== userId
-  ) {
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      booking.custodianUserId !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        status: 403,
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
+    const [assets, organization, defaultOrgImg] = await Promise.all([
+      db.asset.findMany({
+        where: {
+          id: { in: booking?.assets.map((a) => a.id) || [] },
+        },
+        include: {
+          category: true,
+          custody: true,
+          qrCodes: true,
+          location: true,
+          bookings: {
+            where: {
+              ...(booking?.from && booking?.to
+                ? {
+                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                    OR: [
+                      { from: { lte: booking.to }, to: { gte: booking.from } },
+                      { from: { gte: booking.from }, to: { lte: booking.to } },
+                    ],
+                  }
+                : {}),
+            },
+          },
+          kit: true,
+        },
+      }),
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: { imageId: true, name: true, id: true, image: true },
+      }),
+      getImageAsBase64(`${SERVER_URL}/static/images/asset-placeholder.jpg`),
+    ]);
+
+    const assetIdToQrCodeMap = await getQrCodeMaps({
+      assets,
+      userId,
+      organizationId,
+      size: "small",
+    });
+    return {
+      booking,
+      assets,
+      organization,
+      assetIdToQrCodeMap,
+      defaultOrgImg,
+    };
+  } catch (cause) {
     throw new ShelfError({
-      cause: null,
-      message: "You are not authorized to view this booking",
-      status: 403,
+      cause,
+      message: "Error fetching booking data for PDF",
+      status: 500,
       label: "Booking",
-      shouldBeCaptured: false,
     });
   }
-
-  const [assets, organization, defaultOrgImg] = await Promise.all([
-    db.asset.findMany({
-      where: {
-        id: { in: booking?.assets.map((a) => a.id) || [] },
-      },
-      include: {
-        category: true,
-        custody: true,
-        qrCodes: true,
-        location: true,
-        bookings: {
-          where: {
-            ...(booking?.from && booking?.to
-              ? {
-                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                  OR: [
-                    { from: { lte: booking.to }, to: { gte: booking.from } },
-                    { from: { gte: booking.from }, to: { lte: booking.to } },
-                  ],
-                }
-              : {}),
-          },
-        },
-        kit: true,
-      },
-    }),
-    db.organization.findUnique({
-      where: { id: organizationId },
-      select: { imageId: true, name: true, id: true, image: true },
-    }),
-    getImageAsBase64(`${SERVER_URL}/static/images/asset-placeholder.jpg`),
-  ]);
-
-  const assetIdToQrCodeMap = await getQrCodeMaps({
-    assets,
-    userId,
-    organizationId,
-    size: "small",
-  });
-  return {
-    booking,
-    assets,
-    organization,
-    assetIdToQrCodeMap,
-    defaultOrgImg,
-  };
 }
 
 export const getBookingAssetsCustomHeader = ({
@@ -191,9 +200,18 @@ export async function generatePdfContent(
       NODE_ENV !== "development"
         ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
         : undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+    ],
+    // @ts-ignore
+    headless: "new",
   });
-  const fullHtmlContent = `
+
+  try {
+    const fullHtmlContent = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -208,22 +226,39 @@ export async function generatePdfContent(
     </body>
     </html>
   `;
-  const newPage = await browser.newPage();
-  await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
 
-  const pdfBuffer = await newPage.pdf({
-    format: "A4",
-    displayHeaderFooter: true,
-    headerTemplate: headerTemplate || "",
-    margin: {
-      top: "120px",
-      bottom: "30px",
-      left: "20px",
-      right: "20px",
-      ...(styles || {}),
-    },
-  });
+    const newPage = await browser.newPage();
 
-  await browser.close();
-  return pdfBuffer;
+    await newPage.setContent(fullHtmlContent, {
+      waitUntil: "networkidle0",
+      timeout: 60000,
+    });
+
+    const pdfBuffer = await newPage.pdf({
+      format: "A4",
+      displayHeaderFooter: true,
+      headerTemplate: headerTemplate || "",
+      margin: {
+        top: "120px",
+        bottom: "30px",
+        left: "20px",
+        right: "20px",
+        ...(styles || {}),
+      },
+    });
+
+    return pdfBuffer;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Error generating PDF content",
+      status: 500,
+      label: "Booking",
+    });
+  } finally {
+    // Ensures that the browser is closed, even in the case of an error(possible memory leak)
+    if (browser) {
+      await browser.close();
+    }
+  }
 }

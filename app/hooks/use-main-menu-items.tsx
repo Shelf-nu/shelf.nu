@@ -1,9 +1,10 @@
 import Icon from "~/components/icons/icon";
 import { useUserData } from "./use-user-data";
-import { useUserIsSelfService } from "./user-user-is-self-service";
+import { useUserRoleHelper } from "./user-user-role-helper";
 
 export function useMainMenuItems() {
   const user = useUserData();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   let menuItemsTop = [
     {
@@ -71,7 +72,7 @@ export function useMainMenuItems() {
     },
   ];
 
-  if (useUserIsSelfService()) {
+  if (isBaseOrSelfService) {
     /** Deleting the Dashboard menu item as its not needed for self_service users. */
     const itemsToRemove = [
       "dashboard",

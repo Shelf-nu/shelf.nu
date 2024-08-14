@@ -425,7 +425,7 @@ enum OrganizationType {
 
 enum OrganizationRoles {
   ADMIN
-  TEAM_MEMBER
+  BASE
   OWNER
   SELF_SERVICE
 }
@@ -438,8 +438,9 @@ model SsoDetails {
 
   organizations Organization[]
 
-  selfServiceGroupId String? // The group id for self service users
-  adminGroupId       String? // The group id for admin users
+  baseUserGroupId    String? // The group id for BASE users
+  selfServiceGroupId String? // The group id for SELF_SERVICE users
+  adminGroupId       String? // The group id for ADMIN users
 
   // Datetime
   createdAt DateTime @default(now())
@@ -571,6 +572,7 @@ enum Currency {
   HKD // Hong Kong Dollar
   SAR // Saudi Riyal
   AED // United Arab Emirates Dirham
+  PLN // Polish Zloty
 }
 
 enum InviteStatuses {

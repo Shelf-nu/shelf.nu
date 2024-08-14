@@ -31,7 +31,7 @@ import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription.server";
 import { MAX_SIZE } from "./account-details.workspace.new";
@@ -157,13 +157,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await clonedRequest.formData();
 
     const { enabledSso } = currentOrganization;
-    const schema = EditWorkspaceFormSchema(enabledSso);
+    const schema = EditWorkspaceFormSchema(
+      enabledSso,
+      currentOrganization.type === "PERSONAL"
+    );
 
     const payload = parseData(formData, schema, {
       additionalData: { userId, organizationId },
     });
 
-    const { name, currency, id, selfServiceGroupId, adminGroupId } = payload;
+    const {
+      name,
+      currency,
+      id,
+      selfServiceGroupId,
+      adminGroupId,
+      baseUserGroupId,
+    } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -182,6 +192,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ssoDetails: {
           selfServiceGroupId: selfServiceGroupId as string,
           adminGroupId: adminGroupId as string,
+          baseUserGroupId: baseUserGroupId as string,
         },
       }),
     });
@@ -202,7 +213,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export default function GeneralPage() {
   const { organization, canExportAssets } = useLoaderData<typeof loader>();
-
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
       <div className=" mb-6">

@@ -268,10 +268,10 @@ export async function createCustomFieldsIfNotExists({
 
     for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
       if (def.type === "OPTION" && optionMap[customFieldDefStr]?.length) {
-        def.options = optionMap[customFieldDefStr];
+        const uniqueSet = new Set(optionMap[customFieldDefStr]);
+        def.options = Array.from(uniqueSet);
       }
     }
-
     return await upsertCustomField(Object.values(fieldToDefDraftMap));
   } catch (cause) {
     throw new ShelfError({

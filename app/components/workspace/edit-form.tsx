@@ -46,6 +46,9 @@ export const EditWorkspaceFormSchema = (
     selfServiceGroupId: sso
       ? z.string().min(1, "Self service group id is required")
       : z.string().optional(),
+    baseUserGroupId: sso
+      ? z.string().min(1, "Self service group id is required")
+      : z.string().optional(),
     adminGroupId: sso
       ? z.string().min(1, "Administrator group id is required")
       : z.string().optional(),
@@ -234,6 +237,29 @@ export const WorkspaceEditForm = ({
                 error={zo.errors.selfServiceGroupId()?.message}
                 defaultValue={
                   organization.ssoDetails.selfServiceGroupId || undefined
+                }
+                className="w-full"
+                required
+              />
+            </FormRow>
+            <FormRow
+              rowLabel={`Base user role group id`}
+              subHeading={
+                <div>
+                  Place the Id of the group that should be mapped to the{" "}
+                  <b>Base</b> role.
+                </div>
+              }
+              className="border-b-0 pb-[10px]"
+              required
+            >
+              <Input
+                label={"Base user role group id"}
+                hideLabel
+                name={zo.fields.baseUserGroupId()}
+                error={zo.errors.baseUserGroupId()?.message}
+                defaultValue={
+                  organization.ssoDetails.baseUserGroupId || undefined
                 }
                 className="w-full"
                 required

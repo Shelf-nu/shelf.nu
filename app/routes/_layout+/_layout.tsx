@@ -55,6 +55,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           userId: authSession.userId,
         },
         select: {
+          id: true,
           organization: true,
           roles: true,
         },

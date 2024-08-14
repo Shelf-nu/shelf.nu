@@ -9,6 +9,7 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -17,7 +18,6 @@ import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
 import {
@@ -162,7 +162,7 @@ export async function upsertBooking(
     > & { assetIds: Asset["id"][] }
   >,
   hints: ClientHint,
-  isSelfService: boolean = false
+  isBaseOrSelfService: boolean = false
 ) {
   try {
     const {
@@ -382,7 +382,7 @@ export async function upsertBooking(
             });
 
             /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
-            if (isSelfService) {
+            if (isBaseOrSelfService) {
               const adminsEmails = await getOrganizationAdminsEmails({
                 organizationId: res.organizationId,
               });
@@ -503,7 +503,7 @@ export async function upsertBooking(
       cause,
       message:
         "Something went wrong while trying to create or update the booking. Please try again or contact support.",
-      additionalData: { booking, hints, isSelfService },
+      additionalData: { booking, hints, isBaseOrSelfService },
       label,
     });
   }
@@ -879,9 +879,14 @@ export async function getBookingsForCalendar(params: {
   request: Request;
   organizationId: Organization["id"];
   userId: string;
-  isSelfService: boolean;
+  isSelfServiceOrBase: boolean;
 }) {
-  const { request, organizationId, userId, isSelfService = false } = params;
+  const {
+    request,
+    organizationId,
+    userId,
+    isSelfServiceOrBase = false,
+  } = params;
   const searchParams = getCurrentSearchParams(request);
 
   const start = searchParams.get("start") as string;
@@ -895,7 +900,7 @@ export async function getBookingsForCalendar(params: {
       userId,
       bookingFrom: new Date(start),
       bookingTo: new Date(end),
-      ...(isSelfService && {
+      ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: userId,
       }),
