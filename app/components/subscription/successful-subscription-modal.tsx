@@ -91,6 +91,9 @@ export default function SuccessfulSubscriptionModal() {
 }
 
 function AreYouSureModal({ shouldBlock }: { shouldBlock: boolean }) {
+  const [searchParams] = useSearchParams();
+  const isTrial = searchParams.get("trial") === "true";
+
   // Block navigating elsewhere when data has been entered into the input
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -105,12 +108,15 @@ function AreYouSureModal({ shouldBlock }: { shouldBlock: boolean }) {
               <BellIcon />
             </span>
           </div>
-          <AlertDialogTitle>
-            Are you sure you want to leave the page?
-          </AlertDialogTitle>
+          <AlertDialogTitle>Leaving page</AlertDialogTitle>
           <AlertDialogDescription>
-            You just got your team subscription. Do you want to leave without
-            creating a Team workspace?
+            You just got your{" "}
+            <span className="font-semibold">
+              Team subscription{isTrial ? " trial" : ""}
+            </span>
+            . <br />
+            Do you want to create your Team workspace to get full advantage of
+            Shelf?
           </AlertDialogDescription>
           <WarningBox className="my-4 ">
             <>
@@ -128,14 +134,14 @@ function AreYouSureModal({ shouldBlock }: { shouldBlock: boolean }) {
               width="full"
               onClick={() => blocker.reset()}
             >
-              No, I want to stay.
+              Yes, I want to create a Team workspace
             </Button>
 
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               onClick={() => blocker.proceed()}
             >
-              Yes, I don't want a Team workspace
+              No, I will create it later
             </Button>
           </div>
         </AlertDialogFooter>
