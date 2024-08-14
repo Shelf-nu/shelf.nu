@@ -13,11 +13,24 @@ export function getDifferenceInSeconds(
 }
 
 /** Prepares a date to be passed as default value for input with type `datetime-local` */
-export const dateForDateTimeInputValue = (date: Date) => {
+export const dateForDateTimeInputValue = (date: Date, format = "datetime") => {
+  if (!date) {
+    return "";
+  }
   const localDate = new Date(
     date.getTime() - date.getTimezoneOffset() * 60 * 1000
   );
-  return localDate.toISOString().slice(0, 19);
+
+  switch (format) {
+    case "datetime":
+      return localDate.toISOString().slice(0, 19); // 'YYYY-MM-DDTHH:MM:SS'
+    case "date":
+      return localDate.toISOString().split("T")[0]; // 'YYYY-MM-DD'
+    case "time":
+      return localDate.toISOString().slice(11, 19); // 'HH:MM:SS'
+    default:
+      throw new Error("Invalid format type");
+  }
 };
 
 export function calcTimeDifference(

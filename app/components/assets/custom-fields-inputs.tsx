@@ -21,6 +21,7 @@ import {
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { Button } from "../shared/button";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 
 export default function AssetCustomFields({
   zo,
@@ -86,7 +87,7 @@ export default function AssetCustomFields({
           hideLabel
           type="date"
           name={`cf-${field.id}`}
-          value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
+          value={dateForDateTimeInputValue(dateObj[field.id]!, "date")}
           onChange={(e) => {
             const selectedDate = new Date(e.target.value);
             setDateObj({ ...dateObj, [field.id]: selectedDate });
