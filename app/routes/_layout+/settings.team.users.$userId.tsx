@@ -24,12 +24,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { organizationRolesMap } from "./settings.team";
 
-export type UserFriendlyRoles =
-  | "Administrator"
-  | "Owner"
-  | "Base"
-  | "Self service";
-
 export const loader = async ({
   request,
   context,
