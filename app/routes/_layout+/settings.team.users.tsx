@@ -20,7 +20,7 @@ import { db } from "~/database/db.server";
 
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
-import { resolveUserAction } from "~/modules/user/utils";
+import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";

@@ -13,7 +13,7 @@ import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { getUserByID } from "~/modules/user/service.server";
-import { resolveUserAction } from "~/modules/user/utils";
+import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
