@@ -166,7 +166,9 @@ export default function UserTeamSetting() {
       <ListContentWrapper>
         <Filters
           slots={{
-            "left-of-search": <StatusFilter statusItems={STATUS_FILTERS} />,
+            "left-of-search": (
+              <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
+            ),
           }}
         >
           <Button

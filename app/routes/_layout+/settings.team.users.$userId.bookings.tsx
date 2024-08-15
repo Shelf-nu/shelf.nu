@@ -1,5 +1,6 @@
 import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -9,7 +10,12 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -18,19 +24,17 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage from "./bookings";
 
-const BOOKING_STATUS_TO_SHOW = [
-  BookingStatus.DRAFT,
-  BookingStatus.COMPLETE,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-  BookingStatus.RESERVED,
-];
-
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { userId: selectedUserId } = params;
+  const { userId: selectedUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
   try {
     const { organizationId } = await requirePermission({
@@ -54,7 +58,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       search,
       userId: authSession?.userId,
       custodianUserId: selectedUserId,
-      statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+      statuses: status ? [status] : Object.values(BookingStatus),
     });
 
     const totalPages = Math.ceil(bookingCount / perPage);

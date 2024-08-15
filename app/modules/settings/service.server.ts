@@ -37,10 +37,10 @@ export async function getPaginatedAndFilterableSettingUsers({
 
   const { page, perPageParam, search } = paramsValues;
 
-  const status =
-    searchParams.get("status") === "ALL"
+  const inviteStatus =
+    searchParams.get("inviteStatus") === "ALL"
       ? null
-      : (searchParams.get("status") as InviteStatuses);
+      : (searchParams.get("inviteStatus") as InviteStatuses);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -86,13 +86,13 @@ export async function getPaginatedAndFilterableSettingUsers({
       ];
     }
 
-    if (status) {
+    if (inviteStatus) {
       Object.assign(userOrganizationWhere, {
         user: {
-          receivedInvites: { some: { status } },
+          receivedInvites: { some: { status: inviteStatus } },
         },
       });
-      inviteWhere.status = status;
+      inviteWhere.status = inviteStatus;
     }
 
     /**

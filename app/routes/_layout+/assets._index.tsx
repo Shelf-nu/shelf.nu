@@ -338,12 +338,10 @@ export const AssetsList = ({
   customEmptyState,
   disableTeamMemberFilter,
   disableBulkActions,
-  onRowClick,
 }: {
   customEmptyState?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
-  onRowClick?: (id: string) => void;
 }) => {
   const navigate = useNavigate();
   const searchParams: string[] = ["category", "tag", "location"];
@@ -485,9 +483,7 @@ export const AssetsList = ({
         /**
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
-        navigate={(itemId) =>
-          onRowClick ? onRowClick(itemId) : navigate(itemId)
-        }
+        navigate={(itemId) => navigate(`/assets/${itemId}`)}
         className=" overflow-x-visible md:overflow-x-auto"
         bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
         customEmptyStateContent={

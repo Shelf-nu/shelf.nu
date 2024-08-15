@@ -1,6 +1,6 @@
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { z } from "zod";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   getFiltersFromRequest,
@@ -8,7 +8,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -28,7 +28,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { userId: selectedUserId } = params;
+    const { userId: selectedUserId } = getParams(
+      params,
+      z.object({ userId: z.string() }),
+      {
+        additionalData: { userId },
+      }
+    );
     const { filters, redirectNeeded } = await getFiltersFromRequest(
       request,
       organizationId
@@ -108,7 +114,6 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 }
 
 export default function UserAssetsPage() {
-  const navigate = useNavigate();
   return (
     <AssetsList
       disableTeamMemberFilter
@@ -117,7 +122,6 @@ export default function UserAssetsPage() {
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}
-      onRowClick={(assetId) => navigate(`/assets/${assetId}`)}
     />
   );
 }

@@ -19,7 +19,6 @@ export const ListItem = ({
   className,
 }: ListItemProps) => (
   <tr
-    // onClick={navigate ? () => navigate(item.id, item) : undefined}
     onClick={(event) => {
       if (navigate) {
         // Check if Ctrl or Cmd key is pressed
