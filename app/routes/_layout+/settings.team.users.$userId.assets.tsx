@@ -1,6 +1,5 @@
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   getFiltersFromRequest,
@@ -108,7 +107,6 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 }
 
 export default function UserAssetsPage() {
-  const navigate = useNavigate();
   return (
     <AssetsList
       disableTeamMemberFilter
@@ -117,7 +115,6 @@ export default function UserAssetsPage() {
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}
-      onRowClick={(assetId) => navigate(`/assets/${assetId}`)}
     />
   );
 }

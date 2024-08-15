@@ -18,14 +18,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage from "./bookings";
 
-const BOOKING_STATUS_TO_SHOW = [
-  BookingStatus.DRAFT,
-  BookingStatus.COMPLETE,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-  BookingStatus.RESERVED,
-];
-
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -54,7 +46,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       search,
       userId: authSession?.userId,
       custodianUserId: selectedUserId,
-      statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+      statuses: status ? [status] : Object.values(BookingStatus),
     });
 
     const totalPages = Math.ceil(bookingCount / perPage);
