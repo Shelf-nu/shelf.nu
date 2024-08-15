@@ -19,6 +19,7 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight, KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
@@ -117,7 +118,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/assets?${cookieParams.toString()}`);
     }
-
     let [
       tierLimit,
       {
@@ -334,20 +334,24 @@ export default function AssetIndexPage() {
   );
 }
 
-export const AssetsList = () => {
+export const AssetsList = ({
+  customEmptyState,
+  disableTeamMemberFilter,
+  disableBulkActions,
+  onRowClick,
+}: {
+  customEmptyState?: ListProps["customEmptyStateContent"];
+  disableTeamMemberFilter?: boolean;
+  disableBulkActions?: boolean;
+  onRowClick?: (id: string) => void;
+}) => {
   const navigate = useNavigate();
-  const hasFiltersToClear = useSearchParamHasValue(
-    "category",
-    "tag",
-    "location",
-    "teamMember"
-  );
-  const clearFilters = useClearValueFromParams(
-    "category",
-    "tag",
-    "location",
-    "teamMember"
-  );
+  const searchParams: string[] = ["category", "tag", "location"];
+  if (!disableTeamMemberFilter) {
+    searchParams.push("teamMember");
+  }
+  const hasFiltersToClear = useSearchParamHasValue(...searchParams);
+  const clearFilters = useClearValueFromParams(...searchParams);
   const { roles } = useUserRoleHelper();
 
   return (
@@ -437,11 +441,13 @@ export const AssetsList = () => {
               )}
             />
             <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
-              })}
+              truthy={
+                userHasPermission({
+                  roles,
+                  entity: PermissionEntity.custody,
+                  action: PermissionAction.read,
+                }) && !disableTeamMemberFilter
+              }
             >
               <DynamicDropdown
                 trigger={
@@ -476,9 +482,17 @@ export const AssetsList = () => {
       <List
         title="Assets"
         ItemComponent={ListAssetContent}
-        navigate={(itemId) => navigate(itemId)}
+        /**
+         * Using remix's navigate is the default behaviour, however it can receive also a custom function
+         */
+        navigate={(itemId) =>
+          onRowClick ? onRowClick(itemId) : navigate(itemId)
+        }
         className=" overflow-x-visible md:overflow-x-auto"
-        bulkActions={<BulkActionsDropdown />}
+        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+        customEmptyStateContent={
+          customEmptyState ? customEmptyState : undefined
+        }
         headerChildren={
           <>
             <Th className="hidden md:table-cell">Category</Th>
@@ -645,7 +659,7 @@ const ListAssetContent = ({
   );
 };
 
-const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
+export const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   const visibleTags = tags?.slice(0, 2);
   const remainingTags = tags?.slice(2);
 

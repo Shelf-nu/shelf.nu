@@ -1,5 +1,10 @@
 import type { FetcherWithComponents } from "@remix-run/react";
-import { NavLink, useLoaderData, useLocation } from "@remix-run/react";
+import {
+  NavLink,
+  useLoaderData,
+  useLocation,
+  useMatches,
+} from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
@@ -20,7 +25,10 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const { menuItemsTop, menuItemsBottom } = useMainMenuItems();
   const location = useLocation();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
-
+  const matches = useMatches();
+  const currentRoute = matches.at(-1);
+  // @ts-expect-error
+  const handle = currentRoute?.handle?.name;
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
@@ -63,6 +71,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                       : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
                     /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
                     location.pathname.includes(item.to) &&
+                      handle !== "$userId.bookings" &&
                       !location.pathname.includes("assets")
                       ? "active bg-primary-50 text-primary-600"
                       : ""

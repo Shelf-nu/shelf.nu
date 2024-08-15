@@ -1,12 +1,11 @@
 import { useMemo } from "react";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import type { InviteStatuses } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, Link, redirect } from "@remix-run/react";
-import { z } from "zod";
+import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -18,22 +17,20 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
-import { sendEmail } from "~/emails/mail.server";
-import { revokeAccessEmailText } from "~/modules/invite/helpers";
-import { createInvite } from "~/modules/invite/service.server";
+
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
-import { revokeAccessToOrganization } from "~/modules/user/service.server";
+import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import type { RouteHandleWithName } from "./bookings";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -115,201 +112,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
-
-    const { intent } = parseData(
-      formData,
-      z.object({
-        intent: z.enum(["delete", "revokeAccess", "resend", "cancelInvite"]),
-      }),
-      {
-        additionalData: {
-          organizationId,
-        },
-      }
-    );
-
-    switch (intent) {
-      case "delete": {
-        const { teamMemberId } = parseData(
-          formData,
-          z.object({
-            teamMemberId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        await db.teamMember
-          .update({
-            where: {
-              id: teamMemberId,
-            },
-            data: {
-              deletedAt: new Date(),
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to delete team member",
-              additionalData: { teamMemberId, userId, organizationId },
-              label: "Team",
-            });
-          });
-
-        return redirect(`/settings/team/users`);
-      }
-      case "revokeAccess": {
-        const { userId: targetUserId } = parseData(
-          formData,
-          z.object({
-            userId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        const user = await revokeAccessToOrganization({
-          userId: targetUserId,
-          organizationId,
-        });
-
-        const org = await db.organization
-          .findUniqueOrThrow({
-            where: {
-              id: organizationId,
-            },
-            select: {
-              name: true,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Organization not found",
-              additionalData: { organizationId },
-              label: "Team",
-            });
-          });
-
-        await sendEmail({
-          to: user.email,
-          subject: `Access to ${org.name} has been revoked`,
-          text: revokeAccessEmailText({ orgName: org.name }),
-        });
-
-        sendNotification({
-          title: `Access revoked`,
-          message: `User with email ${user.email} no longer has access to this organization`,
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
-        return redirect("/settings/team/users");
-      }
-      case "cancelInvite": {
-        const { email: inviteeEmail } = parseData(
-          formData,
-          z.object({
-            email: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        await db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-              status: InviteStatuses.PENDING,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to cancel invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          });
-
-        sendNotification({
-          title: "Invitation cancelled",
-          message: "The invitation has successfully been cancelled.",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
-        return null;
-      }
-      case "resend": {
-        const {
-          email: inviteeEmail,
-          name: teamMemberName,
-          teamMemberId,
-        } = parseData(
-          formData,
-          z.object({
-            email: z.string(),
-            name: z.string(),
-            teamMemberId: z.string(),
-          }),
-          {
-            additionalData: {
-              organizationId,
-              intent,
-            },
-          }
-        );
-
-        const invite = await createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [OrganizationRoles.ADMIN],
-          userId,
-        });
-
-        if (invite) {
-          sendNotification({
-            title: "Successfully invited user",
-            message:
-              "They will receive an email in which they can complete their registration.",
-            icon: { name: "success", variant: "success" },
-            senderId: userId,
-          });
-        }
-
-        return json(data(null));
-      }
-      default: {
-        throw new ShelfError({
-          cause: null,
-          message: "Invalid action",
-          additionalData: { intent },
-          label: "Team",
-        });
-      }
-    }
+    return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -321,9 +124,32 @@ const STATUS_FILTERS = {
   ACCEPTED: "ACCEPTED",
 };
 
+export const handle = {
+  name: "settings.team.users",
+  breadcrumb: () => <Link to="/settings/team">Team</Link>,
+};
+
 export default function UserTeamSetting() {
-  return (
+  /**
+   * We have 4 cases when we should render index:
+   * 1. When we are on the index route
+   * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
+   * 3. When we are on the assets.$assetId.bookings page
+   * 4. When we are on the settings.team.users.$userId.bookings
+   */
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+  const allowedRoutes = [
+    "settings.team.users", // users index
+    "settings.team.users.invite-user", // invite user modal
+  ];
+
+  const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
+
+  return shouldRenderIndex ? (
     <div>
+      <ContextualModal />
+
       <p className="mb-6 text-xs text-gray-600">
         Users by default have a mail registered in shelf and can get reminders,
         log in or perform other actions. Read more about our{" "}
@@ -364,9 +190,9 @@ export default function UserTeamSetting() {
           }
         />
       </ListContentWrapper>
-
-      <ContextualModal />
     </div>
+  ) : (
+    <Outlet />
   );
 }
 
@@ -374,25 +200,14 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
-              <img src={item.img} alt="custodian" className="size-10 rounded" />
-            </div>
-            <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {item.name}
-              </span>
-              <div>{item.email}</div>
-            </div>
-          </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
-        </div>
+        {item.status === "ACCEPTED" ? (
+          <Link to={`${item.id}/assets`}>
+            <TeamMemberDetails details={item} />
+          </Link>
+        ) : (
+          <TeamMemberDetails details={item} />
+        )}
       </Td>
-
       <Td className="hidden md:table-cell">{item.role}</Td>
       <Td className="hidden md:table-cell">
         <InviteStatusBadge status={item.status} />
@@ -404,6 +219,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             userId={item.userId}
             name={item.name}
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
+            isSSO={item.sso || false}
           />
         ) : null}
       </Td>
@@ -436,3 +252,35 @@ const InviteStatusBadge = ({ status }: { status: InviteStatuses }) => {
     </span>
   );
 };
+
+const TeamMemberDetails = ({
+  details,
+}: {
+  details: TeamMembersWithUserOrInvite;
+}) => (
+  <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+    <div className="flex items-center gap-3">
+      <div className="flex size-12 shrink-0 items-center justify-center">
+        <img src={details.img} alt="custodian" className="size-10 rounded" />
+      </div>
+      <div className="min-w-[130px]">
+        <span className="word-break mb-1 block font-medium">
+          {details.name}
+        </span>
+        <div>{details.email}</div>
+      </div>
+    </div>
+
+    <button className="block md:hidden">
+      <ChevronRight />
+    </button>
+  </div>
+);
+
+// // export const shouldRevalidate = () => false;
+
+// export default function UserTeamPage() {
+//   return <Outlet />;
+// }
+
+// export const ErrorBoundary = () => <ErrorContent />;
