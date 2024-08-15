@@ -73,7 +73,6 @@ export type ListProps = {
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
   bulkActions?: React.ReactElement;
-  onItemClick?: (itemId: string) => void;
 };
 
 /**
