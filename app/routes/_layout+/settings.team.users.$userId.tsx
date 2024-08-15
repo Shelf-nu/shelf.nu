@@ -4,6 +4,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, Outlet, useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -16,7 +17,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -39,7 +40,13 @@ export const loader = async ({
       action: PermissionAction.read,
     });
 
-    const selectedUserId = params.userId as string;
+    const { userId: selectedUserId } = getParams(
+      params,
+      z.object({ userId: z.string() }),
+      {
+        additionalData: { userId },
+      }
+    );
 
     const user = await getUserByID(selectedUserId, {
       userOrganizations: {
