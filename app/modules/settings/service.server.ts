@@ -23,6 +23,7 @@ export interface TeamMembersWithUserOrInvite {
   role: UserFriendlyRoles;
   userId: string | null;
   sso: boolean;
+  custodies?: number;
 }
 
 export async function getPaginatedAndFilterableSettingUsers({
@@ -109,7 +110,14 @@ export async function getPaginatedAndFilterableSettingUsers({
           where: userOrganizationWhere,
           skip: finalSkip,
           take: finalTake,
-          select: { user: true, roles: true },
+          select: {
+            user: {
+              include: {
+                _count: { select: { custodies: true } },
+              },
+            },
+            roles: true,
+          },
         }),
         /** Get the invites */
         db.invite.findMany({
@@ -149,6 +157,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         role: organizationRolesMap[um.roles[0]],
         userId: um.user.id,
         sso: um.user.sso,
+        custodies: um.user._count.custodies,
       }));
 
     /**

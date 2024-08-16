@@ -185,6 +185,7 @@ export default function UserTeamSetting() {
           ItemComponent={UserRow}
           headerChildren={
             <>
+              <Th className="hidden md:table-cell">Custodies</Th>
               <Th className="hidden md:table-cell">Role</Th>
               <Th className="hidden md:table-cell">Status</Th>
               <Th className="hidden md:table-cell">Actions</Th>
@@ -210,6 +211,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
           <TeamMemberDetails details={item} />
         )}
       </Td>
+      <Td className="hidden md:table-cell">{item.custodies || 0}</Td>
       <Td className="hidden md:table-cell">{item.role}</Td>
       <Td className="hidden md:table-cell">
         <InviteStatusBadge status={item.status} />
