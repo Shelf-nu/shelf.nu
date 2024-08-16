@@ -755,23 +755,187 @@ export async function updateProfilePicture({
   }
 }
 
+/**
+ * To delete a user we need to do a few manual things
+ *
+    1. Delete the user itself. To do this we need to do some manual stuff. We need to find all entries that belong to the user, but not to his personal org. Then we need to transfer those entries to the org owner. The models to handle are:
+ *   - Asset
+ *   - Category
+ *   - Tag
+ *   - Location
+ *   - CustomField
+ *   - Invite
+ *   - Booking
+ *   - TeamMember
+ *   - Image
+ * 3. Delete the auth account of the user
+ * 4. Send email that the user is deleted
+ */
 export async function deleteUser(id: User["id"]) {
   try {
-    const user = await db.user.findUnique({
-      where: { id },
-      include: { organizations: true },
+    const user = await getUserByID(id, {
+      userOrganizations: {
+        include: {
+          organization: {
+            select: { id: true, userId: true },
+          },
+        },
+      },
     });
 
-    /** Find the personal org of the user and delete it */
-    const personalOrg = user?.organizations.find(
-      (org) => org.type === "PERSONAL"
+    const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(
+      (uo) => !uo.roles.includes(OrganizationRoles.OWNER)
     );
 
-    await db.organization.delete({
-      where: { id: personalOrg?.id },
-    });
+    const organizationsTheUserOwns = user.userOrganizations.filter((uo) =>
+      uo.roles.includes(OrganizationRoles.OWNER)
+    );
 
-    await db.user.delete({ where: { id } });
+    /** Move entries inside each of organizationsTheUserDoesNotOwn from following models:
+     *   - [x] Asset
+     *   - [x] Category
+     *   - [x] Tag
+     *   - [x] Location
+     *   - [x] CustomField
+     *   - [x] Invite
+     *   - [x] Booking
+     *   - [x] Image
+     *   - [x] Kit
+     * The new owner should be the owner of the organization
+     */
+
+    await db.$transaction(async (tx) => {
+      for (const userOrg of organizationsTheUserDoesNotOwn) {
+        const newOwnerId = userOrg.organization?.userId;
+
+        if (newOwnerId) {
+          /** Update assets */
+          await tx.asset.updateMany({
+            where: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update categories */
+          await tx.category.updateMany({
+            where: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update tags */
+          await tx.tag.updateMany({
+            where: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update locations */
+          await tx.location.updateMany({
+            where: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update custom fields */
+          await tx.customField.updateMany({
+            where: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update invites */
+          await tx.invite.updateMany({
+            where: {
+              inviterId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              inviterId: newOwnerId,
+            },
+          });
+
+          /** Update bookings */
+          await tx.booking.updateMany({
+            where: {
+              creatorId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              creatorId: newOwnerId,
+            },
+          });
+
+          /** Update bookings where the person deleted is the custodian */
+          await tx.booking.updateMany({
+            where: {
+              custodianUserId: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              custodianUserId: null,
+            },
+          });
+
+          /** Update images */
+          await tx.image.updateMany({
+            where: {
+              userId: id,
+              ownerOrgId: userOrg.organizationId,
+            },
+            data: {
+              userId: newOwnerId,
+            },
+          });
+
+          /** Update kits */
+          await tx.kit.updateMany({
+            where: {
+              createdById: id,
+              organizationId: userOrg.organizationId,
+            },
+            data: {
+              createdById: newOwnerId,
+            },
+          });
+        }
+      }
+
+      /** Delete the organizations the user owns. This should cascade to deleting all related entries */
+
+      await tx.organization.deleteMany({
+        where: {
+          id: {
+            in: organizationsTheUserOwns.map((uo) => uo.organizationId),
+          },
+        },
+      });
+
+      /** Finally, delete the actual user */
+      await tx.user.delete({
+        where: { id },
+      });
+    });
   } catch (cause) {
     if (
       cause instanceof PrismaClientKnownRequestError &&
@@ -789,6 +953,7 @@ export async function deleteUser(id: User["id"]) {
     }
   }
 
+  /** Delete the auth account */
   await deleteAuthAccount(id);
 }
 

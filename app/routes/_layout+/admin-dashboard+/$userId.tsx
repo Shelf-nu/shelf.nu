@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
 import { Table, Td, Tr } from "~/components/table";
+import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { deleteUser, getUserByID } from "~/modules/user/service.server";
@@ -122,22 +123,9 @@ export const action = async ({
     const { intent } = parseData(
       await request.clone().formData(),
       z.object({
-        intent: z.enum(["updateTier", "updateCustomTierDetails"]),
+        intent: z.enum(["updateTier", "updateCustomTierDetails", "deleteUser"]),
       })
     );
-
-    if (isDelete(request)) {
-      await deleteUser(shelfUserId);
-
-      sendNotification({
-        title: "User deleted",
-        message: "The user has been deleted successfully",
-        icon: { name: "trash", variant: "error" },
-        senderId: userId,
-      });
-
-      return redirect("/admin-dashboard");
-    }
 
     switch (intent) {
       case "updateTier": {
@@ -186,6 +174,18 @@ export const action = async ({
 
         break;
       }
+      case "deleteUser":
+        if (isDelete(request)) {
+          await deleteUser(shelfUserId);
+
+          sendNotification({
+            title: "User deleted",
+            message: "The user has been deleted successfully",
+            icon: { name: "trash", variant: "error" },
+            senderId: userId,
+          });
+          return redirect("/admin-dashboard/users");
+        }
     }
 
     return json(data(null));
@@ -206,6 +206,7 @@ export default function Area51UserPage() {
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
+          <DeleteUser />
         </div>
         <div className="flex gap-2">
           <div className="w-[400px]">
