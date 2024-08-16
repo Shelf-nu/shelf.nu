@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, Outlet, useLoaderData, useParams } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import When from "~/components/when/when";
@@ -78,3 +79,4 @@ export default function TeamSettings() {
     </>
   );
 }
+export const ErrorBoundary = () => <ErrorContent />;

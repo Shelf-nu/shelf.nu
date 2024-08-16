@@ -1,4 +1,5 @@
 import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -32,3 +33,4 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 };
 
 export const shouldRevalidate = () => false;
+export const ErrorBoundary = () => <ErrorContent />;

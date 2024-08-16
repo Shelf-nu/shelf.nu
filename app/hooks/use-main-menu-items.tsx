@@ -85,7 +85,7 @@ export function useMainMenuItems() {
       "tags",
       "locations",
       "settings",
-      "team",
+      "/settings/team",
     ];
     menuItemsTop = menuItemsTop.filter(
       (item) => !itemsToRemove.includes(item.to)
