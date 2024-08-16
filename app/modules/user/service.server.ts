@@ -9,6 +9,7 @@ import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
+import { sendEmail } from "~/emails/mail.server";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
@@ -936,6 +937,14 @@ export async function deleteUser(id: User["id"]) {
         where: { id },
       });
     });
+    /** Delete the auth account */
+    await deleteAuthAccount(id);
+
+    void sendEmail({
+      to: user.email,
+      subject: "Your account has been deleted",
+      text: `Your shelf account has been deleted. \n\n Kind regards, \n Shelf Team\n\n`,
+    });
   } catch (cause) {
     if (
       cause instanceof PrismaClientKnownRequestError &&
@@ -952,9 +961,6 @@ export async function deleteUser(id: User["id"]) {
       });
     }
   }
-
-  /** Delete the auth account */
-  await deleteAuthAccount(id);
 }
 
 export { defaultUserCategories };
