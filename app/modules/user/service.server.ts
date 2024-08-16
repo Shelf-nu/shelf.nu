@@ -769,6 +769,7 @@ export async function updateProfilePicture({
  *   - Booking
  *   - TeamMember
  *   - Image
+ * 2. Delete all organizations the user owns. This will cascade the deleting of related entries
  * 3. Delete the auth account of the user
  * 4. Send email that the user is deleted
  */
