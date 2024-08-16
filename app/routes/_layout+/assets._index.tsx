@@ -81,6 +81,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    const t1 = performance.now();
+
     const [{ organizationId, organizations, currentOrganization, role }, user] =
       await Promise.all([
         requirePermission({
@@ -179,6 +181,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       setCookie(userPrefsCookie),
       ...(filtersCookie ? [setCookie(filtersCookie)] : []),
     ];
+
+    const t2 = performance.now();
+
+    console.log(`assets index loader: ${t2 - t1}ms`);
+
     return json(
       data({
         header,

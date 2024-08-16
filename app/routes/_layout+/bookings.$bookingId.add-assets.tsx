@@ -85,6 +85,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    const t1 = performance.now();
+
     const {
       search,
       totalAssets,
@@ -110,6 +112,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const booking = await getBooking({ id, organizationId });
     const bookingKitIds = getKitIdsByAssets(booking.assets);
+
+    const t2 = performance.now();
+
+    console.log("Time to load assets", `${t2 - t1}ms`);
 
     return json(
       data({
@@ -161,9 +167,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.update,
     });
-
-    // assetIds: z.array(z.string()).optional().default([]),
-    // removedAssetIds: z.array(z.string()).optional().default([]),
 
     const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
