@@ -15,6 +15,7 @@ import { createNote } from "~/modules/note/service.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getHints } from "~/utils/client-hints";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
@@ -67,7 +68,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
 
     const searchParams = getCurrentSearchParams(request);
-
+    const hints = getHints(request);
     const customFields = await getActiveCustomFields({
       organizationId,
       category: searchParams.get("category"),
@@ -84,6 +85,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         currency: currentOrganization?.currency,
         customFields,
+        hints
       })
     );
   } catch (cause) {
@@ -145,9 +147,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const payload = parseData(formData, FormSchema);
 
+    const hints = getHints(request)
     const customFieldsValues = extractCustomFieldValuesFromPayload({
       payload,
       customFieldDef: customFields,
+      timeZone: hints.timeZone,
     });
 
     const {

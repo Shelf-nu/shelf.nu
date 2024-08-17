@@ -1,5 +1,6 @@
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { format } from "date-fns";
+import { DateTime } from "luxon";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
@@ -118,10 +119,12 @@ export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
   isDuplicate,
+  timeZone,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
   isDuplicate?: boolean;
+  timeZone?: ClientHint["timeZone"];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
   const customFieldsKeys = Object.keys(payload).filter((key) =>
@@ -136,7 +139,11 @@ export const extractCustomFieldValuesFromPayload = ({
       if (!fieldDef && isDuplicate) {
         return null;
       }
-      const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef!);
+      const value = buildCustomFieldValue(
+        { raw: payload[key] },
+        fieldDef!,
+        timeZone
+      );
       return { id, value } as ShelfAssetCustomFieldValueType;
     })
     .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
@@ -144,7 +151,8 @@ export const extractCustomFieldValuesFromPayload = ({
 
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  def: CustomField
+  def: CustomField,
+  timeZone?: ClientHint["timeZone"]
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;
@@ -153,11 +161,26 @@ export const buildCustomFieldValue = (
       return undefined;
     }
 
+    // console.log(raw ?DateTime.fromFormat(raw.toString(), 'yyyy-MM-dd', {
+    //   zone: timeZone,
+    // }).toString(): "" )
+
     switch (def.type) {
       case "BOOLEAN":
         return { raw, valueBoolean: Boolean(raw) };
       case "DATE":
-        return { raw, valueDate: new Date(raw as string).toISOString() };
+        let value = raw as string;
+        if (timeZone) {
+          value = raw
+            ? DateTime.fromFormat(raw.toString(), "yyyy-MM-dd", {
+                zone: timeZone,
+              }).toString()
+            : "";
+        }
+        return {
+          raw,
+          valueDate: value ? new Date(value as string).toISOString() : "",
+        };
       case "OPTION":
         return { raw, valueOption: String(raw) };
       case "MULTILINE_TEXT":
@@ -183,9 +206,17 @@ export const getCustomFieldDisplayValue = (
   hints?: ClientHint
 ): string => {
   if (value.valueDate) {
-    return hints
-      ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
-      : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
+    if (hints) {
+      const dateFormatter = getDateTimeFormatFromHints(hints, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(value.valueDate));
+      const [month, day, year] = dateFormatter.split("/");
+      // Rearrange the components into YYYY-MM-DD format
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+    return format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);
 };

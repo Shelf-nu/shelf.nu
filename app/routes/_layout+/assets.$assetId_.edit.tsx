@@ -23,6 +23,7 @@ import {
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
@@ -65,6 +66,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: { tags: true, customFields: true },
     });
 
+    const hints = getClientHint(request);
     const { categories, totalCategories, tags, locations, totalLocations } =
       await getAllEntriesForCreateAndEdit({
         request,
@@ -99,6 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalLocations,
         currency: currentOrganization?.currency,
         customFields,
+        hints,
       })
     );
   } catch (cause) {
@@ -159,9 +162,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       additionalData: { userId, organizationId },
     });
 
+    const hints = getClientHint(clonedRequest);
+
     const customFieldsValues = extractCustomFieldValuesFromPayload({
       payload,
       customFieldDef: customFields,
+      timeZone: hints?.timeZone,
     });
 
     await updateAssetMainImage({

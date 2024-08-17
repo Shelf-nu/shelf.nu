@@ -7,7 +7,6 @@ import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -34,7 +33,7 @@ export default function AssetCustomFields({
 
   /** Get the custom fields from the loader */
 
-  const { customFields, asset } = useLoaderData<typeof loader>();
+  const { customFields, asset, hints } = useLoaderData<typeof loader>();
 
   const customFieldsValues =
     (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
@@ -57,7 +56,7 @@ export default function AssetCustomFields({
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? getCustomFieldDisplayValue(value) : "";
+    return value ? getCustomFieldDisplayValue(value, hints) : "";
   };
 
   const fieldTypeToCompMap: {
@@ -87,7 +86,7 @@ export default function AssetCustomFields({
           hideLabel
           type="date"
           name={`cf-${field.id}`}
-          value={dateForDateTimeInputValue(dateObj[field.id]!, "date")}
+          defaultValue={getCustomFieldVal(field.id)}
           onChange={(e) => {
             const selectedDate = new Date(e.target.value);
             setDateObj({ ...dateObj, [field.id]: selectedDate });

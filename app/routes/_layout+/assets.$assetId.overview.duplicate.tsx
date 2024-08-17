@@ -13,6 +13,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { getHints } from "~/utils/client-hints";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -97,11 +98,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       DuplicateAssetSchema
     );
 
+    const hints = getHints(request);
+
     const duplicatedAssets = await duplicateAsset({
       asset,
       userId,
       amountOfDuplicates,
       organizationId,
+      timeZone: hints.timeZone,
     });
 
     sendNotification({

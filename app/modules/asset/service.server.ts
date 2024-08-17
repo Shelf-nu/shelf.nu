@@ -67,6 +67,7 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
+import type { ClientHint } from "../booking/types";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -1234,6 +1235,7 @@ export async function duplicateAsset({
   userId,
   amountOfDuplicates,
   organizationId,
+  timeZone
 }: {
   asset: Prisma.AssetGetPayload<{
     include: {
@@ -1245,6 +1247,7 @@ export async function duplicateAsset({
   userId: string;
   amountOfDuplicates: number;
   organizationId: string;
+  timeZone?: ClientHint['timeZone']
 }) {
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];
@@ -1271,6 +1274,7 @@ export async function duplicateAsset({
       payload: { ...payload, ...customFieldValues },
       customFieldDef: customFields,
       isDuplicate: true,
+      timeZone: timeZone,
     });
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
