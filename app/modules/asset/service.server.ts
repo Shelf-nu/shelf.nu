@@ -1235,7 +1235,7 @@ export async function duplicateAsset({
   userId,
   amountOfDuplicates,
   organizationId,
-  timeZone
+  timeZone,
 }: {
   asset: Prisma.AssetGetPayload<{
     include: {
@@ -1247,7 +1247,7 @@ export async function duplicateAsset({
   userId: string;
   amountOfDuplicates: number;
   organizationId: string;
-  timeZone?: ClientHint['timeZone']
+  timeZone?: ClientHint["timeZone"];
 }) {
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];

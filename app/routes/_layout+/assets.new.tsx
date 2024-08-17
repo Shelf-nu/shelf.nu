@@ -85,7 +85,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         currency: currentOrganization?.currency,
         customFields,
-        hints
+        hints,
       })
     );
   } catch (cause) {
@@ -147,7 +147,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const payload = parseData(formData, FormSchema);
 
-    const hints = getHints(request)
+    const hints = getHints(request);
     const customFieldsValues = extractCustomFieldValuesFromPayload({
       payload,
       customFieldDef: customFields,
