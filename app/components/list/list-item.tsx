@@ -5,19 +5,20 @@ export interface ListItemData {
   [x: string]: any;
 }
 
+export interface ListItemProps {
+  item: ListItemData;
+  children: React.ReactNode;
+  navigate?: (id: string, item: ListItemData) => void;
+  className?: string;
+}
+
 export const ListItem = ({
   item,
   children,
   navigate,
   className,
-}: {
-  item: ListItemData;
-  children: React.ReactNode;
-  navigate?: (id: string, item: ListItemData) => void;
-  className?: string;
-}) => (
+}: ListItemProps) => (
   <tr
-    // onClick={navigate ? () => navigate(item.id, item) : undefined}
     onClick={(event) => {
       if (navigate) {
         // Check if Ctrl or Cmd key is pressed

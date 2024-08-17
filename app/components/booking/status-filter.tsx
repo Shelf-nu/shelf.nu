@@ -11,22 +11,28 @@ import {
 
 export function StatusFilter({
   statusItems,
+  name = "status",
 }: {
   statusItems: Record<string, string>;
+  /**
+   * By default the name of the field is status,
+   * but it can cause conflicts if a parent and child route both use the name status
+   * for filtering but they have different status types */
+  name?: string;
 }) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
-  const status = searchParams.get("status");
+  const status = searchParams.get(name);
 
   function handleValueChange(value: string) {
     setSearchParams((prev) => {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
-        prev.delete("status");
+        prev.delete(name);
         return prev;
       }
-      prev.set("status", value);
+      prev.set(name, value);
       return prev;
     });
   }
@@ -34,7 +40,7 @@ export function StatusFilter({
   return (
     <div className="w-full md:w-auto">
       <Select
-        name={`status`}
+        name={name}
         defaultValue={status ? status : "ALL"}
         onValueChange={handleValueChange}
         disabled={disabled}

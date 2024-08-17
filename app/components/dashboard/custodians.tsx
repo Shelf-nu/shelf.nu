@@ -1,13 +1,26 @@
 import { useLoaderData } from "@remix-run/react";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/dashboard";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { EmptyState } from "./empty-state";
+import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Table, Td, Tr } from "../table";
 
 export default function CustodiansList() {
   const { custodiansData } = useLoaderData<typeof loader>();
-
+  const { roles } = useUserRoleHelper();
+  const canViewTeamMemberUsers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMemberProfile,
+    action: PermissionAction.read,
+  });
   return (
     <>
       <div className="rounded-t border border-b-0 border-gray-200">
@@ -33,7 +46,11 @@ export default function CustodiansList() {
           <tbody>
             {custodiansData.map((cd) => (
               <Tr key={cd.id} className="h-[72px]">
-                <Row custodian={cd.custodian} count={cd.count} />
+                <Row
+                  custodian={cd.custodian}
+                  count={cd.count}
+                  canNavigate={canViewTeamMemberUsers}
+                />
               </Tr>
             ))}
             {custodiansData.length < 5 &&
@@ -58,9 +75,11 @@ export default function CustodiansList() {
 function Row({
   custodian,
   count,
+  canNavigate,
 }: {
   custodian: {
     name: string;
+    userId?: string | null;
     user?: {
       firstName?: string | null;
       lastName?: string | null;
@@ -68,7 +87,10 @@ function Row({
     } | null;
   };
   count: number;
+  /** Does the current user have permissions to acess this teamMember page */
+  canNavigate: boolean;
 }) {
+  const teamMemberName = resolveTeamMemberName(custodian);
   return (
     <>
       <Td className="w-full">
@@ -85,9 +107,21 @@ function Row({
                 alt={`${resolveTeamMemberName(custodian)}'s profile`}
               />
               <div>
-                <span className="mt-px">
-                  {resolveTeamMemberName(custodian)}
-                </span>
+                {canNavigate && custodian.userId ? (
+                  <Button
+                    to={`/settings/team/users/${custodian.userId}/assets`}
+                    variant="link"
+                    className={tw(
+                      "mt-px font-medium text-gray-900 hover:text-gray-700 hover:underline",
+                      "[&_.external-link-icon]:opacity-0 [&_.external-link-icon]:duration-100 [&_.external-link-icon]:ease-in-out [&_.external-link-icon]:hover:opacity-100"
+                    )}
+                    target="_blank"
+                  >
+                    {teamMemberName}
+                  </Button>
+                ) : (
+                  <span className="mt-px">{teamMemberName}</span>
+                )}
                 <span className="block text-gray-600">{count} Assets</span>
               </div>
             </div>

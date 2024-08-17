@@ -47,6 +47,11 @@ export function useMainMenuItems() {
       to: "bookings",
       title: "Bookings",
     },
+    {
+      icon: <Icon icon="user" />,
+      to: "/settings/team",
+      title: "Team",
+    },
   ];
   let menuItemsBottom = [
     {
@@ -80,6 +85,7 @@ export function useMainMenuItems() {
       "tags",
       "locations",
       "settings",
+      "/settings/team",
     ];
     menuItemsTop = menuItemsTop.filter(
       (item) => !itemsToRemove.includes(item.to)
