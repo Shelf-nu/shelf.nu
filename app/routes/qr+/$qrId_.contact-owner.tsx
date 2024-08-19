@@ -12,7 +12,6 @@ import {
   createReport,
   sendReportEmails,
 } from "~/modules/report-found/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -86,7 +85,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    const owner = qr?.asset?.organization?.owner;
+    const ownerEmail = qr?.asset?.organization?.owner.email;
 
     const payload = parseData(await request.formData(), NewReportSchema);
     const { email, content } = payload;
@@ -103,9 +102,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
      * 1. To the owner of the asset
      * 2. To the person who reported the asset as found
      */
-    if (owner) {
+    if (ownerEmail) {
       await sendReportEmails({
-        owner: qr?.asset?.organization?.owner as { id: string; email: string },
+        ownerEmail,
         qr,
         message: report.content,
         reporterEmail: report.email,
