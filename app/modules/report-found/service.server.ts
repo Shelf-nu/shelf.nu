@@ -52,7 +52,10 @@ export async function sendReportEmails({
   reporterEmail,
   qr,
 }: {
-  owner: User;
+  owner: {
+    id: string;
+    email: string;
+  };
   message: ReportFound["content"];
   reporterEmail: ReportFound["email"];
   qr: Prisma.QrGetPayload<{

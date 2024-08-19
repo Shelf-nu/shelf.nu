@@ -45,7 +45,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
           id: qrId,
         },
         include: {
-          asset: true,
+          asset: {
+            include: {
+              organization: {
+                select: {
+                  owner: {
+                    select: {
+                      email: true,
+                      id: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           kit: true,
         },
       })
@@ -73,7 +86,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    const owner = await getUserByID(qr.userId);
+    const owner = qr?.asset?.organization?.owner;
 
     const payload = parseData(await request.formData(), NewReportSchema);
     const { email, content } = payload;
@@ -90,12 +103,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
      * 1. To the owner of the asset
      * 2. To the person who reported the asset as found
      */
-    await sendReportEmails({
-      owner,
-      qr,
-      message: report.content,
-      reporterEmail: report.email,
-    });
+    if (owner) {
+      await sendReportEmails({
+        owner: qr?.asset?.organization?.owner as { id: string; email: string },
+        qr,
+        message: report.content,
+        reporterEmail: report.email,
+      });
+    }
 
     return json(data({ report }));
   } catch (cause) {
