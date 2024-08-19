@@ -207,8 +207,8 @@ export const getCustomFieldDisplayValue = (
 ): string => {
   if (value.valueDate) {
     return hints
-    ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
-    : format(new Date(value.valueDate), "PPP");
+      ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
+      : format(new Date(value.valueDate), "PPP");
   }
   return String(value.raw);
 };
