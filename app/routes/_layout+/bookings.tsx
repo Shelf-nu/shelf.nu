@@ -158,8 +158,10 @@ export type RouteHandleWithName = {
 
 export default function BookingsIndexPage({
   className,
+  disableBulkActions = false,
 }: {
   className?: string;
+  disableBulkActions?: boolean;
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
@@ -167,22 +169,31 @@ export default function BookingsIndexPage({
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**
-   * We have 3 cases when we should render index:
+   * We have 4 cases when we should render index:
    * 1. When we are on the index route
    * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
    * 3. When we are on the assets.$assetId.bookings page
+   * 4. When we are on the settings.team.users.$userId.bookings
    */
-  const shouldRenderIndex =
-    currentRoute?.handle?.name === ("bookings.index" as string) ||
-    currentRoute?.handle?.name === "bookings.new" ||
-    currentRoute?.handle?.name === "$assetId.bookings";
 
-  const isAssetBookingsPage =
-    currentRoute?.handle?.name === "$assetId.bookings";
+  const allowedRoutes = [
+    "bookings.index",
+    "bookings.new",
+    "$assetId.bookings",
+    "$userId.bookings",
+  ];
+
+  const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
+
+  /** A bookings page that is a child of another nested layout */
+  const isChildBookingsPage = [
+    "$assetId.bookings",
+    "$userId.bookings",
+  ].includes(currentRoute?.handle?.name);
 
   return shouldRenderIndex ? (
     <>
-      {!isAssetBookingsPage ? (
+      {!isChildBookingsPage ? (
         <Header>
           <Button
             to="new"
@@ -203,7 +214,7 @@ export default function BookingsIndexPage({
           }}
         />
         <List
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           className="overflow-x-visible md:overflow-x-auto"

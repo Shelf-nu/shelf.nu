@@ -1,6 +1,14 @@
 import type { TeamMember, User } from "@prisma/client";
 import { Link } from "@remix-run/react";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 
 /**
@@ -30,16 +38,24 @@ export function CustodyCard({
     dateDisplay: string;
     custodian: {
       name: string;
+      userId?: string | null;
       user?: Partial<
         Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
       > | null;
     };
   } | null;
 }) {
+  const { roles } = useUserRoleHelper();
+  const canViewTeamMemberUsers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMemberProfile,
+    action: PermissionAction.read,
+  });
   /** We return null if user is selfService */
-  if (!hasPermission) {
+  if (!hasPermission || !custody) {
     return null;
   }
+  const fullName = resolveTeamMemberName(custody.custodian);
 
   /* If custody is present, we render the card showing custody */
   if (custody?.dateDisplay) {
@@ -57,9 +73,22 @@ export function CustodyCard({
           <div>
             <p className="">
               In custody of{" "}
-              <span className="font-semibold">
-                {resolveTeamMemberName(custody.custodian)}
-              </span>
+              {canViewTeamMemberUsers && custody?.custodian?.userId ? (
+                <Button
+                  to={`/settings/team/users/${custody.custodian.userId}/assets`}
+                  variant="link"
+                  className={tw(
+                    "mt-px font-semibold text-gray-900 hover:text-gray-700 hover:underline",
+                    "[&_.external-link-icon]:opacity-0 [&_.external-link-icon]:duration-100 [&_.external-link-icon]:ease-in-out [&_.external-link-icon]:hover:opacity-100"
+                  )}
+                  target="_blank"
+                >
+                  {fullName}
+                </Button>
+              ) : (
+                <span className="mt-px">{fullName}</span>
+              )}
+              <span className="font-semibold">{}</span>
             </p>
             <span>Since {custody.dateDisplay}</span>
           </div>
