@@ -206,17 +206,9 @@ export const getCustomFieldDisplayValue = (
   hints?: ClientHint
 ): string => {
   if (value.valueDate) {
-    if (hints) {
-      const dateFormatter = getDateTimeFormatFromHints(hints, {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(new Date(value.valueDate));
-      const [month, day, year] = dateFormatter.split("/");
-      // Rearrange the components into YYYY-MM-DD format
-      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-    }
-    return format(new Date(value.valueDate), "PPP"); // Fallback to default date format
+    return hints
+    ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
+    : format(new Date(value.valueDate), "PPP");
   }
   return String(value.raw);
 };

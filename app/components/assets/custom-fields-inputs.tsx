@@ -50,6 +50,32 @@ export default function AssetCustomFields({
       )
   );
 
+  function convertUTCToLocalYMD(utcDate: Date, timeZone: string): string {
+    const options: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: timeZone,
+    };
+  
+    // Format the date with the given options and timeZone
+    const formattedDate = new Intl.DateTimeFormat("en-CA", options).format(
+      utcDate
+    );
+  
+    return formattedDate;
+  }
+
+  const getDateDefaultValue = (id: string) => {
+    const dateValue = dateObj[id] as Date;
+    if (!dateValue) {
+      return "";
+    }
+    return convertUTCToLocalYMD(dateValue, hints.timeZone);
+  };
+
+  
+
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
@@ -86,7 +112,7 @@ export default function AssetCustomFields({
           hideLabel
           type="date"
           name={`cf-${field.id}`}
-          defaultValue={getCustomFieldVal(field.id)}
+          defaultValue={getDateDefaultValue(field.id)}//this will make sure that the value is in yyyy-mm-dd format
           onChange={(e) => {
             const selectedDate = new Date(e.target.value);
             setDateObj({ ...dateObj, [field.id]: selectedDate });
