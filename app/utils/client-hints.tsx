@@ -2,6 +2,7 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
+import { parseISO } from "date-fns";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
 import type { ClientHint } from "~/modules/booking/types";
 import { ShelfError } from "./error";
@@ -177,4 +178,8 @@ export function getLocale(request: Request) {
   });
 
   return locales[0] ?? "en-US";
+}
+
+export function formatDateBasedOnLocaleOnly(value: string, locale: string) {
+  return parseISO(value).toLocaleDateString(locale);
 }

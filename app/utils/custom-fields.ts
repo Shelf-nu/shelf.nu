@@ -4,7 +4,7 @@ import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
-import { getDateTimeFormatFromHints } from "./client-hints";
+import { formatDateBasedOnLocaleOnly } from "./client-hints";
 import { ShelfError } from "./error";
 
 /** Returns the schema depending on the field type.
@@ -182,9 +182,9 @@ export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   hints?: ClientHint
 ): string => {
-  if (value.valueDate) {
+  if (value.valueDate && value.raw) {
     return hints
-      ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
+      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
       : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);
