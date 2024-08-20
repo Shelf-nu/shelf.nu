@@ -22,6 +22,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
 import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
@@ -757,23 +758,19 @@ export async function updateProfilePicture({
 }
 
 /**
- * To delete a user we need to do a few manual things
+ * To prevent database issues and data loss, we do soft delete.
+ * To comply with regulations, we will destroy all personal data related to the user
  *
-    1. Delete the user itself. To do this we need to do some manual stuff. We need to find all entries that belong to the user, but not to his personal org. Then we need to transfer those entries to the org owner. The models to handle are:
- *   - Asset
- *   - Category
- *   - Tag
- *   - Location
- *   - CustomField
- *   - Invite
- *   - Booking
- *   - TeamMember
- *   - Image
- * 2. Delete all organizations the user owns. This will cascade the deleting of related entries
- * 3. Delete the auth account of the user
- * 4. Send email that the user is deleted
+ * To soft delete the user we do the following:
+ * 1. Update the user email to: deleted+{randomId}@deleted.shelf.nu
+ * 2. Update the user username to: deleted+{randomId}
+ * 3. Update the user firstName to: Deleted
+ * 4. Update the user lastName to: User
+ * 5. Delete the user's profile picture
+ * 6. Remove all relations to organizations the user is part of but doesnt own
+ * 7. Move all entities the user created inside organizations the user is part of but doesnt own to the owner of the organization
  */
-export async function deleteUser(id: User["id"]) {
+export async function softDeleteUser(id: User["id"]) {
   try {
     const user = await getUserByID(id, {
       userOrganizations: {
@@ -789,158 +786,65 @@ export async function deleteUser(id: User["id"]) {
       (uo) => !uo.roles.includes(OrganizationRoles.OWNER)
     );
 
-    const organizationsTheUserOwns = user.userOrganizations.filter((uo) =>
-      uo.roles.includes(OrganizationRoles.OWNER)
-    );
-
-    /** Move entries inside each of organizationsTheUserDoesNotOwn from following models:
-     *   - [x] Asset
-     *   - [x] Category
-     *   - [x] Tag
-     *   - [x] Location
-     *   - [x] CustomField
-     *   - [x] Invite
-     *   - [x] Booking
-     *   - [x] Image
-     *   - [x] Kit
-     * The new owner should be the owner of the organization
-     */
-
     await db.$transaction(async (tx) => {
+      /** Move entries inside each of organizationsTheUserDoesNotOwn from following models:
+       *   - [x] Asset
+       *   - [x] Category
+       *   - [x] Tag
+       *   - [x] Location
+       *   - [x] CustomField
+       *   - [x] Invite
+       *   - [x] Booking
+       *   - [x] Image
+       *   - [x] Kit
+       * The new owner should be the owner of the organization
+       */
       for (const userOrg of organizationsTheUserDoesNotOwn) {
         const newOwnerId = userOrg.organization?.userId;
 
         if (newOwnerId) {
-          /** Update assets */
-          await tx.asset.updateMany({
-            where: {
-              userId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update categories */
-          await tx.category.updateMany({
-            where: {
-              userId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update tags */
-          await tx.tag.updateMany({
-            where: {
-              userId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update locations */
-          await tx.location.updateMany({
-            where: {
-              userId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update custom fields */
-          await tx.customField.updateMany({
-            where: {
-              userId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update invites */
-          await tx.invite.updateMany({
-            where: {
-              inviterId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              inviterId: newOwnerId,
-            },
-          });
-
-          /** Update bookings */
-          await tx.booking.updateMany({
-            where: {
-              creatorId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              creatorId: newOwnerId,
-            },
-          });
-
-          /** Update bookings where the person deleted is the custodian */
-          await tx.booking.updateMany({
-            where: {
-              custodianUserId: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              custodianUserId: null,
-            },
-          });
-
-          /** Update images */
-          await tx.image.updateMany({
-            where: {
-              userId: id,
-              ownerOrgId: userOrg.organizationId,
-            },
-            data: {
-              userId: newOwnerId,
-            },
-          });
-
-          /** Update kits */
-          await tx.kit.updateMany({
-            where: {
-              createdById: id,
-              organizationId: userOrg.organizationId,
-            },
-            data: {
-              createdById: newOwnerId,
-            },
+          await transferEntitiesToNewOwner({
+            tx,
+            id,
+            newOwnerId,
+            organizationId: userOrg.organizationId,
           });
         }
+        /**
+         * Remove the user from all organizations the user belongs to but doesnt own.
+         * */
+        await revokeAccessToOrganization({
+          userId: id,
+          organizationId: userOrg.organizationId,
+        });
       }
 
-      /** Delete the organizations the user owns. This should cascade to deleting all related entries */
+      /** Update the user data */
 
-      await tx.organization.deleteMany({
-        where: {
-          id: {
-            in: organizationsTheUserOwns.map((uo) => uo.organizationId),
-          },
+      const randomId = generateId();
+      await tx.user.update({
+        where: { id },
+        data: {
+          email: `deleted+${randomId}@deleted.shelf.nu`,
+          username: `deleted+${randomId}`,
+          firstName: "Deleted",
+          lastName: "User",
+          deletedAt: new Date(),
         },
       });
-
-      /** Finally, delete the actual user */
-      await tx.user.delete({
-        where: { id },
-      });
     });
-    /** Delete the auth account */
-    await deleteAuthAccount(id);
 
+    /**
+     * Delete the picture of the user
+     *
+     * Note: This happens outside of the transaction because we dont want to rollback the deletion of the user if the deletion of the picture fails
+     * If it fails for some reason, we will get it in our logs that there was an issue so we can check it manually
+     * */
+    if (user.profilePicture) {
+      await deleteProfilePicture({ url: user.profilePicture });
+    }
+
+    /** Send an email to the user that their request has been completed */
     void sendEmail({
       to: user.email,
       subject: "Your account has been deleted",
@@ -1048,4 +952,139 @@ export async function revokeAccessToOrganization({
       label,
     });
   }
+}
+
+/** Move entries inside an organization from 1 owner to another.
+ * Affects the following models:
+ *   - [x] Asset
+ *   - [x] Category
+ *   - [x] Tag
+ *   - [x] Location
+ *   - [x] CustomField
+ *   - [x] Invite
+ *   - [x] Booking
+ *   - [x] Image
+ *   - [x] Kit
+ * Required to be used inside a transaction
+ */
+export async function transferEntitiesToNewOwner({
+  tx,
+  id,
+  newOwnerId,
+  organizationId,
+}: {
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  id: User["id"];
+  newOwnerId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /** Update assets */
+  await tx.asset.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update categories */
+  await tx.category.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update tags */
+  await tx.tag.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update locations */
+  await tx.location.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update custom fields */
+  await tx.customField.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update invites */
+  await tx.invite.updateMany({
+    where: {
+      inviterId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      inviterId: newOwnerId,
+    },
+  });
+
+  /** Update bookings */
+  await tx.booking.updateMany({
+    where: {
+      creatorId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      creatorId: newOwnerId,
+    },
+  });
+
+  /** Update bookings where the person deleted is the custodian */
+  await tx.booking.updateMany({
+    where: {
+      custodianUserId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      custodianUserId: null,
+    },
+  });
+
+  /** Update images */
+  await tx.image.updateMany({
+    where: {
+      userId: id,
+      ownerOrgId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update kits */
+  await tx.kit.updateMany({
+    where: {
+      createdById: id,
+      organizationId: organizationId,
+    },
+    data: {
+      createdById: newOwnerId,
+    },
+  });
 }

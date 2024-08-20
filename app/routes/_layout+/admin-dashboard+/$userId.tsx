@@ -21,7 +21,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
-import { deleteUser, getUserByID } from "~/modules/user/service.server";
+import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -182,7 +182,7 @@ export const action = async ({
       }
       case "deleteUser":
         if (isDelete(request)) {
-          await deleteUser(shelfUserId);
+          await softDeleteUser(shelfUserId);
 
           sendNotification({
             title: "User deleted",
