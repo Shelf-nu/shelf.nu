@@ -562,6 +562,7 @@ enum Currency {
   INR // Indian Rupee
   ZAR // South African Rand
   BRL // Brazilian Real
+  MYR // Malaysian Ringgit
   MXN // Mexican Peso
   SGD // Singapore Dollar
   NZD // New Zealand Dollar

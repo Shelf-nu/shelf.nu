@@ -74,6 +74,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     const userSignedUpWithPassword =
       authUser.user_metadata.signup_method === "email-password";
+
     const OnboardingFormSchema = createOnboardingSchema(
       userSignedUpWithPassword
     );
@@ -112,7 +113,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { userSignedUpWithPassword } = parseData(
       formData,
-      z.object({ userSignedUpWithPassword: z.coerce.boolean() })
+      z.object({
+        userSignedUpWithPassword: z.string().transform((val) => val === "true"),
+      })
     );
 
     const OnboardingFormSchema = createOnboardingSchema(
@@ -120,6 +123,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     const payload = parseData(formData, OnboardingFormSchema);
+
+    /** If the user already signed up with password, we dont need to update it in their account, so we remove it from the payload  */
+    if (userSignedUpWithPassword) {
+      delete payload.password;
+      delete payload.confirmPassword;
+    }
 
     /** Update the user */
     const user = await updateUser({
@@ -131,8 +140,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /**
      * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
      * In this case, we need to create a new session for the user.
+     * We only need to do that if the user DIDNT sign up using password. In that case the password gets set in the updateUser above
      */
-    if (user && userSignedUpWithPassword) {
+    if (user && !userSignedUpWithPassword) {
       //making sure new session is created.
       const authSession = await signInWithEmail(
         user.email,

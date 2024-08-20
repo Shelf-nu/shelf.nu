@@ -48,12 +48,16 @@ export const UpdateFormSchema = z.object({
 
 const Actions = z.discriminatedUnion("intent", [
   z.object({
-    intent: z.enum(["resetPassword", "deleteUser"]),
+    intent: z.enum(["resetPassword"]),
     email: z.string(),
-    reason: z.string(),
   }),
   UpdateFormSchema.extend({
     intent: z.literal("updateUser"),
+  }),
+  z.object({
+    intent: z.literal("deleteUser"),
+    email: z.string(),
+    reason: z.string(),
   }),
 ]);
 
