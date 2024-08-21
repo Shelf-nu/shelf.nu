@@ -534,8 +534,8 @@ export default function KitDetails() {
               }}
               headerChildren={
                 <>
-                  <Th className="table-cell">Category</Th>
-                  <Th className="table-cell">Location</Th>
+                  <Th>Category</Th>
+                  <Th>Location</Th>
                 </>
               }
             />
@@ -606,7 +606,7 @@ function ListContent({
         </div>
       </Td>
 
-      <Td className="table-cell">
+      <Td>
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
@@ -614,7 +614,7 @@ function ListContent({
         ) : null}
       </Td>
 
-      <Td className="table-cell">
+      <Td>
         {location ? (
           <GrayBadge>
             {location.image ? (

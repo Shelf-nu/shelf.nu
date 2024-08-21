@@ -120,7 +120,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     <div
       ref={ref}
       className={tw(
-        "-mx-4  border border-gray-200  bg-white md:mx-0 md:rounded",
+        "-mx-4  overflow-auto border border-gray-200  bg-white md:mx-0 md:rounded",
         className
       )}
     >

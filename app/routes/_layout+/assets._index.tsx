@@ -490,8 +490,8 @@ export const AssetsList = ({
         }
         headerChildren={
           <>
-            <Th className="table-cell">Category</Th>
-            <Th className="table-cell">Tags</Th>
+            <Th>Category</Th>
+            <Th>Tags</Th>
             <When
               truthy={userHasPermission({
                 roles,
@@ -499,9 +499,9 @@ export const AssetsList = ({
                 action: PermissionAction.read,
               })}
             >
-              <Th className="table-cell">Custodian</Th>
+              <Th>Custodian</Th>
             </When>
-            <Th className="table-cell">Location</Th>
+            <Th>Location</Th>
           </>
         }
       />
@@ -579,12 +579,11 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-
         </div>
       </Td>
 
       {/* Category */}
-      <Td className="table-cell">
+      <Td>
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
@@ -597,7 +596,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Tags */}
-      <Td className="table-cell text-left">
+      <Td className="text-left">
         <ListItemTagsColumn tags={tags} />
       </Td>
 
@@ -609,7 +608,7 @@ const ListAssetContent = ({
           action: PermissionAction.read,
         })}
       >
-        <Td className="table-cell">
+        <Td>
           {custody ? (
             <GrayBadge>
               <>
@@ -644,7 +643,7 @@ const ListAssetContent = ({
       </When>
 
       {/* Location */}
-      <Td className="table-cell">
+      <Td>
         {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
       </Td>
     </>

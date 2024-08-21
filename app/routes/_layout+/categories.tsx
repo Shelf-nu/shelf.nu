@@ -12,6 +12,7 @@ import { DeleteCategory } from "~/components/category/delete-category";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
@@ -166,9 +167,9 @@ export default function CategoriesPage() {
           ItemComponent={CategoryItem}
           headerChildren={
             <>
-              <Th className="table-cell">Description</Th>
-              <Th className="table-cell">Assets</Th>
-              <Th className="table-cell">Actions</Th>
+              <Th>Description</Th>
+              <Th>Assets</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -192,8 +193,8 @@ const CategoryItem = ({
         {item.name}
       </Badge>
     </Td>
-    <Td className="w-3/4 text-gray-500" title="Description">
-      {item.description}
+    <Td className="text-gray-500 md:w-3/4" title="Description">
+       {item.description}
     </Td>
     <Td>{item._count.assets}</Td>
     <Td>

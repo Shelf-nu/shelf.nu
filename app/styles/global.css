@@ -262,17 +262,22 @@ dialog {
 .fixed-gradient {
   position: absolute;
   top: 8px;
-  right: 0;
+  right: -1px;
   bottom: 0;
-  width: 20px;
-  background: linear-gradient(to left, rgba(255, 255, 255, 0.89), rgba(255, 255, 255, 0.5));
+  width: 40px;
+  background: linear-gradient(to left, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.5));
   pointer-events: none;
   z-index: 10;
+  display: none;
+}
+
+.overflowing .fixed-gradient{
+  display: block;
 }
 
 .scrollbar-top {
   position: relative;
-  overflow-x: auto;
+  overflow: auto;
   transform: rotateX(180deg);
 }
 
@@ -281,7 +286,7 @@ dialog {
 }
 
 .scrollbar-always-visible {
-  scrollbar-width: thin; 
+  scrollbar-width: thin;
   scrollbar-color: auto;
 }
 

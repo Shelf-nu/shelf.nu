@@ -219,13 +219,13 @@ export default function BookingsIndexPage({
           navigate={(id) => navigate(`/bookings/${id}`)}
           headerChildren={
             <>
-              <Th className="table-cell" />
-              <Th className="table-cell">Description</Th>
+              <Th />
+              <Th>Description</Th>
 
-              <Th className="table-cell">From</Th>
-              <Th className="table-cell">To</Th>
-              <Th className="table-cell">Custodian</Th>
-              <Th className="table-cell">Created by</Th>
+              <Th>From</Th>
+              <Th>To</Th>
+              <Th>Custodian</Th>
+              <Th>Created by</Th>
             </>
           }
         />
@@ -313,7 +313,7 @@ const ListAssetContent = ({
        * 2. Have custody
        * 3. Have other bookings with the same period - this I am not sure how to handle yet
        * */}
-      <Td className="table-cell">
+      <Td>
         {hasUnavaiableAssets ? (
           <AvailabilityBadge
             badgeText={"Includes unavailable assets"}
@@ -325,12 +325,12 @@ const ListAssetContent = ({
         ) : null}
       </Td>
 
-      <Td className="table-cell">
-        {item.description ? <LineBreakText text={item.description} /> : null}
+      <Td className="max-w-62">
+      {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}
-      <Td className="table-cell">
+      <Td>
         {item.displayFrom ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -342,7 +342,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* To */}
-      <Td className="table-cell">
+      <Td>
         {item.displayTo ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -354,7 +354,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <Td className="table-cell">
+      <Td>
         {item?.custodianUser ? (
           <UserBadge
             img={
@@ -371,7 +371,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Created by */}
-      <Td className="table-cell">
+      <Td>
         <UserBadge
           img={
             item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
