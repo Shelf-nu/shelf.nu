@@ -166,8 +166,8 @@ export default function CategoriesPage() {
           ItemComponent={TagItem}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell">Actions</Th>
+              <Th className="table-cell">Description</Th>
+              <Th className="table-cell">Actions</Th>
             </>
           }
         />

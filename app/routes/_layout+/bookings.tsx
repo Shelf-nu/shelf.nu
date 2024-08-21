@@ -217,16 +217,15 @@ export default function BookingsIndexPage({
           bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
-          className="overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
-              <Th className="hidden md:table-cell" />
-              <Th className="hidden md:table-cell">Description</Th>
+              <Th className="table-cell" />
+              <Th className="table-cell">Description</Th>
 
-              <Th className="hidden md:table-cell">From</Th>
-              <Th className="hidden md:table-cell">To</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
-              <Th className="hidden md:table-cell">Created by</Th>
+              <Th className="table-cell">From</Th>
+              <Th className="table-cell">To</Th>
+              <Th className="table-cell">Custodian</Th>
+              <Th className="table-cell">Created by</Th>
             </>
           }
         />
@@ -302,9 +301,9 @@ const ListAssetContent = ({
             </div>
           </div>
 
-          <button className="block md:hidden">
+          {/* <button className="block md:hidden">
             <ChevronRight />
-          </button>
+          </button> */}
         </div>
       </Td>
 
@@ -314,7 +313,7 @@ const ListAssetContent = ({
        * 2. Have custody
        * 3. Have other bookings with the same period - this I am not sure how to handle yet
        * */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {hasUnavaiableAssets ? (
           <AvailabilityBadge
             badgeText={"Includes unavailable assets"}
@@ -326,12 +325,12 @@ const ListAssetContent = ({
         ) : null}
       </Td>
 
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {item.displayFrom ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -343,7 +342,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* To */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {item.displayTo ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -355,7 +354,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {item?.custodianUser ? (
           <UserBadge
             img={
@@ -372,7 +371,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Created by */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         <UserBadge
           img={
             item?.creator?.profilePicture || "/static/images/default_pfp.jpg"

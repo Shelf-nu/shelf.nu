@@ -484,15 +484,14 @@ export const AssetsList = ({
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
         navigate={(itemId) => navigate(`/assets/${itemId}`)}
-        className=" overflow-x-visible md:overflow-x-auto"
         bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }
         headerChildren={
           <>
-            <Th className="hidden md:table-cell">Category</Th>
-            <Th className="hidden md:table-cell">Tags</Th>
+            <Th className="table-cell">Category</Th>
+            <Th className="table-cell">Tags</Th>
             <When
               truthy={userHasPermission({
                 roles,
@@ -500,9 +499,9 @@ export const AssetsList = ({
                 action: PermissionAction.read,
               })}
             >
-              <Th className="hidden md:table-cell">Custodian</Th>
+              <Th className="table-cell">Custodian</Th>
             </When>
-            <Th className="hidden md:table-cell">Location</Th>
+            <Th className="table-cell">Location</Th>
           </>
         }
       />
@@ -581,14 +580,11 @@ const ListAssetContent = ({
             </div>
           </div>
 
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
 
       {/* Category */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
@@ -601,7 +597,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Tags */}
-      <Td className="hidden text-left md:table-cell">
+      <Td className="table-cell text-left">
         <ListItemTagsColumn tags={tags} />
       </Td>
 
@@ -613,7 +609,7 @@ const ListAssetContent = ({
           action: PermissionAction.read,
         })}
       >
-        <Td className="hidden md:table-cell">
+        <Td className="table-cell">
           {custody ? (
             <GrayBadge>
               <>
@@ -648,7 +644,7 @@ const ListAssetContent = ({
       </When>
 
       {/* Location */}
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
       </Td>
     </>

@@ -124,16 +124,16 @@ export default function Area51() {
           hideFirstHeaderColumn
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">QR id</Th>
-              <Th className="hidden md:table-cell">Asset</Th>
-              <Th className="hidden md:table-cell">Kit</Th>
-              <Th className="hidden md:table-cell">Organization ID</Th>
-              <Th className="hidden md:table-cell">User ID</Th>
-              <Th className="hidden md:table-cell">
+              <Th className="table-cell">QR id</Th>
+              <Th className="table-cell">Asset</Th>
+              <Th className="table-cell">Kit</Th>
+              <Th className="table-cell">Organization ID</Th>
+              <Th className="table-cell">User ID</Th>
+              <Th className="table-cell">
                 <span title="Only available for batched codes">Printed</span>
               </Th>
-              <Th className="hidden md:table-cell">Batch</Th>
-              <Th className="hidden md:table-cell">Created at</Th>
+              <Th className="table-cell">Batch</Th>
+              <Th className="table-cell">Created at</Th>
             </>
           }
         />

@@ -110,7 +110,7 @@ export default function LocationsIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Assets</Th>
+              <Th className="table-cell">Assets</Th>
             </>
           }
         />

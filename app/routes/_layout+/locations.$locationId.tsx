@@ -264,8 +264,8 @@ export default function LocationPage() {
               navigate={(itemId) => navigate(`/assets/${itemId}`)}
               headerChildren={
                 <>
-                  <Th className="hidden md:table-cell">Category</Th>
-                  <Th className="hidden md:table-cell">Tags</Th>
+                  <Th className="table-cell">Category</Th>
+                  <Th className="table-cell">Tags</Th>
                 </>
               }
               customEmptyStateContent={{
@@ -325,7 +325,7 @@ const ListAssetContent = ({
           </button>
         </div>
       </Td>
-      <Td className="hidden md:table-cell">
+      <Td className="table-cell">
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}

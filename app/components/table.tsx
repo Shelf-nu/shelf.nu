@@ -10,9 +10,14 @@ export function Table({
   className?: string;
 }) {
   return (
-    <table className={tw("w-full table-auto border-collapse", className)}>
-      {children}
-    </table>
+    <div className="relative overflow-x-auto">
+      <div className="fixed-gradient"></div>
+      <div className="scrollbar-top scrollbar-always-visible overflow-x-auto">
+        <table className={tw("w-full table-auto border-collapse", className)}>
+          {children}
+        </table>
+      </div>
+    </div>
   );
 }
 

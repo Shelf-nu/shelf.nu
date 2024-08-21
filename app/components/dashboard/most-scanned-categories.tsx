@@ -78,6 +78,6 @@ const Row = ({
     </Td>
 
     {/* Category */}
-    <Td className="hidden md:table-cell">{item.scanCount} scans</Td>
+    <Td className="table-cell">{item.scanCount} scans</Td>
   </>
 );

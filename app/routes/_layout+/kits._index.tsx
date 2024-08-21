@@ -190,10 +190,10 @@ export default function KitsIndexPage() {
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell">Assets</Th>
+              <Th className="table-cell">Description</Th>
+              <Th className="table-cell">Assets</Th>
               {canReadCustody && (
-                <Th className="hidden md:table-cell">Custodian</Th>
+                <Th className="table-cell">Custodian</Th>
               )}
             </>
           }
@@ -270,19 +270,19 @@ function ListContent({
             </div>
           </div>
 
-          <button className="block md:hidden">
+          {/* <button className="block md:hidden">
             <ChevronRight />
-          </button>
+          </button> */}
         </div>
       </Td>
 
-      <Td className="hidden max-w-96 truncate md:table-cell">
+      <Td className="table-cell max-w-96 truncate">
         {item.description}
       </Td>
 
-      <Td className="hidden md:table-cell">{item._count.assets}</Td>
+      <Td className="table-cell">{item._count.assets}</Td>
       {canReadCustody && (
-        <Td className="hidden md:table-cell">
+        <Td className="table-cell">
           {item.custody ? (
             <GrayBadge>
               <>
