@@ -194,7 +194,7 @@ const CategoryItem = ({
       </Badge>
     </Td>
     <Td className="text-gray-500 md:w-3/4" title="Description">
-       {item.description}
+      {item.description}
     </Td>
     <Td>{item._count.assets}</Td>
     <Td>

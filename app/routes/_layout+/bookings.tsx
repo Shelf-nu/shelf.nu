@@ -326,7 +326,7 @@ const ListAssetContent = ({
       </Td>
 
       <Td className="max-w-62">
-      {item.description ? <LineBreakText text={item.description} /> : null}
+        {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}

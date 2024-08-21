@@ -9,7 +9,6 @@ export function Table({
   children: React.ReactNode;
   className?: string;
 }) {
-
   const containerRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
 
@@ -25,27 +24,30 @@ export function Table({
     };
 
     checkOverflow(); // Initial check
-    window.addEventListener('resize', checkOverflow); // Check on resize
+    window.addEventListener("resize", checkOverflow); // Check on resize
 
     // Ensure the scroll event listener is added correctly
     const container = containerRef.current;
     if (container) {
-      container.addEventListener('scroll', checkOverflow);
+      container.addEventListener("scroll", checkOverflow);
     }
 
     return () => {
-      window.removeEventListener('resize', checkOverflow);
+      window.removeEventListener("resize", checkOverflow);
       if (container) {
-        container.removeEventListener('scroll', checkOverflow);
+        container.removeEventListener("scroll", checkOverflow);
       }
     };
   }, []);
-  
+
   return (
-    <div className={`relative ${isOverflowing ? 'overflowing' : ''}`}>
+    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
       <div className="fixed-gradient"></div>
-      <div ref={containerRef} className="scrollbar-top scrollbar-always-visible">
-        <table  className={tw("w-full table-auto border-collapse", className)}>
+      <div
+        ref={containerRef}
+        className="scrollbar-top scrollbar-always-visible"
+      >
+        <table className={tw("w-full table-auto border-collapse", className)}>
           {children}
         </table>
       </div>
@@ -93,7 +95,10 @@ interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
 export function Td({ children, className, ...props }: TdProps) {
   return (
     <td
-      className={tw("max-w-[200px] truncate whitespace-nowrap border-b p-4 md:px-6", className)}
+      className={tw(
+        "max-w-[200px] truncate whitespace-nowrap border-b p-4 md:px-6",
+        className
+      )}
       {...props}
     >
       {children}

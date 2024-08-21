@@ -643,9 +643,7 @@ const ListAssetContent = ({
       </When>
 
       {/* Location */}
-      <Td>
-        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
-      </Td>
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };
