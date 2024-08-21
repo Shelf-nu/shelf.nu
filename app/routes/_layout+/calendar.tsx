@@ -288,7 +288,10 @@ const renderEventCard = (args: EventContentArg) => {
       </HoverCardTrigger>
 
       <HoverCardPortal>
-        <HoverCardContent className="pointer-events-none md:w-96" side="top">
+        <HoverCardContent
+          className="pointer-events-none z-[99999] md:w-96"
+          side="top"
+        >
           <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
             <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
             <ArrowRightIcon className="size-3 text-gray-600" />
