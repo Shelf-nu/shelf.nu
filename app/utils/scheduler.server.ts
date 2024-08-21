@@ -10,7 +10,10 @@ declare global {
 export const init = async () => {
   if (!scheduler) {
     if (NODE_ENV === "production") {
-      scheduler = new PgBoss(DATABASE_URL);
+      scheduler = new PgBoss({
+        connectionString: DATABASE_URL,
+        max: 1,
+      });
     } else {
       if (!global.scheduler) {
         global.scheduler = new PgBoss({
