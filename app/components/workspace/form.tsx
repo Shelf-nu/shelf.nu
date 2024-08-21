@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Organization, Currency } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -5,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { useSearchParams } from "~/hooks/search-params";
 import type { loader } from "~/routes/_layout+/account-details.workspace.new";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -38,12 +40,21 @@ interface Props {
 
 export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const { curriences } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+  const nameFieldRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const team = searchParams.get("team");
+    if (!team && nameFieldRef.current) {
+      nameFieldRef.current.focus();
+    }
+  }, [searchParams]);
 
   return (
     <Card className="w-full md:w-min">
@@ -55,6 +66,9 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
       >
         <FormRow
           rowLabel={"Name"}
+          subHeading={
+            "Choose a name that represents your Organization. Make it easily recognizable for your team members."
+          }
           className="border-b-0 pb-[10px] pt-0"
           required={zodFieldIsRequired(NewWorkspaceFormSchema.shape.name)}
         >
@@ -70,10 +84,17 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
             defaultValue={name || undefined}
             placeholder=""
             required={zodFieldIsRequired(NewWorkspaceFormSchema.shape.name)}
+            ref={nameFieldRef}
           />
         </FormRow>
 
-        <FormRow rowLabel={"Main image"} className="border-b-0">
+        <FormRow
+          rowLabel={"Main image"}
+          className="border-b-0"
+          subHeading={
+            "Used to place your organization's logo or symbol. For best results, use a square image."
+          }
+        >
           <div>
             <p className="hidden lg:block">
               Accepts PNG, JPG or JPEG (max.4 MB)

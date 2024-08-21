@@ -1,4 +1,3 @@
-import type { PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -14,6 +13,7 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
+  useRouteLoaderData,
 } from "@remix-run/react";
 import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
@@ -77,8 +77,8 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
-function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
-  const { env } = useLoaderData<typeof loader>();
+export function Layout({ children }: { children: React.ReactNode }) {
+  const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   return (
     <html lang="en" className="h-full">
@@ -88,7 +88,6 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <ClientHintCheck nonce={nonce} />
         <style data-fullcalendar />
         <Meta />
-        {title ? <title>{title}</title> : null}
         <Links />
         <Clarity />
       </head>
@@ -97,7 +96,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.env = ${JSON.stringify(env)}`,
+            __html: `window.env = ${JSON.stringify(data?.env)}`,
           }}
         />
         <Scripts />
@@ -110,9 +109,7 @@ function App() {
   useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
 
-  return (
-    <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
-  );
+  return maintenanceMode ? <MaintenanceMode /> : <Outlet />;
 }
 
 export default withSentry(App);

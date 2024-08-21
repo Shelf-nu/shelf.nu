@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
@@ -103,13 +104,18 @@ export async function createStripeCheckoutSession({
       },
     ];
 
+    const successUrl = await generateReturnUrl({
+      userId,
+      shelfTier,
+      intent,
+      domainUrl,
+    });
+
     const { url } = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${domainUrl}/account-details/subscription?success=true${
-        shelfTier === "tier_2" ? "&team=true" : ""
-      }`,
+      success_url: successUrl,
       cancel_url: `${domainUrl}/account-details/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
@@ -123,7 +129,7 @@ export async function createStripeCheckoutSession({
           trial_period_days: 14,
         },
         payment_method_collection: "if_required",
-      }), // Add trial period if intent is trial
+      }),
     });
 
     if (!url) {
@@ -134,7 +140,6 @@ export async function createStripeCheckoutSession({
         label,
       });
     }
-
     return url;
   } catch (cause) {
     throw new ShelfError({
@@ -412,3 +417,44 @@ export const disabledTeamOrg = async ({
     ["free", "tier_1"].includes(tierLimit?.id)
   );
 };
+
+/** Generates the redirect URL based on relevant data */
+async function generateReturnUrl({
+  userId,
+  shelfTier,
+  intent,
+  domainUrl,
+}: {
+  userId: User["id"];
+  shelfTier: "tier_1" | "tier_2" | "free" | "custom";
+  intent: "trial" | "subscribe";
+  domainUrl: string;
+}) {
+  /**
+   * Here we have a few cases:
+   * 1. If its trial and tier_2, and they dont own team workspaces we redirect them to create a team workspace - we can safely assume that is their first entrance
+   * 3. If its any other tier, we redirect them to /account-details/subscription
+   */
+
+  /** We do a small try/catch to prevent throwing as we just need to continue */
+  let userTeamOrg;
+  try {
+    userTeamOrg = await getOrganizationByUserId({
+      userId,
+      orgType: "TEAM",
+    });
+  } catch (cause) {
+    userTeamOrg = null;
+  }
+
+  const urlSearchParams = new URLSearchParams({
+    success: "true",
+    team: shelfTier === "tier_2" ? "true" : "",
+    ...(intent === "trial" && { trial: "true" }),
+    ...(userTeamOrg && { hasExistingWorkspace: "true" }),
+  });
+
+  return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace
+    ? `${domainUrl}/account-details/workspace/new?${urlSearchParams.toString()}`
+    : `${domainUrl}/account-details/subscription?${urlSearchParams.toString()}`;
+}

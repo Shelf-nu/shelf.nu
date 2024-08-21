@@ -1,4 +1,5 @@
 import { Link, Outlet } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import { ShelfFullLogo } from "~/components/marketing/logos";
 import { usePosition } from "~/hooks/use-position";
 
@@ -20,3 +21,5 @@ export default function QR() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

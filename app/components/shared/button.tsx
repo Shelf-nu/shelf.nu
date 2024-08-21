@@ -168,7 +168,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               )}
             >
               <span>{children}</span>{" "}
-              {newTab && <ExternalLinkIcon className="mt-px" />}
+              {newTab && (
+                <ExternalLinkIcon className="external-link-icon mt-px" />
+              )}
             </span>
           ) : null}
         </Component>
