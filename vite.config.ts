@@ -88,7 +88,7 @@ export default defineConfig({
             // The final file name
             outdir: "build/server",
             // Our server entry point
-            entryPoints: ["server/instrument.server.ts"],
+            entryPoints: ["./app/instrument.server.ts"],
             // Dependencies that should not be bundled
             // We import the remix build from "../build/server/remix.js", and the sentry build from "../build/server/instrument.server.js", so no need to bundle it again
             external: ["./instrument.server.js"],
