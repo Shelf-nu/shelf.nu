@@ -185,10 +185,10 @@ export default function UserTeamSetting() {
           ItemComponent={UserRow}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Custodies</Th>
-              <Th className="hidden md:table-cell">Role</Th>
-              <Th className="hidden md:table-cell">Status</Th>
-              <Th className="hidden md:table-cell">Actions</Th>
+              <Th>Custodies</Th>
+              <Th>Role</Th>
+              <Th>Status</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -211,12 +211,12 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
           <TeamMemberDetails details={item} />
         )}
       </Td>
-      <Td className="hidden md:table-cell">{item.custodies || 0}</Td>
-      <Td className="hidden md:table-cell">{item.role}</Td>
-      <Td className="hidden md:table-cell">
+      <Td>{item.custodies || 0}</Td>
+      <Td>{item.role}</Td>
+      <Td>
         <InviteStatusBadge status={item.status} />
       </Td>
-      <Td className="hidden text-right md:table-cell">
+      <Td className="text-right">
         {item.role !== "Owner" ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
@@ -274,10 +274,6 @@ const TeamMemberDetails = ({
         <div>{details.email}</div>
       </div>
     </div>
-
-    <button className="block md:hidden">
-      <ChevronRight />
-    </button>
   </div>
 );
 
