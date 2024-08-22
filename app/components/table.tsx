@@ -1,6 +1,6 @@
 import type { TdHTMLAttributes } from "react";
 import React from "react";
-import { useTableOverFlow } from "~/hooks/use-table-overflow";
+import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
 import { tw } from "~/utils/tw";
 
 export function Table({
@@ -10,7 +10,7 @@ export function Table({
   children: React.ReactNode;
   className?: string;
 }) {
-  const { containerRef, isOverflowing } = useTableOverFlow();
+  const { containerRef, isOverflowing } = useTableIsOverflowing();
 
   return (
     <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>

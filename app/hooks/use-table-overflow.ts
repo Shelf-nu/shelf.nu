@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 // Custom hook to handle table right side scroll fade effect
-export const useTableOverFlow = () => {
+export const useTableIsOverflowing = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
 
