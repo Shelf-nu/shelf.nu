@@ -2285,15 +2285,15 @@ export async function bulkDeleteAssets({
       select: { id: true, mainImage: true },
     });
 
-    return await db.$transaction(async (tx) => {
-      /** Deleting all assets */
-      await tx.asset.deleteMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
+    try {
+      await db.$transaction(async (tx) => {
+        await tx.asset.deleteMany({
+          where: { id: { in: assets.map((asset) => asset.id) } },
+        });
       });
 
       /** Deleting images of the assets (if any) */
       const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
-
       await Promise.all(
         assetsWithImages.map((asset) =>
           deleteOtherImages({
@@ -2303,11 +2303,23 @@ export async function bulkDeleteAssets({
           })
         )
       );
-    });
+    } catch(cause) {
+      throw new ShelfError({
+        cause,
+        message:
+          "Something went wrong while deleting assets. The transaction was failed.",
+        label: "Assets",
+      });
+    }
   } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting assets";
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk deleting assets",
+      message,
       additionalData: { assetIds, organizationId },
       label,
     });
