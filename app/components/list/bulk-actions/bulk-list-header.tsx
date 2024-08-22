@@ -26,7 +26,7 @@ export default function BulkListHeader() {
   }
 
   return (
-    <Th className="table-cell md:pl-4 md:pr-3">
+    <Th className="md:pl-4 md:pr-3">
       {partialItemsSelected ? (
         <PartialCheckboxIcon
           className="cursor-pointer"

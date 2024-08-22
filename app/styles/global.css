@@ -258,3 +258,47 @@ dialog {
   white-space: -o-pre-wrap; /* Opera 7 */
   word-wrap: break-word; /* IE */
 }
+
+.fixed-gradient {
+  position: absolute;
+  top: 8px;
+  right: -1px;
+  bottom: 0;
+  width: 35px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
+  pointer-events: none;
+  z-index: 1;
+  display: none;
+}
+
+.overflowing .fixed-gradient {
+  display: block;
+}
+
+.scrollbar-top {
+  position: relative;
+  overflow: auto;
+  transform: rotateX(180deg);
+}
+
+.scrollbar-top > * {
+  transform: rotateX(180deg);
+}
+
+.scrollbar-always-visible {
+  scrollbar-width: thin;
+  scrollbar-color: auto;
+}
+
+.scrollbar-always-visible::-webkit-scrollbar {
+  height: 8px;
+}
+
+.scrollbar-always-visible::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 4px; /* Rounded corners for the scrollbar thumb */
+}
+
+.scrollbar-always-visible::-webkit-scrollbar-track {
+  background-color: #f0f0f0; /* Color of the scrollbar track */
+}

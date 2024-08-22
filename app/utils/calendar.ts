@@ -13,9 +13,10 @@ export function getStatusClasses(
     "py-[2px] px-[5px]",
     "hover:cursor-pointer",
     "max-h-[24px]",
+    "truncate",
   ];
   if (oneDayEvent) {
-    classes.push(" [&>.fc-event-title]:!truncate !bg-transparent");
+    classes.push("[&>.fc-event-title]:!truncate !bg-transparent");
   }
   let statusClasses: string[] = [];
   switch (status) {
