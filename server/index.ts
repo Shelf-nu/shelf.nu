@@ -2,7 +2,6 @@
 // It is important to import it as .js for this to work, even if the file is .ts
 import "./instrument.server.js";
 
-import { serveStatic } from "@hono/node-server/serve-static";
 import type { AppLoadContext } from "@remix-run/node";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
@@ -11,7 +10,7 @@ import { initEnv, env } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
-import { cache, protect, refreshSession, urlShortener } from "./middleware";
+import { protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -86,6 +85,8 @@ const server = await createHonoServer({
     },
   },
   assetsDir: "file-assets",
+  /** Disable default logger as we have our own */
+  defaultLogger: false,
   getLoadContext,
   configure: (server) => {
     // Apply the middleware to all routes
