@@ -28,13 +28,9 @@ if (env.NODE_ENV !== "production") {
   });
 }
 
-const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
-
-const isProductionMode = mode === "production";
-
 export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   c,
-  { build }
+  { build, mode }
 ) => {
   const session = getSession<SessionData, FlashData>(c);
 
@@ -42,7 +38,7 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
     // Nice to have if you want to display the app version or do something in the app when deploying a new version
     // Exemple: on navigate, check if the app version is the same as the one in the build assets and if not, display a toast to the user to refresh the page
     // Prevent the user to use an old version of the client side code (it is only downloaded on document request)
-    appVersion: isProductionMode ? build.assets.version : "dev",
+    appVersion: mode === "production" ? build.assets.version : "dev",
     isAuthenticated: session.has(authSessionKey),
     // we could ensure that session.get() match a specific shape
     // let's trust our system for now
@@ -71,7 +67,7 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
-const server = await createHonoServer({
+export const server = await createHonoServer({
   honoOptions: {
     getPath: (req) => {
       const url = new URL(req.url);
@@ -96,24 +92,6 @@ const server = await createHonoServer({
         excludePaths: ["/file-assets", "/healthcheck", "/static"],
       })
     );
-
-    // /**
-    //  * Serve assets files from build/client/assets
-    //  */
-    // server.use(
-    //   "/file-assets/*",
-    //   cache(60 * 60 * 24 * 365), // 1 year
-    //   serveStatic({ root: "./build/client" })
-    // );
-
-    // /**
-    //  * Serve public files
-    //  */
-    // server.use(
-    //   "*",
-    //   cache(60 * 60),
-    //   serveStatic({ root: isProductionMode ? "./build/client" : "./public" })
-    // ); // 1 hour
 
     /**
      * Add logger middleware
@@ -224,5 +202,3 @@ declare module "@remix-run/node" {
     errorMessage: string | null;
   }
 }
-
-export default server;
