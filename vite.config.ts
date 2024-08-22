@@ -1,7 +1,6 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-// import devServer, { defaultOptions } from "@hono/vite-dev-server";
 import { devServer } from "react-router-hono-server/dev";
 import esbuild from "esbuild";
 import { flatRoutes } from "remix-flat-routes";
@@ -66,45 +65,14 @@ export default defineConfig({
       ],
     }),
     devServer(),
-    //   {
-    //   injectClientScript: false,
-    //   entry: "server/index.ts", // The file path of your server.
-    //   exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
-    // }
+
     remix({
       ignoredRouteFiles: ["**/.*"],
-      future: {
-        // unstable_fogOfWar: true,
-        // unstable_singleFetch: true,
-      },
+
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },
-      // buildEnd: async () => {
-      //   await esbuild
-      //     .build({
-      //       alias: {
-      //         "~": "./app",
-      //       },
-      //       // The final file name
-      //       outdir: "build/server",
-      //       // Our server entry point
-      //       entryPoints: ["./app/instrument.server.ts"],
-      //       // Dependencies that should not be bundled
-      //       // We import the remix build from "../build/server/remix.js", and the sentry build from "../build/server/instrument.server.js", so no need to bundle it again
-      //       external: ["./instrument.server.js"],
-      //       platform: "node",
-      //       format: "esm",
-      //       // Don't include node_modules in the bundle
-      //       packages: "external",
-      //       bundle: true,
-      //       logLevel: "info",
-      //     })
-      //     .catch((error: unknown) => {
-      //       console.error(error);
-      //       process.exit(1);
-      //     });
-      // },
+
       buildEnd: async ({ remixConfig }) => {
         const sentryInstrument = `instrument.server`;
         await esbuild
