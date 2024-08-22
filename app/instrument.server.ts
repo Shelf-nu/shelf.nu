@@ -5,6 +5,9 @@ import { SENTRY_DSN } from "~/utils/env";
 import type { ShelfError } from "~/utils/error";
 import { isLikeShelfError } from "~/utils/error";
 
+export function initSentry() {
+  console.log("initSentry");
+}
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,

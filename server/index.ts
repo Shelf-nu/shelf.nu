@@ -2,6 +2,7 @@ import type { AppLoadContext } from "@remix-run/node";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
+import { initSentry } from "~/instrument.server";
 import { initEnv, env } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
@@ -63,6 +64,7 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
+initSentry();
 export const server = await createHonoServer({
   honoOptions: {
     getPath: (req) => {
