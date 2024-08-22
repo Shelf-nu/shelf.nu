@@ -9,7 +9,6 @@ import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 
-import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -300,10 +299,6 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-
-          {/* <button className="block md:hidden">
-            <ChevronRight />
-          </button> */}
         </div>
       </Td>
 
