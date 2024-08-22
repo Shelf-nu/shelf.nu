@@ -2303,9 +2303,9 @@ export async function bulkDeleteAssets({
           })
         )
       );
-    } catch {
+    } catch(cause) {
       throw new ShelfError({
-        cause: null,
+        cause,
         message:
           "Something went wrong while deleting assets. The transaction was failed.",
         label: "Assets",
