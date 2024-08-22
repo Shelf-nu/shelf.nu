@@ -273,7 +273,11 @@ const renderEventCard = (args: EventContentArg) => {
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
-        <div className={tw("inline-block max-w-full truncate bg-transparent")}>
+        <div
+          className={tw(
+            "inline-block max-w-full whitespace-normal bg-transparent lg:truncate"
+          )}
+        >
           <When truthy={_isOneDayEvent}>
             <div className="fc-daygrid-event-dot inline-block" />
           </When>
