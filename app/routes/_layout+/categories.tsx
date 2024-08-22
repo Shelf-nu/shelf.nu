@@ -193,8 +193,10 @@ const CategoryItem = ({
         {item.name}
       </Badge>
     </Td>
-    <Td className="text-gray-500 md:w-3/4" title="Description">
-      {item.description}
+    <Td className="max-w-62">
+      {item.description ? (
+        <LineBreakText text={item.description} numberOfLines={3} />
+      ) : null}
     </Td>
     <Td>{item._count.assets}</Td>
     <Td>
