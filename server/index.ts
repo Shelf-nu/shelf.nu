@@ -85,6 +85,7 @@ const server = await createHonoServer({
       return url.pathname;
     },
   },
+  assetsDir: "file-assets",
   getLoadContext,
   configure: (server) => {
     // Apply the middleware to all routes
@@ -95,23 +96,23 @@ const server = await createHonoServer({
       })
     );
 
-    /**
-     * Serve assets files from build/client/assets
-     */
-    server.use(
-      "/file-assets/*",
-      cache(60 * 60 * 24 * 365), // 1 year
-      serveStatic({ root: "./build/client" })
-    );
+    // /**
+    //  * Serve assets files from build/client/assets
+    //  */
+    // server.use(
+    //   "/file-assets/*",
+    //   cache(60 * 60 * 24 * 365), // 1 year
+    //   serveStatic({ root: "./build/client" })
+    // );
 
-    /**
-     * Serve public files
-     */
-    server.use(
-      "*",
-      cache(60 * 60),
-      serveStatic({ root: isProductionMode ? "./build/client" : "./public" })
-    ); // 1 hour
+    // /**
+    //  * Serve public files
+    //  */
+    // server.use(
+    //   "*",
+    //   cache(60 * 60),
+    //   serveStatic({ root: isProductionMode ? "./build/client" : "./public" })
+    // ); // 1 hour
 
     /**
      * Add logger middleware
