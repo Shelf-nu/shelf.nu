@@ -1,8 +1,3 @@
-// import the Sentry instrumentation file before anything else.
-// It is important to import it as .js for this to work, even if the file is .ts
-// eslint-disable-next-line import/no-unresolved
-import "./instrument.server.js";
-
 /* eslint-disable no-console */
 import { PassThrough } from "stream";
 
