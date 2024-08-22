@@ -186,9 +186,9 @@ const TagItem = ({
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
       <TagBadge>{item.name}</TagBadge>
     </Td>
-    <Td className="max-w-62">
+    <Td className="max-w-62 md:w-3/4">
       {item.description ? (
-        <LineBreakText text={item.description} numberOfLines={3} />
+        <LineBreakText className="md:w-3/4" text={item.description} numberOfLines={3} charactersPerLine={60}/>
       ) : null}
     </Td>
     <Td className="text-left">
