@@ -3,14 +3,13 @@
 import "./instrument.server.js";
 
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { AppLoadContext, ServerBuild } from "@remix-run/node";
+import type { AppLoadContext } from "@remix-run/node";
+import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
-import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
-import { importDevBuild } from "./dev/server";
 import { logger } from "./logger";
 import { cache, protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
@@ -34,6 +33,45 @@ const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
 
 const isProductionMode = mode === "production";
 
+export const getLoadContext: HonoServerOptions["getLoadContext"] = (
+  c,
+  { build }
+) => {
+  const session = getSession<SessionData, FlashData>(c);
+
+  return {
+    // Nice to have if you want to display the app version or do something in the app when deploying a new version
+    // Exemple: on navigate, check if the app version is the same as the one in the build assets and if not, display a toast to the user to refresh the page
+    // Prevent the user to use an old version of the client side code (it is only downloaded on document request)
+    appVersion: isProductionMode ? build.assets.version : "dev",
+    isAuthenticated: session.has(authSessionKey),
+    // we could ensure that session.get() match a specific shape
+    // let's trust our system for now
+    getSession: () => {
+      const auth = session.get(authSessionKey);
+
+      if (!auth) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "There is no session here. This should not happen because if you require it, this route should be mark as protected and catch by the protect middleware.",
+          status: 403,
+          label: "Dev error",
+        });
+      }
+
+      return auth;
+    },
+    setSession: (auth: any) => {
+      session.set(authSessionKey, auth);
+    },
+    destroySession: () => {
+      session.unset(authSessionKey);
+    },
+    errorMessage: session.get("errorMessage") || null,
+  } satisfies AppLoadContext;
+};
+
 const server = await createHonoServer({
   honoOptions: {
     getPath: (req) => {
@@ -47,6 +85,7 @@ const server = await createHonoServer({
       return url.pathname;
     },
   },
+  getLoadContext,
   configure: (server) => {
     // Apply the middleware to all routes
     server.use(
@@ -139,58 +178,6 @@ const server = await createHonoServer({
         ],
       })
     );
-
-    /**
-     * Add remix middleware to Hono server
-     */
-    server.use(async (c, next) => {
-      const build = (isProductionMode
-        ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          // eslint-disable-next-line import/no-unresolved -- this expected until you build the app
-          await import("../build/server/remix.js")
-        : await importDevBuild()) as unknown as ServerBuild;
-
-      return remix({
-        build,
-        mode,
-        getLoadContext(context) {
-          const session = getSession<SessionData, FlashData>(context);
-
-          return {
-            // Nice to have if you want to display the app version or do something in the app when deploying a new version
-            // Exemple: on navigate, check if the app version is the same as the one in the build assets and if not, display a toast to the user to refresh the page
-            // Prevent the user to use an old version of the client side code (it is only downloaded on document request)
-            appVersion: isProductionMode ? build.assets.version : "dev",
-            isAuthenticated: session.has(authSessionKey),
-            // we could ensure that session.get() match a specific shape
-            // let's trust our system for now
-            getSession: () => {
-              const auth = session.get(authSessionKey);
-
-              if (!auth) {
-                throw new ShelfError({
-                  cause: null,
-                  message:
-                    "There is no session here. This should not happen because if you require it, this route should be mark as protected and catch by the protect middleware.",
-                  status: 403,
-                  label: "Dev error",
-                });
-              }
-
-              return auth;
-            },
-            setSession: (auth: any) => {
-              session.set(authSessionKey, auth);
-            },
-            destroySession: () => {
-              session.unset(authSessionKey);
-            },
-            errorMessage: session.get("errorMessage") || null,
-          } satisfies AppLoadContext;
-        },
-      })(c, next);
-    });
   },
 });
 
