@@ -195,7 +195,12 @@ const CategoryItem = ({
     </Td>
     <Td className="max-w-62 md:w-3/4">
       {item.description ? (
-        <LineBreakText className="md:w-3/4" text={item.description} numberOfLines={3} charactersPerLine={60}/>
+        <LineBreakText
+          className="md:w-3/4"
+          text={item.description}
+          numberOfLines={3}
+          charactersPerLine={60}
+        />
       ) : null}
     </Td>
     <Td>{item._count.assets}</Td>
