@@ -10,7 +10,7 @@ export function Table({
   children: React.ReactNode;
   className?: string;
 }) {
-  const {containerRef, isOverflowing} = useTableOverFlow()
+  const { containerRef, isOverflowing } = useTableOverFlow();
 
   return (
     <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
