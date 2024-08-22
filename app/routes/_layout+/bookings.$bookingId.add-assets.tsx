@@ -162,9 +162,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    // assetIds: z.array(z.string()).optional().default([]),
-    // removedAssetIds: z.array(z.string()).optional().default([]),
-
     const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({

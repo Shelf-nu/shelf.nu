@@ -143,6 +143,9 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
+export const handle = {
+  name: "settings.team.users.invite-user",
+};
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -179,28 +182,28 @@ export default function InviteUser() {
           <SelectGroup>
             <SelectLabel className="pl-0">Workspace</SelectLabel>
             <Select name="organizationId" defaultValue={organization.id}>
-              <div className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-transparent px-3.5 py-3 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2  disabled:opacity-50">
+              <div className="flex h-10 w-full items-center justify-between truncate rounded-md border border-gray-300 bg-transparent px-3.5 py-3 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50  [&_span]:max-w-full [&_span]:truncate">
                 <SelectValue />
               </div>
               <SelectContent
                 position="popper"
-                className="w-full min-w-[300px]"
+                className="w-full min-w-[300px] max-w-full"
                 align="start"
               >
-                <div className=" max-h-[320px] overflow-auto">
+                <div className=" max-h-[320px] overflow-auto ">
                   <SelectItem
                     value={organization.id}
                     key={organization.id}
                     className="p-2"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex max-w-full items-center gap-2 truncate">
                       <Image
                         imageId={organization.imageId}
                         alt="img"
                         className={tw("size-6 rounded-[2px] object-cover")}
                       />
 
-                      <div className=" ml-px text-sm text-gray-900">
+                      <div className=" ml-px max-w-full truncate text-sm text-gray-900">
                         {organization.name}
                       </div>
                     </div>

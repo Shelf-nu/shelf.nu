@@ -525,6 +525,9 @@ export async function getBookings(params: {
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
   extraInclude?: Prisma.BookingInclude;
+
+  /** Controls whether entries should be paginated or not */
+  takeAll?: boolean;
 }) {
   const {
     organizationId,
@@ -540,6 +543,7 @@ export async function getBookings(params: {
     bookingFrom,
     userId,
     extraInclude,
+    takeAll = false,
   } = params;
 
   try {
@@ -625,8 +629,10 @@ export async function getBookings(params: {
 
     const [bookings, bookingCount] = await Promise.all([
       db.booking.findMany({
-        skip,
-        take,
+        ...(!takeAll && {
+          skip,
+          take,
+        }),
         where,
         include: {
           ...commonInclude,
@@ -908,6 +914,7 @@ export async function getBookingsForCalendar(params: {
         custodianTeamMember: true,
         custodianUser: true,
       },
+      takeAll: true,
     });
 
     const events = bookings

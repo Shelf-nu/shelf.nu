@@ -32,6 +32,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { createStripeCustomer } from "~/utils/stripe.server";
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -122,7 +123,11 @@ export const action = async ({
     const { intent } = parseData(
       await request.clone().formData(),
       z.object({
-        intent: z.enum(["updateTier", "updateCustomTierDetails"]),
+        intent: z.enum([
+          "updateTier",
+          "updateCustomTierDetails",
+          "createCustomerId",
+        ]),
       })
     );
 
@@ -186,6 +191,15 @@ export const action = async ({
 
         break;
       }
+      case "createCustomerId": {
+        const user = await getUserByID(shelfUserId);
+        await createStripeCustomer({
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          userId: user.id,
+        });
+        return json(data(null));
+      }
     }
 
     return json(data(null));
@@ -220,6 +234,17 @@ export default function Area51UserPage() {
                         <span className="font-semibold">{key}</span>:{" "}
                         {key === "tierId" ? (
                           <TierUpdateForm tierId={user.tierId} />
+                        ) : key === "customerId" && !value ? (
+                          <Form className="inline-block" method="POST">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="createCustomerId"
+                            />
+                            <Button type="submit" variant="link" size="sm">
+                              Create customer ID
+                            </Button>
+                          </Form>
                         ) : (
                           <>
                             {typeof value === "string" ? value : null}
