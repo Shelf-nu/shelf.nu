@@ -7,6 +7,7 @@ import esbuild from "esbuild";
 import { flatRoutes } from "remix-flat-routes";
 import { cjsInterop } from "vite-plugin-cjs-interop";
 import { init } from "@paralleldrive/cuid2";
+import fs from "node:fs";
 
 const createHash = init({
   length: 8,
@@ -79,31 +80,39 @@ export default defineConfig({
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },
-      // buildEnd: async () => {
-      //   await esbuild
-      //     .build({
-      //       alias: {
-      //         "~": "./app",
-      //       },
-      //       // The final file name
-      //       outdir: "build/server",
-      //       // Our server entry point
-      //       entryPoints: ["./app/instrument.server.ts"],
-      //       // Dependencies that should not be bundled
-      //       // We import the remix build from "../build/server/remix.js", and the sentry build from "../build/server/instrument.server.js", so no need to bundle it again
-      //       external: ["./instrument.server.js"],
-      //       platform: "node",
-      //       format: "esm",
-      //       // Don't include node_modules in the bundle
-      //       packages: "external",
-      //       bundle: true,
-      //       logLevel: "info",
-      //     })
-      //     .catch((error: unknown) => {
-      //       console.error(error);
-      //       process.exit(1);
-      //     });
-      // },
+      buildEnd: async ({ remixConfig }) => {
+        const sentryInstrument = `instrument.server`;
+        await esbuild
+          .build({
+            alias: {
+              "~": `./${remixConfig.appDirectory}`,
+            },
+            outdir: `${remixConfig.buildDirectory}/server`,
+            entryPoints: [
+              `${remixConfig.appDirectory}/server/${sentryInstrument}.ts`,
+            ],
+            platform: "node",
+            format: "esm",
+            // Don't include node_modules in the bundle
+            packages: "external",
+            bundle: true,
+            logLevel: "info",
+          })
+          .then(() => {
+            const serverBuildPath = `${remixConfig.buildDirectory}/server/${remixConfig.serverBuildFile}`;
+            fs.writeFileSync(
+              serverBuildPath,
+              Buffer.concat([
+                Buffer.from(`import "./${sentryInstrument}.js"\n`),
+                Buffer.from(fs.readFileSync(serverBuildPath)),
+              ])
+            );
+          })
+          .catch((error: unknown) => {
+            console.error(error);
+            process.exit(1);
+          });
+      },
     }),
     tsconfigPaths(),
   ],
