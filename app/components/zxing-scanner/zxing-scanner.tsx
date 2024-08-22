@@ -9,6 +9,7 @@ import {
 import type { loader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { isQrId } from "~/utils/id";
 import QrScannerNotification from "./qr-scanner-notification";
 import {
   Select,
@@ -49,7 +50,14 @@ export const ZXingScanner = ({
   // Function to decode the QR code
   const decodeQRCodes = (result: string) => {
     if (result != null && !isLoading && !incomingIsLoading) {
-      const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
+      /**
+       * - ^(https?:\/\/[^\/]+\/ matches the protocol, domain, and the initial slash.
+       * - (?:qr\/)? optionally matches the /qr/ part.
+       * - ([a-zA-Z0-9]+))$ matches the QR ID which is the last segment of the URL.
+       * - $ ensures that there are no additional parts after the QR ID.
+       */
+      // Regex to match both old and new QR code structures
+      const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
 
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
@@ -58,10 +66,14 @@ export const ZXingScanner = ({
         return;
       }
 
-      const qrId = match[4]; // Get the last segment of the URL as the QR id
+      const qrId = match[2]; // Get the QR id from the URL
+      if (!isQrId(qrId)) {
+        displayQrNotification({ message: "Please Scan valid asset QR" });
+        return;
+      }
 
       if (!allowDuplicateScan && scannedQrIds.includes(qrId)) {
-        /** @TODO display qr notification here to show the error */
+        displayQrNotification({ message: "Asset is already scanned." });
         return;
       }
 

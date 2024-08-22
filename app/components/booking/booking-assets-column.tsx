@@ -103,13 +103,19 @@ export function BookingAssetsColumn() {
               <div className=" text-md font-semibold text-gray-900">Assets</div>
               <div>{totalItems} items</div>
             </div>
-            <Button
-              to={manageAssetsUrl}
-              className="whitespace-nowrap"
-              disabled={manageAssetsButtonDisabled}
-            >
-              Manage assets
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button icon="scan" variant="secondary" to="scan-assets">
+                Scan
+              </Button>
+              <Button
+                to={manageAssetsUrl}
+                className="whitespace-nowrap"
+                disabled={manageAssetsButtonDisabled}
+              >
+                Manage assets
+              </Button>
+            </div>
           </div>
 
           <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
