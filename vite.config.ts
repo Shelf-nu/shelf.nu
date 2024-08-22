@@ -71,7 +71,6 @@ export default defineConfig({
     //   exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
     // }
     remix({
-      serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
       future: {
         // unstable_fogOfWar: true,

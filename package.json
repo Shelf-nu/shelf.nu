@@ -4,7 +4,7 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build",
+    "build": "NODE_ENV=production remix vite:build",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
     "db:generate-type": "prisma generate",
@@ -12,8 +12,7 @@
     "db:deploy-migration": "prisma migrate deploy && prisma generate",
     "db:deploy-migration:staging": "dotenv -e .env.staging -- prisma migrate deploy && prisma generate",
     "db:deploy-migration:production": "dotenv -e .env.production -- prisma migrate deploy && prisma generate",
-    "dev": "dotenv -e .env -- run-p dev:*",
-    "dev:remix": "vite --host | pino-pretty",
+    "dev": "vite --host",
     "production:dev": "dotenv -e .env.production -- run-p dev:*",
     "staging:dev": "dotenv -e .env.staging -- run-p dev:*",
     "format": "prettier --write .",
