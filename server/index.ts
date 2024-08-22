@@ -2,7 +2,7 @@ import type { AppLoadContext } from "@remix-run/node";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
-import { initSentry } from "~/instrument.server";
+import { initSentry } from "server/instrument.server";
 import { initEnv, env } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
