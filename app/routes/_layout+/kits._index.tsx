@@ -271,15 +271,15 @@ function ListContent({
         </div>
       </Td>
       <Td className="max-w-62 md:max-w-96">
-      {item.description ? (
-        <LineBreakText
-          className="md:max-w-96"
-          text={item.description}
-          numberOfLines={3}
-          charactersPerLine={60}
-        />
-      ) : null}
-    </Td>
+        {item.description ? (
+          <LineBreakText
+            className="md:max-w-96"
+            text={item.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
+        ) : null}
+      </Td>
       <Td>{item._count.assets}</Td>
       {canReadCustody && (
         <Td>
