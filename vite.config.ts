@@ -1,7 +1,8 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import devServer, { defaultOptions } from "@hono/vite-dev-server";
+// import devServer, { defaultOptions } from "@hono/vite-dev-server";
+import { devServer } from "react-router-hono-server/dev";
 import esbuild from "esbuild";
 import { flatRoutes } from "remix-flat-routes";
 import { cjsInterop } from "vite-plugin-cjs-interop";
@@ -63,11 +64,12 @@ export default defineConfig({
         "react-to-print",
       ],
     }),
-    devServer({
-      injectClientScript: false,
-      entry: "server/index.ts", // The file path of your server.
-      exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
-    }),
+    devServer(),
+    //   {
+    //   injectClientScript: false,
+    //   entry: "server/index.ts", // The file path of your server.
+    //   exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
+    // }
     remix({
       serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
