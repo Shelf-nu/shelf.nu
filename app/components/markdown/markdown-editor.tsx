@@ -8,14 +8,13 @@ import { MarkdownViewer } from "./markdown-viewer";
 import Input from "../forms/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";
 
-interface Props {
+interface Props extends TextareaHTMLAttributes<any> {
   label: string;
   name: string;
-  disabled: boolean;
+  disabled?: boolean;
   placeholder: string;
   defaultValue: string;
   className?: string;
-  rest?: TextareaHTMLAttributes<any>;
 }
 
 export const markdownAtom = atom("");
@@ -83,7 +82,6 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           {...rest}
         />
         <div className=" rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
-          {" "}
           This field supports{" "}
           <Link
             to="https://www.markdownguide.org/basic-syntax"
@@ -92,7 +90,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
             rel="nofollow noopener noreferrer"
           >
             markdown
-          </Link>{" "}
+          </Link>
         </div>
       </TabsContent>
       <TabsContent value="preview">

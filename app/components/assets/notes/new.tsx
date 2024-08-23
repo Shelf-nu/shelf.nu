@@ -101,8 +101,7 @@ export const NewNote = ({
               label={"note"}
               defaultValue={""}
               name={zo.fields.content()}
-              placeholder={"Leave a note"}
-              // @ts-ignore
+              placeholder="Leave a note"
               rows={4}
               ref={editorRef}
               className="rounded-b-none"

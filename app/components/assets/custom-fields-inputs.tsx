@@ -21,6 +21,7 @@ import {
 } from "../forms/select";
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
+import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 
 export default function AssetCustomFields({
@@ -171,6 +172,25 @@ export default function AssetCustomFields({
         </>
       );
     },
+    MULTILINE_TEXT: (field) => {
+      const value = getCustomFieldVal(field.id);
+      const error = zo.errors[`cf-${field.id}`]()?.message;
+
+      return (
+        <>
+          <MarkdownEditor
+            name={`cf-${field.id}`}
+            label={field.name}
+            defaultValue={value ? value : ""}
+            placeholder={field.helpText ?? field.name}
+            disabled={disabled}
+          />
+          {error ? (
+            <p className="mt-1 text-sm text-error-500">{error}</p>
+          ) : null}
+        </>
+      );
+    },
   };
 
   return (
@@ -204,9 +224,6 @@ export default function AssetCustomFields({
                 <Input
                   hideLabel
                   placeholder={field.helpText || undefined}
-                  inputType={
-                    field.type === "MULTILINE_TEXT" ? "textarea" : "input"
-                  }
                   type={field.type.toLowerCase()}
                   label={field.name}
                   name={`cf-${field.id}`}

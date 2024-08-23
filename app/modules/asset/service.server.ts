@@ -2303,7 +2303,7 @@ export async function bulkDeleteAssets({
           })
         )
       );
-    } catch(cause) {
+    } catch (cause) {
       throw new ShelfError({
         cause,
         message:
