@@ -67,11 +67,14 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
         <TabsTrigger value="edit">Edit</TabsTrigger>
         <TabsTrigger value="preview">Preview</TabsTrigger>
       </TabsList>
+
+      {/* Having this hidden input so that the value persists even if the tab changes */}
+      <input name={name} value={markdown} type="hidden" disabled={disabled} />
+
       <TabsContent value="edit">
         <Input
           value={markdown}
           onChange={handleChange}
-          name={name}
           label={label}
           disabled={disabled}
           inputType="textarea"
