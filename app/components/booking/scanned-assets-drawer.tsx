@@ -40,6 +40,9 @@ export const addScannedAssetsToBookingSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
+const DRAWER_OFFSET = 390;
+const TOP_GAP = 80 + 53 + 8 + 16;
+
 export default function ScannedAssetsDrawer({
   className,
   style,
@@ -59,7 +62,7 @@ export default function ScannedAssetsDrawer({
    * At snap point 1 we need to show 1 item
    * At snap point 2 we need to show the full list
    */
-  const SNAP_POINTS = [`${80 + 53 + 8 + 16}px`, `${vh - 153}px`];
+  const SNAP_POINTS = [`${vh - (TOP_GAP + DRAWER_OFFSET)}px`, 1];
 
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
@@ -204,6 +207,7 @@ export default function ScannedAssetsDrawer({
               <DrawerFooter className="flex-row px-0">
                 <DrawerClose asChild>
                   <Button
+                    type="button"
                     variant="outline"
                     className="w-full max-w-full"
                     disabled={isLoading}

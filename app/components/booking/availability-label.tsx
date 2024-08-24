@@ -36,6 +36,18 @@ export function AvailabilityLabel({
   const isPartOfKit = !!asset.kitId;
 
   const { booking } = useLoaderData<{ booking: Booking }>();
+
+  /** User scanned the asset and it is already in booking */
+  if (isAlreadyAdded) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already added"
+        tooltipTitle="Asset is part of booking"
+        tooltipContent="This asset is already added to the current booking."
+      />
+    );
+  }
+
   /**
    * Marked as not allowed for booking
    */
@@ -146,17 +158,6 @@ export function AvailabilityLabel({
         badgeText="Added through kit"
         tooltipTitle="Asset was added through a kit"
         tooltipContent="Remove the asset from the kit to add it individually."
-      />
-    );
-  }
-
-  /** User scanned the asset and it is already in booking */
-  if (isAlreadyAdded) {
-    return (
-      <AvailabilityBadge
-        badgeText="Already added"
-        tooltipTitle="Asset is part of booking"
-        tooltipContent="This asset is already added to the current booking."
       />
     );
   }

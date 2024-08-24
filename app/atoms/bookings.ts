@@ -1,6 +1,6 @@
 import { atom } from "jotai";
-import invariant from "tiny-invariant";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { ShelfError } from "~/utils/error";
 import { scannedQrIdsAtom } from "./qr-scanner";
 
 /** This atom keeps track of the assets fetched after scanning.  */
@@ -48,7 +48,14 @@ export const removeFetchedScannedAssetAtom = atom<null, string[], unknown>(
       (asset) => asset.id === update
     );
 
-    invariant(removedAsset, "Asset not found"); // this should not happen in ideal case
+    /** This case should not happen */
+    if (!removedAsset) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found",
+        label: "Booking",
+      });
+    }
 
     set(fetchedScannedAssetsAtom, (prev) =>
       prev.filter((asset) => asset.id !== update)
