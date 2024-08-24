@@ -73,6 +73,9 @@ export default function ScannedAssetsDrawer({
   const someAssetsCheckedOut = fetchedScannedAssets.some(
     (asset) => asset.status === AssetStatus.CHECKED_OUT
   );
+  const someAssetsInCustody = fetchedScannedAssets.some(
+    (asset) => asset.status === AssetStatus.IN_CUSTODY
+  );
 
   return (
     <Drawer
@@ -221,7 +224,9 @@ export default function ScannedAssetsDrawer({
 
                   <Button
                     className="w-full max-w-full"
-                    disabled={isLoading || someAssetsCheckedOut}
+                    disabled={
+                      isLoading || someAssetsCheckedOut || someAssetsInCustody
+                    }
                   >
                     Confirm
                   </Button>

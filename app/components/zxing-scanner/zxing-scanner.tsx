@@ -2,8 +2,10 @@ import { useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useZxing } from "react-zxing";
 import {
+  addQrIdToErrorShownAtom,
   addScannedQrIdAtom,
   displayQrScannerNotificationAtom,
+  errorShownQrIdsAtom,
   scannedQrIdsAtom,
 } from "~/atoms/qr-scanner";
 import type { loader } from "~/routes/_layout+/scanner";
@@ -45,6 +47,9 @@ export const ZXingScanner = ({
   const scannedQrIds = useAtomValue(scannedQrIdsAtom);
   const addScannedQrId = useSetAtom(addScannedQrIdAtom);
 
+  const errorShownQrIds = useAtomValue(errorShownQrIdsAtom);
+  const addQrIdToErrorShown = useSetAtom(addQrIdToErrorShownAtom);
+
   const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   // Function to decode the QR code
@@ -72,8 +77,13 @@ export const ZXingScanner = ({
         return;
       }
 
+      if (!allowDuplicateScan && errorShownQrIds.includes(qrId)) {
+        return;
+      }
+
       if (!allowDuplicateScan && scannedQrIds.includes(qrId)) {
-        displayQrNotification({ message: "Asset is already scanned." });
+        displayQrNotification({ message: "QR is already scanned." });
+        addQrIdToErrorShown(qrId);
         return;
       }
 

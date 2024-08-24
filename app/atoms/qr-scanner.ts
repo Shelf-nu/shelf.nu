@@ -1,9 +1,13 @@
 import { atom } from "jotai";
 
+/***********************
+ * Scanned QR Id Atom  *
+ ***********************/
+
 /** This atom keeps track of the qrIds scanned */
 export const scannedQrIdsAtom = atom<string[]>([]);
 
-/** This atom adds a qrId into scannedQrIdsAtom */
+/** This atom adds a qrId in scannedQrIdsAtom */
 export const addScannedQrIdAtom = atom<null, string[], unknown>(
   null,
   (_, set, update) => {
@@ -18,6 +22,10 @@ export const removeScannedQrIdAtom = atom<null, string[], unknown>(
     set(scannedQrIdsAtom, (prev) => prev.filter((qr) => qr !== update));
   }
 );
+
+/****************************
+ * QR Scanner Notification  *
+ ****************************/
 
 /** This atom is used to show the notification specifically for Qr Scanner */
 type QrScannerNotification = { message: string };
@@ -45,3 +53,23 @@ export const displayQrScannerNotificationAtom = atom<
 export const removeQrScannerNotificationAtom = atom(null, (_, set) => {
   set(qrScannerNotificationAtom, undefined);
 });
+
+/***************************
+ * Error Shown for QR Ids  *
+ ***************************/
+
+/** This atom keeps track of the qrIds for which the error is shown */
+export const errorShownQrIdsAtom = atom<string[]>([]);
+
+/** This atom adds a qrId in errorShownQrIdsAtom and automatically removes it after a certain interval.  */
+export const addQrIdToErrorShownAtom = atom<null, string[], unknown>(
+  null,
+  (_, set, update) => {
+    set(errorShownQrIdsAtom, (prev) => [...prev, update]);
+
+    /** Remove the qrId after 10 seconds */
+    setTimeout(() => {
+      set(errorShownQrIdsAtom, (prev) => prev.filter((id) => id !== update));
+    }, 10000);
+  }
+);
