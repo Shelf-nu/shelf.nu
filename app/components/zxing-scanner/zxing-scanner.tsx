@@ -87,6 +87,11 @@ export const ZXingScanner = ({
         return;
       }
 
+      /** At this point, a QR is successfully detected, so we can vibrate user's device for feedback */
+      if (typeof navigator.vibrate === "function") {
+        navigator.vibrate(200);
+      }
+
       void onQrDetectionSuccess(qrId);
 
       if (!allowDuplicateScan) {
