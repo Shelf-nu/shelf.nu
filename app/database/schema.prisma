@@ -574,6 +574,7 @@ enum Currency {
   SAR // Saudi Riyal
   AED // United Arab Emirates Dirham
   PLN // Polish Zloty
+  IDR // Indonesian Rupiah
 }
 
 enum InviteStatuses {
