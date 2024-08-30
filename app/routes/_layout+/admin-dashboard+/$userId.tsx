@@ -190,7 +190,7 @@ export const action = async ({
             icon: { name: "trash", variant: "error" },
             senderId: userId,
           });
-          return redirect("/admin-dashboard/users");
+          return json(data(null));
         }
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId);
