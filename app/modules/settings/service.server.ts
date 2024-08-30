@@ -164,7 +164,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         role: organizationRolesMap[um.roles[0]],
         userId: um.user.id,
         sso: um.user.sso,
-        custodies: um.user.teamMembers[0]._count.custodies,
+        custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
       }));
 
     /**
