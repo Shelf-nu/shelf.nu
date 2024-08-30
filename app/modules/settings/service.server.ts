@@ -113,7 +113,14 @@ export async function getPaginatedAndFilterableSettingUsers({
           select: {
             user: {
               include: {
-                _count: { select: { custodies: true } },
+                teamMembers: {
+                  where: { organizationId },
+                  include: {
+                    _count: {
+                      select: { custodies: true },
+                    },
+                  },
+                },
               },
             },
             roles: true,
@@ -157,7 +164,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         role: organizationRolesMap[um.roles[0]],
         userId: um.user.id,
         sso: um.user.sso,
-        custodies: um.user._count.custodies,
+        custodies: um.user.teamMembers[0]._count.custodies,
       }));
 
     /**
