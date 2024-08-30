@@ -6,6 +6,7 @@ import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -52,11 +53,12 @@ export default function AssetCustomFields({
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const hints = useHints();
 
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? getCustomFieldDisplayValue(value) : "";
+    return value ? getCustomFieldDisplayValue(value, hints) : "";
   };
 
   const fieldTypeToCompMap: {
