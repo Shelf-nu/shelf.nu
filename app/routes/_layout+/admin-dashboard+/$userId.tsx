@@ -190,7 +190,7 @@ export const action = async ({
             icon: { name: "trash", variant: "error" },
             senderId: userId,
           });
-          return json(data(null));
+          return json(data({ success: true }));
         }
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId);
