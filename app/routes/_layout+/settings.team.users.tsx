@@ -7,13 +7,13 @@ import type {
 } from "@remix-run/node";
 import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
-import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -185,7 +185,12 @@ export default function UserTeamSetting() {
           ItemComponent={UserRow}
           headerChildren={
             <>
-              <Th>Custodies</Th>
+              <Th>
+                <div className="flex items-center gap-1 [&_svg]:size-[15px]">
+                  Custodies{" "}
+                  <InfoTooltip content="Custodies count includes only direct asset custodies and doesn't count any assets assigned via bookings." />
+                </div>
+              </Th>
               <Th>Role</Th>
               <Th>Status</Th>
               <Th>Actions</Th>

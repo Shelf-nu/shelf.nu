@@ -25,7 +25,10 @@ export function CustodyCard({
         id: string;
         name: string;
         from: string | null;
-        custodianUser: Omit<User, "createdAt" | "updatedAt"> | null;
+        custodianUser: Omit<
+          User,
+          "createdAt" | "updatedAt" | "deletedAt"
+        > | null;
         custodianTeamMember: Omit<
           TeamMember,
           "createdAt" | "updatedAt" | "deletedAt"
