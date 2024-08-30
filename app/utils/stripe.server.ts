@@ -157,6 +157,7 @@ export async function getStripePricesAndProducts() {
   try {
     const pricesResponse = await stripe.prices.list({
       active: true,
+      type: "recurring",
       expand: ["data.product"],
     });
 

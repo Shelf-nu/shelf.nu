@@ -7,7 +7,6 @@ import type {
 } from "@remix-run/node";
 import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
-import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
