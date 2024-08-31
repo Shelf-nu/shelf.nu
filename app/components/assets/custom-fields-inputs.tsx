@@ -186,6 +186,7 @@ export default function AssetCustomFields({
             defaultValue={typeof value === "string" ? value : ""}
             placeholder={field.helpText ?? field.name}
             disabled={disabled}
+            maxLength={5000}
           />
           {error ? (
             <p className="mt-1 text-sm text-error-500">{error}</p>

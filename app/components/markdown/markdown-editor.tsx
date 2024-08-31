@@ -30,6 +30,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
     placeholder,
     defaultValue,
     className,
+    maxLength,
     ...rest
   }: Props,
   ref
@@ -82,18 +83,26 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           hideLabel
           inputClassName={tw("text-text-md", className)}
           ref={ref}
+          maxLength={maxLength}
           {...rest}
         />
-        <div className=" rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
-          This field supports{" "}
-          <Link
-            to="https://www.markdownguide.org/basic-syntax"
-            target="_blank"
-            className="text-gray-800 underline"
-            rel="nofollow noopener noreferrer"
-          >
-            markdown
-          </Link>
+        <div className="flex items-center justify-between gap-2 rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
+          <p>
+            This field supports{" "}
+            <Link
+              to="https://www.markdownguide.org/basic-syntax"
+              target="_blank"
+              className="text-gray-800 underline"
+              rel="nofollow noopener noreferrer"
+            >
+              markdown
+            </Link>
+          </p>
+          {maxLength ? (
+            <p>
+              {markdown.length}/{maxLength}
+            </p>
+          ) : null}
         </div>
       </TabsContent>
       <TabsContent value="preview">
