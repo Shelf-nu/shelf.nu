@@ -59,7 +59,7 @@ export default function AssetCustomFields({
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? getCustomFieldDisplayValue(value, hints) : "";
+    return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
   };
 
   const fieldTypeToCompMap: {
@@ -173,7 +173,9 @@ export default function AssetCustomFields({
       );
     },
     MULTILINE_TEXT: (field) => {
-      const value = getCustomFieldVal(field.id);
+      const value = customFieldsValues?.find(
+        (cfv) => cfv.customFieldId === field.id
+      )?.value?.raw;
       const error = zo.errors[`cf-${field.id}`]()?.message;
 
       return (
@@ -181,7 +183,7 @@ export default function AssetCustomFields({
           <MarkdownEditor
             name={`cf-${field.id}`}
             label={field.name}
-            defaultValue={value ? value : ""}
+            defaultValue={typeof value === "string" ? value : ""}
             placeholder={field.helpText ?? field.name}
             disabled={disabled}
           />
@@ -209,7 +211,9 @@ export default function AssetCustomFields({
           const value = customFieldsValues?.find(
             (cfv) => cfv.customFieldId === field.id
           )?.value;
-          const displayVal = value ? getCustomFieldDisplayValue(value) : "";
+          const displayVal = value
+            ? (getCustomFieldDisplayValue(value) as string)
+            : "";
           return (
             <FormRow
               key={field.id + index}

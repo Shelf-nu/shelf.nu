@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
@@ -45,7 +45,6 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
 import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
@@ -143,22 +142,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               .includes(asset.categoryId!)
         )
       : asset.customFields;
-
-    customFields = customFields.map((cf) => {
-      if (cf.customField.type !== CustomFieldType.MULTILINE_TEXT) {
-        return cf;
-      }
-
-      const value = cf.value as { raw: string };
-
-      return {
-        ...cf,
-        value: {
-          ...value,
-          valueMultiLineText: parseMarkdownToReact(value.raw),
-        } as Prisma.JsonValue,
-      };
-    });
 
     const header: HeaderData = {
       title: `${asset.title}'s overview`,
@@ -398,12 +381,13 @@ export default function AssetOverview() {
                           )}
                         >
                           {field.customField.type ===
-                            CustomFieldType.MULTILINE_TEXT &&
-                          fieldValue?.valueMultiLineText ? (
+                          CustomFieldType.MULTILINE_TEXT ? (
                             <MarkdownViewer
-                              content={fieldValue.valueMultiLineText}
+                              content={
+                                customFieldDisplayValue as RenderableTreeNode
+                              }
                             />
-                          ) : isLink(customFieldDisplayValue) ? (
+                          ) : isLink(customFieldDisplayValue as string) ? (
                             <Button
                               role="link"
                               variant="link"
@@ -411,10 +395,10 @@ export default function AssetOverview() {
                               target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
-                              {customFieldDisplayValue}
+                              {customFieldDisplayValue as string}
                             </Button>
                           ) : (
-                            customFieldDisplayValue
+                            (customFieldDisplayValue as string)
                           )}
                         </div>
                       </li>
