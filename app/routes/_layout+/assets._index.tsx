@@ -8,7 +8,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -67,6 +67,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -191,7 +192,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         modelName,
-        canImportAssets: canImportAssets(tierLimit),
+        canImportAssets:
+          canImportAssets(tierLimit) &&
+          (await validatePermission({
+            organizationId,
+            userId,
+            roles: role ? [role] : [],
+            entity: PermissionEntity.asset,
+            action: PermissionAction.import,
+          })),
         searchFieldLabel: "Search assets",
         searchFieldTooltip: {
           title: "Search your asset database",
@@ -298,6 +307,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
+  const { canImportAssets } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -310,13 +320,7 @@ export default function AssetIndexPage() {
           })}
         >
           <>
-            <ImportButton
-              canImportAssets={userHasPermission({
-                roles,
-                entity: PermissionEntity.asset,
-                action: PermissionAction.import,
-              })}
-            />
+            <ImportButton canImportAssets={canImportAssets} />
             <Button
               to="new"
               role="link"

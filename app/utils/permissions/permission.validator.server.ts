@@ -82,4 +82,5 @@ export const validatePermission = async (props: PermissionCheckProps) => {
       label: "Permission",
     });
   }
+  return true;
 };
