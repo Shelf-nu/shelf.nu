@@ -1,11 +1,12 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import devServer, { defaultOptions } from "@hono/vite-dev-server";
+import { devServer } from "react-router-hono-server/dev";
 import esbuild from "esbuild";
 import { flatRoutes } from "remix-flat-routes";
 import { cjsInterop } from "vite-plugin-cjs-interop";
 import { init } from "@paralleldrive/cuid2";
+import fs from "node:fs";
 
 const createHash = init({
   length: 8,
@@ -63,40 +64,40 @@ export default defineConfig({
         "react-to-print",
       ],
     }),
-    devServer({
-      injectClientScript: false,
-      entry: "server/index.ts", // The file path of your server.
-      exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
-    }),
+    devServer(),
+
     remix({
-      serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
-      future: {
-        // unstable_fogOfWar: true,
-        // unstable_singleFetch: true,
-      },
+
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },
-      buildEnd: async () => {
+
+      buildEnd: async ({ remixConfig }) => {
+        const sentryInstrument = `instrument.server`;
         await esbuild
           .build({
             alias: {
-              "~": "./app",
+              "~": `./app`,
             },
-            // The final file name
-            outdir: "build/server",
-            // Our server entry point
-            entryPoints: ["server/index.ts", "server/instrument.server.ts"],
-            // Dependencies that should not be bundled
-            // We import the remix build from "../build/server/remix.js", and the sentry build from "../build/server/instrument.server.js", so no need to bundle it again
-            external: ["./build/server/*", "./instrument.server.js"],
+            outdir: `${remixConfig.buildDirectory}/server`,
+            entryPoints: [`./server/${sentryInstrument}.ts`],
             platform: "node",
             format: "esm",
             // Don't include node_modules in the bundle
             packages: "external",
             bundle: true,
             logLevel: "info",
+          })
+          .then(() => {
+            const serverBuildPath = `${remixConfig.buildDirectory}/server/${remixConfig.serverBuildFile}`;
+            fs.writeFileSync(
+              serverBuildPath,
+              Buffer.concat([
+                Buffer.from(`import "./${sentryInstrument}.js"\n`),
+                Buffer.from(fs.readFileSync(serverBuildPath)),
+              ])
+            );
           })
           .catch((error: unknown) => {
             console.error(error);
