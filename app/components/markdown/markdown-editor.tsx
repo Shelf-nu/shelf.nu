@@ -8,14 +8,13 @@ import { MarkdownViewer } from "./markdown-viewer";
 import Input from "../forms/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";
 
-interface Props {
+interface Props extends TextareaHTMLAttributes<any> {
   label: string;
   name: string;
-  disabled: boolean;
+  disabled?: boolean;
   placeholder: string;
   defaultValue: string;
   className?: string;
-  rest?: TextareaHTMLAttributes<any>;
 }
 
 export const markdownAtom = atom("");
@@ -31,6 +30,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
     placeholder,
     defaultValue,
     className,
+    maxLength = 5000,
     ...rest
   }: Props,
   ref
@@ -68,11 +68,14 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
         <TabsTrigger value="edit">Edit</TabsTrigger>
         <TabsTrigger value="preview">Preview</TabsTrigger>
       </TabsList>
+
+      {/* Having this hidden input so that the value persists even if the tab changes */}
+      <input name={name} value={markdown} type="hidden" disabled={disabled} />
+
       <TabsContent value="edit">
         <Input
           value={markdown}
           onChange={handleChange}
-          name={name}
           label={label}
           disabled={disabled}
           inputType="textarea"
@@ -80,19 +83,26 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           hideLabel
           inputClassName={tw("text-text-md", className)}
           ref={ref}
+          maxLength={maxLength}
           {...rest}
         />
-        <div className=" rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
-          {" "}
-          This field supports{" "}
-          <Link
-            to="https://www.markdownguide.org/basic-syntax"
-            target="_blank"
-            className="text-gray-800 underline"
-            rel="nofollow noopener noreferrer"
-          >
-            markdown
-          </Link>{" "}
+        <div className="flex items-center justify-between gap-2 rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
+          <p>
+            This field supports{" "}
+            <Link
+              to="https://www.markdownguide.org/basic-syntax"
+              target="_blank"
+              className="text-gray-800 underline"
+              rel="nofollow noopener noreferrer"
+            >
+              markdown
+            </Link>
+          </p>
+          {maxLength ? (
+            <p>
+              {markdown.length}/{maxLength}
+            </p>
+          ) : null}
         </div>
       </TabsContent>
       <TabsContent value="preview">
