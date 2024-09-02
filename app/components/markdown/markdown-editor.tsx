@@ -30,7 +30,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
     placeholder,
     defaultValue,
     className,
-    maxLength,
+    maxLength = 5000,
     ...rest
   }: Props,
   ref

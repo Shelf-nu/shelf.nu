@@ -107,7 +107,6 @@ export const NewNote = ({
               className="rounded-b-none"
               onBlur={handelBlur}
               onKeyDown={handleKeyDown}
-              maxLength={100000}
             />
           </div>
         ) : (
