@@ -11,10 +11,8 @@ declare global {
   var __db__: ExtendedPrismaClient;
 }
 
-console.log("IN DB file at start");
 /** Extending prisma client for dynamic findMany */
 function getNewPrismaClient() {
-  console.log("Inside function getNewPrismaClient");
   return new PrismaClient().$extends({
     model: {
       $allModels: {
@@ -40,7 +38,5 @@ if (NODE_ENV === "production") {
   db = global.__db__;
   void db.$connect();
 }
-
-console.log("In DB file before exporting db");
 
 export { db };
