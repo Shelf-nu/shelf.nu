@@ -87,24 +87,13 @@ export default function ScannedAssetsDrawer({
   );
 
   return (
-    <Drawer
-      open
-      dismissible={false}
-      snapPoints={SNAP_POINTS}
-      activeSnapPoint={snap}
-      setActiveSnapPoint={setSnap}
-      // modal={false}
-    >
-      <DrawerContent className={tw("", className)} style={style}>
-        <DrawerTitle className="sr-only">
-          Add assets to booking via scan
-        </DrawerTitle>
+    <div>
+      <div className={tw("", className)} style={style}>
+        <div className="sr-only">Add assets to booking via scan</div>
 
         <div className="mx-auto size-full px-4 md:max-w-4xl md:px-0">
-          <DrawerHeader className="flex items-center justify-between border-b text-left">
-            <DrawerDescription>
-              {fetchedScannedAssetsCount} assets scanned
-            </DrawerDescription>
+          <div className="flex items-center justify-between border-b text-left">
+            <div>{fetchedScannedAssetsCount} assets scanned</div>
 
             <When truthy={fetchedScannedAssetsCount > 0}>
               <DrawerDescription
@@ -114,31 +103,25 @@ export default function ScannedAssetsDrawer({
                 Clear list
               </DrawerDescription>
             </When>
-          </DrawerHeader>
+          </div>
 
           <When truthy={fetchedScannedAssetsCount === 0}>
-            {snap === 1 ? (
-              <div className="my-16 flex flex-col items-center px-3 text-center">
-                <div className="mb-4 rounded-full bg-primary-50  p-2">
-                  <div className=" rounded-full bg-primary-100 p-2 text-primary">
-                    <AssetLabel className="size-6" />
-                  </div>
+            <div className="my-16 flex flex-col items-center px-3 text-center">
+              <div className="mb-4 rounded-full bg-primary-50  p-2">
+                <div className=" rounded-full bg-primary-100 p-2 text-primary">
+                  <AssetLabel className="size-6" />
                 </div>
+              </div>
 
-                <div>
-                  <div className="text-base font-semibold text-gray-900">
-                    List is empty
-                  </div>
-                  <p className="text-sm text-gray-600">
-                    Fill list by scanning codes...
-                  </p>
+              <div>
+                <div className="text-base font-semibold text-gray-900">
+                  List is empty
                 </div>
+                <p className="text-sm text-gray-600">
+                  Fill list by scanning codes...
+                </p>
               </div>
-            ) : (
-              <div className="px-4 py-6 text-center">
-                Fill list by scanning tags...
-              </div>
-            )}
+            </div>
           </When>
 
           <When truthy={fetchedScannedAssetsCount > 0}>
@@ -207,8 +190,8 @@ export default function ScannedAssetsDrawer({
                 </p>
               </When>
 
-              <DrawerFooter className="flex-row px-0">
-                <DrawerClose asChild>
+              <div className="flex-row px-0">
+                <div asChild>
                   <Button
                     type="button"
                     variant="outline"
@@ -217,7 +200,7 @@ export default function ScannedAssetsDrawer({
                   >
                     Close
                   </Button>
-                </DrawerClose>
+                </div>
 
                 <Form ref={zo.ref} className="w-full" method="POST">
                   {fetchedScannedAssets.map((asset, i) => (
@@ -238,12 +221,12 @@ export default function ScannedAssetsDrawer({
                     Confirm
                   </Button>
                 </Form>
-              </DrawerFooter>
+              </div>
             </div>
           </When>
         </div>
-      </DrawerContent>
-    </Drawer>
+      </div>
+    </div>
   );
 }
 
