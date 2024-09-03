@@ -14,6 +14,7 @@ import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { ErrorContent } from "~/components/errors";
 import { ArrowRightIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { Badge } from "~/components/shared/badge";
@@ -33,8 +34,9 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -70,12 +72,22 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
 
     const header = {
       title: `Calendar`,
@@ -328,3 +340,5 @@ const renderEventCard = (args: EventContentArg) => {
     </HoverCard>
   );
 };
+
+export const ErrorBoundary = () => <ErrorContent />;

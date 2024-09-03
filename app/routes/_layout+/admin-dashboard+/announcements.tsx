@@ -9,7 +9,7 @@ import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
+import { parseMarkdownToReact } from "~/utils/md";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {

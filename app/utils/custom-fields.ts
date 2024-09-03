@@ -1,3 +1,4 @@
+import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
@@ -6,6 +7,7 @@ import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
 import { formatDateBasedOnLocaleOnly } from "./client-hints";
 import { ShelfError } from "./error";
+import { parseMarkdownToReact } from "./md";
 
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -181,7 +183,11 @@ export const buildCustomFieldValue = (
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   hints?: ClientHint
-): string => {
+): string | RenderableTreeNode => {
+  if (value.valueMultiLineText) {
+    return parseMarkdownToReact(value.raw as string);
+  }
+
   if (value.valueDate && value.raw) {
     return hints
       ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)

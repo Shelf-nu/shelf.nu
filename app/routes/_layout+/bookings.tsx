@@ -28,9 +28,10 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -42,12 +43,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, isSelfServiceOrBase, currentOrganization } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
+
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =

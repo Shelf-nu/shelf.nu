@@ -44,6 +44,7 @@ import {
   ActiveSwitchIcon,
   ScanIcon,
   MapIcon,
+  ToolIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -93,7 +94,8 @@ export type IconType =
   | "lock"
   | "activate"
   | "deactivate"
-  | "scan";
+  | "scan"
+  | "tool";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -146,6 +148,7 @@ export const iconsMap: IconsMap = {
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
   scan: <ScanIcon />,
+  tool: <ToolIcon />,
 };
 
 export default iconsMap;

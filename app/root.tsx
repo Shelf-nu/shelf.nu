@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -19,7 +20,7 @@ import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
-import MaintenanceMode from "./components/layout/maintenance-mode";
+import BlockInteractions from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
@@ -80,6 +81,11 @@ export const shouldRevalidate = () => false;
 export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
+  const [hasCookies, setHasCookies] = useState(true);
+  useEffect(() => {
+    setHasCookies(navigator.cookieEnabled);
+  }, []);
+
   return (
     <html lang="en" className="h-full">
       <head>
@@ -92,7 +98,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Clarity />
       </head>
       <body className="h-full">
-        {children}
+        <noscript>
+          <BlockInteractions
+            title={"JavaScript is disabled"}
+            content={
+              "This website requires JavaScript to be enabled to function properly. Please enable JavaScript or change browser and try again."
+            }
+            icon="x"
+          />
+        </noscript>
+
+        {hasCookies ? (
+          children
+        ) : (
+          <BlockInteractions
+            title={"Cookies are disabled"}
+            content={
+              "This website requires cookies to be enabled to function properly. Please enable cookies and try again."
+            }
+            icon="x"
+          />
+        )}
+
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
@@ -109,7 +136,21 @@ function App() {
   useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
 
-  return maintenanceMode ? <MaintenanceMode /> : <Outlet />;
+  return maintenanceMode ? (
+    <BlockInteractions
+      title={"Maintenance is being performed"}
+      content={
+        "Apologies, we’re down for scheduled maintenance. Please try again later."
+      }
+      cta={{
+        to: "https://www.shelf.nu/blog-categories/updates-maintenance",
+        text: "Learn more",
+      }}
+      icon="tool"
+    />
+  ) : (
+    <Outlet />
+  );
 }
 
 export default withSentry(App);
