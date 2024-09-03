@@ -1,7 +1,6 @@
-import { useEffect, forwardRef } from "react";
+import { useEffect, forwardRef, useState } from "react";
 import type { TextareaHTMLAttributes, ChangeEvent } from "react";
 import { Link, useFetcher } from "@remix-run/react";
-import { atom, useAtom } from "jotai";
 import type { action } from "~/routes/api+/utils.parse-markdown";
 import { tw } from "~/utils/tw";
 import { MarkdownViewer } from "./markdown-viewer";
@@ -16,11 +15,6 @@ interface Props extends TextareaHTMLAttributes<any> {
   defaultValue: string;
   className?: string;
 }
-
-export const markdownAtom = atom("");
-export const clearMarkdownAtom = atom(null, (_get, set) =>
-  set(markdownAtom, "")
-);
 
 export const MarkdownEditor = forwardRef(function MarkdownEditor(
   {
@@ -37,7 +31,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
 ) {
   const fetcher = useFetcher<typeof action>();
   const content = fetcher.data?.error ? "" : fetcher.data?.content;
-  const [markdown, setMarkdown] = useAtom(markdownAtom);
+  const [markdown, setMarkdown] = useState<string>("");
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const content = e.currentTarget.value;
@@ -55,8 +49,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
 
   useEffect(() => {
     setMarkdown(defaultValue);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [defaultValue]);
 
   return (
     <Tabs
