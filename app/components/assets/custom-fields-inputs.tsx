@@ -176,6 +176,7 @@ export default function AssetCustomFields({
       const value = customFieldsValues?.find(
         (cfv) => cfv.customFieldId === field.id
       )?.value?.raw;
+
       const error = zo.errors[`cf-${field.id}`]()?.message;
 
       return (
@@ -183,7 +184,7 @@ export default function AssetCustomFields({
           <MarkdownEditor
             name={`cf-${field.id}`}
             label={field.name}
-            defaultValue={typeof value === "string" ? value : ""}
+            defaultValue={value ? String(value) : ""}
             placeholder={field.helpText ?? field.name}
             disabled={disabled}
             maxLength={5000}
