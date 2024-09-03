@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -62,7 +62,7 @@ export default function ScannedAssetsDrawer({
    * At snap point 1 we need to show 1 item
    * At snap point 2 we need to show the full list
    */
-  const SNAP_POINTS = [`${vh - (TOP_GAP + DRAWER_OFFSET)}px`, 1];
+  const SNAP_POINTS = [`157px`, 1];
 
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
@@ -70,6 +70,12 @@ export default function ScannedAssetsDrawer({
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
   const removeFetchedScannedAsset = useSetAtom(removeFetchedScannedAssetAtom);
   const clearFetchedScannedAssets = useSetAtom(clearFetchedScannedAssetsAtom);
+
+  useEffect(() => {
+    if (fetchedScannedAssetsCount === 0) {
+      setSnap(SNAP_POINTS[0]);
+    }
+  }, [fetchedScannedAssetsCount, setSnap, SNAP_POINTS]);
 
   const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
@@ -87,12 +93,9 @@ export default function ScannedAssetsDrawer({
       snapPoints={SNAP_POINTS}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
-      modal={false}
+      // modal={false}
     >
-      <DrawerContent
-        className={tw("min-h-[700px] overflow-y-hidden", className)}
-        style={style}
-      >
+      <DrawerContent className={tw("", className)} style={style}>
         <DrawerTitle className="sr-only">
           Add assets to booking via scan
         </DrawerTitle>
