@@ -13,7 +13,8 @@ export const addScannedQrIdAtom = atom<null, string[], unknown>(
   (_, set, update) => {
     set(scannedQrIdsAtom, (prev) => {
       if (!prev.includes(update)) {
-        return [...prev, update];
+        /** Notice we add the new item to start of array. This is for showing the proper order in the drawer component */
+        return [update, ...prev];
       } else {
         return prev;
       }

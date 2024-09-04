@@ -60,14 +60,16 @@ export default function ScannedAssetsDrawer({
   const { vh } = useViewportHeight();
   const [assets, setAssets] = useState<AssetWithBooking[]>([]);
 
-  const someAssetsCheckedOut = useMemo(
-    () => assets.some((asset) => asset.status === AssetStatus.CHECKED_OUT),
-    [assets]
+  /**
+   * Clear the list when the component is unmounted
+   */
+  useEffect(
+    () => () => {
+      clearList();
+    },
+    [clearList]
   );
-  const someAssetsInCustody = useMemo(
-    () => assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY),
-    [assets]
-  );
+
   return (
     <Portal>
       <div
@@ -135,6 +137,7 @@ export default function ScannedAssetsDrawer({
                 </div>
               </div>
             </When>
+
             <When truthy={hasAssets}>
               <Form
                 ref={zo.ref}
@@ -151,7 +154,7 @@ export default function ScannedAssetsDrawer({
                       </ListHeader>
 
                       <tbody>
-                        {qrIds.map((id, index) => (
+                        {qrIds.reverse().map((id, index) => (
                           <AssetRow
                             qrId={id}
                             key={id}
@@ -173,19 +176,6 @@ export default function ScannedAssetsDrawer({
                       </p>
                     </When>
 
-                    {someAssetsCheckedOut && (
-                      <p className="text-[14px] leading-4">
-                        Some assets in your list are checked out. You need to
-                        resolve that before continuing.
-                      </p>
-                    )}
-
-                    {someAssetsInCustody && (
-                      <p className="text-[14px] leading-4">
-                        Some assets in your list are in custody. You need to
-                        resolve that before continuing.
-                      </p>
-                    )}
                     <div className="flex gap-2 px-0 py-3">
                       <Button
                         type="button"
@@ -196,15 +186,7 @@ export default function ScannedAssetsDrawer({
                         Close
                       </Button>
 
-                      <Button
-                        width="full"
-                        type="submit"
-                        disabled={
-                          isLoading ||
-                          someAssetsCheckedOut ||
-                          someAssetsInCustody
-                        }
-                      >
+                      <Button width="full" type="submit" disabled={isLoading}>
                         Confirm
                       </Button>
                     </div>
@@ -237,7 +219,7 @@ function AssetRow({
 
   /** Find the asset in the assets array */
   const asset = useMemo(
-    () => assets.find((a) => a.qrScanned === qrId),
+    () => assets.find((a) => a?.qrScanned === qrId),
     [assets, qrId]
   );
 
@@ -251,7 +233,7 @@ function AssetRow({
     (asset: AssetWithBooking) => {
       setAssets((prev) => {
         /** Only add it it doesnt exist in the list already */
-        if (prev.some((a) => a.id === asset.id)) {
+        if (asset && prev.some((a) => a && a.id === asset.id)) {
           return prev;
         }
         return [...prev, asset];

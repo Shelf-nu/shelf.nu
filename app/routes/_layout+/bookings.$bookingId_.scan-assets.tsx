@@ -5,10 +5,10 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useNavigation } from "@remix-run/react";
+import { useSetAtom } from "jotai";
 import { z } from "zod";
-import { addScannedQrIdAtom, scannedQrIdsAtom } from "~/atoms/qr-scanner";
+import { addScannedQrIdAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import ScannedAssetsDrawer, {

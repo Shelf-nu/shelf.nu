@@ -6,7 +6,6 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -118,7 +117,7 @@ export function BookingAssetsColumn() {
             </div>
           </div>
 
-          <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
+          <div className="-mx-4 overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
             {!hasItems ? (
               <EmptyState
                 className="py-10"
@@ -134,7 +133,7 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table>
+                <Table className="">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
                     <Th> </Th>
