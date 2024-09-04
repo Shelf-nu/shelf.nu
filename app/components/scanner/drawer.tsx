@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
@@ -7,14 +7,7 @@ import { createPortal } from "react-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
-  clearFetchedScannedAssetsAtom,
-  fetchedScannedAssetsAtom,
-  fetchedScannedAssetsCountAtom,
-  removeFetchedScannedAssetAtom,
-} from "~/atoms/bookings";
-import {
   clearScannedQrIdsAtom,
-  displayQrScannerNotificationAtom,
   removeScannedQrIdAtom,
   scannedQrIdsAtom,
 } from "~/atoms/qr-scanner";
@@ -57,6 +50,7 @@ export default function ScannedAssetsDrawer({
     addScannedAssetsToBookingSchema
   );
 
+  // Get the scanned qrIds
   const qrIds = useAtomValue(scannedQrIdsAtom);
   const assetsLength = qrIds.length;
   const hasAssets = assetsLength > 0;
@@ -64,15 +58,22 @@ export default function ScannedAssetsDrawer({
 
   const [expanded, setExpanded] = useState(false);
   const { vh } = useViewportHeight();
+  const [assets, setAssets] = useState<AssetWithBooking[]>([]);
 
-  // const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
-
-  // Handler for the drag end event
+  const someAssetsCheckedOut = useMemo(
+    () => assets.some((asset) => asset.status === AssetStatus.CHECKED_OUT),
+    [assets]
+  );
+  const someAssetsInCustody = useMemo(
+    () => assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY),
+    [assets]
+  );
   return (
     <Portal>
       <div
         className={tw(
-          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out"
+          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out",
+          className
         )}
         style={{
           height: expanded ? vh - TOP_GAP : hasAssets ? 170 : 148,
@@ -135,53 +136,69 @@ export default function ScannedAssetsDrawer({
               </div>
             </When>
             <When truthy={hasAssets}>
-              <div className="flex max-h-full flex-col overflow-scroll">
-                {/* Assets list */}
-                <div>
-                  <Table className="overflow-y-auto">
-                    <ListHeader hideFirstColumn>
-                      <Th className="p-0"> </Th>
-                      <Th className="p-0"> </Th>
-                    </ListHeader>
+              <Form
+                ref={zo.ref}
+                className="flex max-h-full w-full flex-col overflow-scroll"
+                method="POST"
+              >
+                <div className="flex max-h-full flex-col overflow-scroll">
+                  {/* Assets list */}
+                  <div>
+                    <Table className="overflow-y-auto">
+                      <ListHeader hideFirstColumn>
+                        <Th className="p-0"> </Th>
+                        <Th className="p-0"> </Th>
+                      </ListHeader>
 
-                    <tbody>
-                      {qrIds.map((id) => (
-                        <AssetRow qrId={id} key={id} booking={booking} />
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
+                      <tbody>
+                        {qrIds.map((id, index) => (
+                          <AssetRow
+                            qrId={id}
+                            key={id}
+                            booking={booking}
+                            assets={assets}
+                            setAssets={setAssets}
+                            index={index}
+                          />
+                        ))}
+                      </tbody>
+                    </Table>
+                  </div>
 
-                {/* Actions */}
-                <div>
-                  <When truthy={!!zo.errors.assetIds()?.message}>
-                    <p className="text-sm text-error-500">
-                      {zo.errors.assetIds()?.message}
-                    </p>
-                  </When>
+                  {/* Actions */}
+                  <div>
+                    <When truthy={!!zo.errors.assetIds()?.message}>
+                      <p className="text-sm text-error-500">
+                        {zo.errors.assetIds()?.message}
+                      </p>
+                    </When>
 
-                  <div className="flex gap-2 px-0 py-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      width="full"
-                      disabled={isLoading}
-                    >
-                      Close
-                    </Button>
-                    {/* 
-                    <Form ref={zo.ref} className="w-full" method="POST">
-                      {fetchedScannedAssets.map((asset, i) => (
-                        <input
-                          key={asset.id}
-                          type="hidden"
-                          name={`assetIds[${i}]`}
-                          value={asset.id}
-                        />
-                      ))}
+                    {someAssetsCheckedOut && (
+                      <p className="text-[14px] leading-4">
+                        Some assets in your list are checked out. You need to
+                        resolve that before continuing.
+                      </p>
+                    )}
+
+                    {someAssetsInCustody && (
+                      <p className="text-[14px] leading-4">
+                        Some assets in your list are in custody. You need to
+                        resolve that before continuing.
+                      </p>
+                    )}
+                    <div className="flex gap-2 px-0 py-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        width="full"
+                        disabled={isLoading}
+                      >
+                        Close
+                      </Button>
 
                       <Button
                         width="full"
+                        type="submit"
                         disabled={
                           isLoading ||
                           someAssetsCheckedOut ||
@@ -190,10 +207,10 @@ export default function ScannedAssetsDrawer({
                       >
                         Confirm
                       </Button>
-                    </Form> */}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </Form>
             </When>
           </div>
         </div>
@@ -202,25 +219,60 @@ export default function ScannedAssetsDrawer({
   );
 }
 
-function AssetRow({ qrId, booking }: { qrId: string; booking: any }) {
-  const [asset, setAsset] = useState<AssetWithBooking | undefined>(undefined);
-  const removeAsset = useSetAtom(removeScannedQrIdAtom);
+function AssetRow({
+  qrId,
+  assets,
+  setAssets,
+  index,
+}: {
+  qrId: string;
+  booking: any;
+  index: number;
+  assets: AssetWithBooking[];
+  setAssets: React.Dispatch<React.SetStateAction<AssetWithBooking[]>>;
+}) {
+  const { booking } = useLoaderData<typeof loader>();
+
+  const removeQrId = useSetAtom(removeScannedQrIdAtom);
+
+  /** Find the asset in the assets array */
+  const asset = useMemo(
+    () => assets.find((a) => a.qrScanned === qrId),
+    [assets, qrId]
+  );
 
   const isCheckedOut = useMemo(
     () => asset?.status === AssetStatus.CHECKED_OUT,
     [asset]
   );
 
+  /** Adds an asset to the assets array */
+  const setAsset = useCallback(
+    (asset: AssetWithBooking) => {
+      setAssets((prev) => {
+        /** Only add it it doesnt exist in the list already */
+        if (prev.some((a) => a.id === asset.id)) {
+          return prev;
+        }
+        return [...prev, asset];
+      });
+    },
+    [setAssets]
+  );
+
+  /** Fetches asset data based on qrId */
+  const fetchAsset = useCallback(async () => {
+    const response = await fetch(
+      `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
+    );
+    const { asset } = await response.json();
+    setAsset(asset);
+  }, [qrId, booking.id, setAsset]);
+
+  /** Fetch the asset when qrId or booking changes */
   useEffect(() => {
-    async function fetchAsset() {
-      const response = await fetch(
-        `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
-      );
-      const { asset } = await response.json();
-      setAsset(asset);
-    }
     void fetchAsset();
-  }, [qrId, booking.id]);
+  }, [qrId, booking.id, setAsset, fetchAsset]);
 
   return (
     <Tr key={qrId}>
@@ -240,6 +292,11 @@ function AssetRow({ qrId, booking }: { qrId: string; booking: any }) {
                 </div>
               ) : (
                 <>
+                  <input
+                    type="hidden"
+                    name={`assetIds[${index}]`}
+                    value={asset.id}
+                  />
                   <p className="word-break whitespace-break-spaces font-medium">
                     {asset.title}
                   </p>
@@ -270,7 +327,7 @@ function AssetRow({ qrId, booking }: { qrId: string; booking: any }) {
           variant="ghost"
           icon="trash"
           onClick={() => {
-            removeAsset(qrId);
+            removeQrId(qrId);
           }}
         />
       </Td>

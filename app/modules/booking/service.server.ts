@@ -1505,69 +1505,9 @@ export async function addScannedAssetsToBooking({
       where: { id: bookingId, organizationId },
     });
 
-    /** We have to make sure all the assets are available for booking */
-    const {
-      hasAlreadyBookedAssets,
-      hasUnavailableAssets,
-      hasAssetsInCustody,
-      hasCheckedOutAssets,
-      hasKits,
-    } = await getBookingFlags({ ...booking, assetIds });
-
-    if (hasAlreadyBookedAssets) {
-      throw new ShelfError({
-        cause: null,
-        title: "Already booked",
-        message:
-          "Some assets are already added in the current booking. Please make sure you have scanned only available assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-
-    if (hasUnavailableAssets) {
-      throw new ShelfError({
-        cause: null,
-        title: "Unavailable",
-        message:
-          "Some assets are marked as unavailable for bookings by administrator. Please make sure you have scanned only available assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-
-    if (hasAssetsInCustody) {
-      throw new ShelfError({
-        cause: null,
-        title: "In custody",
-        message:
-          "Some assets are in custody of team member making it currently unavailable for bookings. Please make sure you have scanned only available assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-
-    if (hasCheckedOutAssets) {
-      throw new ShelfError({
-        cause: null,
-        title: "Checked out",
-        message:
-          "Some assets are currently checked out as part of another booking and should be available for your selected date range period.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-
-    if (hasKits) {
-      throw new ShelfError({
-        cause: null,
-        title: "Part of kit",
-        message:
-          "Some assets are part of kit. Remove the asset from the kit to add it individually.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
+    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
+     * If there are already checked out or in custody assets, the user wont be able to check out
+     */
 
     /** Adding assets into booking */
     return await db.$transaction(async (tx) => {
