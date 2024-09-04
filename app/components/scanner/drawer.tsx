@@ -52,6 +52,7 @@ export default function ScannedAssetsDrawer({
 
   // Get the scanned qrIds
   const qrIds = useAtomValue(scannedQrIdsAtom);
+  const removeQrId = useSetAtom(removeScannedQrIdAtom);
   const assetsLength = qrIds.length;
   const hasAssets = assetsLength > 0;
   const clearList = useSetAtom(clearScannedQrIdsAtom);
@@ -69,6 +70,15 @@ export default function ScannedAssetsDrawer({
     },
     [clearList]
   );
+
+  /**
+   * Check which of tha assets are already added in the booking.assets
+   */
+  const assetsAlreadyAdded = assets.filter((asset) =>
+    booking.assets.some((a) => a?.id === asset?.id)
+  );
+
+  const hasAssetsAlreadyAdded = assetsAlreadyAdded.length > 0;
 
   return (
     <Portal>
@@ -170,6 +180,35 @@ export default function ScannedAssetsDrawer({
 
                   {/* Actions */}
                   <div>
+                    <When truthy={hasAssetsAlreadyAdded}>
+                      <div className="bg-warning-25 p-4">
+                        <p className="text-sm text-gray-500">
+                          <strong>{assetsAlreadyAdded.length}</strong> assets
+                          already added to the booking.{" "}
+                          <Button
+                            variant="link"
+                            className="text-gray inline underline"
+                            onClick={() => {
+                              setAssets((prev) =>
+                                prev.filter(
+                                  (a) =>
+                                    !assetsAlreadyAdded.some(
+                                      (aa) => aa?.id === a?.id
+                                    )
+                                )
+                              );
+                              assetsAlreadyAdded.forEach((a) => {
+                                removeQrId(a?.qrScanned);
+                              });
+                            }}
+                          >
+                            Remove from list
+                          </Button>{" "}
+                          to continue.
+                        </p>
+                      </div>
+                    </When>
+
                     <When truthy={!!zo.errors.assetIds()?.message}>
                       <p className="text-sm text-error-500">
                         {zo.errors.assetIds()?.message}
@@ -186,7 +225,11 @@ export default function ScannedAssetsDrawer({
                         Close
                       </Button>
 
-                      <Button width="full" type="submit" disabled={isLoading}>
+                      <Button
+                        width="full"
+                        type="submit"
+                        disabled={isLoading || hasAssetsAlreadyAdded}
+                      >
                         Confirm
                       </Button>
                     </div>
@@ -216,6 +259,13 @@ function AssetRow({
   const { booking } = useLoaderData<typeof loader>();
 
   const removeQrId = useSetAtom(removeScannedQrIdAtom);
+  /** Remove the asset from the list */
+  function removeAssetFromList() {
+    // Remive the qrId from the list
+    removeQrId(qrId);
+    // Remove the asset from the list
+    setAssets((prev) => prev.filter((a) => a?.qrScanned !== qrId));
+  }
 
   /** Find the asset in the assets array */
   const asset = useMemo(
@@ -308,9 +358,7 @@ function AssetRow({
           className="border-none"
           variant="ghost"
           icon="trash"
-          onClick={() => {
-            removeQrId(qrId);
-          }}
+          onClick={removeAssetFromList}
         />
       </Td>
     </Tr>

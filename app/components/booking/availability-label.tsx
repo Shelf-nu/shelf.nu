@@ -41,7 +41,7 @@ export function AvailabilityLabel({
   if (isAlreadyAdded) {
     return (
       <AvailabilityBadge
-        badgeText="Already added"
+        badgeText="Already added to this booking"
         tooltipTitle="Asset is part of booking"
         tooltipContent="This asset is already added to the current booking."
       />
