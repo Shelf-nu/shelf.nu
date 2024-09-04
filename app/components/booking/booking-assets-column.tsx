@@ -215,10 +215,10 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+      <Td className="w-full whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center">
+            <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -229,23 +229,21 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="min-w-[130px]">
-                <span className="word-break mb-1 block font-medium">
-                  <Button
-                    to={`/assets/${item.id}`}
-                    variant="link"
-                    className="text-gray-900 hover:text-gray-700"
-                  >
-                    {item.title}
-                  </Button>
-                </span>
-                <div>
-                  <AssetStatusBadge
-                    status={item.status}
-                    availableToBook={item.availableToBook}
-                  />
-                </div>
+            <div className="min-w-[180px]">
+              <span className="word-break mb-1 block font-medium">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left text-gray-900 hover:text-gray-700"
+                >
+                  {item.title}
+                </Button>
+              </span>
+              <div>
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>

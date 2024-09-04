@@ -12,7 +12,6 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ChevronRight } from "~/components/icons/library";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
@@ -558,51 +557,41 @@ function ListContent({
     };
   }>;
 }) {
-  const { id, mainImage, mainImageExpiration, title, location, category } =
-    item;
+  const { location, category } = item;
 
   const { roles } = useUserRoleHelper();
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+      <Td className="w-full whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center">
+            <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: id,
-                  mainImage,
-                  mainImageExpiration,
-                  alt: title,
+                  assetId: item.id,
+                  mainImage: item.mainImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
                 }}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <Button
-                to={`/assets/${item.id}`}
-                variant="link"
-                className="mb-1 text-gray-900 hover:text-gray-700"
-              >
-                {item.title}
-              </Button>
+            <div className="min-w-[180px]">
+              <span className="word-break mb-1 block font-medium">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left text-gray-900 hover:text-gray-700"
+                >
+                  {item.title}
+                </Button>
+              </span>
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
               />
-              <div className="block md:hidden">
-                {category ? (
-                  <Badge color={category.color} withDot={false}>
-                    {category.name}
-                  </Badge>
-                ) : null}
-              </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
 
