@@ -57,19 +57,32 @@ export default function ScannedAssetsDrawer({
   const hasAssets = assetsLength > 0;
   const clearList = useSetAtom(clearScannedQrIdsAtom);
 
+  /** Removes an set of assets from the list
+   * Handles both the qrIds and the assets array
+   */
+  function removeAssetsFromList(assets: AssetWithBooking[]) {
+    setAssets((prev) =>
+      prev.filter((a) => !assets.some((aa) => aa?.id === a?.id))
+    );
+    assets.forEach((a) => {
+      removeQrId(a?.qrScanned);
+    });
+  }
+
   const [expanded, setExpanded] = useState(false);
   const { vh } = useViewportHeight();
   const [assets, setAssets] = useState<AssetWithBooking[]>([]);
 
-  /**
-   * Clear the list when the component is unmounted
-   */
-  useEffect(
-    () => () => {
-      clearList();
-    },
-    [clearList]
-  );
+  // /**
+  //  * Clear the list when the component is unmounted
+  //  */
+  // useEffect(
+  //   () => () => {
+  //     clearList();
+  //     setAssets([]);
+  //   },
+  //   [clearList]
+  // );
 
   /**
    * Check which of tha assets are already added in the booking.assets
@@ -188,19 +201,9 @@ export default function ScannedAssetsDrawer({
                           <Button
                             variant="link"
                             className="text-gray inline underline"
-                            onClick={() => {
-                              setAssets((prev) =>
-                                prev.filter(
-                                  (a) =>
-                                    !assetsAlreadyAdded.some(
-                                      (aa) => aa?.id === a?.id
-                                    )
-                                )
-                              );
-                              assetsAlreadyAdded.forEach((a) => {
-                                removeQrId(a?.qrScanned);
-                              });
-                            }}
+                            onClick={() =>
+                              removeAssetsFromList(assetsAlreadyAdded)
+                            }
                           >
                             Remove from list
                           </Button>{" "}
