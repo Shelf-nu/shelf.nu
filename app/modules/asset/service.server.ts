@@ -47,6 +47,7 @@ import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
+  isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -102,6 +103,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
         "The asset you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

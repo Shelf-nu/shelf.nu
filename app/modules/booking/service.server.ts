@@ -14,7 +14,7 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -870,6 +870,7 @@ export async function getBooking(
       },
     });
   } catch (cause) {
+    const is404 = isNotFoundError(cause);
     throw new ShelfError({
       cause,
       title: "Booking not found",
@@ -877,6 +878,7 @@ export async function getBooking(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { booking },
       label,
+      shouldBeCaptured: !is404,
     });
   }
 }
