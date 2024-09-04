@@ -68,7 +68,7 @@ export function Td({ children, className, ...props }: TdProps) {
   return (
     <td
       className={tw(
-        "max-w-[200px] truncate whitespace-nowrap border-b p-4 md:px-6",
+        "max-w-[250px] truncate whitespace-nowrap border-b p-4 md:px-6",
         className
       )}
       {...props}
