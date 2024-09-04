@@ -11,7 +11,13 @@ export const scannedQrIdsAtom = atom<string[]>([]);
 export const addScannedQrIdAtom = atom<null, string[], unknown>(
   null,
   (_, set, update) => {
-    set(scannedQrIdsAtom, (prev) => [...prev, update]);
+    set(scannedQrIdsAtom, (prev) => {
+      if (!prev.includes(update)) {
+        return [...prev, update];
+      } else {
+        return prev;
+      }
+    });
   }
 );
 
@@ -20,6 +26,14 @@ export const removeScannedQrIdAtom = atom<null, string[], unknown>(
   null,
   (_, set, update) => {
     set(scannedQrIdsAtom, (prev) => prev.filter((qr) => qr !== update));
+  }
+);
+
+/** Clears the IDs */
+export const clearScannedQrIdsAtom = atom<null, string[], unknown>(
+  null,
+  (_, set) => {
+    set(scannedQrIdsAtom, []);
   }
 );
 

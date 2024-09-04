@@ -24,7 +24,7 @@ import Icon from "../icons/icon";
 import { Spinner } from "../shared/spinner";
 
 type ZXingScannerProps = {
-  onQrDetectionSuccess: (qrId: string) => void | Promise<void>;
+  onQrDetectionSuccess?: (qrId: string) => void | Promise<void>;
   videoMediaDevices?: MediaDeviceInfo[];
   isLoading?: boolean;
   allowDuplicateScan?: boolean;
@@ -43,9 +43,6 @@ export const ZXingScanner = ({
 
   const fetcher = useFetcher();
   const isSwitchingCamera = isFormProcessing(fetcher.state);
-
-  const scannedQrIds = useAtomValue(scannedQrIdsAtom);
-  const addScannedQrId = useSetAtom(addScannedQrIdAtom);
 
   const errorShownQrIds = useAtomValue(errorShownQrIdsAtom);
   const addQrIdToErrorShown = useSetAtom(addQrIdToErrorShownAtom);
@@ -81,29 +78,25 @@ export const ZXingScanner = ({
         return;
       }
 
-      if (!allowDuplicateScan && scannedQrIds.includes(qrId)) {
-        displayQrNotification({ message: "QR is already scanned." });
-        addQrIdToErrorShown(qrId);
-        return;
-      }
+      // if (!allowDuplicateScan && scannedQrIds.includes(qrId)) {
+      //   displayQrNotification({ message: "QR is already scanned." });
+      //   addQrIdToErrorShown(qrId);
+      //   return;
+      // }
 
       /** At this point, a QR is successfully detected, so we can vibrate user's device for feedback */
       if (typeof navigator.vibrate === "function") {
         navigator.vibrate(200);
       }
 
-      void onQrDetectionSuccess(qrId);
-
-      if (!allowDuplicateScan) {
-        addScannedQrId(qrId);
-      }
+      onQrDetectionSuccess && void onQrDetectionSuccess(qrId);
     }
   };
 
   const { ref } = useZxing({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
-    timeBetweenDecodingAttempts: 50,
+    timeBetweenDecodingAttempts: 5,
     onDecodeResult(result) {
       void decodeQRCodes(result.getText());
     },

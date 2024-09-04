@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
@@ -12,11 +12,17 @@ import {
   fetchedScannedAssetsCountAtom,
   removeFetchedScannedAssetAtom,
 } from "~/atoms/bookings";
-import { displayQrScannerNotificationAtom } from "~/atoms/qr-scanner";
+import {
+  clearScannedQrIdsAtom,
+  displayQrScannerNotificationAtom,
+  removeScannedQrIdAtom,
+  scannedQrIdsAtom,
+} from "~/atoms/qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
-import { AvailabilityLabel } from "./availability-label";
+import { AvailabilityLabel } from "../booking/availability-label";
 import { AssetLabel } from "../icons/library";
 import { ListHeader } from "../list/list-header";
 import { Button } from "../shared/button";
@@ -46,36 +52,20 @@ export default function ScannedAssetsDrawer({
   isLoading,
 }: ScannedAssetsDrawerProps) {
   const { booking } = useLoaderData<typeof loader>();
-
   const zo = useZorm(
     "AddScannedAssetsToBooking",
     addScannedAssetsToBookingSchema
   );
 
+  const qrIds = useAtomValue(scannedQrIdsAtom);
+  const assetsLength = qrIds.length;
+  const hasAssets = assetsLength > 0;
+  const clearList = useSetAtom(clearScannedQrIdsAtom);
+
   const [expanded, setExpanded] = useState(false);
   const { vh } = useViewportHeight();
 
-  const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
-  const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
-  const removeFetchedScannedAsset = useSetAtom(removeFetchedScannedAssetAtom);
-  const clearFetchedScannedAssets = useSetAtom(clearFetchedScannedAssetsAtom);
-
-  const hasAssets = fetchedScannedAssetsCount > 0;
-  const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
-
-  const someAssetsCheckedOut = fetchedScannedAssets.some(
-    (asset) => asset.status === AssetStatus.CHECKED_OUT
-  );
-  const someAssetsInCustody = fetchedScannedAssets.some(
-    (asset) => asset.status === AssetStatus.IN_CUSTODY
-  );
-
-  // useEffect(() => {
-  //   if (document) {
-  //     document.body.style.overflow = expanded ? "hidden" : "auto";
-  //     document.body.style.height = expanded ? "100vh" : "auto";
-  //   }
-  // }, [expanded]);
+  // const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   // Handler for the drag end event
   return (
@@ -111,17 +101,12 @@ export default function ScannedAssetsDrawer({
 
             {/* Header */}
             <div className="flex items-center justify-between text-left">
-              <div className="py-4">
-                {fetchedScannedAssetsCount} assets scanned
-              </div>
+              <div className="py-4">{assetsLength} assets scanned</div>
 
               <When truthy={hasAssets}>
-                <div
-                  className="cursor-pointer"
-                  onClick={clearFetchedScannedAssets}
-                >
+                <Button variant="tertiary" onClick={clearList}>
                   Clear list
-                </div>
+                </Button>
               </When>
             </div>
 
@@ -160,55 +145,13 @@ export default function ScannedAssetsDrawer({
                     </ListHeader>
 
                     <tbody>
-                      {fetchedScannedAssets.map((asset) => (
-                        <Tr key={asset.id}>
-                          <Td className="w-full p-0 md:p-0">
-                            <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-                              <div className="flex items-center gap-3">
-                                <div className="flex flex-col gap-y-1">
-                                  <p className="word-break whitespace-break-spaces font-medium">
-                                    {asset.title}
-                                  </p>
-
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                    <AvailabilityLabel
-                                      isAddedThroughKit={
-                                        booking.assets.some(
-                                          (a) => a.id === asset.id
-                                        ) && !!asset.kitId
-                                      }
-                                      isAlreadyAdded={booking.assets.some(
-                                        (a) => a.id === asset.id
-                                      )}
-                                      showKitStatus
-                                      asset={asset}
-                                      isCheckedOut={
-                                        asset.status === "CHECKED_OUT"
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </Td>
-                          <Td>
-                            <Button
-                              className="border-none"
-                              variant="ghost"
-                              icon="trash"
-                              onClick={() => {
-                                removeFetchedScannedAsset(asset.id);
-                                displayQrNotification({
-                                  message: "Asset was removed from list",
-                                });
-                              }}
-                            />
-                          </Td>
-                        </Tr>
+                      {qrIds.map((id) => (
+                        <AssetRow qrId={id} key={id} booking={booking} />
                       ))}
                     </tbody>
                   </Table>
                 </div>
+
                 {/* Actions */}
                 <div>
                   <When truthy={!!zo.errors.assetIds()?.message}>
@@ -226,7 +169,7 @@ export default function ScannedAssetsDrawer({
                     >
                       Close
                     </Button>
-
+                    {/* 
                     <Form ref={zo.ref} className="w-full" method="POST">
                       {fetchedScannedAssets.map((asset, i) => (
                         <input
@@ -247,7 +190,7 @@ export default function ScannedAssetsDrawer({
                       >
                         Confirm
                       </Button>
-                    </Form>
+                    </Form> */}
                   </div>
                 </div>
               </div>
@@ -256,6 +199,82 @@ export default function ScannedAssetsDrawer({
         </div>
       </div>
     </Portal>
+  );
+}
+
+function AssetRow({ qrId, booking }: { qrId: string; booking: any }) {
+  const [asset, setAsset] = useState<AssetWithBooking | undefined>(undefined);
+  const removeAsset = useSetAtom(removeScannedQrIdAtom);
+
+  const isCheckedOut = useMemo(
+    () => asset?.status === AssetStatus.CHECKED_OUT,
+    [asset]
+  );
+
+  useEffect(() => {
+    async function fetchAsset() {
+      const response = await fetch(
+        `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
+      );
+      const { asset } = await response.json();
+      setAsset(asset);
+    }
+    void fetchAsset();
+  }, [qrId, booking.id]);
+
+  return (
+    <Tr key={qrId}>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-y-1">
+              {!asset ? (
+                <div>
+                  <p>
+                    QR id: <span className="font-semibold">{qrId}</span>
+                  </p>{" "}
+                  <TextLoader
+                    text="Fetching asset"
+                    className="text-[10px] text-gray-500"
+                  />
+                </div>
+              ) : (
+                <>
+                  <p className="word-break whitespace-break-spaces font-medium">
+                    {asset.title}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <AvailabilityLabel
+                      isAddedThroughKit={
+                        booking.assets.some((a) => a.id === asset.id) &&
+                        !!asset.kitId
+                      }
+                      isAlreadyAdded={booking.assets.some(
+                        (a) => a.id === asset.id
+                      )}
+                      showKitStatus
+                      asset={asset}
+                      isCheckedOut={isCheckedOut}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </Td>
+      <Td>
+        <Button
+          className="border-none"
+          variant="ghost"
+          icon="trash"
+          onClick={() => {
+            removeAsset(qrId);
+          }}
+        />
+      </Td>
+    </Tr>
   );
 }
 
@@ -272,4 +291,8 @@ function Tr({ children }: { children: React.ReactNode }) {
       {children}
     </tr>
   );
+}
+
+function TextLoader({ text, className }: { text: string; className?: string }) {
+  return <div className={tw("loading-text", className)}>{text}...</div>;
 }

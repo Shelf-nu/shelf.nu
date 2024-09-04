@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
@@ -7,18 +6,14 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { setFetchedScannedAssetAtom } from "~/atoms/bookings";
-import {
-  displayQrScannerNotificationAtom,
-  removeScannedQrIdAtom,
-} from "~/atoms/qr-scanner";
-import ScannedAssetsDrawer, {
-  addScannedAssetsToBookingSchema,
-} from "~/components/booking/scanned-assets-drawer";
+import { addScannedQrIdAtom, scannedQrIdsAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import ScannedAssetsDrawer, {
+  addScannedAssetsToBookingSchema,
+} from "~/components/scanner/drawer";
 import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
@@ -45,7 +40,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -144,50 +138,30 @@ export const handle = {
 };
 
 export default function ScanAssetsForBookings() {
-  const { booking } = useLoaderData<typeof loader>();
-
-  const [isFetchingAsset, setIsFetchingAsset] = useState(false);
+  const addQrId = useSetAtom(addScannedQrIdAtom);
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
-
-  const setFetchedScannedAsset = useSetAtom(setFetchedScannedAssetAtom);
-  const removeScannedQrId = useSetAtom(removeScannedQrIdAtom);
-
-  const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
-  async function handleQrDetectionSuccess(qrId: string) {
-    try {
-      setIsFetchingAsset(true);
-
-      const response = await fetch(
-        `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
-      );
-      const { asset } = await response.json();
-      setFetchedScannedAsset(asset as AssetWithBooking);
-
-      displayQrNotification({ message: "Asset added to list." });
-    } catch {
-      removeScannedQrId(qrId);
-    } finally {
-      setIsFetchingAsset(false);
-    }
+  function handleQrDetectionSuccess(qrId: string) {
+    /** If the asset is not already in the list */
+    addQrId(qrId);
   }
 
   return (
     <>
       <Header hidePageDescription />
 
-      <ScannedAssetsDrawer isLoading={isLoading || isFetchingAsset} />
+      <ScannedAssetsDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
           <ZXingScanner
-            isLoading={isFetchingAsset || isLoading}
+            isLoading={isLoading}
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
           />
