@@ -67,7 +67,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -194,7 +194,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         canImportAssets:
           canImportAssets(tierLimit) &&
-          (await validatePermission({
+          (await hasPermission({
             organizationId,
             userId,
             roles: role ? [role] : [],
