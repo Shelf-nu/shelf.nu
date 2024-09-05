@@ -4,11 +4,12 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
+  LinksFunction,
 } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
-import { addScannedQrIdAtom } from "~/atoms/qr-scanner";
+import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import ScannedAssetsDrawer, {
@@ -22,6 +23,7 @@ import {
   addScannedAssetsToBooking,
   getBooking,
 } from "~/modules/booking/service.server";
+import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { userPrefs } from "~/utils/cookies.server";
@@ -40,6 +42,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: scannerCss },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -138,7 +144,7 @@ export const handle = {
 };
 
 export default function ScanAssetsForBookings() {
-  const addQrId = useSetAtom(addScannedQrIdAtom);
+  const addItem = useSetAtom(addScannedItemAtom);
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -149,7 +155,7 @@ export default function ScanAssetsForBookings() {
 
   function handleQrDetectionSuccess(qrId: string) {
     /** If the asset is not already in the list */
-    addQrId(qrId);
+    addItem(qrId);
   }
 
   return (

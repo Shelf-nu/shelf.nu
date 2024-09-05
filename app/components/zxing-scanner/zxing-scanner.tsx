@@ -3,10 +3,8 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useZxing } from "react-zxing";
 import {
   addQrIdToErrorShownAtom,
-  addScannedQrIdAtom,
   displayQrScannerNotificationAtom,
   errorShownQrIdsAtom,
-  scannedQrIdsAtom,
 } from "~/atoms/qr-scanner";
 import type { loader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";

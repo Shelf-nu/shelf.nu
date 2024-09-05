@@ -7,9 +7,12 @@ import { createPortal } from "react-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
-  clearScannedQrIdsAtom,
-  removeScannedQrIdAtom,
-  scannedQrIdsAtom,
+  clearScannedItemsAtom,
+  removeScannedItemAtom,
+  removeScannedItemsByAssetIdAtom,
+  scannedItemsAtom,
+  scannedItemsIdsAtom,
+  updateScannedItemAtom,
 } from "~/atoms/qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
@@ -51,47 +54,39 @@ export default function ScannedAssetsDrawer({
   );
 
   // Get the scanned qrIds
-  const qrIds = useAtomValue(scannedQrIdsAtom);
-  const removeQrId = useSetAtom(removeScannedQrIdAtom);
-  const assetsLength = qrIds.length;
-  const hasAssets = assetsLength > 0;
-  const clearList = useSetAtom(clearScannedQrIdsAtom);
+  const items = useAtomValue(scannedItemsAtom);
+  const assets = Object.values(items).filter(
+    (asset): asset is AssetWithBooking => !!asset
+  );
+  const clearList = useSetAtom(clearScannedItemsAtom);
+  const assetsIds = useAtomValue(scannedItemsIdsAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
-  /** Removes an set of assets from the list
-   * Handles both the qrIds and the assets array
-   */
-  function removeAssetsFromList(assets: AssetWithBooking[]) {
-    setAssets((prev) =>
-      prev.filter((a) => !assets.some((aa) => aa?.id === a?.id))
-    );
-    assets.forEach((a) => {
-      removeQrId(a?.qrScanned);
-    });
-  }
+  const itemsLength = Object.keys(items).length;
+  const hasItems = itemsLength > 0;
 
   const [expanded, setExpanded] = useState(false);
   const { vh } = useViewportHeight();
-  const [assets, setAssets] = useState<AssetWithBooking[]>([]);
-
-  // /**
-  //  * Clear the list when the component is unmounted
-  //  */
-  // useEffect(
-  //   () => () => {
-  //     clearList();
-  //     setAssets([]);
-  //   },
-  //   [clearList]
-  // );
 
   /**
    * Check which of tha assets are already added in the booking.assets
+   * Returns an array of the assetIDs that are already added
    */
-  const assetsAlreadyAdded = assets.filter((asset) =>
-    booking.assets.some((a) => a?.id === asset?.id)
-  );
-
+  const assetsAlreadyAdded: string[] = assetsIds
+    .filter((assetId): assetId is string => !!assetId)
+    .filter((assetId) => booking.assets.some((a) => a?.id === assetId));
   const hasAssetsAlreadyAdded = assetsAlreadyAdded.length > 0;
+
+  const assetsPartOfKit = Object.values(items)
+    .filter((asset): asset is AssetWithBooking => !!asset)
+    .filter((asset) => asset?.kitId && asset.id)
+    .map((asset) => asset.id);
+  const hasAssetsPartOfKit = assetsPartOfKit.length > 0;
+
+  const hasConflictsToResolve = hasAssetsAlreadyAdded || hasAssetsPartOfKit;
+  function resolveAllConflicts() {
+    removeAssetsFromList([...assetsAlreadyAdded, ...assetsPartOfKit]);
+  }
 
   return (
     <Portal>
@@ -101,7 +96,7 @@ export default function ScannedAssetsDrawer({
           className
         )}
         style={{
-          height: expanded ? vh - TOP_GAP : hasAssets ? 170 : 148,
+          height: expanded ? vh - TOP_GAP : hasItems ? 170 : 148,
         }}
       >
         <div className={tw("h-full")} style={style}>
@@ -110,7 +105,7 @@ export default function ScannedAssetsDrawer({
           <div className="mx-auto inline-flex size-full flex-col px-4 md:max-w-4xl md:px-0">
             {/* Handle */}
             <motion.div
-              className="border-b py-1 text-center hover:cursor-grab"
+              className="py-1 text-center hover:cursor-grab"
               onClick={() => {
                 setExpanded((prev) => !prev);
               }}
@@ -126,18 +121,24 @@ export default function ScannedAssetsDrawer({
             </motion.div>
 
             {/* Header */}
-            <div className="flex items-center justify-between text-left">
-              <div className="py-4">{assetsLength} assets scanned</div>
+            <div className="flex items-center justify-between border-b text-left">
+              <div className="py-4">{`${itemsLength} asset${
+                itemsLength > 1 ? "s" : ""
+              } scanned`}</div>
 
-              <When truthy={hasAssets}>
-                <Button variant="tertiary" onClick={clearList}>
+              <When truthy={hasItems}>
+                <Button
+                  variant="block-link-gray"
+                  onClick={clearList}
+                  className="text-[12px] font-normal text-gray-500"
+                >
                   Clear list
                 </Button>
               </When>
             </div>
 
             {/* Body */}
-            <When truthy={!hasAssets}>
+            <When truthy={!hasItems}>
               <div className="flex flex-col items-center px-3 py-6 text-center">
                 {expanded && (
                   <div className="mb-4 rounded-full bg-primary-50  p-2">
@@ -161,64 +162,105 @@ export default function ScannedAssetsDrawer({
               </div>
             </When>
 
-            <When truthy={hasAssets}>
-              <Form
-                ref={zo.ref}
-                className="flex max-h-full w-full flex-col overflow-scroll"
-                method="POST"
-              >
-                <div className="flex max-h-full flex-col overflow-scroll">
-                  {/* Assets list */}
-                  <div>
-                    <Table className="overflow-y-auto">
-                      <ListHeader hideFirstColumn>
-                        <Th className="p-0"> </Th>
-                        <Th className="p-0"> </Th>
-                      </ListHeader>
+            <When truthy={hasItems}>
+              <div className="flex max-h-full flex-col overflow-scroll">
+                {/* Assets list */}
+                <div>
+                  <Table className="overflow-y-auto">
+                    <ListHeader hideFirstColumn className="border-none">
+                      <Th className="p-0"> </Th>
+                      <Th className="p-0"> </Th>
+                    </ListHeader>
 
-                      <tbody>
-                        {qrIds.reverse().map((id, index) => (
-                          <AssetRow
-                            qrId={id}
-                            key={id}
-                            booking={booking}
-                            assets={assets}
-                            setAssets={setAssets}
-                            index={index}
-                          />
-                        ))}
-                      </tbody>
-                    </Table>
-                  </div>
+                    <tbody>
+                      {Object.entries(items).map(([qrId, asset]) => (
+                        <AssetRow qrId={qrId} key={qrId} asset={asset} />
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
 
-                  {/* Actions */}
-                  <div>
-                    <When truthy={hasAssetsAlreadyAdded}>
-                      <div className="bg-warning-25 p-4">
-                        <p className="text-sm text-gray-500">
-                          <strong>{assetsAlreadyAdded.length}</strong> assets
-                          already added to the booking.{" "}
-                          <Button
-                            variant="link"
-                            className="text-gray inline underline"
-                            onClick={() =>
-                              removeAssetsFromList(assetsAlreadyAdded)
-                            }
-                          >
-                            Remove from list
-                          </Button>{" "}
-                          to continue.
-                        </p>
+                {/* Actions */}
+                <div>
+                  <When truthy={hasConflictsToResolve}>
+                    <div className="bg-gray-25 p-4 text-[12px]">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-[14px] font-semibold">
+                            Unresolved blockers
+                          </p>
+                          <p>Resolve the issues below to continue</p>
+                        </div>
+
+                        <Button
+                          variant="block-link"
+                          className="text-[12px]"
+                          onClick={resolveAllConflicts}
+                        >
+                          Resolve all
+                        </Button>
                       </div>
-                    </When>
 
-                    <When truthy={!!zo.errors.assetIds()?.message}>
-                      <p className="text-sm text-error-500">
-                        {zo.errors.assetIds()?.message}
-                      </p>
-                    </When>
+                      <hr className="my-2" />
+                      <ul className="list-inside list-disc text-[12px] text-gray-500">
+                        <When truthy={hasAssetsAlreadyAdded}>
+                          <li>
+                            <strong>{assetsAlreadyAdded.length}</strong> assets
+                            already added to the booking.{" "}
+                            <Button
+                              variant="link"
+                              type="button"
+                              className="text-gray inline text-[12px] font-normal underline"
+                              onClick={() => {
+                                removeAssetsFromList(assetsAlreadyAdded);
+                              }}
+                            >
+                              Remove from list
+                            </Button>{" "}
+                            to continue.
+                          </li>
+                        </When>
+                        <When truthy={hasAssetsPartOfKit}>
+                          <li>
+                            <strong>{assetsPartOfKit.length}</strong> assets Are
+                            part of a kit.{" "}
+                            <Button
+                              variant="link"
+                              type="button"
+                              className="text-gray inline text-[12px] font-normal underline"
+                              onClick={() => {
+                                removeAssetsFromList(assetsPartOfKit);
+                              }}
+                            >
+                              Remove from list
+                            </Button>{" "}
+                            to continue.
+                          </li>
+                        </When>
+                      </ul>
+                    </div>
+                  </When>
 
-                    <div className="flex gap-2 px-0 py-3">
+                  <When truthy={!!zo.errors.assetIds()?.message}>
+                    <p className="text-sm text-error-500">
+                      {zo.errors.assetIds()?.message}
+                    </p>
+                  </When>
+                  <Form
+                    ref={zo.ref}
+                    className="flex max-h-full w-full"
+                    method="POST"
+                  >
+                    <div className="flex w-full gap-2 px-0 py-3">
+                      {assets.map((asset, index) => (
+                        <input
+                          key={asset.id}
+                          type="hidden"
+                          name={`assetIds[${index}]`}
+                          value={asset.id}
+                        />
+                      ))}
+
                       <Button
                         type="button"
                         variant="outline"
@@ -236,9 +278,9 @@ export default function ScannedAssetsDrawer({
                         Confirm
                       </Button>
                     </div>
-                  </div>
+                  </Form>
                 </div>
-              </Form>
+              </div>
             </When>
           </div>
         </div>
@@ -249,50 +291,18 @@ export default function ScannedAssetsDrawer({
 
 function AssetRow({
   qrId,
-  assets,
-  setAssets,
-  index,
+  asset,
 }: {
   qrId: string;
-  booking: any;
-  index: number;
-  assets: AssetWithBooking[];
-  setAssets: React.Dispatch<React.SetStateAction<AssetWithBooking[]>>;
+  asset: AssetWithBooking | undefined;
 }) {
   const { booking } = useLoaderData<typeof loader>();
-
-  const removeQrId = useSetAtom(removeScannedQrIdAtom);
-  /** Remove the asset from the list */
-  function removeAssetFromList() {
-    // Remive the qrId from the list
-    removeQrId(qrId);
-    // Remove the asset from the list
-    setAssets((prev) => prev.filter((a) => a?.qrScanned !== qrId));
-  }
-
-  /** Find the asset in the assets array */
-  const asset = useMemo(
-    () => assets.find((a) => a?.qrScanned === qrId),
-    [assets, qrId]
-  );
+  const setAsset = useSetAtom(updateScannedItemAtom);
+  const removeAsset = useSetAtom(removeScannedItemAtom);
 
   const isCheckedOut = useMemo(
     () => asset?.status === AssetStatus.CHECKED_OUT,
     [asset]
-  );
-
-  /** Adds an asset to the assets array */
-  const setAsset = useCallback(
-    (asset: AssetWithBooking) => {
-      setAssets((prev) => {
-        /** Only add it it doesnt exist in the list already */
-        if (asset && prev.some((a) => a && a.id === asset.id)) {
-          return prev;
-        }
-        return [...prev, asset];
-      });
-    },
-    [setAssets]
   );
 
   /** Fetches asset data based on qrId */
@@ -301,7 +311,7 @@ function AssetRow({
       `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
     );
     const { asset } = await response.json();
-    setAsset(asset);
+    setAsset({ qrId, asset });
   }, [qrId, booking.id, setAsset]);
 
   /** Fetch the asset when qrId or booking changes */
@@ -327,11 +337,6 @@ function AssetRow({
                 </div>
               ) : (
                 <>
-                  <input
-                    type="hidden"
-                    name={`assetIds[${index}]`}
-                    value={asset.id}
-                  />
                   <p className="word-break whitespace-break-spaces font-medium">
                     {asset.title}
                   </p>
@@ -361,7 +366,7 @@ function AssetRow({
           className="border-none"
           variant="ghost"
           icon="trash"
-          onClick={removeAssetFromList}
+          onClick={() => removeAsset(qrId)}
         />
       </Td>
     </Tr>

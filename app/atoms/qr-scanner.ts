@@ -1,42 +1,92 @@
 import { atom } from "jotai";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 
 /***********************
  * Scanned QR Id Atom  *
+ *
+ * The data is structured in a object where:
+ * - key: qrId
+ * - value: asset
+ *
  ***********************/
 
-/** This atom keeps track of the qrIds scanned */
-export const scannedQrIdsAtom = atom<string[]>([]);
+export const scannedItemsAtom = atom<{
+  [key: string]: AssetWithBooking | undefined;
+}>({});
 
-/** This atom adds a qrId in scannedQrIdsAtom */
-export const addScannedQrIdAtom = atom<null, string[], unknown>(
+/** Get an array of the scanned items ids */
+export const scannedItemsIdsAtom = atom((get) =>
+  Object.values(get(scannedItemsAtom)).map((item) => item?.id)
+);
+
+// Add item to object with value `undefined` (just receives the key)
+export const addScannedItemAtom = atom(null, (get, set, qrId: string) => {
+  const currentItems = get(scannedItemsAtom);
+  set(scannedItemsAtom, {
+    [qrId]: undefined, // Add the new entry at the start
+    ...currentItems, // Spread the rest of the existing items
+  });
+});
+
+// Update item based on key
+export const updateScannedItemAtom = atom(
   null,
-  (_, set, update) => {
-    set(scannedQrIdsAtom, (prev) => {
-      if (!prev.includes(update)) {
-        /** Notice we add the new item to start of array. This is for showing the proper order in the drawer component */
-        return [update, ...prev];
-      } else {
-        return prev;
-      }
+  (get, set, { qrId, asset }: { qrId: string; asset: AssetWithBooking }) => {
+    const currentItems = get(scannedItemsAtom);
+
+    // Check if the item already exists; if it does, skip the update
+    if (currentItems[qrId]) {
+      return; // Skip the update if the item is already present
+    }
+
+    set(scannedItemsAtom, {
+      ...currentItems,
+      [qrId]: asset,
     });
   }
 );
 
-/** This atom is used to remove a qrId from scannedQrIdsAtom */
-export const removeScannedQrIdAtom = atom<null, string[], unknown>(
+// Remove item based on key
+export const removeScannedItemAtom = atom(null, (get, set, qrId: string) => {
+  const currentItems = get(scannedItemsAtom);
+  const { [qrId]: _, ...rest } = currentItems; // Removes the key
+  set(scannedItemsAtom, rest);
+});
+
+// Remove multiple items based on key array
+export const removeMultipleScannedItemsAtom = atom(
   null,
-  (_, set, update) => {
-    set(scannedQrIdsAtom, (prev) => prev.filter((qr) => qr !== update));
+  (get, set, qrIds: string[]) => {
+    const currentItems = get(scannedItemsAtom);
+    const updatedItems = { ...currentItems };
+    qrIds.forEach((qrId) => {
+      delete updatedItems[qrId];
+    });
+    set(scannedItemsAtom, updatedItems);
   }
 );
 
-/** Clears the IDs */
-export const clearScannedQrIdsAtom = atom<null, string[], unknown>(
+// Remove items based on asset id
+export const removeScannedItemsByAssetIdAtom = atom(
   null,
-  (_, set) => {
-    set(scannedQrIdsAtom, []);
+  (get, set, assetIds: string[]) => {
+    const currentItems = get(scannedItemsAtom);
+    const updatedItems = { ...currentItems };
+    Object.entries(currentItems).forEach(([qrId, asset]) => {
+      if (asset && assetIds.includes(asset?.id)) {
+        delete updatedItems[qrId];
+      }
+    });
+    set(scannedItemsAtom, updatedItems);
   }
 );
+
+// Clear all items
+export const clearScannedItemsAtom = atom(null, (_get, set) => {
+  set(scannedItemsAtom, {}); // Resets the atom to an empty object
+});
+
+/*******************************/
 
 /****************************
  * QR Scanner Notification  *
