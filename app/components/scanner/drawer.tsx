@@ -20,10 +20,7 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
-import {
-  AvailabilityBadge,
-  KitAvailabilityLabel,
-} from "../booking/availability-label";
+import { AvailabilityBadge } from "../booking/availability-label";
 import { AssetLabel } from "../icons/library";
 import { ListHeader } from "../list/list-header";
 import { Button } from "../shared/button";
@@ -116,6 +113,19 @@ export default function ScannedAssetsDrawer({
     .map((a) => !!a && a.id);
   const hasUnavailableAssets = unavailableAssetsIds.length > 0;
 
+  /**
+   * 1. Get the count of kits kits that have assets inside them that are not avaiable to book
+   * 2. Get an array of the asset ids inside those kits that are not available to book
+   * */
+  const countKitsWithUnavailableAssets = kits.filter((kit) =>
+    kit.assets.some((a) => !a.availableToBook)
+  ).length;
+  const unavailableAssetsIdsInKits = kits
+    .filter((kit) => kit.assets.some((a) => !a.availableToBook))
+    .flatMap((kit) => kit.assets.map((a) => a.id));
+
+  const hasUnavailableAssetsInKits = countKitsWithUnavailableAssets > 0;
+
   /** QR codes that were scanned but are not valid to be added */
   const hasErrors = errors.length > 0;
 
@@ -129,6 +139,7 @@ export default function ScannedAssetsDrawer({
     unavailableAssetsIds.length +
     assetsAlreadyAddedIds.length +
     assetsPartOfKitIds.length +
+    countKitsWithUnavailableAssets +
     errors.length;
 
   function resolveAllConflicts() {
@@ -136,6 +147,7 @@ export default function ScannedAssetsDrawer({
       ...assetsAlreadyAddedIds,
       ...assetsPartOfKitIds,
       ...unavailableAssetsIds,
+      ...unavailableAssetsIdsInKits,
     ]);
     removeItemsFromList(errors.map(([qrId]) => qrId));
   }
@@ -254,7 +266,7 @@ export default function ScannedAssetsDrawer({
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-[14px] font-semibold">
-                            Unresolved blockers ({totalUnresolvedConflicts})
+                            ⚠️ Unresolved blockers ({totalUnresolvedConflicts})
                           </p>
                           <p className="leading-4">
                             Resolve the issues below to continue. They are
@@ -275,6 +287,7 @@ export default function ScannedAssetsDrawer({
 
                       <hr className="my-2" />
                       <ul className="list-inside list-disc text-[12px] text-gray-500">
+                        {/* Unavailable assets */}
                         <When truthy={hasUnavailableAssets}>
                           <li>
                             <strong>
@@ -295,9 +308,10 @@ export default function ScannedAssetsDrawer({
                             >
                               Remove from list
                             </Button>{" "}
-                            to continue.
                           </li>
                         </When>
+
+                        {/* Already added assets */}
                         <When truthy={hasAssetsAlreadyAdded}>
                           <li>
                             <strong>
@@ -316,9 +330,10 @@ export default function ScannedAssetsDrawer({
                             >
                               Remove from list
                             </Button>{" "}
-                            to continue.
                           </li>
                         </When>
+
+                        {/* Assets part of kit */}
                         <When truthy={hasAssetsPartOfKit}>
                           <li>
                             <strong>{`${assetsPartOfKitIds.length} asset${
@@ -335,10 +350,34 @@ export default function ScannedAssetsDrawer({
                             >
                               Remove from list
                             </Button>{" "}
-                            to continue.{" "}
                             <p className="text-[10px]">
                               Note: Scan Kit QR to add the full kit
                             </p>
+                          </li>
+                        </When>
+
+                        <When truthy={hasUnavailableAssetsInKits}>
+                          <li>
+                            <strong>{`${countKitsWithUnavailableAssets} kit${
+                              countKitsWithUnavailableAssets > 1
+                                ? "s have"
+                                : " has"
+                            } `}</strong>
+                            unavailable assets inside{" "}
+                            {countKitsWithUnavailableAssets > 1 ? "them" : "it"}
+                            .{" "}
+                            <Button
+                              variant="link"
+                              type="button"
+                              className="text-gray inline text-[12px] font-normal underline"
+                              onClick={() => {
+                                removeAssetsFromList(
+                                  unavailableAssetsIdsInKits
+                                );
+                              }}
+                            >
+                              Remove from list
+                            </Button>{" "}
                           </li>
                         </When>
 
@@ -358,7 +397,6 @@ export default function ScannedAssetsDrawer({
                             >
                               Remove from list
                             </Button>{" "}
-                            to continue.{" "}
                             <p className="text-[10px]">
                               Note: Scan Kit QR to add the full kit
                             </p>
@@ -425,7 +463,7 @@ function ItemRow({ qrId, item }: { qrId: string; item: ScanListItem }) {
     const request = await fetch(`/api/get-scanned-item/${qrId}`);
     const response = await request.json();
 
-    /**  */
+    /** If the server returns an error, add it to the item and return */
     if (response.error) {
       setItem({
         qrId,
@@ -566,6 +604,9 @@ function AssetRow({ asset }: { asset: AssetWithBooking }) {
 }
 
 function KitRow({ kit }: { kit: KitForBooking }) {
+  const someAssetMarkedUnavailable = kit.assets.some(
+    (asset) => !asset.availableToBook
+  );
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -585,7 +626,13 @@ function KitRow({ kit }: { kit: KitForBooking }) {
         >
           kit
         </span>
-        <KitAvailabilityLabel kit={kit} />
+        {someAssetMarkedUnavailable && (
+          <AvailabilityBadge
+            badgeText="Contains non-bookable assets"
+            tooltipTitle="Kit is unavailable for check-out"
+            tooltipContent="Some assets in this kit are marked as non-bookable. You can still add the kit to your booking, but you must remove the non-bookable assets to proceed with check-out."
+          />
+        )}
       </div>
     </div>
   );

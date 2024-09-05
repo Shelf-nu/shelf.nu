@@ -140,7 +140,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "single",
+  breadcrumb: () => "Scan QR codes to add to booking",
 };
 
 export default function ScanAssetsForBookings() {
