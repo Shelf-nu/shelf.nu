@@ -1,24 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AssetStatus } from "@prisma/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Asset, Kit, Prisma } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtomValue, useSetAtom } from "jotai";
 import { createPortal } from "react-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import type { ScanListItem } from "~/atoms/qr-scanner";
 import {
   clearScannedItemsAtom,
+  removeMultipleScannedItemsAtom,
   removeScannedItemAtom,
   removeScannedItemsByAssetIdAtom,
   scannedItemsAtom,
-  scannedItemsIdsAtom,
   updateScannedItemAtom,
 } from "~/atoms/qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
-import { AvailabilityLabel } from "../booking/availability-label";
+import {
+  AvailabilityBadge,
+  KitAvailabilityLabel,
+} from "../booking/availability-label";
 import { AssetLabel } from "../icons/library";
 import { ListHeader } from "../list/list-header";
 import { Button } from "../shared/button";
@@ -55,12 +60,19 @@ export default function ScannedAssetsDrawer({
 
   // Get the scanned qrIds
   const items = useAtomValue(scannedItemsAtom);
-  const assets = Object.values(items).filter(
-    (asset): asset is AssetWithBooking => !!asset
-  );
+  const assets = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => item?.data as AssetWithBooking);
+
+  const kits = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "kit")
+    .map((item) => item?.data as KitForBooking);
+
+  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
+
   const clearList = useSetAtom(clearScannedItemsAtom);
-  const assetsIds = useAtomValue(scannedItemsIdsAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
+  const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
@@ -68,25 +80,77 @@ export default function ScannedAssetsDrawer({
   const [expanded, setExpanded] = useState(false);
   const { vh } = useViewportHeight();
 
+  const itemsListRef = useRef<HTMLDivElement>(null);
+  const prevItemsLengthRef = useRef<number>(itemsLength);
+
+  useEffect(() => {
+    /** When the items.length increases, scroll the item list div to the top */
+    if (itemsListRef.current && itemsLength > prevItemsLengthRef.current) {
+      itemsListRef.current.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+    prevItemsLengthRef.current = itemsLength;
+  }, [expanded, itemsLength]);
+
   /**
    * Check which of tha assets are already added in the booking.assets
    * Returns an array of the assetIDs that are already added
    */
-  const assetsAlreadyAdded: string[] = assetsIds
-    .filter((assetId): assetId is string => !!assetId)
-    .filter((assetId) => booking.assets.some((a) => a?.id === assetId));
-  const hasAssetsAlreadyAdded = assetsAlreadyAdded.length > 0;
+  const assetsAlreadyAddedIds: string[] = assets
+    .filter((asset) => !!asset)
+    .filter((asset) => booking.assets.some((a) => a?.id === asset.id))
+    .map((a) => !!a && a.id);
+  const hasAssetsAlreadyAdded = assetsAlreadyAddedIds.length > 0;
 
-  const assetsPartOfKit = Object.values(items)
-    .filter((asset): asset is AssetWithBooking => !!asset)
-    .filter((asset) => asset?.kitId && asset.id)
+  /** Get list of ids of the assets that are part of kit */
+  const assetsPartOfKitIds: string[] = assets
+    .filter((asset) => !!asset && asset.kitId && asset.id)
     .map((asset) => asset.id);
-  const hasAssetsPartOfKit = assetsPartOfKit.length > 0;
+  const hasAssetsPartOfKit = assetsPartOfKitIds.length > 0;
 
-  const hasConflictsToResolve = hasAssetsAlreadyAdded || hasAssetsPartOfKit;
+  /** Get assets marked as unavailable to book */
+  const unavailableAssetsIds = assets
+    .filter((asset) => !asset.availableToBook)
+    .map((a) => !!a && a.id);
+  const hasUnavailableAssets = unavailableAssetsIds.length > 0;
+
+  /** QR codes that were scanned but are not valid to be added */
+  const hasErrors = errors.length > 0;
+
+  const hasConflictsToResolve =
+    hasAssetsAlreadyAdded ||
+    hasAssetsPartOfKit ||
+    hasErrors ||
+    hasUnavailableAssets;
+
+  const totalUnresolvedConflicts =
+    unavailableAssetsIds.length +
+    assetsAlreadyAddedIds.length +
+    assetsPartOfKitIds.length +
+    errors.length;
+
   function resolveAllConflicts() {
-    removeAssetsFromList([...assetsAlreadyAdded, ...assetsPartOfKit]);
+    removeAssetsFromList([
+      ...assetsAlreadyAddedIds,
+      ...assetsPartOfKitIds,
+      ...unavailableAssetsIds,
+    ]);
+    removeItemsFromList(errors.map(([qrId]) => qrId));
   }
+
+  /** List of ids from:
+   * - all items with type asset
+   * - all assets attached to items with type kit
+   * */
+
+  const assetIdsForBooking = Array.from(
+    new Set([
+      ...assets.map((a) => a.id),
+      ...kits.flatMap((k) => k.assets.map((a) => a.id)),
+    ])
+  );
 
   return (
     <Portal>
@@ -100,7 +164,7 @@ export default function ScannedAssetsDrawer({
         }}
       >
         <div className={tw("h-full")} style={style}>
-          <div className="sr-only">Add assets to booking via scan</div>
+          <div className="sr-only">Add assets and kits to booking via scan</div>
 
           <div className="mx-auto inline-flex size-full flex-col px-4 md:max-w-4xl md:px-0">
             {/* Handle */}
@@ -122,7 +186,7 @@ export default function ScannedAssetsDrawer({
 
             {/* Header */}
             <div className="flex items-center justify-between border-b text-left">
-              <div className="py-4">{`${itemsLength} asset${
+              <div className="py-4">{`${itemsLength} item${
                 itemsLength > 1 ? "s" : ""
               } scanned`}</div>
 
@@ -163,7 +227,10 @@ export default function ScannedAssetsDrawer({
             </When>
 
             <When truthy={hasItems}>
-              <div className="flex max-h-full flex-col overflow-scroll">
+              <div
+                className="-ml-4 flex max-h-full w-screen flex-col overflow-scroll"
+                ref={itemsListRef}
+              >
                 {/* Assets list */}
                 <div>
                   <Table className="overflow-y-auto">
@@ -173,8 +240,8 @@ export default function ScannedAssetsDrawer({
                     </ListHeader>
 
                     <tbody>
-                      {Object.entries(items).map(([qrId, asset]) => (
-                        <AssetRow qrId={qrId} key={qrId} asset={asset} />
+                      {Object.entries(items).map(([qrId, item]) => (
+                        <ItemRow qrId={qrId} key={qrId} item={item} />
                       ))}
                     </tbody>
                   </Table>
@@ -187,32 +254,64 @@ export default function ScannedAssetsDrawer({
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-[14px] font-semibold">
-                            Unresolved blockers
+                            Unresolved blockers ({totalUnresolvedConflicts})
                           </p>
-                          <p>Resolve the issues below to continue</p>
+                          <p className="leading-4">
+                            Resolve the issues below to continue. They are
+                            currently blocking you from being able to confirm.
+                          </p>
                         </div>
 
                         <Button
-                          variant="block-link"
-                          className="text-[12px]"
+                          variant="secondary"
+                          size="xs"
+                          className="whitespace-nowrap text-[12px] leading-3"
                           onClick={resolveAllConflicts}
+                          title="Removes all conflicting items from the list"
                         >
-                          Resolve all
+                          Resolve all ({totalUnresolvedConflicts})
                         </Button>
                       </div>
 
                       <hr className="my-2" />
                       <ul className="list-inside list-disc text-[12px] text-gray-500">
+                        <When truthy={hasUnavailableAssets}>
+                          <li>
+                            <strong>
+                              {`${unavailableAssetsIds.length} asset${
+                                unavailableAssetsIds.length > 1
+                                  ? "s are"
+                                  : " is"
+                              }`}
+                            </strong>{" "}
+                            marked as <strong>unavailable</strong>.{" "}
+                            <Button
+                              variant="link"
+                              type="button"
+                              className="text-gray inline text-[12px] font-normal underline"
+                              onClick={() => {
+                                removeAssetsFromList(unavailableAssetsIds);
+                              }}
+                            >
+                              Remove from list
+                            </Button>{" "}
+                            to continue.
+                          </li>
+                        </When>
                         <When truthy={hasAssetsAlreadyAdded}>
                           <li>
-                            <strong>{assetsAlreadyAdded.length}</strong> assets
+                            <strong>
+                              {`${assetsAlreadyAddedIds.length} asset${
+                                assetsAlreadyAddedIds.length > 1 ? "s" : ""
+                              }`}
+                            </strong>{" "}
                             already added to the booking.{" "}
                             <Button
                               variant="link"
                               type="button"
                               className="text-gray inline text-[12px] font-normal underline"
                               onClick={() => {
-                                removeAssetsFromList(assetsAlreadyAdded);
+                                removeAssetsFromList(assetsAlreadyAddedIds);
                               }}
                             >
                               Remove from list
@@ -222,19 +321,47 @@ export default function ScannedAssetsDrawer({
                         </When>
                         <When truthy={hasAssetsPartOfKit}>
                           <li>
-                            <strong>{assetsPartOfKit.length}</strong> assets Are
-                            part of a kit.{" "}
+                            <strong>{`${assetsPartOfKitIds.length} asset${
+                              assetsPartOfKitIds.length > 1 ? "s" : ""
+                            } `}</strong>
+                            are part of a kit.{" "}
                             <Button
                               variant="link"
                               type="button"
                               className="text-gray inline text-[12px] font-normal underline"
                               onClick={() => {
-                                removeAssetsFromList(assetsPartOfKit);
+                                removeAssetsFromList(assetsPartOfKitIds);
                               }}
                             >
                               Remove from list
                             </Button>{" "}
-                            to continue.
+                            to continue.{" "}
+                            <p className="text-[10px]">
+                              Note: Scan Kit QR to add the full kit
+                            </p>
+                          </li>
+                        </When>
+
+                        <When truthy={hasErrors}>
+                          <li>
+                            <strong>{`${errors.length} QR codes `}</strong>
+                            are invalid.{" "}
+                            <Button
+                              variant="link"
+                              type="button"
+                              className="text-gray inline text-[12px] font-normal underline"
+                              onClick={() => {
+                                removeItemsFromList(
+                                  errors.map(([qrId]) => qrId)
+                                );
+                              }}
+                            >
+                              Remove from list
+                            </Button>{" "}
+                            to continue.{" "}
+                            <p className="text-[10px]">
+                              Note: Scan Kit QR to add the full kit
+                            </p>
                           </li>
                         </When>
                       </ul>
@@ -251,13 +378,13 @@ export default function ScannedAssetsDrawer({
                     className="flex max-h-full w-full"
                     method="POST"
                   >
-                    <div className="flex w-full gap-2 px-0 py-3">
-                      {assets.map((asset, index) => (
+                    <div className="flex w-full gap-2 p-3">
+                      {assetIdsForBooking.map((assetId, index) => (
                         <input
-                          key={asset.id}
+                          key={assetId}
                           type="hidden"
                           name={`assetIds[${index}]`}
-                          value={asset.id}
+                          value={assetId}
                         />
                       ))}
 
@@ -289,84 +416,84 @@ export default function ScannedAssetsDrawer({
   );
 }
 
-function AssetRow({
-  qrId,
-  asset,
-}: {
-  qrId: string;
-  asset: AssetWithBooking | undefined;
-}) {
-  const { booking } = useLoaderData<typeof loader>();
-  const setAsset = useSetAtom(updateScannedItemAtom);
-  const removeAsset = useSetAtom(removeScannedItemAtom);
+function ItemRow({ qrId, item }: { qrId: string; item: ScanListItem }) {
+  const setItem = useSetAtom(updateScannedItemAtom);
+  const removeItem = useSetAtom(removeScannedItemAtom);
 
-  const isCheckedOut = useMemo(
-    () => asset?.status === AssetStatus.CHECKED_OUT,
-    [asset]
-  );
+  /** Fetches item data based on qrId */
+  const fetchItem = useCallback(async () => {
+    const request = await fetch(`/api/get-scanned-item/${qrId}`);
+    const response = await request.json();
 
-  /** Fetches asset data based on qrId */
-  const fetchAsset = useCallback(async () => {
-    const response = await fetch(
-      `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
-    );
-    const { asset } = await response.json();
-    setAsset({ qrId, asset });
-  }, [qrId, booking.id, setAsset]);
+    /**  */
+    if (response.error) {
+      setItem({
+        qrId,
+        item: { error: response.error.message },
+      });
+      return;
+    }
+
+    const qr: Prisma.QrGetPayload<{
+      include: {
+        asset: true;
+        kit: true;
+      };
+    }> & {
+      type: "asset" | "kit" | undefined;
+    } = response.qr;
+
+    const itemWithType =
+      qr && qr.type === "asset"
+        ? { data: qr.asset, type: "asset" }
+        : { data: qr.kit, type: "kit" };
+
+    if (itemWithType && itemWithType?.data) {
+      setItem({
+        qrId,
+        item: itemWithType as ScanListItem,
+      });
+    }
+  }, [qrId, setItem]);
 
   /** Fetch the asset when qrId or booking changes */
   useEffect(() => {
-    void fetchAsset();
-  }, [qrId, booking.id, setAsset, fetchAsset]);
+    void fetchItem();
+  }, [qrId, setItem, fetchItem]);
+
+  const hasItem = !!item && !!item.data;
+  const isAsset = item?.type === "asset";
+  const isKit = item?.type === "kit";
+  const itemData = isAsset
+    ? (item?.data as Asset)
+    : isKit
+    ? (item?.data as Kit)
+    : undefined;
 
   return (
     <Tr key={qrId}>
       <Td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col gap-y-1">
-              {!asset ? (
-                <div>
-                  <p>
-                    QR id: <span className="font-semibold">{qrId}</span>
-                  </p>{" "}
-                  <TextLoader
-                    text="Fetching asset"
-                    className="text-[10px] text-gray-500"
-                  />
-                </div>
-              ) : (
-                <>
-                  <p className="word-break whitespace-break-spaces font-medium">
-                    {asset.title}
-                  </p>
+          <When truthy={!hasItem}>
+            <RowLoadingState qrId={qrId} error={item?.error} />
+          </When>
 
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <AvailabilityLabel
-                      isAddedThroughKit={
-                        booking.assets.some((a) => a.id === asset.id) &&
-                        !!asset.kitId
-                      }
-                      isAlreadyAdded={booking.assets.some(
-                        (a) => a.id === asset.id
-                      )}
-                      showKitStatus
-                      asset={asset}
-                      isCheckedOut={isCheckedOut}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+          {/* Render asset row */}
+          <When truthy={isAsset}>
+            <AssetRow asset={itemData as AssetWithBooking} />
+          </When>
+
+          <When truthy={isKit}>
+            <KitRow kit={itemData as KitForBooking} />
+          </When>
         </div>
       </Td>
       <Td>
         <Button
-          className="border-none"
+          className="border-none text-gray-500 hover:text-gray-700"
           variant="ghost"
           icon="trash"
-          onClick={() => removeAsset(qrId)}
+          onClick={() => removeItem(qrId)}
         />
       </Td>
     </Tr>
@@ -376,7 +503,7 @@ function AssetRow({
 function Tr({ children }: { children: React.ReactNode }) {
   return (
     <tr
-      className="h-[80px] items-center hover:bg-gray-50"
+      className="h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0"
       style={{
         transform: "translateZ(0)",
         willChange: "transform",
@@ -391,3 +518,126 @@ function Tr({ children }: { children: React.ReactNode }) {
 function TextLoader({ text, className }: { text: string; className?: string }) {
   return <div className={tw("loading-text", className)}>{text}...</div>;
 }
+
+function RowLoadingState({ qrId, error }: { qrId: string; error?: string }) {
+  return (
+    <div className="max-w-full">
+      <p>
+        QR id: <span className="font-semibold">{qrId}</span>
+      </p>{" "}
+      {error ? (
+        <p className="whitespace-normal text-[12px] text-error-500">{error}</p>
+      ) : (
+        <TextLoader
+          text="Fetching item"
+          className="text-[10px] text-gray-500"
+        />
+      )}
+    </div>
+  );
+}
+
+function AssetRow({ asset }: { asset: AssetWithBooking }) {
+  const { booking } = useLoaderData<typeof loader>();
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {asset.title}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          asset
+        </span>
+        <LocalAvailabilityLabel
+          isPartOfKit={!!asset.kitId}
+          isAlreadyAdded={booking.assets.some((a) => a?.id === asset.id)}
+          isMarkedAsUnavailable={!asset.availableToBook}
+        />
+      </div>
+    </div>
+  );
+}
+
+function KitRow({ kit }: { kit: KitForBooking }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {kit.name}{" "}
+        <span className="text-[12px] font-normal text-gray-700">
+          ({kit._count.assets} assets)
+        </span>
+      </p>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          kit
+        </span>
+        <KitAvailabilityLabel kit={kit} />
+      </div>
+    </div>
+  );
+}
+
+/** The global one considers a lot of states that are not relevant for this UI.
+ * Here we should show only the labels are blockers:
+ * - asset is part of kit
+ * - asset is already in the booking
+ *   */
+const LocalAvailabilityLabel = ({
+  isPartOfKit,
+  isAlreadyAdded,
+  isMarkedAsUnavailable,
+}: {
+  isPartOfKit: boolean;
+  isAlreadyAdded: boolean;
+  isMarkedAsUnavailable: boolean;
+}) => {
+  if (isMarkedAsUnavailable) {
+    return (
+      <AvailabilityBadge
+        badgeText={"Unavailable"}
+        tooltipTitle={"Asset is unavailable for bookings"}
+        tooltipContent={
+          "This asset is marked as unavailable for bookings by an administrator."
+        }
+      />
+    );
+  }
+  if (isAlreadyAdded) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already added to this booking"
+        tooltipTitle="Asset is part of booking"
+        tooltipContent="This asset is already added to the current booking."
+      />
+    );
+  }
+
+  /**
+   * Asset is part of a kit
+   */
+  if (isPartOfKit) {
+    return (
+      <AvailabilityBadge
+        badgeText="Part of kit"
+        tooltipTitle="Asset is part of a kit"
+        tooltipContent="Remove the asset from the kit to add it individually."
+      />
+    );
+  }
+
+  return null;
+};

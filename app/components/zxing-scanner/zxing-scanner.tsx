@@ -166,7 +166,7 @@ export const ZXingScanner = ({
           </fetcher.Form>
 
           {/* Overlay */}
-          <div className="absolute left-1/2 top-1/2 h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 -translate-y-1/2 rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]" />
+          <div className="absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2  rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]" />
         </>
       )}
     </div>

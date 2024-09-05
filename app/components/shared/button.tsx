@@ -12,7 +12,7 @@ export interface ButtonProps {
   className?: string;
   variant?: ButtonVariant;
   width?: ButtonWidth;
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
   icon?: IconType;
   /** Disabled can be a boolean  */
   disabled?:

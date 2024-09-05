@@ -1,5 +1,18 @@
 import { atom } from "jotai";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
+
+export type ScanListItems = {
+  [key: string]: ScanListItem;
+};
+
+export type ScanListItem =
+  | {
+      data?: AssetWithBooking | KitForBooking;
+      error?: string;
+      type?: "asset" | "kit";
+    }
+  | undefined;
 
 /***********************
  * Scanned QR Id Atom  *
@@ -10,39 +23,41 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add
  *
  ***********************/
 
-export const scannedItemsAtom = atom<{
-  [key: string]: AssetWithBooking | undefined;
-}>({});
+export const scannedItemsAtom = atom<ScanListItems>({});
 
 /** Get an array of the scanned items ids */
 export const scannedItemsIdsAtom = atom((get) =>
-  Object.values(get(scannedItemsAtom)).map((item) => item?.id)
+  Object.values(get(scannedItemsAtom)).map((item) => item?.data?.id)
 );
 
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  set(scannedItemsAtom, {
-    [qrId]: undefined, // Add the new entry at the start
-    ...currentItems, // Spread the rest of the existing items
-  });
+  if (!currentItems[qrId]) {
+    set(scannedItemsAtom, {
+      [qrId]: undefined, // Add the new entry at the start
+      ...currentItems, // Spread the rest of the existing items
+    });
+  }
 });
 
 // Update item based on key
 export const updateScannedItemAtom = atom(
   null,
-  (get, set, { qrId, asset }: { qrId: string; asset: AssetWithBooking }) => {
+  (get, set, { qrId, item }: { qrId: string; item: ScanListItem }) => {
     const currentItems = get(scannedItemsAtom);
 
     // Check if the item already exists; if it does, skip the update
-    if (currentItems[qrId]) {
+    if (!item || currentItems[qrId]) {
       return; // Skip the update if the item is already present
     }
 
-    set(scannedItemsAtom, {
-      ...currentItems,
-      [qrId]: asset,
-    });
+    if ((item && item?.data && item?.type) || item?.error) {
+      set(scannedItemsAtom, {
+        ...currentItems,
+        [qrId]: item,
+      });
+    }
   }
 );
 
@@ -69,11 +84,11 @@ export const removeMultipleScannedItemsAtom = atom(
 // Remove items based on asset id
 export const removeScannedItemsByAssetIdAtom = atom(
   null,
-  (get, set, assetIds: string[]) => {
+  (get, set, ids: string[]) => {
     const currentItems = get(scannedItemsAtom);
     const updatedItems = { ...currentItems };
-    Object.entries(currentItems).forEach(([qrId, asset]) => {
-      if (asset && assetIds.includes(asset?.id)) {
+    Object.entries(currentItems).forEach(([qrId, item]) => {
+      if (item?.data?.id && ids.includes(item?.data?.id)) {
         delete updatedItems[qrId];
       }
     });

@@ -72,7 +72,7 @@ export async function createKit({
      * 2. If the qr code belongs to the current organization
      * 3. If the qr code is not linked to an asset
      */
-    const qr = qrId ? await getQr(qrId) : null;
+    const qr = qrId ? await getQr({ id: qrId }) : null;
     const qrCodes =
       qr &&
       qr.organizationId === organizationId &&
