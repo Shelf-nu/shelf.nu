@@ -57,7 +57,6 @@ export default function ScannedAssetsDrawer({
 
   // Get the scanned qrIds
   const items = useAtomValue(scannedItemsAtom);
-  console.log(items);
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetWithBooking);
@@ -485,7 +484,7 @@ function ItemRow({ qrId, item }: { qrId: string; item: ScanListItem }) {
     if (response.error) {
       setItem({
         qrId,
-        item: { error: response.error.message },
+        item: { error: response.error.message, count: 1 },
       });
       return;
     }
@@ -580,12 +579,14 @@ function TextLoader({ text, className }: { text: string; className?: string }) {
 }
 
 function RowLoadingState({ qrId, error }: { qrId: string; error?: string }) {
-  // const items = useAtomValue(scannedItemsAtom);
-  // const item = items[qrId];
+  const items = useAtomValue(scannedItemsAtom);
+  const item = items[qrId];
+  // console.log(item);
   return (
     <div className="max-w-full">
       <p>
-        QR id: <span className="font-semibold">{qrId}</span>
+        QR id: <span className="font-semibold">{qrId}</span>{" "}
+        {item?.count > 1 && <>({item?.count})</>}
       </p>{" "}
       {error ? (
         <p className="whitespace-normal text-[12px] text-error-500">{error}</p>

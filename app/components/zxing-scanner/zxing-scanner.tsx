@@ -5,7 +5,6 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { useAtomValue } from "jotai";
 import { useZxing } from "react-zxing";
 
 import type { loader } from "~/routes/_layout+/scanner";
@@ -59,6 +58,7 @@ export const ZXingScanner = ({
 
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
+
       if (!match) {
         return;
       }
@@ -68,9 +68,9 @@ export const ZXingScanner = ({
         return;
       }
 
-      if (!allowDuplicateScan) {
-        return;
-      }
+      // if (!allowDuplicateScan) {
+      //   return;
+      // }
 
       /** At this point, a QR is successfully detected, so we can vibrate user's device for feedback */
       if (typeof navigator.vibrate === "function") {
@@ -84,7 +84,7 @@ export const ZXingScanner = ({
   const { ref } = useZxing({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
-    timeBetweenDecodingAttempts: 5,
+    timeBetweenDecodingAttempts: 50,
     onDecodeResult(result) {
       void decodeQRCodes(result.getText());
     },

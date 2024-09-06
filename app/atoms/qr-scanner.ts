@@ -6,13 +6,12 @@ export type ScanListItems = {
   [key: string]: ScanListItem;
 };
 
-export type ScanListItem =
-  | {
-      data?: AssetWithBooking | KitForBooking;
-      error?: string;
-      type?: "asset" | "kit";
-    }
-  | undefined;
+export type ScanListItem = {
+  data?: AssetWithBooking | KitForBooking;
+  error?: string;
+  type?: "asset" | "kit";
+  count: number;
+};
 
 /***********************
  * Scanned QR Id Atom  *
@@ -33,12 +32,32 @@ export const scannedItemsIdsAtom = atom((get) =>
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  if (!currentItems[qrId]) {
-    set(scannedItemsAtom, {
-      [qrId]: undefined, // Add the new entry at the start
-      ...currentItems, // Spread the rest of the existing items
-    });
+  const currentItem = currentItems[qrId];
+
+  let newItems: ScanListItems;
+  if (currentItem) {
+    // Increment the count of the existing item
+    newItems = {
+      [qrId]: {
+        ...currentItem,
+        count: currentItem.count + 1,
+      },
+      ...Object.fromEntries(
+        Object.entries(currentItems).filter(([key]) => key !== qrId)
+      ),
+    };
+  } else {
+    // Add the new item with a count of 1 at the top
+    newItems = {
+      [qrId]: {
+        data: undefined,
+        count: 1,
+      },
+      ...currentItems,
+    };
   }
+
+  set(scannedItemsAtom, newItems);
 });
 
 // Update item based on key
