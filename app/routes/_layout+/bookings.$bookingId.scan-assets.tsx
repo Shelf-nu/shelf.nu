@@ -141,6 +141,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => "Scan QR codes to add to booking",
+  name: "booking.scan-assets",
 };
 
 export default function ScanAssetsForBookings() {
@@ -170,6 +171,7 @@ export default function ScanAssetsForBookings() {
             isLoading={isLoading}
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
+            backButtonText="Booking"
           />
         ) : (
           <div className="mt-4 flex h-full flex-col items-center justify-center">

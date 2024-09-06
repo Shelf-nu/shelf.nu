@@ -1,16 +1,17 @@
-import { useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
-import { useZxing } from "react-zxing";
+import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import {
-  addQrIdToErrorShownAtom,
-  displayQrScannerNotificationAtom,
-  errorShownQrIdsAtom,
-} from "~/atoms/qr-scanner";
+  Link,
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { useZxing } from "react-zxing";
+
 import type { loader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { isQrId } from "~/utils/id";
-import QrScannerNotification from "./qr-scanner-notification";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,7 @@ type ZXingScannerProps = {
   videoMediaDevices?: MediaDeviceInfo[];
   isLoading?: boolean;
   allowDuplicateScan?: boolean;
+  backButtonText?: string;
 };
 
 export const ZXingScanner = ({
@@ -33,6 +35,7 @@ export const ZXingScanner = ({
   onQrDetectionSuccess,
   isLoading: incomingIsLoading,
   allowDuplicateScan = false,
+  backButtonText = "Back",
 }: ZXingScannerProps) => {
   const { scannerCameraId } = useLoaderData<typeof loader>();
 
@@ -41,11 +44,6 @@ export const ZXingScanner = ({
 
   const fetcher = useFetcher();
   const isSwitchingCamera = isFormProcessing(fetcher.state);
-
-  const errorShownQrIds = useAtomValue(errorShownQrIdsAtom);
-  const addQrIdToErrorShown = useSetAtom(addQrIdToErrorShownAtom);
-
-  const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   // Function to decode the QR code
   const decodeQRCodes = (result: string) => {
@@ -62,25 +60,17 @@ export const ZXingScanner = ({
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
       if (!match) {
-        displayQrNotification({ message: "Please scan a valid asset QR." });
         return;
       }
 
       const qrId = match[2]; // Get the QR id from the URL
       if (!isQrId(qrId)) {
-        displayQrNotification({ message: "Please Scan valid asset QR" });
         return;
       }
 
-      if (!allowDuplicateScan && errorShownQrIds.includes(qrId)) {
+      if (!allowDuplicateScan) {
         return;
       }
-
-      // if (!allowDuplicateScan && scannedQrIds.includes(qrId)) {
-      //   displayQrNotification({ message: "QR is already scanned." });
-      //   addQrIdToErrorShown(qrId);
-      //   return;
-      // }
 
       /** At this point, a QR is successfully detected, so we can vibrate user's device for feedback */
       if (typeof navigator.vibrate === "function") {
@@ -110,14 +100,19 @@ export const ZXingScanner = ({
 
   return (
     <div className="relative size-full min-h-[400px] overflow-hidden">
-      <QrScannerNotification />
-
       {isSwitchingCamera ? (
         <div className="mt-4 flex flex-col items-center justify-center">
           <Spinner /> Switching cameras...
         </div>
       ) : (
         <>
+          <Link
+            to=".."
+            className="absolute left-0 top-0 z-[999] inline-flex items-center justify-start p-2 text-[11px] leading-[11px] text-white"
+          >
+            <TriangleLeftIcon className="size-[14px]" />{" "}
+            <span className="mt-[-0.5px]">{backButtonText}</span>
+          </Link>
           <video
             ref={ref}
             width="100%"

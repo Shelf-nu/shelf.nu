@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset, Kit, Prisma } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAtomValue, useSetAtom } from "jotai";
 import { createPortal } from "react-dom";
 import { useZorm } from "react-zorm";
@@ -18,7 +18,7 @@ import {
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
-import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
+import { type loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
 import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "../booking/availability-label";
 import { AssetLabel } from "../icons/library";
@@ -57,6 +57,7 @@ export default function ScannedAssetsDrawer({
 
   // Get the scanned qrIds
   const items = useAtomValue(scannedItemsAtom);
+  console.log(items);
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetWithBooking);
@@ -113,16 +114,23 @@ export default function ScannedAssetsDrawer({
     .map((a) => !!a && a.id);
   const hasUnavailableAssets = unavailableAssetsIds.length > 0;
 
-  /**
-   * 1. Get the count of kits kits that have assets inside them that are not avaiable to book
-   * 2. Get an array of the asset ids inside those kits that are not available to book
-   * */
-  const countKitsWithUnavailableAssets = kits.filter((kit) =>
-    kit.assets.some((a) => !a.availableToBook)
-  ).length;
-  const unavailableAssetsIdsInKits = kits
+  /** To get the QR ids of the kits that include unavailable assets,
+   * we first find the kits and
+   * then we we search in the items to kind the keys that hold those kits */
+  const kitsWithUnavailableAssets = kits
     .filter((kit) => kit.assets.some((a) => !a.availableToBook))
-    .flatMap((kit) => kit.assets.map((a) => a.id));
+    .map((kit) => kit.id);
+  const countKitsWithUnavailableAssets = kitsWithUnavailableAssets.length;
+
+  const qrIdsOfUnavailableKits = Object.entries(items)
+    .filter(([qrId, item]) => {
+      if (!item || item.type !== "kit") return false;
+
+      if (kitsWithUnavailableAssets.includes((item?.data as Kit)?.id)) {
+        return qrId;
+      }
+    })
+    .map(([qrId]) => qrId);
 
   const hasUnavailableAssetsInKits = countKitsWithUnavailableAssets > 0;
 
@@ -133,7 +141,8 @@ export default function ScannedAssetsDrawer({
     hasAssetsAlreadyAdded ||
     hasAssetsPartOfKit ||
     hasErrors ||
-    hasUnavailableAssets;
+    hasUnavailableAssets ||
+    hasUnavailableAssetsInKits;
 
   const totalUnresolvedConflicts =
     unavailableAssetsIds.length +
@@ -147,9 +156,11 @@ export default function ScannedAssetsDrawer({
       ...assetsAlreadyAddedIds,
       ...assetsPartOfKitIds,
       ...unavailableAssetsIds,
-      ...unavailableAssetsIdsInKits,
     ]);
-    removeItemsFromList(errors.map(([qrId]) => qrId));
+    removeItemsFromList([
+      ...errors.map(([qrId]) => qrId),
+      ...qrIdsOfUnavailableKits,
+    ]);
   }
 
   /** List of ids from:
@@ -252,17 +263,26 @@ export default function ScannedAssetsDrawer({
                     </ListHeader>
 
                     <tbody>
-                      {Object.entries(items).map(([qrId, item]) => (
-                        <ItemRow qrId={qrId} key={qrId} item={item} />
-                      ))}
+                      <AnimatePresence>
+                        {Object.entries(items).map(([qrId, item]) => (
+                          <ItemRow qrId={qrId} key={qrId} item={item} />
+                        ))}
+                      </AnimatePresence>
                     </tbody>
                   </Table>
                 </div>
 
                 {/* Actions */}
                 <div>
+                  {/* Blockers */}
                   <When truthy={hasConflictsToResolve}>
-                    <div className="bg-gray-25 p-4 text-[12px]">
+                    <motion.div
+                      className="bg-gray-25 p-4 text-[12px]"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      exit={{ opacity: 0 }}
+                    >
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-[14px] font-semibold">
@@ -371,9 +391,7 @@ export default function ScannedAssetsDrawer({
                               type="button"
                               className="text-gray inline text-[12px] font-normal underline"
                               onClick={() => {
-                                removeAssetsFromList(
-                                  unavailableAssetsIdsInKits
-                                );
+                                removeItemsFromList(qrIdsOfUnavailableKits);
                               }}
                             >
                               Remove from list
@@ -403,7 +421,7 @@ export default function ScannedAssetsDrawer({
                           </li>
                         </When>
                       </ul>
-                    </div>
+                    </motion.div>
                   </When>
 
                   <When truthy={!!zo.errors.assetIds()?.message}>
@@ -540,7 +558,11 @@ function ItemRow({ qrId, item }: { qrId: string; item: ScanListItem }) {
 
 function Tr({ children }: { children: React.ReactNode }) {
   return (
-    <tr
+    <motion.tr
+      initial={{ opacity: 0, y: -80 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      exit={{ opacity: 0 }}
       className="h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0"
       style={{
         transform: "translateZ(0)",
@@ -549,7 +571,7 @@ function Tr({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-    </tr>
+    </motion.tr>
   );
 }
 
@@ -558,6 +580,8 @@ function TextLoader({ text, className }: { text: string; className?: string }) {
 }
 
 function RowLoadingState({ qrId, error }: { qrId: string; error?: string }) {
+  // const items = useAtomValue(scannedItemsAtom);
+  // const item = items[qrId];
   return (
     <div className="max-w-full">
       <p>
@@ -583,7 +607,7 @@ function AssetRow({ asset }: { asset: AssetWithBooking }) {
         {asset.title}
       </p>
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="flex flex-wrap items-center gap-1">
         <span
           className={tw(
             "inline-block bg-gray-50 px-[6px] py-[2px]",
@@ -651,9 +675,9 @@ const LocalAvailabilityLabel = ({
   isPartOfKit: boolean;
   isAlreadyAdded: boolean;
   isMarkedAsUnavailable: boolean;
-}) => {
-  if (isMarkedAsUnavailable) {
-    return (
+}) => (
+  <div className="flex gap-1">
+    <When truthy={isMarkedAsUnavailable}>
       <AvailabilityBadge
         badgeText={"Unavailable"}
         tooltipTitle={"Asset is unavailable for bookings"}
@@ -661,30 +685,22 @@ const LocalAvailabilityLabel = ({
           "This asset is marked as unavailable for bookings by an administrator."
         }
       />
-    );
-  }
-  if (isAlreadyAdded) {
-    return (
+    </When>
+
+    <When truthy={isAlreadyAdded}>
       <AvailabilityBadge
         badgeText="Already added to this booking"
         tooltipTitle="Asset is part of booking"
         tooltipContent="This asset is already added to the current booking."
       />
-    );
-  }
+    </When>
 
-  /**
-   * Asset is part of a kit
-   */
-  if (isPartOfKit) {
-    return (
+    <When truthy={isPartOfKit}>
       <AvailabilityBadge
         badgeText="Part of kit"
         tooltipTitle="Asset is part of a kit"
         tooltipContent="Remove the asset from the kit to add it individually."
       />
-    );
-  }
-
-  return null;
-};
+    </When>
+  </div>
+);
