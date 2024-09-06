@@ -52,11 +52,22 @@ export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   }
 }
 
-export async function getQr(id: Qr["id"]) {
+type QrWithInclude<T extends Prisma.QrInclude | undefined> =
+  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Qr;
+
+export async function getQr<T extends Prisma.QrInclude | undefined>({
+  id,
+  include,
+}: Pick<Asset, "id"> & {
+  include?: T;
+}): Promise<QrWithInclude<T>> {
   try {
-    return await db.qr.findUniqueOrThrow({
+    const qr = await db.qr.findUniqueOrThrow({
       where: { id },
+      include: { ...include },
     });
+
+    return qr as QrWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -401,7 +412,7 @@ export async function claimQrCode({
 }) {
   try {
     /** First, just in case we check whether its claimed */
-    const qr = await getQr(id);
+    const qr = await getQr({ id });
     if (qr.organizationId) {
       throw new ShelfError({
         message:

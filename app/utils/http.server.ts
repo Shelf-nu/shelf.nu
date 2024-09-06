@@ -198,13 +198,13 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @param cause - The error that has been catch
  * @returns The normalized error with `error` key set to the error
  */
-export function error(cause: ShelfError) {
+export function error(cause: ShelfError, shouldSendNotification = true) {
   Logger.error(cause);
 
-  // TODO: @DonKoko maybe globally rethink this?
   if (
     cause.additionalData?.userId &&
-    typeof cause.additionalData?.userId === "string"
+    typeof cause.additionalData?.userId === "string" &&
+    shouldSendNotification
   ) {
     sendNotification({
       title: cause.title || "Oops! Something went wrong",

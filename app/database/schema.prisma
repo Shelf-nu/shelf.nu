@@ -561,10 +561,13 @@ enum Currency {
   CAD // Canadian Dollar
   CHF // Swiss Franc
   CNY // Chinese Yuan
+  CZK // Czech Koruna
   DKK // Danish Krone
   INR // Indian Rupee
+  IDR // Indonesian Rupiah
   ZAR // South African Rand
   BRL // Brazilian Real
+  LKR // Sri Lankan Rupee
   MYR // Malaysian Ringgit
   MXN // Mexican Peso
   SGD // Singapore Dollar
@@ -577,7 +580,6 @@ enum Currency {
   SAR // Saudi Riyal
   AED // United Arab Emirates Dirham
   PLN // Polish Zloty
-  IDR // Indonesian Rupiah
 }
 
 enum InviteStatuses {

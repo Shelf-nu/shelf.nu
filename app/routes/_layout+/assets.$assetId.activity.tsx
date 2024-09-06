@@ -11,7 +11,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,

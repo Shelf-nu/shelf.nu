@@ -302,3 +302,17 @@ dialog {
 .scrollbar-always-visible::-webkit-scrollbar-track {
   background-color: #f0f0f0; /* Color of the scrollbar track */
 }
+
+/** Loading text */
+.loading-text {
+  display: inline-block;
+  font-family: monospace;
+  clip-path: inset(0 3ch 0 0);
+  animation: l 1s steps(4) infinite;
+}
+
+@keyframes l {
+  to {
+    clip-path: inset(0 -1ch 0 0);
+  }
+}

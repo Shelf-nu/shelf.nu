@@ -1,3 +1,4 @@
+import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type {
   Asset,
   AssetCustomFieldValue,
@@ -11,7 +12,7 @@ export interface ICustomFieldValueJson {
   valueBoolean?: boolean;
   valueDate?: string;
   valueOption?: string;
-  valueMultiLineText?: string;
+  valueMultiLineText?: RenderableTreeNode;
 }
 
 export type ShelfAssetCustomFieldValueType = Omit<

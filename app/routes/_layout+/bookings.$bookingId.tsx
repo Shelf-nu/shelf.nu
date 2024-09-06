@@ -5,7 +5,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -52,6 +52,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { RouteHandleWithName } from "./bookings";
 import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -220,6 +221,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => "single",
+  name: "bookings.$bookingId",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -548,8 +550,16 @@ export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
-  return (
+  /**When we are on the booking.scan-assets route, we render an outlet */
+  const shouldRenderOutlet =
+    currentRoute?.handle?.name === "booking.scan-assets";
+
+  return shouldRenderOutlet ? (
+    <Outlet />
+  ) : (
     <>
       <Header
         title={hasName ? name : booking.name}

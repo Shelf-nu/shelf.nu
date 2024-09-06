@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -20,7 +20,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { isErrorResponse } from "~/utils/http";
 import {
   data,
   error,
@@ -32,6 +31,7 @@ import { validEmail } from "~/utils/misc";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
 import { randomUsernameFromEmail } from "~/utils/user";
+import type { action as resendOtpAction } from "./resend-otp";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
@@ -105,6 +105,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
+type resendAction = typeof resendOtpAction;
+
 export default function OtpPage() {
   const [message, setMessage] = useState<{
     message: string;
@@ -112,40 +114,25 @@ export default function OtpPage() {
   }>();
   const data = useActionData<typeof action>();
   const [searchParams] = useSearchParams();
+  const fetcher = useFetcher<resendAction>();
 
   const zo = useZorm("otpForm", OtpSchema);
-  const transition = useNavigation();
-  const disabled = isFormProcessing(transition.state);
+  const disabled = isFormProcessing(fetcher.state);
 
   const email = searchParams.get("email") || "";
   const mode = searchParams.get("mode") as OtpVerifyMode;
   const pageData = getOtpPageData(mode);
 
-  async function handleResendOtp() {
+  function handleResendOtp() {
     const formData = new FormData();
     formData.append("email", email);
     formData.append("mode", mode);
 
     try {
-      const response = await fetch("/send-otp", {
-        method: "post",
-        body: formData,
+      fetcher.submit(formData, {
+        method: "POST",
+        action: "/resend-otp",
       });
-
-      if (response.status === 200) {
-        setMessage({
-          message: "Email sent successfully. Please check your inbox.",
-          type: "success",
-        });
-      } else {
-        const data = await response.json();
-        setMessage({
-          message: isErrorResponse(data)
-            ? data.error.message
-            : "Something went wrong. Please try again!",
-          type: "error",
-        });
-      }
     } catch {
       setMessage({
         message: "Something went wrong. Please try again.",
@@ -153,6 +140,23 @@ export default function OtpPage() {
       });
     }
   }
+
+  /** Handle success and error state when resending with fetcher */
+  useEffect(() => {
+    if (fetcher?.data) {
+      if (fetcher.data.error) {
+        setMessage({
+          message: fetcher.data.error.message,
+          type: "error",
+        });
+      } else {
+        setMessage({
+          message: "Email sent successfully. Please check your inbox.",
+          type: "success",
+        });
+      }
+    }
+  }, [fetcher]);
 
   return (
     <>
@@ -201,7 +205,9 @@ export default function OtpPage() {
             onClick={handleResendOtp}
           >
             Did not receive a code?{" "}
-            <span className="text-primary-500">Send again</span>
+            <span className="text-primary-500">
+              {disabled ? "Sending code..." : "Send again"}
+            </span>
           </button>
         </div>
       </div>

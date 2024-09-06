@@ -8,14 +8,16 @@ type ListHeaderProps = {
   hideFirstColumn?: boolean;
   bulkActions?: ListProps["bulkActions"];
   title?: string;
+  className?: string;
 };
 
 export const ListHeader = ({
   children,
   hideFirstColumn = false,
   bulkActions,
+  className,
 }: ListHeaderProps) => (
-  <thead className="border-b">
+  <thead className={tw("border-b", className)}>
     <tr className="">
       {bulkActions ? <BulkListHeader /> : null}
       {hideFirstColumn ? null : (

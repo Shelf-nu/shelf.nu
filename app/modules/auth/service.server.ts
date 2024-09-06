@@ -85,12 +85,15 @@ export async function resendVerificationEmail(email: string) {
       throw error;
     }
   } catch (cause) {
+    // @ts-expect-error
+    const isRateLimitError = cause?.code === "over_email_send_rate_limit";
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while resending the verification email. Please try again later or contact support.",
       additionalData: { email },
       label,
+      shouldBeCaptured: !isRateLimitError,
     });
   }
 }
@@ -181,8 +184,8 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
-    const isRateLimitError =
-      cause instanceof AuthError && cause.code === "over_email_send_rate_limit";
+    // @ts-expect-error
+    const isRateLimitError = cause.code === "over_email_send_rate_limit";
     throw new ShelfError({
       cause,
       message:

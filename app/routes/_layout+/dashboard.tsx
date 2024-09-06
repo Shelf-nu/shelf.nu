@@ -35,7 +35,7 @@ import {
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,

@@ -19,7 +19,7 @@ export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => (
     <DropdownMenuTrigger
       className={tw("asset-actions", fullWidth ? "w-full" : "")}
     >
-      <span className="flex items-center gap-2">
+      <span className="flex size-6 items-center justify-center gap-2 text-center">
         <VerticalDotsIcon />
       </span>
     </DropdownMenuTrigger>

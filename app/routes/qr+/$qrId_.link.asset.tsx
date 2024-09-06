@@ -69,7 +69,7 @@ export const loader = async ({
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
   try {
-    const qr = await getQr(qrId);
+    const qr = await getQr({ id: qrId });
     if (qr?.assetId || qr?.kitId) {
       throw new ShelfError({
         message: "This QR code is already linked to an asset or a kit.",

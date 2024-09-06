@@ -7,7 +7,11 @@ import { data, error, parseData } from "~/utils/http.server";
 
 export const ClientNotificationSchema = z.object({
   title: z.string().min(4, { message: "Title is required" }),
-  message: z.string().min(10, { message: "Message is required" }),
+  message: z
+    .string()
+    .min(10, { message: "Message is required" })
+    .optional()
+    .nullable(),
   icon: z.custom<NotificationIcon>(),
 });
 
