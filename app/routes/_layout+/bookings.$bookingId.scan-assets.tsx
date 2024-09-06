@@ -154,9 +154,9 @@ export default function ScanAssetsForBookings() {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
-  function handleQrDetectionSuccess(qrId: string) {
-    /** If the asset is not already in the list */
-    addItem(qrId);
+  function handleQrDetectionSuccess(qrId: string, error?: string) {
+    /** WE send the error to the item. addItem will automatically handle the data based on its value */
+    addItem(qrId, error);
   }
 
   return (
@@ -172,6 +172,7 @@ export default function ScanAssetsForBookings() {
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
             backButtonText="Booking"
+            allowNonShelfCodes
           />
         ) : (
           <div className="mt-4 flex h-full flex-col items-center justify-center">

@@ -31,15 +31,25 @@ export const scannedItemsIdsAtom = atom((get) =>
 );
 
 // Add item to object with value `undefined` (just receives the key)
-export const addScannedItemAtom = atom(null, (get, set, qrId: string) => {
-  const currentItems = get(scannedItemsAtom);
-  if (!currentItems[qrId]) {
-    set(scannedItemsAtom, {
-      [qrId]: undefined, // Add the new entry at the start
-      ...currentItems, // Spread the rest of the existing items
-    });
+export const addScannedItemAtom = atom(
+  null,
+  (get, set, qrId: string, error?: string) => {
+    const currentItems = get(scannedItemsAtom);
+    if (!currentItems[qrId]) {
+      /** Set can optionally receive error. If it does, add it to the item.
+       * This is used for errors that are related to the QR code itself, not the item.
+       */
+      set(scannedItemsAtom, {
+        [qrId]: error
+          ? {
+              error: error,
+            }
+          : undefined, // Add the new entry at the start
+        ...currentItems, // Spread the rest of the existing items
+      });
+    }
   }
-});
+);
 
 // Update item based on key
 export const updateScannedItemAtom = atom(
