@@ -97,6 +97,50 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
       });
 
+    const bookings = await db.booking
+      .findMany({
+        where: {
+          organizationId,
+          status: {
+            in: ["ONGOING", "OVERDUE"],
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        include: {
+          custodianTeamMember: {
+            include: {
+              user: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  profilePicture: true,
+                  email: true,
+                },
+              },
+            },
+          },
+          custodianUser: {
+            select: {
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+              email: true,
+            },
+          },
+          assets: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load assets",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      });
+
     const announcement = await db.announcement
       .findFirst({
         where: {
@@ -128,6 +172,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         assets,
+        bookings,
         locale: getLocale(request),
         currency: currentOrganization?.currency,
         totalValuation,
@@ -136,6 +181,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipOnboardingChecklist: cookie.skipOnboardingChecklist,
         custodiansData: getCustodiansOrderedByTotalCustodies({
           assets,
+          bookings,
         }),
         mostScannedAssets: getMostScannedAssets({ assets }),
         mostScannedCategories: getMostScannedAssetsCategories({ assets }),

@@ -1,4 +1,4 @@
-import type { Custody, Prisma } from "@prisma/client";
+import type { Booking, Custody, Prisma } from "@prisma/client";
 import {
   assetStatusColorMap,
   userFriendlyAssetStatus,
@@ -150,23 +150,42 @@ function hasCustody(asset: Asset): asset is Asset & { custody: Custody } {
 
 export function getCustodiansOrderedByTotalCustodies({
   assets,
+  bookings
 }: {
   assets: Asset[];
+  bookings: Booking[];
 }) {
+
   const assetsWithCustody = assets.filter(
     (asset) => asset.custody && asset.custody.custodian
   );
-  const allCustodiansSet = new Set(
+
+  const allDirectCustodiansSet = new Set(
     assetsWithCustody.filter(hasCustody).map((asset) => asset.custody.custodian)
   );
-  const allCustodians = Array.from(allCustodiansSet).filter(Boolean);
+
+  const allDirectCustodians = Array.from(allDirectCustodiansSet).filter(Boolean);
+
+  const allBookerCustodiansSet = new Set(
+    bookings.map((booking) => booking.custodianUser ? { id: booking.custodianUserId, user: booking.custodianUser } : { id: booking.custodianTeamMemberId, user: booking.custodianTeamMember })
+  );
+  const allBookerCustodians = Array.from(allBookerCustodiansSet).filter(Boolean);
+  const allCustodians = [...allDirectCustodians, ...allBookerCustodians];
 
   let custodianCounts: { [key: string]: number } = {};
 
   for (let asset of assetsWithCustody) {
-    if (asset.custody) {
-      let custodianId = asset.custody.custodian.id;
+    if (asset.custody && asset.custody.custodian.userId) {
+      let custodianId = asset.custody.custodian.userId;
       custodianCounts[custodianId] = (custodianCounts[custodianId] || 0) + 1;
+    }
+  }
+
+  for (let booking of bookings) {
+    if (booking.custodianUserId) {
+      custodianCounts[booking.custodianUserId] = (custodianCounts[booking.custodianUserId] || 0) + booking.assets.length;
+    } else if (booking.custodianTeamMemberId) {
+      custodianCounts[booking.custodianTeamMemberId] = (custodianCounts[booking.custodianTeamMemberId] || 0) + booking.assets.length;
     }
   }
 
