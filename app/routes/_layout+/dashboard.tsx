@@ -19,6 +19,7 @@ import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
+import { getBookings } from "~/modules/booking/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -97,49 +98,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
       });
 
-    const bookings = await db.booking
-      .findMany({
-        where: {
-          organizationId,
-          status: {
-            in: ["ONGOING", "OVERDUE"],
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        include: {
-          custodianTeamMember: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                  email: true,
-                },
-              },
-            },
-          },
-          custodianUser: {
-            select: {
-              firstName: true,
-              lastName: true,
-              profilePicture: true,
-              email: true,
-            },
-          },
-          assets: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to load assets",
-          additionalData: { userId, organizationId },
-          label: "Dashboard",
-        });
-      });
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      perPage: 1000,
+      statuses: ["ONGOING", "OVERDUE"],
+      extraInclude: {
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    });
 
     const announcement = await db.announcement
       .findFirst({
@@ -172,7 +141,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         assets,
-        bookings,
         locale: getLocale(request),
         currency: currentOrganization?.currency,
         totalValuation,

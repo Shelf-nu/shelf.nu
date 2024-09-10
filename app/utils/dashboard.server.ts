@@ -1,4 +1,4 @@
-import type { Booking, Custody, Prisma } from "@prisma/client";
+import type { Custody, Prisma } from "@prisma/client";
 import {
   assetStatusColorMap,
   userFriendlyAssetStatus,
@@ -153,7 +153,13 @@ export function getCustodiansOrderedByTotalCustodies({
   bookings
 }: {
   assets: Asset[];
-  bookings: Booking[];
+  bookings: Prisma.BookingGetPayload<{
+    include: {
+      custodianTeamMember: true,
+      custodianUser: true,
+      assets: true
+    }
+  }>[];
 }) {
 
   const assetsWithCustody = assets.filter(
@@ -167,17 +173,17 @@ export function getCustodiansOrderedByTotalCustodies({
   const allDirectCustodians = Array.from(allDirectCustodiansSet).filter(Boolean);
 
   const allBookerCustodiansSet = new Set(
-    bookings.map((booking) => booking.custodianUser ? { id: booking.custodianUserId, user: booking.custodianUser } : { id: booking.custodianTeamMemberId, user: booking.custodianTeamMember })
+    bookings.map((booking) => booking.custodianUser ? { id: booking.custodianUserId, userId: booking.custodianUserId, user: booking.custodianUser } : { id: booking.custodianTeamMemberId, ...booking.custodianTeamMember })
   );
   const allBookerCustodians = Array.from(allBookerCustodiansSet).filter(Boolean);
   const allCustodians = [...allDirectCustodians, ...allBookerCustodians];
-
   let custodianCounts: { [key: string]: number } = {};
 
   for (let asset of assetsWithCustody) {
-    if (asset.custody && asset.custody.custodian.userId) {
-      let custodianId = asset.custody.custodian.userId;
-      custodianCounts[custodianId] = (custodianCounts[custodianId] || 0) + 1;
+    if (asset.custody) {
+      // will use userId to map and show consolidated hold of assets (through bookings or direct custodies) of a team member, in case of NRM will use custodian id
+      let userId = asset.custody.custodian.userId ? asset.custody.custodian.userId : asset.custody.custodian.id;
+      custodianCounts[userId] = (custodianCounts[userId] || 0) + 1;
     }
   }
 
@@ -189,6 +195,7 @@ export function getCustodiansOrderedByTotalCustodies({
     }
   }
 
+
   /**
    * Make array for easier sorting
    */
@@ -197,7 +204,7 @@ export function getCustodiansOrderedByTotalCustodies({
       id,
       count,
       custodian: allCustodians.find(
-        (custodian) => custodian.id === id
+        (custodian) => custodian.userId ? custodian.userId === id : custodian.id === id
       ) as TeamMemberWithUser,
     })
   );
