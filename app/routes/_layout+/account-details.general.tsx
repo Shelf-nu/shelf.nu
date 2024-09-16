@@ -27,7 +27,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ADMIN_EMAIL } from "~/utils/env";
+import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -120,7 +120,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         void sendEmail({
           to: ADMIN_EMAIL || "support@shelf.nu",
           subject: "Delete account request",
-          text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n\n Reason: ${reason}\n\n`,
+          text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
         });
 
         void sendEmail({
