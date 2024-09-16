@@ -84,7 +84,7 @@
     "maplibre-gl": "^4.0.0",
     "nodemailer": "^6.9.9",
     "nprogress": "^0.2.0",
-    "path-to-regexp": "^6.2.1",
+    "path-to-regexp": "^6.3.0",
     "pg-boss": "^9.0.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",
