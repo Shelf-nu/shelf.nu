@@ -225,15 +225,6 @@ export default function ScannedAssetsDrawer({
                       ))}
 
                       <Button
-                        type="button"
-                        variant="outline"
-                        width="full"
-                        disabled={isLoading}
-                      >
-                        Close
-                      </Button>
-
-                      <Button
                         width="full"
                         type="submit"
                         disabled={isLoading || hasConflictsToResolve}
