@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset, Kit, Prisma } from "@prisma/client";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, useRouteLoaderData } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAtomValue, useSetAtom } from "jotai";
 import { createPortal } from "react-dom";
@@ -14,6 +14,7 @@ import {
   updateScannedItemAtom,
 } from "~/atoms/qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
@@ -52,6 +53,10 @@ export default function ScannedAssetsDrawer({
     "AddScannedAssetsToBooking",
     addScannedAssetsToBookingSchema
   );
+
+  let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
+    "routes/_layout+/_layout"
+  )?.minimizedSidebar;
 
   // Get the scanned qrIds
   const items = useAtomValue(scannedItemsAtom);
@@ -107,6 +112,7 @@ export default function ScannedAssetsDrawer({
       <div
         className={tw(
           "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out",
+          minimizedSidebar ? "lg:left-[82px]" : "lg:left-[312px]",
           className
         )}
         style={{
@@ -116,7 +122,7 @@ export default function ScannedAssetsDrawer({
         <div className={tw("h-full")} style={style}>
           <div className="sr-only">Add assets and kits to booking via scan</div>
 
-          <div className="mx-auto inline-flex size-full flex-col px-4 md:max-w-4xl md:px-0">
+          <div className="mx-auto inline-flex size-full flex-col px-4 ">
             {/* Handle */}
             <motion.div
               className="py-1 text-center hover:cursor-grab"
@@ -178,7 +184,7 @@ export default function ScannedAssetsDrawer({
 
             <When truthy={hasItems}>
               <div
-                className="-ml-4 flex max-h-full w-screen flex-col overflow-scroll"
+                className="-ml-4 flex max-h-full w-screen flex-col overflow-scroll md:ml-0 md:w-full"
                 ref={itemsListRef}
               >
                 {/* Assets list */}
