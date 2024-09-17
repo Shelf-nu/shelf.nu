@@ -1,4 +1,4 @@
-import { CalendarIcon } from "@radix-ui/react-icons";
+import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import { Spinner } from "./spinner";
 
 import {
@@ -95,7 +95,8 @@ export type IconType =
   | "activate"
   | "deactivate"
   | "scan"
-  | "tool";
+  | "tool"
+  | "rows";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -149,6 +150,7 @@ export const iconsMap: IconsMap = {
   deactivate: <XIcon />,
   scan: <ScanIcon />,
   tool: <ToolIcon />,
+  rows: <RowsIcon />,
 };
 
 export default iconsMap;

@@ -146,7 +146,6 @@ export const handle = {
 
 export default function ScanAssetsForBookings() {
   const addItem = useSetAtom(addScannedItemAtom);
-
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 

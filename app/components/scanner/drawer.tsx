@@ -107,6 +107,12 @@ export default function ScannedAssetsDrawer({
     kits,
   });
 
+  // Clear the list when the component is mounted
+  useEffect(() => {
+    clearList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <Portal>
       <div
