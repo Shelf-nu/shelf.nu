@@ -1,4 +1,4 @@
-import { CalendarIcon } from "@radix-ui/react-icons";
+import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import { Spinner } from "./spinner";
 
 import {
@@ -42,6 +42,7 @@ import {
   AssetLabel,
   LockIcon,
   ActiveSwitchIcon,
+  ScanIcon,
   MapIcon,
   ToolIcon,
 } from "../icons/library";
@@ -93,7 +94,9 @@ export type IconType =
   | "lock"
   | "activate"
   | "deactivate"
-  | "tool";
+  | "scan"
+  | "tool"
+  | "rows";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -145,7 +148,9 @@ export const iconsMap: IconsMap = {
   lock: <LockIcon />,
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
+  scan: <ScanIcon />,
   tool: <ToolIcon />,
+  rows: <RowsIcon />,
 };
 
 export default iconsMap;
