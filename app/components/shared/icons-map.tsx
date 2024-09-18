@@ -45,6 +45,8 @@ import {
   ScanIcon,
   MapIcon,
   ToolIcon,
+  AddTagsIcon,
+  RemoveTagsIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -68,6 +70,8 @@ export type IconType =
   | "question"
   | "write"
   | "tag"
+  | "tag-remove"
+  | "tag-add"
   | "category"
   | "location"
   | "gps"
@@ -122,6 +126,8 @@ export const iconsMap: IconsMap = {
   question: <QuestionsIcon />,
   write: <WriteIcon />,
   tag: <TagsIcon />,
+  "tag-add": <AddTagsIcon />,
+  "tag-remove": <RemoveTagsIcon />,
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
   gps: <GpsMarkerIcon />,

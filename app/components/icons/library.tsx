@@ -867,6 +867,58 @@ export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const AddTagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m21 10.923-7.594-7.53c-.519-.514-.778-.77-1.081-.955a3.015 3.015 0 0 0-.867-.356C11.112 2 10.745 2 10.012 2H6M3 8.643v1.958c0 .485 0 .727.055.955.05.203.13.396.24.574.123.2.296.371.642.714l7.8 7.734c.792.785 1.188 1.178 1.645 1.325.402.13.834.13 1.236 0 .457-.147.853-.54 1.645-1.325l2.474-2.454c.792-.785 1.188-1.177 1.337-1.63.13-.399.13-.828 0-1.226-.149-.453-.545-.845-1.337-1.63l-7.3-7.238c-.346-.343-.519-.515-.72-.638a2.011 2.011 0 0 0-.579-.237c-.23-.055-.474-.055-.963-.055H6.2c-1.12 0-1.68 0-2.108.216-.376.19-.682.494-.874.867C3 6.977 3 7.533 3 8.643Z"
+    />
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.3}
+      d="M22.714 3.357H18M20.357 1v4.714"
+    />
+  </svg>
+);
+
+export const RemoveTagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m20 11-7.594-7.594c-.519-.519-.778-.778-1.081-.964a3.001 3.001 0 0 0-.867-.36C10.112 2 9.746 2 9.012 2H5M2 8.7v1.975c0 .489 0 .733.055.963.05.204.13.4.24.579.123.201.296.374.642.72l7.8 7.8c.792.792 1.188 1.188 1.645 1.337a2 2 0 0 0 1.236 0c.457-.149.853-.545 1.645-1.337l2.474-2.474c.792-.792 1.188-1.188 1.337-1.645a2 2 0 0 0 0-1.236c-.149-.457-.545-.853-1.337-1.645l-7.3-7.3c-.346-.346-.519-.519-.72-.642a2 2 0 0 0-.579-.24c-.23-.055-.474-.055-.963-.055H5.2c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C2 7.02 2 7.58 2 8.7Z"
+    />
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.3}
+      d="M22.024 5.024 18.69 1.69m3.334 0L18.69 5.024"
+    />
+  </svg>
+);
+
 export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="18"

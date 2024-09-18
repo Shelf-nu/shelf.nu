@@ -2651,3 +2651,54 @@ export async function bulkUpdateAssetCategory({
     });
   }
 }
+
+export async function bulkAssignAssetTags({
+  userId,
+  assetIds,
+  organizationId,
+  tagsIds,
+  currentSearchParams,
+  remove,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  tagsIds: string[];
+  currentSearchParams?: string | null;
+  remove: boolean;
+}) {
+  try {
+    const shouldUpdateAll = assetIds.includes(ALL_SELECTED_KEY);
+    let _assetIds = assetIds;
+
+    if (shouldUpdateAll) {
+      const allOrgAssetIds = await db.asset.findMany({
+        where: getAssetsWhereInput({ organizationId, currentSearchParams }),
+        select: { id: true },
+      });
+      _assetIds = allOrgAssetIds.map((a) => a.id);
+    }
+
+    const updatePromises = _assetIds.map((id) =>
+      db.asset.update({
+        where: { id },
+        data: {
+          tags: {
+            [remove ? "disconnect" : "connect"]: tagsIds.map((id) => ({ id })), // IDs of tags you want to connect
+          },
+        },
+      })
+    );
+
+    await Promise.all(updatePromises);
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating category.",
+      additionalData: { userId, assetIds, organizationId, tagsIds },
+      label,
+    });
+  }
+}
