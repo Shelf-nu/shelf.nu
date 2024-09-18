@@ -1,3 +1,4 @@
+import { clear } from "node:console";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset, Kit, Prisma } from "@prisma/client";
 import { Form, useLoaderData, useRouteLoaderData } from "@remix-run/react";
@@ -27,7 +28,6 @@ import { Button } from "../shared/button";
 
 import { Table, Td, Th } from "../table";
 import When from "../when/when";
-import { clear } from "node:console";
 
 type ScannedAssetsDrawerProps = {
   className?: string;
