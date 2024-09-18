@@ -106,7 +106,12 @@ export function BookingAssetsColumn() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button icon="scan" variant="secondary" to="scan-assets">
+              <Button
+                icon="scan"
+                variant="secondary"
+                to="scan-assets"
+                disabled={manageAssetsButtonDisabled}
+              >
                 Scan
               </Button>
               <Button
