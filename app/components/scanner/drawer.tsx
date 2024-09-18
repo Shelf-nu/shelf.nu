@@ -27,6 +27,7 @@ import { Button } from "../shared/button";
 
 import { Table, Td, Th } from "../table";
 import When from "../when/when";
+import { clear } from "node:console";
 
 type ScannedAssetsDrawerProps = {
   className?: string;
@@ -107,11 +108,15 @@ export default function ScannedAssetsDrawer({
     kits,
   });
 
-  // Clear the list when the component is mounted
-  useEffect(() => {
-    clearList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  /** Clear the list on dismount */
+  useEffect(
+    () => () => {
+      if (hasItems) {
+        clearList();
+      }
+    },
+    [clearList, hasItems]
+  );
 
   return (
     <Portal>
@@ -223,7 +228,7 @@ export default function ScannedAssetsDrawer({
                   </When>
                   <Form
                     ref={zo.ref}
-                    className="flex max-h-full w-full"
+                    className="mb-4 flex max-h-full w-full"
                     method="POST"
                   >
                     <div className="flex w-full gap-2 p-3">
