@@ -112,6 +112,35 @@ export const ImportContent = () => (
       <b>"cf:purchase date, type:date"</b>
     </div>
 
+    <h4 className="mt-2">Importing with QR codes</h4>
+    <div>
+      You also have the option to se a Shelf QR code for each asset. This is
+      very valuable if you already have Shelf QR codes printed and you want to
+      link them to the assets you are importing.
+      <br />
+      This feature comes with the following limitations:
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          <b>Existing code</b> - the QR code needs to already exist in shelf
+        </li>
+        <li>
+          <b>No duplicate codes</b> - the qrId needs to be unique for each asset
+        </li>
+        <li>
+          <b>No linked codes</b> - the qrId needs not be linked to any asset or
+          kit
+        </li>
+        <li>
+          <b>QR ownership</b> - the QR code needs to be either unclaimed or
+          belong to the organization you are trying to import it to.
+        </li>
+      </ul>
+      If no <b>"qrId"</b> is used a new QR code will be generated.
+      <br />
+      If you are interesting in receiving some unclaimed or unlinked codes, feel
+      free to get in touch with support and we can provide those for you.
+    </div>
+
     <h4 className="mt-2">Extra considerations</h4>
     <ul className="list-inside list-disc">
       <li>
