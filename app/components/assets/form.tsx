@@ -124,6 +124,12 @@ export const AssetForm = ({
     };
   }>();
 
+  /** Get the tags from the loader */
+  const tagsSuggestions = useLoaderData<typeof loader>().tags.map((tag) => ({
+    label: tag.name,
+    value: tag.id,
+  }));
+
   return (
     <Card className="w-full lg:w-min">
       <Form
@@ -286,7 +292,10 @@ export const AssetForm = ({
           required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
           <InnerLabel hideLg={true}>Tags</InnerLabel>
-          <TagsAutocomplete existingTags={tags ?? []} />
+          <TagsAutocomplete
+            existingTags={tags ?? []}
+            suggestions={tagsSuggestions}
+          />
         </FormRow>
 
         <FormRow

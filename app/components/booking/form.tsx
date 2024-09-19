@@ -428,22 +428,37 @@ export function BookingForm({
                 value={item}
               />
             ))}
-            <div className="flex gap-3">
+            <div className="flex flex-col">
+              {!assetIds ? (
+                <Button
+                  icon="scan"
+                  className="mb-1"
+                  type="submit"
+                  disabled={disabled}
+                  value="scan"
+                  name="intent"
+                >
+                  Scan QR codes
+                </Button>
+              ) : null}
+              <Button
+                className="mb-3 whitespace-nowrap"
+                icon="rows"
+                value="create"
+                name="intent"
+                disabled={disabled}
+              >
+                {assetIds ? "Create Booking" : "View assets list"}
+              </Button>
+              <hr />
               <Button
                 variant="secondary"
                 to=".."
                 width="full"
                 disabled={disabled}
-                className="w-1/2 whitespace-nowrap"
+                className=" mt-3 whitespace-nowrap"
               >
                 Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={disabled}
-                className="w-1/2 whitespace-nowrap"
-              >
-                {assetIds ? "Create Booking" : "Check Asset Availability"}
               </Button>
             </div>
             <div className="h-3" />

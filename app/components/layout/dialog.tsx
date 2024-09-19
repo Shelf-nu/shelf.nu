@@ -38,7 +38,7 @@ export const Dialog = ({
               <XIcon />
             </Button>
           </div>
-          <div className="grow overflow-auto">{children}</div>
+          <div className="dialog-body grow overflow-auto">{children}</div>
         </div>
       </dialog>
     </div>
