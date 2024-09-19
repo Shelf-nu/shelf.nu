@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -18,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 import { WarningBox } from "../shared/warning-box";
+import { Table, Td, Th, Tr } from "../table";
 
 export const ImportBackup = () => (
   <>
@@ -212,6 +214,43 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             <div>
               <h5 className="text-red-500">{data.error.title}</h5>
               <p className="text-red-500">{data.error.message}</p>
+              {data?.error?.additionalData?.duplicateCodes ? (
+                <BrokenQrCodesTable
+                  title="Duplicate codes"
+                  data={
+                    data.error.additionalData
+                      .duplicateCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.nonExistentCodes ? (
+                <BrokenQrCodesTable
+                  title="Non existent codes"
+                  data={
+                    data.error.additionalData
+                      .nonExistentCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.linkedCodes ? (
+                <BrokenQrCodesTable
+                  title="Already linked codes"
+                  data={
+                    data.error.additionalData
+                      .linkedCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.connectedToOtherOrgs ? (
+                <BrokenQrCodesTable
+                  title="Some codes do not belong to this organization"
+                  data={
+                    data.error.additionalData
+                      .connectedToOtherOrgs as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+
               <p className="mt-2">
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
@@ -261,3 +300,33 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
     </fetcher.Form>
   );
 };
+
+function BrokenQrCodesTable({
+  title,
+  data,
+}: {
+  title: string;
+  data: QRCodePerImportedAsset[];
+}) {
+  return (
+    <div className="mt-3">
+      <h5>{title}</h5>
+      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
+        <thead>
+          <Tr>
+            <Th>Asset title</Th>
+            <Th>QR ID</Th>
+          </Tr>
+        </thead>
+        <tbody>
+          {data.map((code: { title: string; qrId: string }) => (
+            <Tr key={code.title}>
+              <Td>{code.title}</Td>
+              <Td>{code.qrId}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
