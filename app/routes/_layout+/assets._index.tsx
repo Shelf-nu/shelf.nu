@@ -11,6 +11,7 @@ import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetIndexPagination } from "~/components/assets/asset-index-pagination";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
@@ -484,6 +485,7 @@ export const AssetsList = ({
       <List
         title="Assets"
         ItemComponent={ListAssetContent}
+        customPagination={<AssetIndexPagination />}
         /**
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */

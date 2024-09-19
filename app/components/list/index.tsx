@@ -73,6 +73,9 @@ export type ListProps = {
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
   bulkActions?: React.ReactElement;
+
+  /** Optionally recieve an element for custom pagination */
+  customPagination?: React.ReactElement;
 };
 
 /**
@@ -89,6 +92,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     customEmptyStateContent,
     emptyStateClassName,
     bulkActions,
+    customPagination,
   }: ListProps,
   ref
 ) {
@@ -197,7 +201,6 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
             </div>
             {!isBaseOrSelfService ? <div>{bulkActions}</div> : null}
           </div>
-
           <Table
             className={tw(
               "list",
@@ -224,7 +227,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               ))}
             </tbody>
           </Table>
-          <Pagination />
+          {customPagination ? customPagination : <Pagination />}
         </>
       )}
     </div>
