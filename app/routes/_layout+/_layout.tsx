@@ -3,9 +3,11 @@ import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
+import InstallPwaPromptModal from "~/components/layout/install-pwa-prompt-modal";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
@@ -96,8 +98,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         )?.roles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
-        hideSupportBanner: cookie.hideSupportBanner,
+        hideNoticeCard: cookie.hideNoticeCard,
         minimizedSidebar: cookie.minimizedSidebar,
+        hideInstallPwaPrompt: cookie.hideInstallPwaPrompt,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
@@ -124,7 +127,6 @@ export default function App() {
   const { currentOrganizationId, disabledTeamOrg } =
     useLoaderData<typeof loader>();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
-
   return (
     <>
       <div
@@ -148,6 +150,13 @@ export default function App() {
               )}
             </div>
             <Toaster />
+            <ClientOnly fallback={null}>
+              {() =>
+                window.matchMedia("(max-width: 640px)").matches ? (
+                  <InstallPwaPromptModal />
+                ) : null
+              }
+            </ClientOnly>
           </main>
         </div>
       </div>
