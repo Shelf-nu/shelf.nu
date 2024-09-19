@@ -1107,12 +1107,15 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
   );
 
+  const hasKits = assets.some((asset) => !!asset.kitId);
+
   return {
     hasAssets,
     hasUnavailableAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
+    hasKits,
   };
 }
 
@@ -1485,6 +1488,50 @@ export async function bulkCancelBookings({
       cause,
       message,
       additionalData: { bookingIds, organizationId, userId },
+      label,
+    });
+  }
+}
+
+export async function addScannedAssetsToBooking({
+  assetIds,
+  bookingId,
+  organizationId,
+}: {
+  assetIds: Asset["id"][];
+  bookingId: Booking["id"];
+  organizationId: Booking["organizationId"];
+}) {
+  try {
+    const booking = await db.booking.findFirstOrThrow({
+      where: { id: bookingId, organizationId },
+    });
+
+    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
+     * If there are already checked out or in custody assets, the user wont be able to check out
+     */
+
+    /** Adding assets into booking */
+    return await db.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while adding scanned assets to booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetIds, bookingId, organizationId },
       label,
     });
   }

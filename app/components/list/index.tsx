@@ -170,8 +170,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                         selectedBulkItemsCount < totalItems && (
                           <Button
                             onClick={handleSelectAllItems}
-                            variant="link"
-                            className="-mt-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
+                            variant="block-link"
                           >
                             Select all {totalItems} entries
                           </Button>
