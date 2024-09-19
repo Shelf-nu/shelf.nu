@@ -54,7 +54,7 @@ Shelf is ideal for managing:
 - **IT Asset Management**: Track devices, peripherals, and office technology.
 - **Theatre & Arts**: Perfect for managing props, costumes, and scenic elements for productions.
 - **Home Inventory**: Organize and track personal items, manage warranties, and know their locations.
-- **Educational Institutions**: Centralize and manage department assets for better collaboration.
+- **Educational Institutions**: Centralize and manage department assets for **better** collaboration.
 
 ---
 
@@ -63,18 +63,27 @@ Shelf is ideal for managing:
 To set up Shelf:
 
 1. **Clone the Repo**:
-    ```bash
-    git clone https://github.com/Shelf-nu/shelf.nu.git
-    cd shelf.nu
-    ```
+   ```bash
+   git clone https://github.com/Shelf-nu/shelf.nu.git
+   cd shelf.nu
+   ```
 2. **Install Dependencies**:
-    ```bash
-    npm install
-    ```
-3. **Run Locally**:
-    ```bash
-    npm run dev
-    ```
+   ```bash
+   npm install
+   ```
+3. **Setup your database:**
+
+   - Create your supabase database: [Guide](./docs/get-started.md#development)
+   - Run intial migrations
+
+   ```
+   npm run setup
+   ```
+
+4. **Start local server**:
+   ```bash
+   npm run dev
+   ```
 
 For detailed setup instructions, check out our [documentation](https://github.com/Shelf-nu/shelf.nu/tree/main/docs).
 
