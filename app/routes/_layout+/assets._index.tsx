@@ -50,6 +50,7 @@ import {
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -83,6 +84,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    /** Validate permissions and fetch user */
     const [{ organizationId, organizations, currentOrganization, role }, user] =
       await Promise.all([
         requirePermission({
@@ -110,6 +112,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+
+    /** Parse filters */
     const {
       filters,
       serializedCookie: filtersCookie,
@@ -120,6 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/assets?${cookieParams.toString()}`);
     }
+    /** Query tierLimit, assets & Asset index settings */
     let [
       tierLimit,
       {
@@ -140,6 +145,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalTeamMembers,
         rawTeamMembers,
       },
+      settings,
     ] = await Promise.all([
       getOrganizationTierLimit({
         organizationId,
@@ -150,6 +156,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         filters,
       }),
+      getAssetIndexSettings({ userId, organizationId }),
     ]);
 
     if (role === OrganizationRoles.SELF_SERVICE) {
@@ -216,6 +223,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         rawTeamMembers,
         filters,
         organizationId,
+        settings,
       }),
       {
         headers,
