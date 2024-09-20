@@ -22,18 +22,6 @@ export function AssetIndexPagination() {
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
 
-  function handleModeChange(event: React.FormEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    const mode = (event.currentTarget as HTMLButtonElement).value;
-    const formData = new FormData();
-    formData.append("mode", mode);
-
-    fetcher.submit(formData, {
-      method: "POST",
-      action: "/api/asset-index-settings",
-    });
-  }
-
   return (
     <div
       className={tw(
@@ -43,26 +31,26 @@ export function AssetIndexPagination() {
     >
       <Pagination className="px-4 py-[6px]" />
       <div className="px-4 py-[6px]">
-        <ButtonGroup>
-          <Button
-            variant="secondary"
-            className={tw(mode === "SIMPLE" ? disabledButtonStyles : "")}
-            name="mode"
-            value="SIMPLE"
-            onClick={handleModeChange}
-          >
-            Simple
-          </Button>
-          <Button
-            variant="secondary"
-            className={tw(mode === "ADVANCED" ? disabledButtonStyles : "")}
-            name="mode"
-            value="ADVANCED"
-            onClick={handleModeChange}
-          >
-            Advanced
-          </Button>
-        </ButtonGroup>
+        <fetcher.Form method="post" action="/api/asset-index-settings">
+          <ButtonGroup>
+            <Button
+              variant="secondary"
+              className={tw(mode === "SIMPLE" ? disabledButtonStyles : "")}
+              name="mode"
+              value="SIMPLE"
+            >
+              Simple
+            </Button>
+            <Button
+              variant="secondary"
+              className={tw(mode === "ADVANCED" ? disabledButtonStyles : "")}
+              name="mode"
+              value="ADVANCED"
+            >
+              Advanced
+            </Button>
+          </ButtonGroup>
+        </fetcher.Form>
       </div>
     </div>
   );
