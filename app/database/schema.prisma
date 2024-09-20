@@ -152,10 +152,15 @@ model AssetIndexSettings {
   // Settings fields
   mode AssetIndexMode @default(SIMPLE)
 
+  // Holds the columns that are visible in the index view in json format
+  // Format is {name: string, visible: boolean, position: number}[] where name is the name of the column, visible is whether the column is visible or not and position is the position of the column
+  // The shape of the JSON includes both some fixed entries that will always be present and some dynamic entries for the custom fields
+  // The fixed entries are: id, status, description, valuation, createdAt, category, tags, location, kit, custody
+  columns   Json @default("[ {\"name\": \"id\", \"visible\": true, \"position\": 0}, {\"name\": \"status\", \"visible\": true, \"position\": 1}, {\"name\": \"description\", \"visible\": true, \"position\": 2}, {\"name\": \"valuation\", \"visible\": true, \"position\": 3}, {\"name\": \"createdAt\", \"visible\": true, \"position\": 4}, {\"name\": \"category\", \"visible\": true, \"position\": 5}, {\"name\": \"tags\", \"visible\": true, \"position\": 6}, {\"name\": \"location\", \"visible\": true, \"position\": 7}, {\"name\": \"kit\", \"visible\": true, \"position\": 8}, {\"name\": \"custody\", \"visible\": true, \"position\": 9} ]")
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
 
   @@unique([userId, organizationId])
 
@@ -165,6 +170,8 @@ enum AssetIndexMode {
   SIMPLE
   ADVANCED
 }
+
+
 
 
 

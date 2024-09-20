@@ -67,6 +67,8 @@ import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
+export type AssetIndexLoaderData = typeof loader;
+
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];

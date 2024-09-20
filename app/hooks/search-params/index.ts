@@ -7,7 +7,7 @@ import {
 } from "@remix-run/react";
 import Cookies from "js-cookie";
 
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useCurrentOrganization } from "../use-current-organization-id";
 
 /**
@@ -85,7 +85,7 @@ type SetSearchParams = (
  * a URLSearchParams object constructed from the filters, and the organization ID.
  */
 export function useAssetIndexCookieSearchParams() {
-  const assetIndexData = useLoaderData<typeof loader>();
+  const assetIndexData = useLoaderData<AssetIndexLoaderData>();
   const isAssetIndexPage = useIsAssetIndexPage();
 
   if (!assetIndexData || !isAssetIndexPage) {

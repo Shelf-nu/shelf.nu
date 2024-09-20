@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { Button } from "../shared/button";
 
 export const ExportButton = ({
@@ -7,7 +7,7 @@ export const ExportButton = ({
 }: {
   canExportAssets: boolean;
 }) => {
-  const { totalItems } = useLoaderData<typeof loader>();
+  const { totalItems } = useLoaderData<AssetIndexLoaderData>();
   return (
     <Button
       to={`/assets/export/assets-${new Date().toISOString().slice(0, 10)}.csv`}

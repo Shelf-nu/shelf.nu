@@ -20,6 +20,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
 export function AssetIndexFilters({
   disableTeamMemberFilter,
@@ -177,7 +178,8 @@ function AdvancedAssetIndexFilters() {
         "flex items-center justify-between bg-white py-2 md:rounded md:border md:border-gray-200 md:px-6 md:py-5"
       )}
     >
-      Advanced filters
+      <div>Avanced search</div>
+      <ConfigureColumnsDropdown />
     </div>
   );
 }

@@ -8,12 +8,12 @@ import {
 } from "~/components/forms/select";
 import { useSearchParams } from "~/hooks/search-params";
 
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 export default function PerPageItemsSelect() {
   const perPageValues = ["20", "50", "100"];
   const [_, setSearchParams] = useSearchParams();
-  const { perPage } = useLoaderData<typeof loader>();
+  const { perPage } = useLoaderData<AssetIndexLoaderData>();
 
   function onValueChange(value: string) {
     setSearchParams((prev) => {

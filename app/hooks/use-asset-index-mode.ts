@@ -1,12 +1,12 @@
 import type { AssetIndexMode } from "@prisma/client";
 import { useFetchers, useLoaderData } from "@remix-run/react";
-import type { loader as AssetIndexLoader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 /** Hook that returns the mode used in the asset index.
  * Can only be used in asset index page or its child routes
  */
 export function useAssetIndexMode() {
-  const { settings } = useLoaderData<typeof AssetIndexLoader>();
+  const { settings } = useLoaderData<AssetIndexLoaderData>();
 
   /** Get the mode from the settings */
   const mode = settings?.mode || "SIMPLE";

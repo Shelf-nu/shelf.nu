@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
@@ -13,7 +13,7 @@ export const BulkDeleteAssetsSchema = z.object({
 });
 
 export default function BulkDeleteDialog() {
-  const { totalItems } = useLoaderData<typeof loader>();
+  const { totalItems } = useLoaderData<AssetIndexLoaderData>();
   const zo = useZorm("BulkDeleteAssets", BulkDeleteAssetsSchema);
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
