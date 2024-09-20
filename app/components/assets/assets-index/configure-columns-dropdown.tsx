@@ -18,7 +18,6 @@ import { tw } from "~/utils/tw";
 export function ConfigureColumnsDropdown() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings } = useLoaderData<AssetIndexLoaderData>();
-
   const initialColumns = (settings?.columns as Column[])?.sort(
     (a, b) => a.position - b.position
   );

@@ -148,6 +148,7 @@ model AssetIndexSettings {
 
   // This is the organizationId for which the user is setting the index settings
   organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
 
   // Settings fields
   mode AssetIndexMode @default(SIMPLE)
@@ -445,9 +446,7 @@ model Organization {
   images       Image[]       @relation("owner")
   bookings     Booking[]
   kits         Kit[]
-
-
-
+  assetIndexSettings AssetIndexSettings[]
 }
 
 model UserOrganization {

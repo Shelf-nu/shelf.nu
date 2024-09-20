@@ -125,6 +125,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       ref={ref}
       className={tw(
         "-mx-4  overflow-auto border border-gray-200  bg-white md:mx-0 md:rounded",
+        customPagination && "mb-[50px]",
+
         className
       )}
     >
@@ -227,9 +229,11 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               ))}
             </tbody>
           </Table>
-          {customPagination ? customPagination : <Pagination />}
+          {!customPagination && <Pagination />}
         </>
       )}
+      {/*  Always render it, even if no items in list. */}
+      {customPagination && customPagination}
     </div>
   );
 });

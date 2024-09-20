@@ -7,9 +7,10 @@ import {
   isLikeShelfError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
-import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import type { Column } from "../asset-index-settings/helpers";
+import { updateAssetIndexSettingsAfterCfUpdate } from "../asset-index-settings/service.server";
 
 const label: ErrorLabel = "Custom fields";
 
@@ -25,29 +26,60 @@ export async function createCustomField({
   categories = [],
 }: CustomFieldDraftPayload) {
   try {
-    return await db.customField.create({
-      data: {
-        name,
-        helpText,
-        type,
-        required,
-        active,
-        options,
-        organization: {
-          connect: {
-            id: organizationId,
+    const [customField, assetIndexSettingsEntries] = await Promise.all([
+      db.customField.create({
+        data: {
+          name,
+          helpText,
+          type,
+          required,
+          active,
+          options,
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+          createdBy: {
+            connect: {
+              id: userId,
+            },
+          },
+          categories: {
+            connect: categories.map((category) => ({ id: category })),
           },
         },
-        createdBy: {
-          connect: {
-            id: userId,
-          },
-        },
-        categories: {
-          connect: categories.map((category) => ({ id: category })),
-        },
-      },
-    });
+      }),
+      db.assetIndexSettings.findMany({
+        where: { organizationId },
+      }),
+    ]);
+
+    /** We need to add it to the advanced index settings for each entry belonging to this organization */
+    if (customField.active) {
+      await Promise.all(
+        assetIndexSettingsEntries.map(async (entry) => {
+          const columns = Array.from(entry.columns as Prisma.JsonArray);
+          const prevHighestPosition = (columns as Column[]).reduce(
+            (acc, col) => (col.position > acc ? col.position : acc),
+            0
+          );
+
+          columns.push({
+            name: `cf_${customField.name}`,
+            visible: true,
+            position: prevHighestPosition + 1,
+          });
+
+          await db.assetIndexSettings.update({
+            where: { id: entry.id, organizationId },
+            data: { columns },
+          });
+        })
+      );
+    }
+
+    return customField;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Custom field", {
       additionalData: { userId, organizationId },
@@ -155,10 +187,23 @@ export async function updateCustomField(payload: {
       },
     } satisfies Prisma.CustomFieldUpdateInput;
 
-    return await db.customField.update({
+    /** Get the custom field. We need it in order to be able to update the asset index settings */
+    const customField = (await db.customField.findFirst({
+      where: { id },
+    })) as CustomField;
+
+    const updatedField = await db.customField.update({
       where: { id },
       data: data,
     });
+
+    /** Updates the Asset */
+    await updateAssetIndexSettingsAfterCfUpdate({
+      oldField: customField,
+      newField: updatedField,
+    });
+
+    return updatedField;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Custom field", {
       additionalData: {
@@ -341,28 +386,77 @@ export async function countActiveCustomFields({
 }
 
 export async function bulkActivateOrDeactivateCustomFields({
-  customFieldIds,
+  customFields,
   organizationId,
   userId,
   active,
 }: {
-  customFieldIds: CustomField["id"][];
+  customFields: CustomField[];
   organizationId: CustomField["organizationId"];
   userId: CustomField["userId"];
   active: boolean;
 }) {
   try {
-    return await db.customField.updateMany({
-      where: customFieldIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
-        : { id: { in: customFieldIds } },
+    const customFieldsIds = customFields.map((field) => field.id);
+
+    const updatedFields = await db.customField.updateMany({
+      where: { id: { in: customFieldsIds } },
       data: { active },
     });
+
+    /** Get the asset index settings for the organization */
+    const settings = await db.assetIndexSettings.findMany({
+      where: { organizationId },
+    });
+
+    /** Update the asset index settings for each entry */
+    const updates = settings.map((entry) => {
+      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+
+      customFields.forEach((field) => {
+        const oldField = field;
+        const newField = { ...field, active };
+        const cfIndex = columns.findIndex(
+          (col) => col?.name === `cf_${oldField.name}`
+        );
+        if (newField.active) {
+          /** Field is missing so we add it */
+          if (cfIndex === -1) {
+            const prevHighestPosition = columns.reduce(
+              (acc, col) => (col.position > acc ? col.position : acc),
+              0
+            );
+            columns.push({
+              name: `cf_${newField.name}`,
+              visible: true,
+              position: prevHighestPosition + 1,
+            });
+          } else {
+            columns[cfIndex] = {
+              name: `cf_${newField.name}`,
+              visible: columns[cfIndex].visible,
+              position: columns[cfIndex].position,
+            };
+          }
+        } else {
+          columns.splice(cfIndex, 1);
+        }
+      });
+
+      return db.assetIndexSettings.update({
+        where: { id: entry.id, organizationId },
+        data: { columns },
+      });
+    });
+
+    await Promise.all(updates.filter(Boolean));
+
+    return updatedFields;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk activating custom fields.",
-      additionalData: { customFieldIds, organizationId, userId },
+      additionalData: { customFields, organizationId, userId },
       label,
     });
   }
