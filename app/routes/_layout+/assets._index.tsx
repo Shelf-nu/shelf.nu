@@ -1,5 +1,5 @@
 import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
-import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -11,24 +11,20 @@ import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
-import { AssetIndexPagination } from "~/components/assets/asset-index-pagination";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
+import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
-import { StatusFilter } from "~/components/booking/status-filter";
-import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight, KitIcon } from "~/components/icons/library";
+import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Filters } from "~/components/list/filters";
-import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
-import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {
   Tooltip,
@@ -39,10 +35,7 @@ import {
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import {
-  useClearValueFromParams,
-  useSearchParamHasValue,
-} from "~/hooks/search-params";
+
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
@@ -72,7 +65,6 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
-import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export const links: LinksFunction = () => [
@@ -357,139 +349,12 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
 }) => {
   const navigate = useNavigate();
-  const searchParams: string[] = ["category", "tag", "location"];
-  if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
-  }
-  const hasFiltersToClear = useSearchParamHasValue(...searchParams);
-  const clearFilters = useClearValueFromParams(...searchParams);
+
   const { roles } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
-      <Filters
-        slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          "right-of-search": <SortBy />,
-        }}
-      >
-        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-          {hasFiltersToClear ? (
-            <div className="hidden gap-6 md:flex">
-              <Button
-                as="button"
-                onClick={clearFilters}
-                variant="link"
-                className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
-                type="button"
-              >
-                Clear all filters
-              </Button>
-              <div className="text-gray-500"> | </div>
-            </div>
-          ) : null}
-
-          <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Categories{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "category", queryKey: "name" }}
-              label="Filter by category"
-              placeholder="Search categories"
-              initialDataKey="categories"
-              countKey="totalCategories"
-              withoutValueItem={{
-                id: "uncategorized",
-                name: "Uncategorized",
-              }}
-            />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "tag", queryKey: "name" }}
-              label="Filter by tag"
-              initialDataKey="tags"
-              countKey="totalTags"
-              withoutValueItem={{
-                id: "untagged",
-                name: "Without tag",
-              }}
-            />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Locations{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "location", queryKey: "name" }}
-              label="Filter by location"
-              initialDataKey="locations"
-              countKey="totalLocations"
-              withoutValueItem={{
-                id: "without-location",
-                name: "Without location",
-              }}
-              renderItem={({ metadata }) => (
-                <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
-                  />
-                  <div>{metadata.name}</div>
-                </div>
-              )}
-            />
-            <When
-              truthy={
-                userHasPermission({
-                  roles,
-                  entity: PermissionEntity.custody,
-                  action: PermissionAction.read,
-                }) && !disableTeamMemberFilter
-              }
-            >
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Custodian{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{
-                  name: "teamMember",
-                  queryKey: "name",
-                  deletedAt: null,
-                }}
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
-                renderItem={(item) => resolveTeamMemberName(item)}
-                label="Filter by custodian"
-                placeholder="Search team members"
-                initialDataKey="teamMembers"
-                countKey="totalTeamMembers"
-                withoutValueItem={{
-                  id: "without-custody",
-                  name: "Without custody",
-                }}
-              />
-            </When>
-          </div>
-        </div>
-      </Filters>
+      <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
       <List
         title="Assets"
         ItemComponent={ListAssetContent}

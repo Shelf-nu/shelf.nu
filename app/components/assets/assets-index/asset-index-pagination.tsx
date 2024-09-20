@@ -1,24 +1,18 @@
-import {
-  useFetcher,
-  useLoaderData,
-  useRouteLoaderData,
-} from "@remix-run/react";
+import { useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
-import type { loader as AssetIndexLoader } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-import { Pagination } from "../list/pagination";
-import { Button } from "../shared/button";
-import { ButtonGroup } from "../shared/button-group";
+import { Pagination } from "../../list/pagination";
+import { Button } from "../../shared/button";
+import { ButtonGroup } from "../../shared/button-group";
 
 export function AssetIndexPagination() {
   let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
     "routes/_layout+/_layout"
   )?.minimizedSidebar;
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: "asset-index-settings-mode" });
 
-  const { settings } = useLoaderData<typeof AssetIndexLoader>();
-
-  const mode = settings?.mode || "SIMPLE";
+  const { modeIsSimple, modeIsAdvanced } = useAssetIndexMode();
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
 
@@ -35,7 +29,7 @@ export function AssetIndexPagination() {
           <ButtonGroup>
             <Button
               variant="secondary"
-              className={tw(mode === "SIMPLE" ? disabledButtonStyles : "")}
+              className={tw(modeIsSimple ? disabledButtonStyles : "")}
               name="mode"
               value="SIMPLE"
             >
@@ -43,7 +37,7 @@ export function AssetIndexPagination() {
             </Button>
             <Button
               variant="secondary"
-              className={tw(mode === "ADVANCED" ? disabledButtonStyles : "")}
+              className={tw(modeIsAdvanced ? disabledButtonStyles : "")}
               name="mode"
               value="ADVANCED"
             >
