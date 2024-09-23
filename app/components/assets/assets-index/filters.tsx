@@ -173,13 +173,10 @@ export function AssetIndexFilters({
 
 function AdvancedAssetIndexFilters() {
   return (
-    <div
-      className={tw(
-        "flex items-center justify-between bg-white py-2 md:rounded md:border md:border-gray-200 md:px-6 md:py-5"
-      )}
-    >
-      <div>Avanced search</div>
-      <ConfigureColumnsDropdown />
-    </div>
+    <Filters>
+      <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+        <ConfigureColumnsDropdown />
+      </div>
+    </Filters>
   );
 }
