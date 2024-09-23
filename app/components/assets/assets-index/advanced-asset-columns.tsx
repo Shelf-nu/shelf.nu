@@ -41,7 +41,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { resolveTeamMemberName } from "~/utils/user";
 import { AssetStatusBadge } from "../asset-status-badge";
 
-export function ColumnToComponentMap({
+export function AdvancedIndexColumn({
   column,
   item,
 }: {
@@ -151,16 +151,13 @@ export function ColumnToComponentMap({
       return <TagsColumn tags={item.tags ?? []} />;
 
     case "location":
-      return <TextColumn value={item.location.name} />;
+      return <TextColumn value={item?.location?.name || ""} />;
 
     case "kit":
       return <TextColumn value={item?.kit?.name || ""} />;
 
     case "custody":
       return <CustodyColumn custody={item.custody} />;
-
-    default:
-      return <Td key={column}>{column}</Td>;
   }
 }
 

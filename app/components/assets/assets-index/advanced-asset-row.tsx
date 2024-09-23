@@ -2,7 +2,7 @@ import type { Asset, Category, Custody, Kit, Tag } from "@prisma/client";
 
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 // eslint-disable-next-line import/no-cycle
-import { ColumnToComponentMap } from "./advanced-asset-columns";
+import { AdvancedIndexColumn } from "./advanced-asset-columns";
 
 export const AdvancedAssetRow = ({
   item,
@@ -34,7 +34,7 @@ export const AdvancedAssetRow = ({
       {[{ name: "name", visible: true, position: 0 }, ...columns].map(
         (column) =>
           column.visible ? (
-            <ColumnToComponentMap
+            <AdvancedIndexColumn
               column={column.name}
               item={item}
               key={column.name}
