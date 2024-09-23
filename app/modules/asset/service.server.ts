@@ -28,7 +28,7 @@ import {
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
 import { createLocationsIfNotExists } from "~/modules/location/service.server";
-import { getQr } from "~/modules/qr/service.server";
+import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
@@ -740,10 +740,11 @@ export async function createAsset({
      * 2. If the qr code belongs to the current organization
      * 3. If the qr code is not linked to an asset or a kit
      */
+
     const qr = qrId ? await getQr({ id: qrId }) : null;
     const qrCodes =
       qr &&
-      qr.organizationId === organizationId &&
+      (qr.organizationId === organizationId || !qr.organizationId) &&
       qr.assetId === null &&
       qr.kitId === null
         ? { connect: { id: qrId } }
@@ -1737,6 +1738,12 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    const qrCodesPerAsset = await parseQrCodesFromImportData({
+      data,
+      organizationId,
+      userId,
+    });
+
     const kits = await createKitsIfNotExists({
       data,
       userId,
@@ -1791,6 +1798,7 @@ export async function createAssetsFromContentImport({
         }, [] as ShelfAssetCustomFieldValueType[]);
 
       await createAsset({
+        qrId: qrCodesPerAsset.find((item) => item?.title === asset.title)?.qrId,
         organizationId,
         title: asset.title,
         description: asset.description || "",
@@ -1812,12 +1820,17 @@ export async function createAssetsFromContentImport({
       });
     }
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
+      message: isShelfError
         ? cause?.message
         : "Something went wrong while creating assets from content import",
-      additionalData: { userId, organizationId },
+      additionalData: {
+        userId,
+        organizationId,
+        ...(isShelfError && cause.additionalData),
+      },
       label,
     });
   }
