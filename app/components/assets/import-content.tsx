@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -18,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 import { WarningBox } from "../shared/warning-box";
+import { Table, Td, Th, Tr } from "../table";
 
 export const ImportBackup = () => (
   <>
@@ -108,6 +110,35 @@ export const ImportContent = () => (
       This is how a sample header looks like for custom field with name{" "}
       <b>"purchase date"</b> and type <b>"date"</b> :{" "}
       <b>"cf:purchase date, type:date"</b>
+    </div>
+
+    <h4 className="mt-2">Importing with QR codes</h4>
+    <div>
+      You also have the option to se a Shelf QR code for each asset. This is
+      very valuable if you already have Shelf QR codes printed and you want to
+      link them to the assets you are importing.
+      <br />
+      This feature comes with the following limitations:
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          <b>Existing code</b> - the QR code needs to already exist in shelf
+        </li>
+        <li>
+          <b>No duplicate codes</b> - the qrId needs to be unique for each asset
+        </li>
+        <li>
+          <b>No linked codes</b> - the qrId needs not be linked to any asset or
+          kit
+        </li>
+        <li>
+          <b>QR ownership</b> - the QR code needs to be either unclaimed or
+          belong to the organization you are trying to import it to.
+        </li>
+      </ul>
+      If no <b>"qrId"</b> is used a new QR code will be generated.
+      <br />
+      If you are interesting in receiving some unclaimed or unlinked codes, feel
+      free to get in touch with support and we can provide those for you.
     </div>
 
     <h4 className="mt-2">Extra considerations</h4>
@@ -212,6 +243,43 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             <div>
               <h5 className="text-red-500">{data.error.title}</h5>
               <p className="text-red-500">{data.error.message}</p>
+              {data?.error?.additionalData?.duplicateCodes ? (
+                <BrokenQrCodesTable
+                  title="Duplicate codes"
+                  data={
+                    data.error.additionalData
+                      .duplicateCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.nonExistentCodes ? (
+                <BrokenQrCodesTable
+                  title="Non existent codes"
+                  data={
+                    data.error.additionalData
+                      .nonExistentCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.linkedCodes ? (
+                <BrokenQrCodesTable
+                  title="Already linked codes"
+                  data={
+                    data.error.additionalData
+                      .linkedCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.connectedToOtherOrgs ? (
+                <BrokenQrCodesTable
+                  title="Some codes do not belong to this organization"
+                  data={
+                    data.error.additionalData
+                      .connectedToOtherOrgs as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+
               <p className="mt-2">
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
@@ -261,3 +329,33 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
     </fetcher.Form>
   );
 };
+
+function BrokenQrCodesTable({
+  title,
+  data,
+}: {
+  title: string;
+  data: QRCodePerImportedAsset[];
+}) {
+  return (
+    <div className="mt-3">
+      <h5>{title}</h5>
+      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
+        <thead>
+          <Tr>
+            <Th>Asset title</Th>
+            <Th>QR ID</Th>
+          </Tr>
+        </thead>
+        <tbody>
+          {data.map((code: { title: string; qrId: string }) => (
+            <Tr key={code.title}>
+              <Td>{code.title}</Td>
+              <Td>{code.qrId}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
