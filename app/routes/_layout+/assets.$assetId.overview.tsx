@@ -337,7 +337,6 @@ export default function AssetOverview() {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}{" "}
-                      {asset.organization.currency}
                     </div>
                   </div>
                 </li>

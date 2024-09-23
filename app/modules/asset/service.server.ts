@@ -140,6 +140,7 @@ async function getAssetsFromView(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
+  extraInclude?: Prisma.AssetInclude;
 }) {
   let {
     organizationId,
@@ -157,6 +158,7 @@ async function getAssetsFromView(params: {
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     locationIds,
     teamMemberIds,
+    extraInclude,
   } = params;
 
   try {
@@ -422,6 +424,7 @@ async function getAssetsFromView(params: {
                     },
                   }
                 : {}),
+              ...extraInclude,
             },
           },
         },
@@ -466,6 +469,7 @@ async function getAssets(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
+  extraInclude?: Prisma.AssetInclude;
 }) {
   const {
     organizationId,
@@ -483,6 +487,7 @@ async function getAssets(params: {
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     teamMemberIds,
+    extraInclude,
   } = params;
 
   try {
@@ -674,6 +679,7 @@ async function getAssets(params: {
                 },
               }
             : {}),
+          ...extraInclude,
         },
         orderBy: { [orderBy]: orderDirection },
       }),
@@ -1404,6 +1410,7 @@ export async function getAllEntriesForCreateAndEdit({
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,
+  extraInclude,
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
   excludeSearchFromView = false,
@@ -1521,6 +1528,7 @@ export async function getPaginatedAndFilterableAssets({
       unhideAssetsBookigIds,
       locationIds,
       teamMemberIds,
+      extraInclude,
     });
     const totalPages = Math.ceil(totalAssets / perPage);
 

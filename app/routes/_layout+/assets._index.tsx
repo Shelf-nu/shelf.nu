@@ -12,6 +12,9 @@ import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+// eslint-disable-next-line import/no-cycle
+import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
+import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
 import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
@@ -36,6 +39,8 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
+import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
@@ -48,6 +53,7 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getClientHint } from "~/utils/client-hints";
 import {
   userPrefs,
   getFiltersFromRequest,
@@ -106,6 +112,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+    const { locale, timeZone } = getClientHint(request);
 
     /** Parse filters */
     const {
@@ -149,6 +156,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         filters,
+        // @TODO we need to adjust this. Need to first get the settings and depending on mode, fetch the custom fields
+        extraInclude: {
+          customFields: {
+            where: {
+              customField: {
+                active: true,
+              },
+            },
+            include: {
+              customField: {
+                select: {
+                  id: true,
+                  name: true,
+                  helpText: true,
+                  required: true,
+                  type: true,
+                  categories: true,
+                },
+              },
+            },
+          },
+        },
       }),
       getAssetIndexSettings({ userId, organizationId }),
     ]);
@@ -182,6 +211,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       setCookie(userPrefsCookie),
       ...(filtersCookie ? [setCookie(filtersCookie)] : []),
     ];
+
     return json(
       data({
         header,
@@ -218,6 +248,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         filters,
         organizationId,
         settings,
+        locale,
+        timeZone,
+        currentOrganization,
       }),
       {
         headers,
@@ -351,15 +384,36 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
 }) => {
   const navigate = useNavigate();
-
+  // We use the hook because it handles optimistic UI
+  const { modeIsSimple } = useAssetIndexMode();
+  const columns = useAssetIndexColumns();
   const { roles } = useUserRoleHelper();
+
+  const headerChildren = modeIsSimple ? (
+    <>
+      <Th>Category</Th>
+      <Th>Tags</Th>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.custody,
+          action: PermissionAction.read,
+        })}
+      >
+        <Th>Custodian</Th>
+      </When>
+      <Th>Location</Th>
+    </>
+  ) : (
+    <AdvancedTableHeader columns={columns} />
+  );
 
   return (
     <ListContentWrapper>
       <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
       <List
         title="Assets"
-        ItemComponent={ListAssetContent}
+        ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
         customPagination={<AssetIndexPagination />}
         /**
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
@@ -369,22 +423,7 @@ export const AssetsList = ({
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }
-        headerChildren={
-          <>
-            <Th>Category</Th>
-            <Th>Tags</Th>
-            <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
-              })}
-            >
-              <Th>Custodian</Th>
-            </When>
-            <Th>Location</Th>
-          </>
-        }
+        headerChildren={headerChildren}
       />
     </ListContentWrapper>
   );

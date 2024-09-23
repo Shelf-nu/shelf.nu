@@ -7,7 +7,7 @@ export type Column = {
   position: number;
 };
 // Define the fixed fields
-const fixedFields = [
+export const fixedFields = [
   "id",
   "status",
   "description",
@@ -24,7 +24,7 @@ export const columnsLabelsMap: Record<(typeof fixedFields)[number], string> = {
   id: "ID",
   status: "Status",
   description: "Description",
-  valuation: "Valuation",
+  valuation: "Value",
   createdAt: "Created at",
   category: "Category",
   tags: "Tags",
@@ -49,12 +49,12 @@ export const defaultFields = [
 // Function that generates Zod schema
 export const generateColumnsSchema = (customFields: string[]) => {
   // Combine fixed and custom fields
-  const allFields = [...fixedFields, ...customFields];
+  const allFields = [...fixedFields, ...customFields] as const;
 
-  // Ensure we have at least two fields for z.union, otherwise handle single case
+  // Ensure we have at least one field for z.union or z.literal
   let nameSchema;
   if (allFields.length === 1) {
-    nameSchema = z.literal(allFields[0]); // If only one field, use z.literal
+    nameSchema = z.literal(allFields[0]); // Single field case
   } else if (allFields.length >= 2) {
     nameSchema = z.union(
       allFields.map((field) => z.literal(field)) as [
@@ -67,15 +67,21 @@ export const generateColumnsSchema = (customFields: string[]) => {
     throw new Error("There should be at least one field to validate");
   }
 
-  // Create a schema for each column in the array
+  // Create a Zod schema for each column object
   const columnSchema = z.object({
     name: nameSchema, // Name must be one of the fixed or custom fields
-    visible: z.boolean(), // 'visible' is a boolean
-    position: z.number(), // 'position' is a number
+    visible: z
+      .union([z.boolean(), z.string()])
+      .transform((val) => val === "on" || val === true) // Convert "on" to boolean true
+      .default(false), // if not present in the formData, convert to false. That means the checkbox was unselected
+    position: z.union([z.string(), z.number()]).transform(Number), // Ensure position is a number
   });
 
-  // The final schema is an array of the column schema
-  return z.array(columnSchema);
+  // Return the final schema
+  return z.object({
+    intent: z.literal("changeColumns"), // Validate intent is 'changeColumns'
+    columns: z.array(columnSchema), // Dynamically validate columns as a array of objects
+  });
 };
 
 export function parseColumnName(name: string) {

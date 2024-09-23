@@ -1,9 +1,65 @@
 import type { AssetIndexMode, CustomField, Prisma } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
-import type { Column } from "./helpers";
+import { defaultFields, type Column } from "./helpers";
+import { getOrganizationById } from "../organization/service.server";
 
 const label: ErrorLabel = "Asset Index Settings";
+
+export async function createUserAssetIndexSettings({
+  userId,
+  organizationId,
+  tx,
+}: {
+  userId: string;
+  organizationId: string;
+  /** Optionally receive a transaction when the settingsd need to be created together with other entries */
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+}) {
+  const _db = tx || db;
+
+  try {
+    const org = await getOrganizationById(organizationId, {
+      customFields: {
+        where: { active: true },
+      },
+    });
+
+    /** We start at the default fields length */
+    let position = defaultFields.length - 1;
+    const customFieldsColumns = org.customFields.map((cf) => {
+      /** We increment the position for each custom field */
+      position += 1;
+      return {
+        name: `cf_${cf.name}`,
+        visible: true,
+        position,
+      };
+    });
+
+    const columns = [...defaultFields, ...customFieldsColumns];
+
+    return await _db.assetIndexSettings.create({
+      data: {
+        userId,
+        organizationId,
+        mode: "SIMPLE",
+        columns,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Failed to create asset index settings.",
+      message:
+        "We couldn't create the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+      additionalData: { userId, organizationId },
+      label,
+    });
+  }
+}
 
 export async function getAssetIndexSettings({
   userId,
@@ -16,6 +72,16 @@ export async function getAssetIndexSettings({
     const assetIndexSettings = await db.assetIndexSettings.findFirst({
       where: { userId, organizationId },
     });
+
+    /** This is a safety shute. If for some reason there are no settings, we create them on the go */
+    if (!assetIndexSettings) {
+      const newAssetIndexSettings = await createUserAssetIndexSettings({
+        userId,
+        organizationId,
+      });
+
+      return newAssetIndexSettings;
+    }
 
     return assetIndexSettings;
   } catch (cause) {

@@ -26,6 +26,8 @@ export function AssetIndexPagination() {
       <Pagination className="px-4 py-[6px]" />
       <div className="px-4 py-[6px]">
         <fetcher.Form method="post" action="/api/asset-index-settings">
+          <input type="hidden" name="intent" value="changeMode" />
+
           <ButtonGroup>
             <Button
               variant="secondary"

@@ -2,7 +2,14 @@ import { AssetIndexMode } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
-import { changeMode } from "~/modules/asset-index-settings/service.server";
+import { generateColumnsSchema } from "~/modules/asset-index-settings/helpers";
+import {
+  changeMode,
+  updateColumns,
+} from "~/modules/asset-index-settings/service.server";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
@@ -26,15 +33,64 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.read,
     });
-    const { mode } = parseData(await request.formData(), AssetSettingsSchema);
 
-    await changeMode({
-      userId,
-      organizationId,
-      mode,
-    });
+    const formData = await request.clone().formData();
 
-    return json(data({ success: true }));
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["changeMode", "changeColumns"]) })
+    );
+
+    switch (intent) {
+      case "changeMode": {
+        const { mode } = parseData(formData, AssetSettingsSchema);
+
+        await changeMode({
+          userId,
+          organizationId,
+          mode,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "changeColumns": {
+        /**
+         * The form already includes all the columsn data, so we don't need to update the data in the DB. We just override it with the new data.
+         * We use Zod to validate the data and then return it as a success.
+         */
+
+        const customFields = await getActiveCustomFields({
+          organizationId,
+        });
+        const customFieldsNames = customFields.map(
+          (field) => `cf_${field.name}`
+        );
+        const columnsSchema = generateColumnsSchema(customFieldsNames);
+
+        const { columns } = parseData(formData, columnsSchema);
+        await updateColumns({
+          userId,
+          organizationId,
+          columns,
+        });
+
+        sendNotification({
+          title: "Successfully updated columns",
+          message:
+            "The columns have been successfully updated. The changes will be reflected in the asset index.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId: authSession.userId });
     return json(error(reason), { status: reason.status });
