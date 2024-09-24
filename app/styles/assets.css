@@ -1,3 +1,7 @@
 .select-trigger span span {
   @apply text-gray-500;
 }
+
+.freeze-shadow:before {
+  box-shadow: 0px 32px 32px -12px #1018281a;
+}

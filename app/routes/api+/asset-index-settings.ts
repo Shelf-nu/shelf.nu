@@ -2,6 +2,7 @@ import { AssetIndexMode } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import { generateColumnsSchema } from "~/modules/asset-index-settings/helpers";
 import {
   changeMode,
@@ -38,7 +39,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["changeMode", "changeColumns"]) })
+      z.object({
+        intent: z.enum([
+          "changeMode",
+          "changeColumns",
+          "changeFreeze",
+          "changeShowImage",
+        ]),
+      })
     );
 
     switch (intent) {
@@ -83,6 +91,40 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
+        return json(data({ success: true }));
+      }
+
+      case "changeFreeze": {
+        const { freezeColumn } = parseData(
+          formData,
+          z.object({
+            freezeColumn: z.string().transform((value) => value === "yes"),
+          })
+        );
+
+        await db.assetIndexSettings.update({
+          where: { userId_organizationId: { userId, organizationId } },
+          data: { freezeColumn },
+        });
+
+        // This is a placeholder for the future
+        return json(data({ success: true }));
+      }
+
+      case "changeShowImage": {
+        const { showAssetImage } = parseData(
+          formData,
+          z.object({
+            showAssetImage: z.string().transform((value) => value === "yes"),
+          })
+        );
+
+        await db.assetIndexSettings.update({
+          where: { userId_organizationId: { userId, organizationId } },
+          data: { showAssetImage },
+        });
+
+        // This is a placeholder for the future
         return json(data({ success: true }));
       }
 

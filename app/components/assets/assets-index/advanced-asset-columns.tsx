@@ -1,3 +1,4 @@
+import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import {
   CustomFieldType,
@@ -20,6 +21,9 @@ import {
 } from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
 import When from "~/components/when/when";
+import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AssetsFromViewItem,
@@ -38,7 +42,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { freezeColumnClassNames } from "./freeze-column-classes";
+import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 
 export function AdvancedIndexColumn({
@@ -50,6 +57,9 @@ export function AdvancedIndexColumn({
 }) {
   const { locale, currentOrganization, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
+  const showAssetImage = useAssetIndexShowImage();
+  const freezeColumn = useAssetIndexFreezeColumn();
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   const isCustomField = column.startsWith("cf_");
 
@@ -96,7 +106,31 @@ export function AdvancedIndexColumn({
 
   switch (column) {
     case "name":
-      return <TextColumn value={item.title} />;
+      return (
+        <TextColumn
+          className={tw(
+            "min-w-[300px] max-w-[400px] whitespace-normal",
+            modeIsAdvanced && freezeColumn ? freezeColumnClassNames.name : ""
+          )}
+          value={
+            <div className={tw("flex items-center gap-2 ")}>
+              {showAssetImage ? (
+                <AssetImage
+                  asset={{
+                    assetId: item.id,
+                    mainImage: item.mainImage,
+                    mainImageExpiration: item.mainImageExpiration,
+                    alt: item.title,
+                  }}
+                  className="size-10 rounded-[4px] border object-cover"
+                />
+              ) : null}
+
+              <div>{item.title}</div>
+            </div>
+          }
+        />
+      );
     case "id":
       return <TextColumn value={item.id} />;
     case "status":
@@ -139,8 +173,18 @@ export function AdvancedIndexColumn({
   }
 }
 
-function TextColumn({ value }: { value: string }) {
-  return <Td className="w-full max-w-none whitespace-nowrap">{value}</Td>;
+function TextColumn({
+  value,
+  className,
+}: {
+  value: string | React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <Td className={tw("w-full max-w-none whitespace-nowrap", className)}>
+      {value}
+    </Td>
+  );
 }
 
 function StatusColumn({
