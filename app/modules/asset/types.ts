@@ -3,8 +3,11 @@ import type {
   Asset,
   AssetCustomFieldValue,
   CustomField,
+  Prisma,
   User,
 } from "@prisma/client";
+import type { Return } from "@prisma/client/runtime/library";
+import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
   raw: string | number | boolean;
@@ -81,3 +84,8 @@ export type AssetCustomFieldsValuesWithFields =
   ShelfAssetCustomFieldValueType & {
     customField: CustomField;
   };
+
+/** Item returned by getAssetsFromView */
+export type AssetsFromViewItem = Prisma.AssetGetPayload<{
+  include: Return<typeof assetIndexFields>;
+}>;

@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { Notes } from "~/components/assets/notes";
-import { LockIcon } from "~/components/icons/library";
+import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -100,7 +100,7 @@ export default function AssetActivity() {
         <div className="flex h-full flex-col justify-center">
           <div className="flex flex-col items-center justify-center  text-center">
             <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
-              <LockIcon />
+              <NoPermissionsIcon />
             </div>
             <h5>Insufficient permissions</h5>
             <p>You are not allowed to view asset notes</p>

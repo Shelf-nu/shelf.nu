@@ -1,11 +1,8 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import {
   CustomFieldType,
-  type Asset,
   type AssetStatus,
   type Category,
-  type Custody,
-  type Kit,
   type Tag,
 } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
@@ -24,7 +21,10 @@ import {
 import { Td } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type {
+  AssetsFromViewItem,
+  ShelfAssetCustomFieldValueType,
+} from "~/modules/asset/types";
 import type { fixedFields } from "~/modules/asset-index-settings/helpers";
 // eslint-disable-next-line import/no-cycle
 import {
@@ -46,27 +46,7 @@ export function AdvancedIndexColumn({
   item,
 }: {
   column: (typeof fixedFields)[number];
-  item: Asset & {
-    kit: Kit;
-    category?: Category;
-    tags?: Tag[];
-    custody: Custody & {
-      custodian: {
-        name: string;
-        user?: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-          email: string | null;
-        };
-      };
-    };
-    location: {
-      name: string;
-    };
-    // @TODO FIX ME
-    customFields: any;
-  };
+  item: AssetsFromViewItem;
 }) {
   const { locale, currentOrganization, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
@@ -76,8 +56,6 @@ export function AdvancedIndexColumn({
   if (isCustomField) {
     const fieldName = column.replace("cf_", "");
     const field = item.customFields.find(
-      // @TODO FIX ME
-      // @ts-expect-error
       (customFieldValue) => customFieldValue.customField.name === fieldName
     );
 
@@ -242,17 +220,7 @@ function TagsColumn({ tags }: { tags: Tag[] }) {
 function CustodyColumn({
   custody,
 }: {
-  custody: Custody & {
-    custodian: {
-      name: string;
-      user?: {
-        firstName: string | null;
-        lastName: string | null;
-        profilePicture: string | null;
-        email: string | null;
-      };
-    };
-  };
+  custody: AssetsFromViewItem["custody"];
 }) {
   const { roles } = useUserRoleHelper();
 

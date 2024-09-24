@@ -31,11 +31,12 @@ export function Th({
   children,
   className,
   colSpan,
+  ...rest
 }: {
   children?: React.ReactNode;
   className?: string;
   colSpan?: number;
-}) {
+} & React.ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       className={tw(
@@ -43,6 +44,7 @@ export function Th({
         className
       )}
       colSpan={colSpan || undefined}
+      {...rest}
     >
       {children}
     </th>

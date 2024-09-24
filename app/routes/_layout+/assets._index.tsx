@@ -1,4 +1,4 @@
-import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
+import type { Tag } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -47,6 +47,7 @@ import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
@@ -156,28 +157,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         filters,
-        // @TODO we need to adjust this. Need to first get the settings and depending on mode, fetch the custom fields
-        extraInclude: {
-          customFields: {
-            where: {
-              customField: {
-                active: true,
-              },
-            },
-            include: {
-              customField: {
-                select: {
-                  id: true,
-                  name: true,
-                  helpText: true,
-                  required: true,
-                  type: true,
-                  categories: true,
-                },
-              },
-            },
-          },
-        },
       }),
       getAssetIndexSettings({ userId, organizationId }),
     ]);
@@ -429,29 +408,7 @@ export const AssetsList = ({
   );
 };
 
-const ListAssetContent = ({
-  item,
-}: {
-  item: Asset & {
-    kit: Kit;
-    category?: Category;
-    tags?: Tag[];
-    custody: Custody & {
-      custodian: {
-        name: string;
-        user?: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-          email: string | null;
-        };
-      };
-    };
-    location: {
-      name: string;
-    };
-  };
-}) => {
+const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
   const { category, tags, custody, location, kit } = item;
   const { roles } = useUserRoleHelper();
   return (

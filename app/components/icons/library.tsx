@@ -1585,7 +1585,7 @@ export const AssetLabel = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
+export const NoPermissionsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     fill="none"
@@ -1654,6 +1654,44 @@ export const HandleIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinejoin="round"
       strokeWidth={1.25}
       d="M6.333 2.001a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM6.333 6.668a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM6.333 11.335a.667.667 0 1 0 0-1.334.667.667 0 0 0 0 1.334ZM1.667 2.001a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM1.667 6.668a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM1.667 11.335a.667.667 0 1 0 0-1.334.667.667 0 0 0 0 1.334Z"
+    />
+  </svg>
+);
+
+export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 16 16"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="M11.333 6.667V5.333a3.333 3.333 0 0 0-6.667 0v1.334m3.334 3V11m-2.133 3h4.266c1.12 0 1.68 0 2.108-.218a2 2 0 0 0 .874-.874c.218-.428.218-.988.218-2.108v-.933c0-1.12 0-1.68-.218-2.108a2 2 0 0 0-.874-.874c-.428-.218-.988-.218-2.108-.218H5.867c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.875.874c-.217.428-.217.988-.217 2.108v.933c0 1.12 0 1.68.217 2.108a2 2 0 0 0 .875.874c.427.218.987.218 2.108.218Z"
+    />
+  </svg>
+);
+
+export const ImageIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M16.2 21H6.931c-.605 0-.908 0-1.049-.12a.5.5 0 0 1-.173-.42c.014-.183.228-.397.657-.826l8.503-8.503c.396-.396.594-.594.822-.668a1 1 0 0 1 .618 0c.228.074.426.272.822.668L21 15v1.2M16.2 21c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C21 18.72 21 17.88 21 16.2M16.2 21H7.8c-1.68 0-2.52 0-3.162-.327a3 3 0 0 1-1.311-1.311C3 18.72 3 17.88 3 16.2V7.8c0-1.68 0-2.52.327-3.162a3 3 0 0 1 1.311-1.311C5.28 3 6.12 3 7.8 3h8.4c1.68 0 2.52 0 3.162.327a3 3 0 0 1 1.311 1.311C21 5.28 21 6.12 21 7.8v8.4M10.5 8.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"
     />
   </svg>
 );

@@ -40,7 +40,7 @@ import {
   CheckIcon,
   PartialCheckboxIcon,
   AssetLabel,
-  LockIcon,
+  NoPermissionsIcon,
   ActiveSwitchIcon,
   ScanIcon,
   MapIcon,
@@ -48,6 +48,8 @@ import {
   AddTagsIcon,
   RemoveTagsIcon,
   ColumnsIcon,
+  LockIcon,
+  ImageIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -102,7 +104,9 @@ export type IconType =
   | "scan"
   | "tool"
   | "rows"
-  | "columns";
+  | "columns"
+  | "no-permissions"
+  | "image";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -153,13 +157,15 @@ export const iconsMap: IconsMap = {
   "release-custody": <CheckInIcon />,
   "partial-checkbox": <PartialCheckboxIcon />,
   "asset-label": <AssetLabel />,
-  lock: <LockIcon />,
+  "no-permissions": <NoPermissionsIcon />,
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
   scan: <ScanIcon />,
   tool: <ToolIcon />,
   rows: <RowsIcon />,
   columns: <ColumnsIcon />,
+  lock: <LockIcon />,
+  image: <ImageIcon />,
 };
 
 export default iconsMap;

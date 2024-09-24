@@ -58,6 +58,7 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import { assetIndexFields } from "./fields";
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
@@ -363,7 +364,11 @@ async function getAssetsFromView(params: {
     if (hideUnavailable === true && where.asset) {
       where.asset.kit = null;
     }
-
+    const ASSET_INDEX_FIELDS = assetIndexFields({
+      bookingFrom,
+      bookingTo,
+      unavailableBookingStatuses,
+    });
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -373,57 +378,7 @@ async function getAssetsFromView(params: {
         include: {
           asset: {
             include: {
-              kit: true,
-              category: true,
-              tags: true,
-              location: {
-                select: {
-                  name: true,
-                },
-              },
-              custody: {
-                select: {
-                  custodian: {
-                    select: {
-                      name: true,
-                      user: {
-                        select: {
-                          firstName: true,
-                          lastName: true,
-                          profilePicture: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-              ...(bookingTo && bookingFrom
-                ? {
-                    bookings: {
-                      where: {
-                        status: { in: unavailableBookingStatuses },
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
-                      },
-                      take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
-                      select: {
-                        from: true,
-                        to: true,
-                        status: true,
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  }
-                : {}),
+              ...ASSET_INDEX_FIELDS,
               ...extraInclude,
             },
           },

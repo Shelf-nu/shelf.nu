@@ -1,33 +1,9 @@
-import type { Asset, Category, Custody, Kit, Tag } from "@prisma/client";
-
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 // eslint-disable-next-line import/no-cycle
 import { AdvancedIndexColumn } from "./advanced-asset-columns";
 
-export const AdvancedAssetRow = ({
-  item,
-}: {
-  item: Asset & {
-    kit: Kit;
-    category?: Category;
-    tags?: Tag[];
-    custody: Custody & {
-      custodian: {
-        name: string;
-        user?: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-          email: string | null;
-        };
-      };
-    };
-    location: {
-      name: string;
-    };
-    customFields: any;
-  };
-}) => {
+export const AdvancedAssetRow = ({ item }: { item: AssetsFromViewItem }) => {
   const columns = useAssetIndexColumns();
   return (
     <>

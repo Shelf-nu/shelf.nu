@@ -106,18 +106,20 @@ export function ConfigureColumnsDropdown() {
                             checked={column.visible}
                             onChange={() => handleCheckboxChange(index)}
                           />
-                          <FakeCheckbox
-                            checked={column.visible}
-                            className={tw(
-                              "mr-1 text-white",
-                              column.visible ? "text-primary" : ""
-                            )}
-                          />
+
                           <label
                             htmlFor={column.name}
-                            className="flex-1 text-[14px] font-medium text-gray-700"
+                            className="flex flex-1 items-center text-[14px] font-medium text-gray-700 hover:cursor-pointer"
                             title="Custom field"
                           >
+                            {" "}
+                            <FakeCheckbox
+                              checked={column.visible}
+                              className={tw(
+                                "mr-1 text-white",
+                                column.visible ? "text-primary" : ""
+                              )}
+                            />
                             <span>{parseColumnName(column.name)}</span>
                             {column.name.startsWith("cf_") && (
                               <span className=" lowercase text-gray-500">
@@ -137,15 +139,7 @@ export function ConfigureColumnsDropdown() {
               </div>
             </div>
             <footer className="absolute bottom-0 w-full border-t bg-white p-[10px]">
-              <Button
-                // onClick={() => {
-                //   setIsPopoverOpen(false);
-                // }}
-
-                disabled={!hasChanges}
-                variant="secondary"
-                width="full"
-              >
+              <Button disabled={!hasChanges} variant="secondary" width="full">
                 Apply
               </Button>
             </footer>
