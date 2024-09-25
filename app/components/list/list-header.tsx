@@ -34,40 +34,27 @@ export const ListHeader = ({
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
 
-  const [isHovered, setIsHovered] = useState(false);
-
-  const handleMouseEnter = () => {
-    setIsHovered(true);
-  };
-
-  const handleMouseLeave = () => {
-    setIsHovered(false);
-  };
-
   return (
-    <thead className={tw("border-b", className)}>
+    <thead
+      className={tw(
+        "border-b",
+        modeIsAdvanced ? "sticky top-0 z-10 bg-white" : "",
+        className
+      )}
+    >
       <tr className="">
-        {bulkActions ? (
-          <BulkListHeader
-            isHovered={isHovered}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-          />
-        ) : null}
+        {bulkActions ? <BulkListHeader /> : null}
         {hideFirstColumn ? null : (
           <Th
             className={tw(
               "!border-b-0 border-r border-r-transparent text-left font-normal text-gray-600",
               bulkActions ? "!pl-0" : "",
 
-              modeIsAdvanced && isHovered ? " bg-gray-50" : "",
               modeIsAdvanced && freezeColumn
                 ? freezeColumnClassNames.nameHeader
                 : "" //48px is the width of the checkbox
             )}
             colSpan={children ? 1 : 100}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
           >
             <div
               className={tw(
@@ -120,7 +107,7 @@ function AdvancedModeDropdown() {
               value={freezeColumn ? "no" : "yes"}
             />
             <Button
-              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-100 hover:text-gray-700 focus:bg-gray-100"
+              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-50 hover:text-gray-700 "
               variant="link"
               icon="lock"
               type="submit"
@@ -142,7 +129,7 @@ function AdvancedModeDropdown() {
               value={showAssetImage ? "no" : "yes"}
             />
             <Button
-              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-100 hover:text-gray-700 focus:bg-gray-100 "
+              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-50 hover:text-gray-700  "
               variant="link"
               icon="image"
               type="submit"

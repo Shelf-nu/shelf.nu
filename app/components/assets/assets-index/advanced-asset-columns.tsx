@@ -181,7 +181,12 @@ function TextColumn({
   className?: string;
 }) {
   return (
-    <Td className={tw("w-full max-w-none whitespace-nowrap", className)}>
+    <Td
+      className={tw(
+        "w-full max-w-none !overflow-visible whitespace-nowrap",
+        className
+      )}
+    >
       {value}
     </Td>
   );

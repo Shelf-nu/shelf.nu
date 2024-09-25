@@ -14,11 +14,8 @@ import { tw } from "~/utils/tw";
 import type { IndexResponse } from "..";
 
 export default function BulkListHeader({
-  isHovered,
   ...rest
-}: {
-  isHovered: boolean;
-} & React.ThHTMLAttributes<HTMLTableCellElement>) {
+}: {} & React.ThHTMLAttributes<HTMLTableCellElement>) {
   const { items } = useLoaderData<IndexResponse>();
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
@@ -45,7 +42,7 @@ export default function BulkListHeader({
       )}
       {...rest}
     >
-      <div className={tw(modeIsAdvanced && isHovered ? "bg-gray-50" : "")}>
+      <div>
         {partialItemsSelected ? (
           <PartialCheckboxIcon
             className="cursor-pointer"
