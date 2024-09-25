@@ -6,7 +6,13 @@ import {
   type Category,
   type Tag,
 } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverPortal,
+  PopoverContent,
+} from "@radix-ui/react-popover";
+import { Link, useLoaderData } from "@remix-run/react";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
@@ -84,9 +90,23 @@ export function AdvancedIndexColumn({
     return (
       <Td>
         {field.customField.type === CustomFieldType.MULTILINE_TEXT ? (
-          <MarkdownViewer
-            content={customFieldDisplayValue as RenderableTreeNode}
-          />
+          <Popover>
+            <PopoverTrigger className="underline hover:cursor-pointer">
+              View content
+            </PopoverTrigger>
+            <PopoverPortal>
+              <PopoverContent
+                align="end"
+                className={tw(
+                  "mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
+                )}
+              >
+                <MarkdownViewer
+                  content={customFieldDisplayValue as RenderableTreeNode}
+                />
+              </PopoverContent>
+            </PopoverPortal>
+          </Popover>
         ) : isLink(customFieldDisplayValue as string) ? (
           <Button
             role="link"
@@ -126,7 +146,11 @@ export function AdvancedIndexColumn({
                 />
               ) : null}
 
-              <div>{item.title}</div>
+              <div>
+                <Link to={item.id} className="underline">
+                  {item.title}
+                </Link>
+              </div>
             </div>
           }
         />

@@ -44,7 +44,7 @@ export function useAssetIndexColumns() {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
 
   /** Get the mode from the settings */
-  const columns = settings?.columns as Column[];
+  const columns = (settings?.columns as Column[]) || [];
 
   let optimisticColumns = columns;
   const fetchers = useFetchers();

@@ -397,7 +397,9 @@ export const AssetsList = ({
         /**
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
-        navigate={(itemId) => navigate(`/assets/${itemId}`)}
+        navigate={
+          modeIsSimple ? (itemId) => navigate(`/assets/${itemId}`) : undefined
+        }
         bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined

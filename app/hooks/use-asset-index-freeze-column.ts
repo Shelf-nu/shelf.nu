@@ -7,8 +7,10 @@ import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 export function useAssetIndexFreezeColumn() {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
 
-  /** Get the mode from the settings */
-  const { freezeColumn } = settings;
+  /** Get the mode from the settings
+   * We meed to set it to false in the case when useAssetIndexFreezeColumn is called in a page different than the asset index page
+   */
+  const freezeColumn = settings?.freezeColumn || false;
 
   let optimisticFrozen = freezeColumn;
   const fetchers = useFetchers();

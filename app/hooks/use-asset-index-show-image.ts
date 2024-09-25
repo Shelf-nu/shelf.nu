@@ -8,7 +8,7 @@ export function useAssetIndexShowImage() {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
 
   /** Get the mode from the settings */
-  const { showAssetImage } = settings;
+  const showAssetImage = settings.showAssetImage || false;
 
   let optimisticShowAssetImage = showAssetImage;
   const fetchers = useFetchers();

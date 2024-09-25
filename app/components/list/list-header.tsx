@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
@@ -13,6 +13,7 @@ import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
 import BulkListHeader from "./bulk-actions/bulk-list-header";
 import { freezeColumnClassNames } from "../assets/assets-index/freeze-column-classes";
+import { useAdvancedStickyHeader } from "../assets/assets-index/use-advanced-sticky-header";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import { Th } from "../table";
@@ -33,14 +34,16 @@ export const ListHeader = ({
 }: ListHeaderProps) => {
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
+  // const theadRef = useAdvancedStickyHeader();
 
   return (
     <thead
       className={tw(
         "border-b",
-        modeIsAdvanced ? "sticky top-0 z-10 bg-white" : "",
+        modeIsAdvanced ? "z-10 bg-white" : "",
         className
       )}
+      // ref={theadRef}
     >
       <tr className="">
         {bulkActions ? <BulkListHeader /> : null}
@@ -52,7 +55,7 @@ export const ListHeader = ({
 
               modeIsAdvanced && freezeColumn
                 ? freezeColumnClassNames.nameHeader
-                : "" //48px is the width of the checkbox
+                : ""
             )}
             colSpan={children ? 1 : 100}
           >

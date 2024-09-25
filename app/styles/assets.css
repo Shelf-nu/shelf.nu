@@ -1,9 +1,6 @@
 .select-trigger span span {
   @apply text-gray-500;
 }
-/* 
-.freeze-shadow {
-  box-shadow: 32px 0px 32px -12px #1018281f;
-  overflow: visible;
-  z-index: 1;
-} */
+.sticky-table-header {
+  @apply fixed top-[19px] z-10;
+}

@@ -15,6 +15,7 @@ export const freezeColumnClassNames: Record<
   ),
   name: tw(
     "freeze-shadow sticky left-[48px] z-10 bg-white",
-    "after:absolute after:inset-0 after:border-b after:border-r after:border-gray-200 after:content-['']"
+    "after:absolute after:inset-y-0 after:right-0 after:border-r after:border-gray-200 after:content-['']",
+    "before:absolute before:inset-x-0 before:bottom-0 before:border-b before:border-gray-200 before:content-['']"
   ),
 };
