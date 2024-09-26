@@ -132,7 +132,7 @@ export default function App() {
       <div
         id="container"
         key={currentOrganizationId}
-        className="flex min-h-screen min-w-[320px] flex-col"
+        className="flex h-screen max-h-screen min-h-screen min-w-[320px] flex-col"
       >
         <div className="inner-container flex flex-col md:flex-row">
           <Sidebar />

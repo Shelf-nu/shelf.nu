@@ -1,4 +1,4 @@
-import { CalendarIcon } from "@radix-ui/react-icons";
+import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import { Spinner } from "./spinner";
 
 import {
@@ -42,8 +42,11 @@ import {
   AssetLabel,
   LockIcon,
   ActiveSwitchIcon,
+  ScanIcon,
   MapIcon,
   ToolIcon,
+  AddTagsIcon,
+  RemoveTagsIcon,
   InstallIcon,
 } from "../icons/library";
 
@@ -68,6 +71,8 @@ export type IconType =
   | "question"
   | "write"
   | "tag"
+  | "tag-remove"
+  | "tag-add"
   | "category"
   | "location"
   | "gps"
@@ -94,7 +99,9 @@ export type IconType =
   | "lock"
   | "activate"
   | "deactivate"
+  | "scan"
   | "tool"
+  | "rows"
   | "install";
 
 type IconsMap = {
@@ -121,6 +128,8 @@ export const iconsMap: IconsMap = {
   question: <QuestionsIcon />,
   write: <WriteIcon />,
   tag: <TagsIcon />,
+  "tag-add": <AddTagsIcon />,
+  "tag-remove": <RemoveTagsIcon />,
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
   gps: <GpsMarkerIcon />,
@@ -147,7 +156,9 @@ export const iconsMap: IconsMap = {
   lock: <LockIcon />,
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
+  scan: <ScanIcon />,
   tool: <ToolIcon />,
+  rows: <RowsIcon />,
   install: <InstallIcon />,
 };
 

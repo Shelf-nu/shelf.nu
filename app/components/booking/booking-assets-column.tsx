@@ -100,24 +100,37 @@ export function BookingAssetsColumn() {
           <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
             <div>
               <div className=" text-md font-semibold text-gray-900">Assets</div>
-              <div>{totalItems} items</div>
+              <div>
+                <span>{totalItems} items</span>
+              </div>
             </div>
-            <Button
-              to={manageAssetsUrl}
-              className="whitespace-nowrap"
-              disabled={manageAssetsButtonDisabled}
-            >
-              Manage assets
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                icon="scan"
+                variant="secondary"
+                to="scan-assets"
+                disabled={manageAssetsButtonDisabled}
+              >
+                Scan
+              </Button>
+              <Button
+                to={manageAssetsUrl}
+                className="whitespace-nowrap"
+                disabled={manageAssetsButtonDisabled}
+              >
+                Manage assets
+              </Button>
+            </div>
           </div>
 
-          <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
+          <div className="-mx-4 overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
             {!hasItems ? (
               <EmptyState
                 className="py-10"
                 customContent={{
                   title: "Start by defining a booking period",
-                  text: "Assets added to your booking will show up here. You must select a Start and End date and Save your booking in order to be able to add assets.",
+                  text: "Assets added to your booking will show up here. Scan tags or search for assets to add to your booking.",
                   newButtonRoute: manageAssetsUrl,
                   newButtonContent: "Manage assets",
                   buttonProps: {
@@ -127,7 +140,7 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table>
+                <Table className="">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
                     <Th> </Th>

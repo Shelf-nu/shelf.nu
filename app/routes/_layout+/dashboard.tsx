@@ -19,6 +19,7 @@ import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
+import { getBookings } from "~/modules/booking/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -97,6 +98,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
       });
 
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      perPage: 1000,
+      statuses: ["ONGOING", "OVERDUE"],
+      extraInclude: {
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    });
+
     const announcement = await db.announcement
       .findFirst({
         where: {
@@ -136,6 +149,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipOnboardingChecklist: cookie.skipOnboardingChecklist,
         custodiansData: getCustodiansOrderedByTotalCustodies({
           assets,
+          bookings,
         }),
         mostScannedAssets: getMostScannedAssets({ assets }),
         mostScannedCategories: getMostScannedAssetsCategories({ assets }),

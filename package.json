@@ -84,7 +84,7 @@
     "maplibre-gl": "^4.0.0",
     "nodemailer": "^6.9.9",
     "nprogress": "^0.2.0",
-    "path-to-regexp": "^6.2.1",
+    "path-to-regexp": "^6.3.0",
     "pg-boss": "^9.0.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",
@@ -157,7 +157,7 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.7.1",
     "typescript": "^5.1.0",
-    "vite": "^5.2.3",
+    "vite": "^5.4.6",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
     "vitest": "^1.4.0"

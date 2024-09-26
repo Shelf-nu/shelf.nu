@@ -220,3 +220,43 @@ export default function AssetIndexPage() {
 **Dependencies:**
 
 - `useRouteLoaderData`: hook from `@remix-run/react` that returns the loader data for a given route by ID.
+
+## `useUserData`
+
+The `useUserData` hook is used to access the current user's data from within any component in the application, particularly those nested under the `_layout` route.
+
+**Overview**
+
+This hook simplifies the process of retrieving user data that is loaded in the `_layout` route. It uses the `useRouteLoaderData` hook from Remix to access the loader data, making it easy to get user information without prop drilling.
+
+**Returns**
+
+- `user`: The user data object from the `_layout` route loader. This typically includes properties like `email` and possibly other user-related information.
+
+**Usage:**
+
+Here's an example of how to use the `useUserData` hook in a component:
+
+```typescript
+import React from 'react';
+import { useUserData } from '~/hooks/use-user-data';
+
+export const RequestDeleteUser = () => {
+  const user = useUserData();
+
+  return (
+    <form>
+      {/* Other form elements */}
+      <input type="hidden" name="email" value={user?.email} />
+      {/* Rest of the component */}
+    </form>
+  );
+}
+```
+
+In this example, the `useUserData` hook is used to retrieve the current user's email address, which is then used in a hidden form field.
+
+## Dependencies
+
+- `useRouteLoaderData`: A hook from `@remix-run/react` that returns the loader data for a given route by ID.
+- `loader` type from `~/routes/_layout+/_layout`: Used to type the loader data.

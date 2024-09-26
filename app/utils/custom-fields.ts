@@ -190,7 +190,7 @@ export const getCustomFieldDisplayValue = (
 
   if (value.valueDate && value.raw) {
     return hints
-      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+      ? formatDateBasedOnLocaleOnly(value.valueDate as string, hints.locale)
       : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);
