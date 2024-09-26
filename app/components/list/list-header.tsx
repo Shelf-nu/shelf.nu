@@ -34,7 +34,7 @@ export const ListHeader = ({
 }: ListHeaderProps) => {
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
-  // const theadRef = useAdvancedStickyHeader();
+  const theadRef = useAdvancedStickyHeader();
 
   return (
     <thead
@@ -43,7 +43,7 @@ export const ListHeader = ({
         modeIsAdvanced ? "z-10 bg-white" : "",
         className
       )}
-      // ref={theadRef}
+      ref={theadRef}
     >
       <tr className="">
         {bulkActions ? <BulkListHeader /> : null}

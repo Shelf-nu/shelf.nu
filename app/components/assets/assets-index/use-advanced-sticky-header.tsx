@@ -17,7 +17,9 @@ export function useAdvancedStickyHeader(): RefObject<HTMLTableSectionElement> {
       if (scrollTop > tableRect.top - bodyRect.top) {
         const bodyTop = bodyRect.top;
         theadRef.current.style.position = "fixed";
-        theadRef.current.style.top = `${-bodyTop}px`;
+
+        // 317 is some magical number that makes the header have the correct position. No idea where it comes from
+        theadRef.current.style.top = `${-bodyTop - 317}px`;
         theadRef.current.style.zIndex = "10";
 
         // Adjust column widths
