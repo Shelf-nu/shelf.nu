@@ -200,6 +200,7 @@ export function AdvancedIndexColumn({
 function TextColumn({
   value,
   className,
+  ...rest
 }: {
   value: string | React.ReactNode;
   className?: string;
@@ -210,6 +211,7 @@ function TextColumn({
         "w-full max-w-none !overflow-visible whitespace-nowrap",
         className
       )}
+      {...rest}
     >
       {value}
     </Td>

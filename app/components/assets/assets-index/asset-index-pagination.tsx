@@ -5,6 +5,7 @@ import { tw } from "~/utils/tw";
 import { Pagination } from "../../list/pagination";
 import { Button } from "../../shared/button";
 import { ButtonGroup } from "../../shared/button-group";
+import { ChevronRight } from "~/components/icons/library";
 
 export function AssetIndexPagination() {
   let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
@@ -24,7 +25,19 @@ export function AssetIndexPagination() {
       )}
     >
       <Pagination className="px-4 py-[6px]" />
-      <div className="px-4 py-[6px]">
+      <div className="flex items-stretch gap-2 px-4 py-[6px]">
+        <Button
+          onClick={() =>
+            window.scrollTo({
+              top: 0,
+              behavior: "smooth",
+            })
+          }
+          variant="secondary"
+          title="Scroll to top"
+        >
+          <ChevronRight className="chev -rotate-90" />
+        </Button>
         <fetcher.Form method="post" action="/api/asset-index-settings">
           <input type="hidden" name="intent" value="changeMode" />
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
@@ -58,6 +58,7 @@ export const ListHeader = ({
                 : ""
             )}
             colSpan={children ? 1 : 100}
+            data-column-name="name"
           >
             <div
               className={tw(

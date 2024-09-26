@@ -8,7 +8,11 @@ export function AdvancedTableHeader({ columns }: { columns: Column[] }) {
       {columns
         .filter((column) => column.visible)
         .map((column) => (
-          <Th key={column.name} className="whitespace-nowrap">
+          <Th
+            key={column.name}
+            className="whitespace-nowrap"
+            data-column-name={column.name}
+          >
             {parseColumnName(column.name)}
           </Th>
         ))}
