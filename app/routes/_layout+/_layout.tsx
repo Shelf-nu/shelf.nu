@@ -152,7 +152,8 @@ export default function App() {
             <Toaster />
             <ClientOnly fallback={null}>
               {() =>
-                window.matchMedia("(max-width: 640px)").matches ? (
+                window.matchMedia("(max-width: 640px)").matches &&
+                !window.matchMedia("(display-mode: standalone)").matches ? (
                   <InstallPwaPromptModal />
                 ) : null
               }
