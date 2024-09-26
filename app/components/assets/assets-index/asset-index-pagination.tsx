@@ -1,11 +1,11 @@
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { ChevronRight } from "~/components/icons/library";
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
 import { Pagination } from "../../list/pagination";
 import { Button } from "../../shared/button";
 import { ButtonGroup } from "../../shared/button-group";
-import { ChevronRight } from "~/components/icons/library";
 
 export function AssetIndexPagination() {
   let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
@@ -20,7 +20,7 @@ export function AssetIndexPagination() {
   return (
     <div
       className={tw(
-        "asset-index-pagination z-99 fixed bottom-0 right-0 flex items-center justify-between border-t border-gray-200 bg-white ",
+        "asset-index-pagination fixed bottom-0 right-0 z-[12] flex items-center justify-between border-t border-gray-200 bg-white ",
         minimizedSidebar ? "lg:left-[82px]" : "lg:left-[312px]"
       )}
     >
@@ -38,7 +38,16 @@ export function AssetIndexPagination() {
         >
           <ChevronRight className="chev -rotate-90" />
         </Button>
-        <fetcher.Form method="post" action="/api/asset-index-settings">
+        <fetcher.Form
+          method="post"
+          action="/api/asset-index-settings"
+          onSubmit={() => {
+            window.scrollTo({
+              top: 0,
+              behavior: "smooth",
+            });
+          }}
+        >
           <input type="hidden" name="intent" value="changeMode" />
 
           <ButtonGroup>

@@ -1,6 +1,6 @@
 import { AssetIndexMode } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { generateColumnsSchema } from "~/modules/asset-index-settings/helpers";
@@ -59,7 +59,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           mode,
         });
 
-        return json(data({ success: true }));
+        // Redirect to the assets page, so the loader takes care of setting the correct search params and filters based on the mode
+        return redirect("/assets");
       }
 
       case "changeColumns": {

@@ -50,6 +50,8 @@ import {
   ColumnsIcon,
   LockIcon,
   ImageIcon,
+  FilterIcon,
+  SortIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -106,7 +108,9 @@ export type IconType =
   | "rows"
   | "columns"
   | "no-permissions"
-  | "image";
+  | "image"
+  | "filter"
+  | "sort";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -166,6 +170,8 @@ export const iconsMap: IconsMap = {
   columns: <ColumnsIcon />,
   lock: <LockIcon />,
   image: <ImageIcon />,
+  filter: <FilterIcon />,
+  sort: <SortIcon />,
 };
 
 export default iconsMap;

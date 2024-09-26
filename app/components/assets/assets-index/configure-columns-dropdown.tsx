@@ -49,7 +49,7 @@ export function ConfigureColumnsDropdown() {
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
-        <Button variant="secondary" icon="columns">
+        <Button variant="secondary" icon="columns" className="text-gray-500">
           Columns
         </Button>
       </PopoverTrigger>

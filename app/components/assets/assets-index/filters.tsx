@@ -20,6 +20,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
 export function AssetIndexFilters({
@@ -173,7 +174,11 @@ export function AssetIndexFilters({
 
 function AdvancedAssetIndexFilters() {
   return (
-    <Filters>
+    <Filters
+      slots={{
+        "left-of-search": <AdvancedFilteringAndSorting />,
+      }}
+    >
       <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
         <ConfigureColumnsDropdown />
       </div>

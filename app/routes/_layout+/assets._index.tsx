@@ -1,14 +1,14 @@
 import type { Tag } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useFetchers, useLoaderData, useNavigate } from "@remix-run/react";
+import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -21,13 +21,13 @@ import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
 import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
-import type { HeaderData } from "~/components/layout/header/types";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {
   Tooltip,
@@ -43,35 +43,26 @@ import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
-  bulkDeleteAssets,
-  getPaginatedAndFilterableAssets,
-  updateAssetsWithBookingCustodians,
-} from "~/modules/asset/service.server";
+  advancedModeLoader,
+  simpleModeLoader,
+} from "~/modules/asset/data.server";
+import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getClientHint } from "~/utils/client-hints";
-import {
-  userPrefs,
-  getFiltersFromRequest,
-  setCookie,
-} from "~/utils/cookies.server";
+
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canImportAssets } from "~/utils/subscription.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export type AssetIndexLoaderData = typeof loader;
@@ -113,128 +104,32 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
-    const { locale, timeZone } = getClientHint(request);
 
-    /** Parse filters */
-    const {
-      filters,
-      serializedCookie: filtersCookie,
-      redirectNeeded,
-    } = await getFiltersFromRequest(request, organizationId);
+    const settings = await getAssetIndexSettings({ userId, organizationId });
 
-    if (filters && redirectNeeded) {
-      const cookieParams = new URLSearchParams(filters);
-      return redirect(`/assets?${cookieParams.toString()}`);
-    }
-    /** Query tierLimit, assets & Asset index settings */
-    let [
-      tierLimit,
-      {
-        search,
-        totalAssets,
-        perPage,
-        page,
-        categories,
-        tags,
-        assets,
-        totalPages,
-        cookie,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        teamMembers,
-        totalTeamMembers,
-        rawTeamMembers,
-      },
-      settings,
-    ] = await Promise.all([
-      getOrganizationTierLimit({
-        organizationId,
-        organizations,
-      }),
-      getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        filters,
-      }),
-      getAssetIndexSettings({ userId, organizationId }),
-    ]);
+    const mode = settings.mode;
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      /**
-       * For self service users we dont return the assets that are not available to book
-       */
-      assets = assets.filter((a) => a.availableToBook);
-    }
-
-    assets = await updateAssetsWithBookingCustodians(assets);
-
-    const header: HeaderData = {
-      title: isPersonalOrg(currentOrganization)
-        ? user?.firstName
-          ? `${user.firstName}'s inventory`
-          : `Your inventory`
-        : currentOrganization?.name
-        ? `${currentOrganization?.name}'s inventory`
-        : "Your inventory",
-    };
-
-    const modelName = {
-      singular: "asset",
-      plural: "assets",
-    };
-
-    const userPrefsCookie = await userPrefs.serialize(cookie);
-    const headers = [
-      setCookie(userPrefsCookie),
-      ...(filtersCookie ? [setCookie(filtersCookie)] : []),
-    ];
-
-    return json(
-      data({
-        header,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        canImportAssets:
-          canImportAssets(tierLimit) &&
-          (await hasPermission({
-            organizationId,
-            userId,
-            roles: role ? [role] : [],
-            entity: PermissionEntity.asset,
-            action: PermissionAction.import,
-          })),
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        teamMembers,
-        totalTeamMembers,
-        rawTeamMembers,
-        filters,
-        organizationId,
-        settings,
-        locale,
-        timeZone,
-        currentOrganization,
-      }),
-      {
-        headers,
-      }
-    );
+    return mode === "SIMPLE"
+      ? await simpleModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        })
+      : await advancedModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -365,6 +260,15 @@ export const AssetsList = ({
   const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexMode();
+  const fetchers = useFetchers();
+  /** Find the fetcher used for toggling between asset index modes */
+  const modeFetcher = fetchers.find(
+    (fetcher) => fetcher.key === "asset-index-settings-mode"
+  );
+
+  // const isSwappingMode = modeFetcher?.state === "loading";
+  const isSwappingMode = modeFetcher?.formData;
+
   const columns = useAssetIndexColumns();
   const { roles } = useUserRoleHelper();
 
@@ -389,6 +293,20 @@ export const AssetsList = ({
 
   return (
     <ListContentWrapper>
+      {isSwappingMode ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ delay: 0.2 }}
+          className="absolute inset-[3px] z-[11] flex flex-col items-center border border-gray-200 bg-gray-25/95 pt-[200px]"
+        >
+          <Spinner />
+          <p className="mt-2">Changing mode...</p>
+        </motion.div>
+      ) : (
+        <></>
+      )}
       <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
       <List
         title="Assets"

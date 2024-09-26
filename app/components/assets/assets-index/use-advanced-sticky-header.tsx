@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 
 function debounce(func: Function, wait: number) {
   let timeout: ReturnType<typeof setTimeout>;
@@ -14,14 +15,23 @@ function debounce(func: Function, wait: number) {
 }
 
 export function useAdvancedStickyHeader(
+  /**
+   * THis is the magic number that makes it work. I am not sure why this is the case but it works
+   * ¯\_(ツ)_/¯
+   */
+
   initialOffset: number = 317
 ): RefObject<HTMLTableSectionElement> {
   const theadRef = useRef<HTMLTableSectionElement>(null);
   const ticking = useRef(false);
   const [isSticky, setIsSticky] = useState(false);
   const lastScrollTop = useRef(0);
+  const { modeIsSimple } = useAssetIndexMode();
 
   const updateHeader = useCallback(() => {
+    /**This feature is only for advanced mode */
+    if (modeIsSimple) return;
+
     if (!theadRef.current) return;
     const tableElement = theadRef.current.closest("table") as HTMLTableElement;
     if (!tableElement) return;
@@ -53,10 +63,12 @@ export function useAdvancedStickyHeader(
         const theadColumns = theadRef.current.rows[0].cells;
         Array.from(theadColumns).forEach((theadColumn, index) => {
           if (tableColumns[index]) {
+            /** For this column we need to handle it in a special way because its position is sticky so we cant adjust its width directly */
             if (theadColumn.dataset.columnName === "name") {
               const innerDiv = theadColumn.querySelector("div");
               if (innerDiv) {
                 innerDiv.style.width = "275px";
+                // Add 0.5px to the width make columns align properly. Not sure why this is needed
                 theadColumn.style.width = `${
                   tableColumns[index].offsetWidth + 0.5
                 }px`;
@@ -97,7 +109,7 @@ export function useAdvancedStickyHeader(
     }
 
     lastScrollTop.current = scrollTop;
-  }, [initialOffset, isSticky]);
+  }, [initialOffset, isSticky, modeIsSimple]);
 
   const handleScroll = useCallback(() => {
     if (!ticking.current) {
