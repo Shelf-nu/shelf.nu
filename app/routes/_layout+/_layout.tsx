@@ -7,7 +7,7 @@ import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
-import InstallPwaPromptModal from "~/components/layout/install-pwa-prompt-modal";
+import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";

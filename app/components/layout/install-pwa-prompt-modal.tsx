@@ -5,7 +5,7 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { usePwaManager } from "~/utils/pwa-manager";
 import { Button } from "../shared/button";
 
-export default function InstallPwaPromptModal() {
+export function InstallPwaPromptModal() {
   const { hideInstallPwaPrompt } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   let optimisticHideInstallPwaPrompt = hideInstallPwaPrompt;
