@@ -4,6 +4,7 @@ import { AnimatePresence } from "framer-motion";
 import type { loader } from "~/routes/_layout+/_layout";
 import { usePwaManager } from "~/utils/pwa-manager";
 import { Button } from "../shared/button";
+import { useRef } from "react";
 
 export function InstallPwaPromptModal() {
   const { hideInstallPwaPrompt } = useLoaderData<typeof loader>();
@@ -13,7 +14,7 @@ export function InstallPwaPromptModal() {
     optimisticHideInstallPwaPrompt =
       fetcher.formData.get("pwaPromptVisibility") === "hidden";
   }
-  // const hidePwaPromptForm = useRef<HTMLFormElement | null>(null);
+  const hidePwaPromptForm = useRef<HTMLFormElement | null>(null);
 
   const { promptInstall } = usePwaManager();
   return optimisticHideInstallPwaPrompt ? null : (
@@ -42,13 +43,18 @@ export function InstallPwaPromptModal() {
                 variant="primary"
                 className="mb-3"
                 onClick={async () => {
-                  await promptInstall();
+                  await promptInstall().then(() =>
+                    fetcher.submit(hidePwaPromptForm.current, {
+                      method: "POST",
+                    })
+                  );
                 }}
               >
                 Install
               </Button>
             )}
             <fetcher.Form
+              ref={hidePwaPromptForm}
               method="post"
               action="/api/user/prefs/hide-install-pwa-prompt-modal"
             >

@@ -60,28 +60,6 @@ export const usePwaManager = () => {
   return context;
 };
 
-function checkIsArcBrowser() {
-  return window
-    .getComputedStyle(document.documentElement)
-    .getPropertyValue("--arc-palette-title")
-    ? true
-    : false;
-}
-
-function subscribeToLoadEvent(callback: () => void) {
-  async function delayCallback() {
-    // delay the callback to be sure everything is loaded
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    callback();
-  }
-
-  window.addEventListener("load", delayCallback);
-
-  return () => {
-    window.removeEventListener("load", delayCallback);
-  };
-}
-
 let promptInstallStore: PwaManager["promptInstall"] = null;
 
 function subscribeToBeforeInstallPromptEvent(callback: () => void) {
@@ -111,18 +89,10 @@ export const PwaManagerProvider = ({
     () => null
   );
 
-  // 🚨 Some chrome based browsers don't support prompt to install even if they support the event.
-  // [21/10/2023] : ❌ Arc Browser
-  const isArcBrowser = useSyncExternalStore(
-    subscribeToLoadEvent,
-    () => checkIsArcBrowser(),
-    () => false
-  );
-
   return (
     <PwaManagerContext.Provider
       value={{
-        promptInstall: isArcBrowser ? null : promptInstall,
+        promptInstall: promptInstall,
       }}
     >
       {children}
