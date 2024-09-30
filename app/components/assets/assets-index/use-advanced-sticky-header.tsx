@@ -1,139 +1,135 @@
-import type { RefObject } from "react";
-import { useEffect, useRef, useCallback, useState } from "react";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-function debounce(func: Function, wait: number) {
-  let timeout: ReturnType<typeof setTimeout>;
-  return function executedFunction(...args: any[]) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-export function useAdvancedStickyHeader(
-  /**
-   * THis is the magic number that makes it work. I am not sure why this is the case but it works
-   * ¯\_(ツ)_/¯
-   */
-
-  initialOffset: number = 317
-): RefObject<HTMLTableSectionElement> {
-  const theadRef = useRef<HTMLTableSectionElement>(null);
-  const ticking = useRef(false);
+export function useStickyHeaderPortal(stickyOffset: number = 0) {
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(
+    null
+  );
   const [isSticky, setIsSticky] = useState(false);
-  const lastScrollTop = useRef(0);
-  const { modeIsSimple } = useAssetIndexMode();
+  const headerRef = useRef<HTMLTableSectionElement>(null);
+  const stickyRef = useRef<HTMLDivElement>(null);
 
-  const updateHeader = useCallback(() => {
-    /**This feature is only for advanced mode */
-    if (modeIsSimple) return;
+  useEffect(() => {
+    //
+    const headerRefCurrent = headerRef.current;
+    if (!headerRefCurrent) return;
 
-    if (!theadRef.current) return;
-    const tableElement = theadRef.current.closest("table") as HTMLTableElement;
+    const tableElement = headerRefCurrent.closest("table");
     if (!tableElement) return;
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.top = "0";
+    container.style.left = `${tableElement?.getBoundingClientRect().left}px`;
+    container.style.width = `${tableElement?.getBoundingClientRect().width}px`;
+    container.style.zIndex = "1000";
+    document.body.appendChild(container);
+    setPortalContainer(container);
 
-    const tableRect = tableElement.getBoundingClientRect();
-    const headerRect = theadRef.current.getBoundingClientRect();
-    const bodyRect = document.body.getBoundingClientRect();
-    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const newIsSticky = !entry.isIntersecting;
+        setIsSticky(newIsSticky);
+      },
+      {
+        threshold: 0,
+        rootMargin: `-${stickyOffset}px 0px 0px 0px`,
+      }
+    );
 
-    const shouldBeSticky = scrollTop > tableRect.top - bodyRect.top;
-
-    if (shouldBeSticky !== isSticky) {
-      setIsSticky(shouldBeSticky);
+    if (headerRef.current) {
+      observer.observe(headerRef.current);
     }
 
-    if (shouldBeSticky) {
-      const bodyTop = bodyRect.top;
-      const translateY = -bodyTop - initialOffset;
+    return () => {
+      document.body.removeChild(container);
+      if (headerRefCurrent) {
+        observer.unobserve(headerRefCurrent);
+      }
+    };
+  }, [stickyOffset]);
 
-      theadRef.current.style.position = "fixed";
-      theadRef.current.style.transform = `translateY(${translateY}px)`;
-      theadRef.current.style.zIndex = "10";
-      theadRef.current.style.width = `${tableRect.width}px`;
+  useEffect(() => {
+    const handleResize = () => {
+      if (portalContainer && headerRef.current) {
+        const tableElement = headerRef.current.closest("table");
+        portalContainer.style.left = `${tableElement?.getBoundingClientRect()
+          .left}px`;
+        portalContainer.style.width = `${tableElement?.getBoundingClientRect()
+          .width}px`;
+        // if (isSticky) {
+        //   adjustColumnWidths();
+        // }
+      }
+    };
 
+    if (isSticky) {
+      if (!headerRef.current) return;
+      const tableElement = headerRef.current.closest("table");
+      if (!tableElement) return;
+      // Fix the header widths
       // Adjust column widths
-      const tableBody = tableElement.querySelector("tbody");
-      if (tableBody && tableBody.rows.length > 0) {
-        const tableColumns = tableBody.rows[0].cells;
-        const theadColumns = theadRef.current.rows[0].cells;
-        Array.from(theadColumns).forEach((theadColumn, index) => {
-          if (tableColumns[index]) {
+      // THEEAD of the original table
+      const tableHead = tableElement.querySelector("thead");
+      if (!tableHead || tableHead.rows.length <= 0) return;
+
+      const theadColumns = tableHead.rows[0].cells;
+      const stickyColumns =
+        stickyRef.current?.querySelector("thead")?.rows[0].cells;
+
+      console.log("theadColumns", theadColumns);
+      console.log("stickyColumns", stickyColumns);
+
+      if (stickyColumns && theadColumns.length === stickyColumns.length) {
+        Array.from(stickyColumns).forEach((stickyColumn, index) => {
+          if (theadColumns[index]) {
             /** For this column we need to handle it in a special way because its position is sticky so we cant adjust its width directly */
-            if (theadColumn.dataset.columnName === "name") {
-              const innerDiv = theadColumn.querySelector("div");
+            if (stickyColumn.dataset.columnName === "name") {
+              const innerDiv = stickyColumn.querySelector("div");
               if (innerDiv) {
                 innerDiv.style.width = "275px";
                 // Add 0.5px to the width make columns align properly. Not sure why this is needed
-                theadColumn.style.width = `${
-                  tableColumns[index].offsetWidth + 0.5
+                stickyColumn.style.width = `${
+                  theadColumns[index].offsetWidth + 0.5
                 }px`;
               }
             } else {
-              theadColumn.style.width = `${tableColumns[index].offsetWidth}px`;
+              stickyColumn.style.width = `${theadColumns[index].offsetWidth}px`;
             }
-            theadColumn.style.borderBottom = "none";
+            stickyColumn.style.borderBottom = "none";
           }
         });
       }
-
-      // Add padding to the table body to prevent content jump
-      if (tableElement.style.paddingTop === "") {
-        tableElement.style.paddingTop = `${headerRect.height}px`;
-      }
-    } else {
-      theadRef.current.style.position = "";
-      theadRef.current.style.transform = "";
-      theadRef.current.style.zIndex = "";
-      theadRef.current.style.width = "";
-
-      // Reset column widths
-      const theadColumns = theadRef.current.rows[0].cells;
-      Array.from(theadColumns).forEach((theadColumn) => {
-        theadColumn.style.width = "";
-        theadColumn.style.borderBottom = "";
-        if (theadColumn.dataset.columnName === "name") {
-          const innerDiv = theadColumn.querySelector("div");
-          if (innerDiv) {
-            innerDiv.style.width = "";
-          }
-        }
-      });
-
-      // Remove padding from the table body
-      tableElement.style.paddingTop = "";
     }
 
-    lastScrollTop.current = scrollTop;
-  }, [initialOffset, isSticky, modeIsSimple]);
-
-  const handleScroll = useCallback(() => {
-    if (!ticking.current) {
-      window.requestAnimationFrame(() => {
-        updateHeader();
-        ticking.current = false;
-      });
-      ticking.current = true;
-    }
-  }, [updateHeader]);
-
-  const handleResize = debounce(() => {
-    updateHeader();
-  }, 100);
-
-  useEffect(() => {
-    window.addEventListener("scroll", handleScroll);
     window.addEventListener("resize", handleResize);
 
     return () => {
-      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleResize);
     };
-  }, [handleScroll, handleResize]);
+  }, [portalContainer, isSticky]);
 
-  return theadRef;
+  const StickyHeader: React.FC<{ children: React.ReactNode }> = ({
+    children,
+  }) => {
+    if (!portalContainer || !isSticky) return null;
+
+    return createPortal(
+      <div
+        ref={stickyRef}
+        style={{
+          position: "sticky",
+          top: `${stickyOffset}px`,
+          width: "100%",
+          background: "white",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          zIndex: 1000,
+        }}
+      >
+        {children}
+      </div>,
+      portalContainer
+    );
+  };
+
+  return { headerRef, StickyHeader };
 }

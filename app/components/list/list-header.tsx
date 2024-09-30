@@ -13,8 +13,8 @@ import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
 import BulkListHeader from "./bulk-actions/bulk-list-header";
 import { freezeColumnClassNames } from "../assets/assets-index/freeze-column-classes";
-import { useAdvancedStickyHeader } from "../assets/assets-index/use-advanced-sticky-header";
-import { ChevronRight } from "../icons/library";
+import { useStickyHeaderPortal } from "../assets/assets-index/use-advanced-sticky-header";
+import { ChevronRight, LockIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import { Th } from "../table";
 
@@ -34,45 +34,71 @@ export const ListHeader = ({
 }: ListHeaderProps) => {
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
-  const theadRef = useAdvancedStickyHeader();
+  const { headerRef, StickyHeader } = useStickyHeaderPortal();
+
+  const headerContent = (
+    <tr className="">
+      {bulkActions ? <BulkListHeader /> : null}
+      {hideFirstColumn ? null : (
+        <Th
+          className={tw(
+            "!border-b-0 border-r border-r-transparent text-left font-normal text-gray-600",
+            bulkActions ? "!pl-0" : "",
+
+            modeIsAdvanced && freezeColumn
+              ? freezeColumnClassNames.nameHeader
+              : ""
+          )}
+          colSpan={children ? 1 : 100}
+          data-column-name="name"
+        >
+          <div
+            className={tw(
+              modeIsAdvanced && "flex items-center justify-between"
+            )}
+          >
+            <div className="flex items-center gap-1">
+              Name{" "}
+              {modeIsAdvanced && freezeColumn ? (
+                <span className=" size-4 text-gray-400">
+                  <LockIcon />
+                </span>
+              ) : null}
+            </div>
+            {modeIsAdvanced && <AdvancedModeDropdown />}
+          </div>
+        </Th>
+      )}
+      {children}
+    </tr>
+  );
 
   return (
-    <thead
-      className={tw(
-        "border-b",
-        modeIsAdvanced ? "z-10 bg-white" : "",
-        className
-      )}
-      ref={theadRef}
-    >
-      <tr className="">
-        {bulkActions ? <BulkListHeader /> : null}
-        {hideFirstColumn ? null : (
-          <Th
-            className={tw(
-              "!border-b-0 border-r border-r-transparent text-left font-normal text-gray-600",
-              bulkActions ? "!pl-0" : "",
-
-              modeIsAdvanced && freezeColumn
-                ? freezeColumnClassNames.nameHeader
-                : ""
-            )}
-            colSpan={children ? 1 : 100}
-            data-column-name="name"
-          >
-            <div
-              className={tw(
-                modeIsAdvanced && "flex items-center justify-between"
-              )}
-            >
-              Name
-              {modeIsAdvanced && <AdvancedModeDropdown />}
-            </div>
-          </Th>
+    <>
+      <thead
+        className={tw(
+          "border-b",
+          modeIsAdvanced ? "z-10 bg-white" : "",
+          className
         )}
-        {children}
-      </tr>
-    </thead>
+        ref={headerRef}
+      >
+        {headerContent}
+      </thead>
+      <StickyHeader>
+        <table style={{ width: "100%" }}>
+          <thead
+            className={tw(
+              "border-b",
+              modeIsAdvanced ? "z-10 bg-white" : "",
+              className
+            )}
+          >
+            {headerContent}
+          </thead>
+        </table>
+      </StickyHeader>
+    </>
   );
 };
 
