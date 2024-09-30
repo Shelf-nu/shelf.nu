@@ -1,135 +1,147 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import ReactDOM from "react-dom";
 
-export function useStickyHeaderPortal(stickyOffset: number = 0) {
-  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(
-    null
-  );
+export function useStickyHeaderPortal() {
   const [isSticky, setIsSticky] = useState(false);
-  const headerRef = useRef<HTMLTableSectionElement>(null);
-  const stickyRef = useRef<HTMLDivElement>(null);
+  const originalHeaderRef = useRef<HTMLTableSectionElement>(null);
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState({
+    top: 0,
+    left: 0,
+    width: "100%",
+    columnCoords: [] as { left: number; width: number }[],
+  });
 
   useEffect(() => {
-    //
-    const headerRefCurrent = headerRef.current;
+    const headerRefCurrent = originalHeaderRef.current;
     if (!headerRefCurrent) return;
-
+    const columns = headerRefCurrent.rows[0].cells;
     const tableElement = headerRefCurrent.closest("table");
     if (!tableElement) return;
-    const container = document.createElement("div");
-    container.style.position = "fixed";
-    container.style.top = "0";
-    container.style.left = `${tableElement?.getBoundingClientRect().left}px`;
-    container.style.width = `${tableElement?.getBoundingClientRect().width}px`;
-    container.style.zIndex = "1000";
-    document.body.appendChild(container);
-    setPortalContainer(container);
+
+    function handleTableHorizontalScroll(e: Event) {
+      const head = (e.target as HTMLDivElement).querySelector("thead");
+      if (!head) return;
+      const newColumnCoords = Array.from(columns).map((column) => ({
+        width: column.offsetWidth,
+        left: column.getBoundingClientRect().left,
+      }));
+      setCoords((prev) => ({ ...prev, columnCoords: newColumnCoords }));
+    }
+
+    const tableParent = tableElement.parentElement;
+
+    tableParent?.addEventListener("scroll", handleTableHorizontalScroll);
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         const newIsSticky = !entry.isIntersecting;
         setIsSticky(newIsSticky);
+
+        if (newIsSticky) {
+          setCoords({
+            top: 0,
+            left: tableElement.getBoundingClientRect().left,
+            width: `${tableElement.getBoundingClientRect().width}px`,
+            columnCoords: Array.from(columns).map((column) => ({
+              width: column.offsetWidth,
+              left: column.getBoundingClientRect().left,
+            })),
+          });
+        }
       },
       {
         threshold: 0,
-        rootMargin: `-${stickyOffset}px 0px 0px 0px`,
+        rootMargin: `0px 0px 0px 0px`,
       }
     );
 
-    if (headerRef.current) {
-      observer.observe(headerRef.current);
+    if (headerRefCurrent) {
+      observer.observe(headerRefCurrent);
     }
 
     return () => {
-      document.body.removeChild(container);
       if (headerRefCurrent) {
         observer.unobserve(headerRefCurrent);
       }
     };
-  }, [stickyOffset]);
+  }, []);
+
+  return { originalHeaderRef, isSticky, stickyHeaderRef, coords };
+}
+
+export const StickyHeader = ({
+  children,
+  isSticky,
+  stickyHeaderRef,
+  coords,
+}: {
+  children: React.ReactNode;
+  isSticky: boolean;
+  stickyHeaderRef: React.RefObject<HTMLDivElement>;
+  coords: {
+    top: number;
+    left: number;
+    width: string;
+    columnCoords: { left: number; width: number }[];
+  };
+}) => {
+  const { top, left, width, columnCoords } = coords;
 
   useEffect(() => {
-    const handleResize = () => {
-      if (portalContainer && headerRef.current) {
-        const tableElement = headerRef.current.closest("table");
-        portalContainer.style.left = `${tableElement?.getBoundingClientRect()
-          .left}px`;
-        portalContainer.style.width = `${tableElement?.getBoundingClientRect()
-          .width}px`;
-        // if (isSticky) {
-        //   adjustColumnWidths();
-        // }
+    if (!isSticky) return;
+    if (!stickyHeaderRef.current) return;
+    const head = stickyHeaderRef.current.querySelector("thead");
+    if (!head) return;
+
+    const stickyColumns = head.rows[0].cells;
+
+    Array.from(stickyColumns).forEach((stickyColumn, index) => {
+      const source = columnCoords[index];
+      stickyColumn.style.position = "absolute";
+      stickyColumn.style.width = `${source.width}px`;
+
+      if (source.left < left) {
+        // This handles the overflow of the sticky header when scrolling to the right
+        // If the left of the column is less than the left of the table, we need to adjust the width and left of the sticky column
+        stickyColumn.style.width = `${source.width - (left - source.left)}px`;
+        stickyColumn.style.left = `${left}px`;
+      } else {
+        stickyColumn.style.left = `${source.left - left}px`;
       }
-    };
 
-    if (isSticky) {
-      if (!headerRef.current) return;
-      const tableElement = headerRef.current.closest("table");
-      if (!tableElement) return;
-      // Fix the header widths
-      // Adjust column widths
-      // THEEAD of the original table
-      const tableHead = tableElement.querySelector("thead");
-      if (!tableHead || tableHead.rows.length <= 0) return;
+      // Calculate it based on the relative parent. This could also be done with the thead not being relative. Then we dont need to re-calculate the left and we have to use postion: fixed
+      const columnName = stickyColumn.dataset.columnName;
 
-      const theadColumns = tableHead.rows[0].cells;
-      const stickyColumns =
-        stickyRef.current?.querySelector("thead")?.rows[0].cells;
-
-      console.log("theadColumns", theadColumns);
-      console.log("stickyColumns", stickyColumns);
-
-      if (stickyColumns && theadColumns.length === stickyColumns.length) {
-        Array.from(stickyColumns).forEach((stickyColumn, index) => {
-          if (theadColumns[index]) {
-            /** For this column we need to handle it in a special way because its position is sticky so we cant adjust its width directly */
-            if (stickyColumn.dataset.columnName === "name") {
-              const innerDiv = stickyColumn.querySelector("div");
-              if (innerDiv) {
-                innerDiv.style.width = "275px";
-                // Add 0.5px to the width make columns align properly. Not sure why this is needed
-                stickyColumn.style.width = `${
-                  theadColumns[index].offsetWidth + 0.5
-                }px`;
-              }
-            } else {
-              stickyColumn.style.width = `${theadColumns[index].offsetWidth}px`;
-            }
-            stickyColumn.style.borderBottom = "none";
-          }
-        });
+      if (index === 0) {
+        // this is the first column for bulk actions
+        stickyColumn.style.position = "sticky";
+        stickyColumn.style.left = `0px`;
       }
-    }
+      if (columnName === "name") {
+        stickyColumn.style.position = "sticky";
+        stickyColumn.style.left = `48px`;
+      }
+    });
+  }, [columnCoords, isSticky, left, stickyHeaderRef]);
 
-    window.addEventListener("resize", handleResize);
+  if (!isSticky) return null;
 
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [portalContainer, isSticky]);
-
-  const StickyHeader: React.FC<{ children: React.ReactNode }> = ({
-    children,
-  }) => {
-    if (!portalContainer || !isSticky) return null;
-
-    return createPortal(
-      <div
-        ref={stickyRef}
-        style={{
-          position: "sticky",
-          top: `${stickyOffset}px`,
-          width: "100%",
-          background: "white",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          zIndex: 1000,
-        }}
-      >
-        {children}
-      </div>,
-      portalContainer
-    );
-  };
-
-  return { headerRef, StickyHeader };
-}
+  return ReactDOM.createPortal(
+    <div
+      ref={stickyHeaderRef}
+      style={{
+        position: "fixed",
+        top: `${top}px`,
+        left: `${left}px`,
+        width: width.at(-1) === "x" ? width : `${width}px`,
+        background: "white",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        zIndex: 1000,
+      }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+};
