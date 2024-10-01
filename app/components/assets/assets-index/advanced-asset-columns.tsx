@@ -147,7 +147,7 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div>
-                <Link to={item.id} className="underline">
+                <Link to={item.id} className="font-medium underline">
                   {item.title}
                 </Link>
               </div>
