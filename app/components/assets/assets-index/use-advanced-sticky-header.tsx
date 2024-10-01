@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
+import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 
 export function useStickyHeaderPortal() {
   const [isSticky, setIsSticky] = useState(false);
@@ -87,6 +89,8 @@ export const StickyHeader = ({
   };
 }) => {
   const { top, left, width, columnCoords } = coords;
+  const { modeIsAdvanced } = useAssetIndexMode();
+  const frozen = useAssetIndexFreezeColumn();
 
   useEffect(() => {
     if (!isSticky) return;
@@ -98,7 +102,9 @@ export const StickyHeader = ({
 
     Array.from(stickyColumns).forEach((stickyColumn, index) => {
       const source = columnCoords[index];
-      stickyColumn.style.position = "absolute";
+      const columnName = stickyColumn.dataset.columnName;
+
+      stickyColumn.classList.add("sticky-column");
       stickyColumn.style.width = `${source.width}px`;
 
       if (source.left < left) {
@@ -110,20 +116,17 @@ export const StickyHeader = ({
         stickyColumn.style.left = `${source.left - left}px`;
       }
 
-      // Calculate it based on the relative parent. This could also be done with the thead not being relative. Then we dont need to re-calculate the left and we have to use postion: fixed
-      const columnName = stickyColumn.dataset.columnName;
-
-      if (index === 0) {
+      if (index === 0 && modeIsAdvanced && frozen) {
         // this is the first column for bulk actions
         stickyColumn.style.position = "sticky";
         stickyColumn.style.left = `0px`;
       }
-      if (columnName === "name") {
+      if (columnName === "name" && modeIsAdvanced && frozen) {
         stickyColumn.style.position = "sticky";
         stickyColumn.style.left = `48px`;
       }
     });
-  }, [columnCoords, isSticky, left, stickyHeaderRef]);
+  }, [columnCoords, frozen, isSticky, left, modeIsAdvanced, stickyHeaderRef]);
 
   if (!isSticky) return null;
 
@@ -135,7 +138,8 @@ export const StickyHeader = ({
         top: `${top}px`,
         left: `${left}px`,
         width: width.at(-1) === "x" ? width : `${width}px`,
-        background: "white",
+        height: 53,
+        backgroundColor: "white",
         boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
         zIndex: 1000,
       }}
