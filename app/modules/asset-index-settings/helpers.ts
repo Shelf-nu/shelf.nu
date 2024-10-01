@@ -22,6 +22,7 @@ export const fixedFields = [
 
 export const columnsLabelsMap: Record<(typeof fixedFields)[number], string> = {
   id: "ID",
+  name: "Name",
   status: "Status",
   description: "Description",
   valuation: "Value",
@@ -92,4 +93,59 @@ export function parseColumnName(name: string) {
 
   /** For fixed fields, return the label */
   return columnsLabelsMap[name as keyof typeof columnsLabelsMap];
+}
+
+export function parseSortingOptions(sortBy: string[]) {
+  const fields = sortBy.map((s) => {
+    const [name, direction] = s.split(":");
+    return { name, direction } as { name: string; direction: "asc" | "desc" };
+  });
+
+  const orderBy = [];
+
+  /** We need to build the orderBy object based on how prisma works.
+   * OrderBy can be an array with multiple ordering parameters. Example from prisma:
+  orderBy: [
+    {
+      role: 'desc',
+    },
+    {
+      email: 'desc',
+    },
+  ]
+   * We need to consider 2 options:
+   * 1. Asset fields
+   * 2. Relation fields
+   * Example of how relation fields are managed:
+   * orderBy: {
+        posts: {
+          count: 'desc',
+        },
+      },
+   */
+
+  const directAssetFields = [
+    "id",
+    "status",
+    "description",
+    "valuation",
+    "createdAt",
+  ];
+
+  for (const field of fields) {
+    if (directAssetFields.includes(field.name)) {
+      orderBy.push({ [field.name]: field.direction });
+    } else if (field.name.startsWith("cf_")) {
+      return;
+      orderBy.push({
+        customFields: {
+          value: field.name.slice(3),
+          direction: field.direction,
+        },
+      });
+    } else {
+      orderBy.push({ [field.name]: { name: field.direction } });
+    }
+  }
+  return orderBy;
 }

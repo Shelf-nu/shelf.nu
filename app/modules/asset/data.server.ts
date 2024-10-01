@@ -6,6 +6,7 @@ import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getClientHint } from "~/utils/client-hints";
 import {
+  getAdvancedFiltersFromRequest,
   getFiltersFromRequest,
   setCookie,
   userPrefs,
@@ -19,6 +20,7 @@ import {
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import {
+  getAdvancedPaginatedAndFilterableAssets,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
@@ -201,35 +203,29 @@ export async function advancedModeLoader({
   const { locale, timeZone } = getClientHint(request);
 
   /** Parse filters */
-  const filters = undefined;
+
+  /** Parse filters */
+  const {
+    filters,
+    serializedCookie: filtersCookie,
+    redirectNeeded,
+  } = await getAdvancedFiltersFromRequest(request, organizationId);
+
+  if (filters && redirectNeeded) {
+    const cookieParams = new URLSearchParams(filters);
+    return redirect(`/assets?${cookieParams.toString()}`);
+  }
 
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
-    {
-      search,
-      totalAssets,
-      perPage,
-      page,
-      categories,
-      tags,
-      assets,
-      totalPages,
-      cookie,
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-      teamMembers,
-      totalTeamMembers,
-      rawTeamMembers,
-    },
+    { search, totalAssets, perPage, page, assets, totalPages, cookie },
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
       organizations,
     }),
-    getPaginatedAndFilterableAssets({
+    getAdvancedPaginatedAndFilterableAssets({
       request,
       organizationId,
       filters,
@@ -270,8 +266,6 @@ export async function advancedModeLoader({
     data({
       header,
       items: assets,
-      categories,
-      tags,
       search,
       page,
       totalItems: totalAssets,
@@ -292,13 +286,6 @@ export async function advancedModeLoader({
         title: "Search your asset database",
         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
       },
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-      teamMembers,
-      totalTeamMembers,
-      rawTeamMembers,
       filters,
       organizationId,
       locale,

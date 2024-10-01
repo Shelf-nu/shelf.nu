@@ -16,6 +16,7 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
 import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
 import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
+// eslint-disable-next-line import/no-cycle
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";

@@ -69,6 +69,7 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
+import { parseSortingOptions } from "../asset-index-settings/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -653,6 +654,214 @@ async function getAssets(params: {
     });
   }
 }
+
+/**
+ * Fetches assets from AssetSearchView
+ * This is used to have a more advanced search however its less performant
+ */
+export async function getAdvancedPaginatedAndFilterableAssets({
+  request,
+  organizationId,
+  filters = "",
+}: {
+  request: LoaderFunctionArgs["request"];
+  organizationId: Organization["id"];
+
+  filters?: string;
+  /**
+   * Set to true if you want the query to be performed by directly accessing the assets table
+   *  instead of the AssetSearchView
+   */
+  excludeSearchFromView?: boolean;
+}) {
+  const currentFilterParams = new URLSearchParams(filters || "");
+  const searchParams = filters
+    ? currentFilterParams
+    : getCurrentSearchParams(request);
+
+  const paramsValues = getParamsValues(searchParams);
+  const { page, perPageParam, search } = paramsValues;
+  const sortBy = searchParams.getAll("sortBy");
+
+  const orderBy = parseSortingOptions(sortBy);
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
+
+    /** Default value of where. Takes the assets belonging to current user */
+    let where: Prisma.AssetSearchViewWhereInput = {
+      asset: { organizationId },
+    };
+
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      const words = search
+        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
+        .trim()
+        .replace(/ +/g, " ") //replace multiple spaces into 1
+        .split(" ")
+        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
+        .filter(Boolean)
+        .join(" & ");
+      where.searchVector = {
+        search: words,
+      };
+    }
+
+    const ASSET_INDEX_FIELDS = assetIndexFields({
+      unavailableBookingStatuses,
+    });
+
+    const [assetSearch, totalAssets] = await Promise.all([
+      /** Get the assets */
+      db.assetSearchView.findMany({
+        skip,
+        take,
+        where,
+        include: {
+          asset: {
+            include: {
+              ...ASSET_INDEX_FIELDS,
+            },
+          },
+        },
+        // orderBy: sortBy.map((s) => {
+        //   const [name, direction] = s.split(":");
+        //   return { asset: { [name]: direction as SortingDirection } };
+        // }),
+      }),
+
+      /** Count them */
+      db.assetSearchView.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(totalAssets / perPage);
+
+    return {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      assets: assetSearch.map((a) => a.asset),
+      totalPages,
+      cookie,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Fail to fetch paginated and filterable assets",
+      additionalData: {
+        organizationId,
+        paramsValues,
+      },
+      label,
+    });
+  }
+}
+// async function getAdvancedIndexAssetsFromView(params: {
+//   organizationId: Organization["id"];
+//   /** Page number. Starts at 1 */
+//   page: number;
+//   /** Assets to be loaded per page */
+
+//   sortBy: string[];
+//   orderDirection: SortingDirection;
+//   perPage?: number;
+//   search?: string | null;
+//   categoriesIds?: Category["id"][] | null;
+//   tagsIds?: Tag["id"][] | null;
+//   status?: Asset["status"] | null;
+//   hideUnavailable?: Asset["availableToBook"];
+//   bookingFrom?: Booking["from"];
+//   bookingTo?: Booking["to"];
+//   unhideAssetsBookigIds?: Booking["id"][];
+//   locationIds?: Location["id"][] | null;
+//   teamMemberIds?: TeamMember["id"][] | null;
+//   extraInclude?: Prisma.AssetInclude;
+// }) {
+//   let {
+//     organizationId,
+//     sortBy,
+//     orderDirection,
+//     page = 1,
+//     perPage = 8,
+//     search,
+//     categoriesIds,
+//     tagsIds,
+//     status,
+//     bookingFrom,
+//     bookingTo,
+//     hideUnavailable,
+//     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
+//     locationIds,
+//     teamMemberIds,
+//     extraInclude,
+//   } = params;
+
+//   try {
+//     const skip = page > 1 ? (page - 1) * perPage : 0;
+//     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
+
+//     /** Default value of where. Takes the assets belonging to current user */
+//     let where: Prisma.AssetSearchViewWhereInput = {
+//       asset: { organizationId },
+//     };
+
+//     /** If the search string exists, add it to the where object */
+//     if (search) {
+//       const words = search
+//         .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
+//         .trim()
+//         .replace(/ +/g, " ") //replace multiple spaces into 1
+//         .split(" ")
+//         .map((w) => w.trim() + ":*") //remove leading and trailing spaces
+//         .filter(Boolean)
+//         .join(" & ");
+//       where.searchVector = {
+//         search: words,
+//       };
+//     }
+
+//     const ASSET_INDEX_FIELDS = assetIndexFields({
+//       bookingFrom,
+//       bookingTo,
+//       unavailableBookingStatuses,
+//     });
+//     const [assetSearch, totalAssets] = await Promise.all([
+//       /** Get the assets */
+//       db.assetSearchView.findMany({
+//         skip,
+//         take,
+//         where,
+//         include: {
+//           asset: {
+//             include: {
+//               ...ASSET_INDEX_FIELDS,
+//               ...extraInclude,
+//             },
+//           },
+//         },
+//         orderBy: { asset: { [orderBy]: orderDirection } },
+//       }),
+
+//       /** Count them */
+//       db.assetSearchView.count({ where }),
+//     ]);
+
+//     return { assets: assetSearch.map((a) => a.asset), totalAssets };
+//   } catch (cause) {
+//     throw new ShelfError({
+//       cause,
+//       message: "Something went wrong while fetching assets from view",
+//       additionalData: { ...params },
+//       label,
+//     });
+//   }
+// }
 
 export async function createAsset({
   title,
@@ -1463,11 +1672,8 @@ export async function getPaginatedAndFilterableAssets({
     ]);
 
     let getFunction = getAssetsFromView;
-    if (excludeSearchFromView) {
-      getFunction = getAssets;
-    }
 
-    const { assets, totalAssets } = await getFunction({
+    let getParams = {
       organizationId,
       page,
       perPage,
@@ -1484,7 +1690,12 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
-    });
+    };
+    if (excludeSearchFromView) {
+      getFunction = getAssets;
+    }
+
+    const { assets, totalAssets } = await getFunction(getParams);
     const totalPages = Math.ceil(totalAssets / perPage);
 
     return {
