@@ -2715,3 +2715,36 @@ export async function bulkAssignAssetTags({
     });
   }
 }
+
+export async function bulkMarkAsAvailableAssets({
+  organizationId,
+  assetIds,
+  currentSearchParams,
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /* If we are selecting all assets in list then we have to consider other filters too */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    await db.asset.updateMany({
+      where: { ...where, availableToBook: false },
+      data: {
+        availableToBook: true,
+      },
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while marking assets as available.",
+      additionalData: { assetIds, organizationId },
+      label,
+    });
+  }
+}

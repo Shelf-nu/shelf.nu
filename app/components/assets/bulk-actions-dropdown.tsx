@@ -11,6 +11,7 @@ import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
+import BulkMarkAsAvailableDialog from "./bulk-mark-as-available-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
@@ -101,6 +102,7 @@ function ConditionalDropdown() {
       <BulkAssignCustodyDialog />
       <BulkReleaseCustodyDialog />
       <BulkDeleteDialog />
+      <BulkMarkAsAvailableDialog />
 
       <DropdownMenu
         modal={false}
@@ -171,7 +173,6 @@ function ConditionalDropdown() {
                 }
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="border-b py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="assign-custody"
@@ -196,7 +197,6 @@ function ConditionalDropdown() {
                 label="Assign tags"
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="tag-remove"
@@ -205,7 +205,6 @@ function ConditionalDropdown() {
                 label="Remove tags"
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="location"
@@ -213,15 +212,29 @@ function ConditionalDropdown() {
                 disabled={isLoading}
               />
             </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
+            <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="category"
                 onClick={closeMenu}
                 disabled={isLoading}
               />
             </DropdownMenuItem>
-
+            <DropdownMenuItem className="py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                label="Mark as available"
+                type="available"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                label="Mark as unavailable"
+                type="unavailable"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
+            </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="trash"
@@ -237,7 +250,6 @@ function ConditionalDropdown() {
                 }
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="border-t md:hidden lg:p-0">
               <Button
                 role="button"
