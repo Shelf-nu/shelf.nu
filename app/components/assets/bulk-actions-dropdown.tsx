@@ -11,7 +11,7 @@ import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
-import BulkMarkAsAvailableDialog from "./bulk-mark-as-available-dialog";
+import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
@@ -102,7 +102,8 @@ function ConditionalDropdown() {
       <BulkAssignCustodyDialog />
       <BulkReleaseCustodyDialog />
       <BulkDeleteDialog />
-      <BulkMarkAsAvailableDialog />
+      <BulkMarkAvailabilityDialog type="available" />
+      <BulkMarkAvailabilityDialog type="unavailable" />
 
       <DropdownMenu
         modal={false}

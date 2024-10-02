@@ -1,6 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { BulkMarkAsAvailableSchema } from "~/components/assets/bulk-mark-as-available-dialog";
-import { bulkMarkAsAvailableAssets } from "~/modules/asset/service.server";
+import { BulkMarkAvailabilitySchema } from "~/components/assets/bulk-mark-availability-dialog";
+import { bulkMarkAvailability } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -27,20 +27,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, currentSearchParams } = parseData(
+    const { assetIds, type, currentSearchParams } = parseData(
       formData,
-      BulkMarkAsAvailableSchema.and(CurrentSearchParamsSchema)
+      BulkMarkAvailabilitySchema.and(CurrentSearchParamsSchema)
     );
 
-    await bulkMarkAsAvailableAssets({
+    await bulkMarkAvailability({
       organizationId,
       assetIds,
+      type,
       currentSearchParams,
     });
 
     sendNotification({
-      title: "Marked as available.",
-      message: "All the assets are marked as available now.",
+      title: `Marked as ${type}.`,
+      message: `All the assets are marked as ${type} now.`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

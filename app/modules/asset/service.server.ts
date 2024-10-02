@@ -2716,13 +2716,15 @@ export async function bulkAssignAssetTags({
   }
 }
 
-export async function bulkMarkAsAvailableAssets({
+export async function bulkMarkAvailability({
   organizationId,
   assetIds,
+  type,
   currentSearchParams,
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
+  type: "available" | "unavailable";
   currentSearchParams?: string | null;
 }) {
   try {
@@ -2732,10 +2734,11 @@ export async function bulkMarkAsAvailableAssets({
       : { id: { in: assetIds }, organizationId };
 
     await db.asset.updateMany({
-      where: { ...where, availableToBook: false },
-      data: {
-        availableToBook: true,
+      where: {
+        ...where,
+        availableToBook: type === "unavailable",
       },
+      data: { availableToBook: type === "available" },
     });
 
     return true;

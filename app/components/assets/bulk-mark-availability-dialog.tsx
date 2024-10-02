@@ -3,24 +3,31 @@ import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
-export const BulkMarkAsAvailableSchema = z.object({
+export const BulkMarkAvailabilitySchema = z.object({
   assetIds: z.string().array().min(1),
+  type: z.enum(["available", "unavailable"]),
 });
 
-export default function BulkMarkAsAvailableDialog() {
-  const zo = useZorm("BulkMarkAsAvailable", BulkMarkAsAvailableSchema);
+export default function BulkMarkAvailabilityDialog({
+  type,
+}: {
+  type: z.infer<typeof BulkMarkAvailabilitySchema>["type"];
+}) {
+  const zo = useZorm("BulkMarkAvailability", BulkMarkAvailabilitySchema);
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
-      type="available"
-      title="Mark assets as available"
-      description="Mark all selected assets as available. Assets that are already available, will be skipped."
-      actionUrl="/api/assets/bulk-mark-as-available"
+      type={type}
+      title={`Mark assets as ${type}`}
+      description={`Mark all selected assets as ${type}. Assets that are already ${type}, will be skipped.`}
+      actionUrl="/api/assets/bulk-mark-availability"
       arrayFieldId="assetIds"
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <div className="modal-content-wrapper">
+          <input type="hidden" name="type" value={type} />
+
           {fetcherError ? (
             <p className="text-sm text-error-500">{fetcherError}</p>
           ) : null}
