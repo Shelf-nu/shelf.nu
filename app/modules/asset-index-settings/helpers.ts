@@ -126,6 +126,7 @@ export function parseSortingOptions(sortBy: string[]) {
 
   const directAssetFields = [
     "id",
+    "name",
     "status",
     "description",
     "valuation",
@@ -134,7 +135,10 @@ export function parseSortingOptions(sortBy: string[]) {
 
   for (const field of fields) {
     if (directAssetFields.includes(field.name)) {
-      orderBy.push({ [field.name]: field.direction });
+      console.log("field.name", field.name);
+      orderBy.push({
+        [field.name === "name" ? "title" : field.name]: field.direction,
+      });
     } else if (field.name.startsWith("cf_")) {
       return;
       orderBy.push({

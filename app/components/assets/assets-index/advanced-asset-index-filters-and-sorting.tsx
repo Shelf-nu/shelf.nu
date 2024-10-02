@@ -5,11 +5,12 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   parseColumnName,
@@ -69,18 +70,15 @@ function AdvancedFilter() {
 function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
-  // @TODO - this needs to be changed to our own useSearchParams which has to be reworked to receive a dynamic cookie
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSorts = searchParams.getAll("sortBy");
+  const initialSorts = searchParams.getAll("sortBy").map((s) => {
+    const [name, direction] = s.split(":");
+    return { name, direction } as Sort;
+  });
   const disabled = useDisabled();
 
   useEffect(() => {
-    setSorts(
-      initialSorts.map((s) => {
-        const [name, direction] = s.split(":");
-        return { name, direction } as Sort;
-      })
-    );
+    setSorts(initialSorts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

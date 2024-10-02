@@ -259,7 +259,7 @@ export async function advancedModeLoader({
   const userPrefsCookie = await userPrefs.serialize(cookie);
   const headers = [
     setCookie(userPrefsCookie),
-    // ...(filtersCookie ? [setCookie(filtersCookie)] : []),
+    ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
   return json(

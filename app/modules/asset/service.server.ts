@@ -685,6 +685,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 
   const orderBy = parseSortingOptions(sortBy);
 
+  console.log("orderBy", orderBy);
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -729,6 +731,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
             },
           },
         },
+        orderBy,
         // orderBy: sortBy.map((s) => {
         //   const [name, direction] = s.split(":");
         //   return { asset: { [name]: direction as SortingDirection } };
