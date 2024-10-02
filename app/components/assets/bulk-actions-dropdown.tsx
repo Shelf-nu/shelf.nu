@@ -206,7 +206,7 @@ function ConditionalDropdown() {
                 label="Remove tags"
               />
             </DropdownMenuItem>
-            <DropdownMenuItem className="py-1 lg:p-0">
+            <DropdownMenuItem className="border-t py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="location"
                 onClick={closeMenu}
@@ -220,7 +220,7 @@ function ConditionalDropdown() {
                 disabled={isLoading}
               />
             </DropdownMenuItem>
-            <DropdownMenuItem className="py-1 lg:p-0">
+            <DropdownMenuItem className="border-t py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 label="Mark as available"
                 type="available"
