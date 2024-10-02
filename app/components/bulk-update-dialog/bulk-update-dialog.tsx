@@ -40,7 +40,9 @@ type BulkDialogType =
   | "archive"
   | "tag-add"
   | "tag-remove"
-  | "cancel";
+  | "cancel"
+  | "available"
+  | "unavailable";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
