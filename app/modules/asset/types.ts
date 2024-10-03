@@ -2,8 +2,12 @@ import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type {
   Asset,
   AssetCustomFieldValue,
+  Location,
+  Category,
   CustomField,
+  Kit,
   Prisma,
+  Tag,
   User,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
@@ -88,4 +92,54 @@ export type AssetCustomFieldsValuesWithFields =
 /** Item returned by getAssetsFromView */
 export type AssetsFromViewItem = Prisma.AssetGetPayload<{
   include: Return<typeof assetIndexFields>;
+}>;
+
+/** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
+export type AdvancedIndexAsset = Pick<
+  Asset,
+  | "id"
+  | "title"
+  | "description"
+  | "createdAt"
+  | "updatedAt"
+  | "userId"
+  | "mainImage"
+  | "mainImageExpiration"
+  | "categoryId"
+  | "locationId"
+  | "organizationId"
+  | "status"
+  | "valuation"
+  | "availableToBook"
+  | "kitId"
+> & {
+  kit: Pick<Kit, "id" | "name"> | null;
+  category: Pick<Category, "id" | "name" | "color"> | null;
+  tags: Pick<Tag, "id" | "name">[];
+  location: Pick<Location, "name"> | null;
+  custody: {
+    custodian: {
+      name: string;
+      user: {
+        firstName: string | null;
+        lastName: string | null;
+        profilePicture: string | null;
+        email: string;
+      };
+    };
+  } | null;
+  customFields: (AssetCustomFieldValue & {
+    customField: Pick<
+      CustomField,
+      "id" | "name" | "helpText" | "required" | "type" | "options"
+    > & {
+      categories: Pick<Category, "id" | "name">[] | null;
+    };
+  })[];
+};
+
+// Type for the entire query result
+export type AdvancedIndexQueryResult = Array<{
+  total_count: number;
+  assets: AdvancedIndexAsset[];
 }>;

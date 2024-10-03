@@ -442,7 +442,11 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
   );
 };
 
-export const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
+export const ListItemTagsColumn = ({
+  tags,
+}: {
+  tags: Pick<Tag, "id" | "name">[] | undefined;
+}) => {
   const visibleTags = tags?.slice(0, 2);
   const remainingTags = tags?.slice(2);
 

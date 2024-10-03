@@ -95,6 +95,7 @@ export function parseColumnName(name: string) {
   return columnsLabelsMap[name as keyof typeof columnsLabelsMap];
 }
 
+// @TODO - do we still need this
 export function parseSortingOptions(sortBy: string[]) {
   const fields = sortBy.map((s) => {
     const [name, direction] = s.split(":");
@@ -126,6 +127,7 @@ export function parseSortingOptions(sortBy: string[]) {
 
   const directAssetFields = [
     "id",
+    "name",
     "status",
     "description",
     "valuation",
@@ -134,7 +136,9 @@ export function parseSortingOptions(sortBy: string[]) {
 
   for (const field of fields) {
     if (directAssetFields.includes(field.name)) {
-      orderBy.push({ [field.name]: field.direction });
+      orderBy.push({
+        [field.name === "name" ? "title" : field.name]: field.direction,
+      });
     } else if (field.name.startsWith("cf_")) {
       return;
       orderBy.push({
