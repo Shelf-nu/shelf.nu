@@ -160,3 +160,54 @@ export const assetIndexFields = ({
 
   return fields;
 };
+
+export const advancedAssetIndexFields = () => {
+  const fields = {
+    kit: true,
+    category: true,
+    tags: true,
+    location: {
+      select: {
+        name: true,
+      },
+    },
+    custody: {
+      select: {
+        custodian: {
+          select: {
+            name: true,
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    },
+    customFields: {
+      where: {
+        customField: {
+          active: true,
+        },
+      },
+      include: {
+        customField: {
+          select: {
+            id: true,
+            name: true,
+            helpText: true,
+            required: true,
+            type: true,
+            categories: true,
+          },
+        },
+      },
+    },
+  };
+
+  return fields;
+};

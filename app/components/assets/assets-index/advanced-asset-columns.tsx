@@ -1,11 +1,6 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import {
-  CustomFieldType,
-  type AssetStatus,
-  type Category,
-  type Tag,
-} from "@prisma/client";
+import { CustomFieldType, type AssetStatus } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
@@ -32,6 +27,7 @@ import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
+  AdvancedIndexAsset,
   AssetsFromViewItem,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
@@ -59,7 +55,7 @@ export function AdvancedIndexColumn({
   item,
 }: {
   column: (typeof fixedFields)[number];
-  item: AssetsFromViewItem;
+  item: AdvancedIndexAsset;
 }) {
   const { locale, currentOrganization, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
@@ -267,7 +263,7 @@ function DateColumn({ value }: { value: string | Date }) {
 function CategoryColumn({
   category,
 }: {
-  category: Category | null | undefined;
+  category: AdvancedIndexAsset["category"];
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -284,7 +280,7 @@ function CategoryColumn({
   );
 }
 
-function TagsColumn({ tags }: { tags: Tag[] }) {
+function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
       <ListItemTagsColumn tags={tags} />
