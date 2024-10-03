@@ -239,8 +239,6 @@ export async function advancedModeLoader({
     assets = assets.filter((a) => a.availableToBook);
   }
 
-  assets = await updateAssetsWithBookingCustodians(assets);
-
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
