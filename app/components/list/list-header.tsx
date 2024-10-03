@@ -13,10 +13,7 @@ import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
 import BulkListHeader from "./bulk-actions/bulk-list-header";
 import { freezeColumnClassNames } from "../assets/assets-index/freeze-column-classes";
-import {
-  StickyHeader,
-  useStickyHeaderPortal,
-} from "../assets/assets-index/use-advanced-sticky-header";
+import { useStickyHeaderPortal } from "../assets/assets-index/use-advanced-sticky-header";
 import { ChevronRight, LockIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import { Th } from "../table";
@@ -37,8 +34,7 @@ export const ListHeader = ({
 }: ListHeaderProps) => {
   const { modeIsAdvanced } = useAssetIndexMode();
   const freezeColumn = useAssetIndexFreezeColumn();
-  const { originalHeaderRef, isSticky, stickyHeaderRef, coords } =
-    useStickyHeaderPortal();
+  const { originalHeaderRef } = useStickyHeaderPortal();
 
   const headerContent = useMemo(
     () => (
@@ -92,7 +88,7 @@ export const ListHeader = ({
       >
         {headerContent}
       </thead>
-      <StickyHeader
+      {/* <StickyHeader
         isSticky={isSticky}
         stickyHeaderRef={stickyHeaderRef}
         coords={coords}
@@ -108,7 +104,7 @@ export const ListHeader = ({
             {headerContent}
           </thead>
         </table>
-      </StickyHeader>
+      </StickyHeader> */}
     </>
   );
 };

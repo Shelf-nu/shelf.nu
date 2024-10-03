@@ -1,6 +1,8 @@
 import type { TdHTMLAttributes } from "react";
 import React from "react";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
 
 export function Table({
@@ -10,14 +12,27 @@ export function Table({
   children: React.ReactNode;
   className?: string;
 }) {
+  const { vh } = useViewportHeight();
   const { containerRef, isOverflowing } = useTableIsOverflowing();
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   return (
-    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
+    <div
+      className={tw(
+        "relative",
+        isOverflowing && "overflowing",
+        modeIsAdvanced && "flex flex-1 flex-col"
+      )}
+    >
       <div className="fixed-gradient"></div>
       <div
         ref={containerRef}
-        className="scrollbar-top scrollbar-always-visible"
+        className={tw(
+          modeIsAdvanced
+            ? "overflow-auto"
+            : "scrollbar-top scrollbar-always-visible"
+        )}
+        style={modeIsAdvanced ? { maxHeight: `${vh - 395}px` } : undefined}
       >
         <table className={tw("w-full table-auto border-collapse", className)}>
           {children}
