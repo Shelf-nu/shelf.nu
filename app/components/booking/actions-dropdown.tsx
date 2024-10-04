@@ -1,3 +1,4 @@
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useSubmit } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -18,6 +19,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
 import { GenerateBookingPdf } from "./generate-booking-pdf";
+import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
 import When from "../when/when";
@@ -65,8 +67,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
       <DropdownMenuPortal>
         <DropdownMenuContent
           align="end"
-          className="order w-[220px] rounded-md bg-white p-1.5 text-right "
+          className="order w-[220px] rounded-md bg-white p-1.5 text-right"
         >
+          <When truthy={booking.status === BookingStatus.RESERVED}>
+            <RevertToDraftDialog booking={booking} />
+          </When>
           <When
             truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
           >
