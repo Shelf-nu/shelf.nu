@@ -36,6 +36,7 @@ export async function createUserAssetIndexSettings({
         name: `cf_${cf.name}`,
         visible: true,
         position,
+        cfType: cf.type,
       };
     });
 
@@ -186,12 +187,14 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
             name: `cf_${newField.name}`,
             visible: true,
             position: prevHighestPosition + 1,
+            cfType: newField.type,
           });
         } else {
           columns[cfIndex] = {
             name: `cf_${newField.name}`,
             visible: columns[cfIndex].visible,
             position: columns[cfIndex].position,
+            cfType: newField.type,
           };
         }
       } else {

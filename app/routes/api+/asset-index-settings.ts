@@ -84,6 +84,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           columns,
         });
 
+        console.log("Columns updated", columns);
+
         sendNotification({
           title: "Successfully updated columns",
           message:
