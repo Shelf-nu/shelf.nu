@@ -24,7 +24,6 @@ import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
-import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -293,7 +292,7 @@ export const AssetsList = ({
   );
 
   return (
-    <ListContentWrapper>
+    <div className="flex h-full flex-col gap-4 pt-4">
       {isSwappingMode ? (
         <motion.div
           initial={{ opacity: 0 }}
@@ -325,7 +324,7 @@ export const AssetsList = ({
         }
         headerChildren={headerChildren}
       />
-    </ListContentWrapper>
+    </div>
   );
 };
 

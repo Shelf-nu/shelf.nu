@@ -67,7 +67,7 @@ export function AdvancedIndexColumn({
 
   if (isCustomField) {
     const fieldName = column.replace("cf_", "");
-    const field = item.customFields.find(
+    const field = item.customFields?.find(
       (customFieldValue) => customFieldValue.customField.name === fieldName
     );
 
