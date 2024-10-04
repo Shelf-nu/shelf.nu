@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { CustomFieldType, Prisma } from "@prisma/client";
 import { z } from "zod";
 import type { CustomFieldSorting } from "../asset/types";
 
@@ -6,6 +6,8 @@ export type Column = {
   name: string;
   visible: boolean;
   position: number;
+  /** Optionally for custom fields add the type */
+  cfType?: CustomFieldType;
 };
 // Define the fixed fields
 export const fixedFields = [
@@ -77,6 +79,7 @@ export const generateColumnsSchema = (customFields: string[]) => {
       .transform((val) => val === "on" || val === true) // Convert "on" to boolean true
       .default(false), // if not present in the formData, convert to false. That means the checkbox was unselected
     position: z.union([z.string(), z.number()]).transform(Number), // Ensure position is a number
+    // cfType: z.optional(z.enum())
   });
 
   // Return the final schema
