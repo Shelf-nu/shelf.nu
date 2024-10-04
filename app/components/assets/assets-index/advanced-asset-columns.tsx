@@ -20,7 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { Td } from "~/components/table";
+import { Td as BaseTd } from "~/components/table";
 import When from "~/components/when/when";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
@@ -337,4 +337,8 @@ function CustodyColumn({
       </Td>
     </When>
   );
+}
+
+function Td({ className, ...rest }: React.ComponentProps<typeof BaseTd>) {
+  return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
 }

@@ -57,7 +57,7 @@ export function ConfigureColumnsDropdown() {
         <PopoverContent
           align="end"
           className={tw(
-            "mt-1  w-[240px] rounded-md border border-gray-300 bg-white p-0"
+            "z-20 mt-1  w-[240px] rounded-md border border-gray-300 bg-white p-0"
           )}
         >
           <fetcher.Form action="/api/asset-index-settings" method="post">

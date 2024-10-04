@@ -23,7 +23,7 @@ interface Sort {
   name: string;
   direction: "asc" | "desc";
   // Only relevant for custom fields
-  fieldType?: string;
+  cfType?: string;
 }
 
 export function AdvancedFilteringAndSorting() {
@@ -102,7 +102,12 @@ function AdvancedSorting() {
 
       // Append new sortBy parameters
       sorts.forEach((s) => {
-        prev.append("sortBy", `${s.name}:${s.direction}:${s.fieldType}`);
+        const sortA = [s.name, s.direction];
+        if (s.name.startsWith("cf_") && s.cfType) {
+          // we check for the cfType but we can already expect it will be preset because the field is a custom field
+          sortA.push(s.cfType);
+        }
+        prev.append("sortBy", sortA.join(":"));
       });
 
       return searchParams;
@@ -217,11 +222,13 @@ function PickAColumnToSortBy({
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns;
 
-  console.log("columns", columns);
-
   const columnsSortOptions: Sort[] = (columns as Column[])
     .filter((c) => !sorts.map((sort) => sort.name).includes(c.name))
-    ?.map((column) => ({ name: column.name, direction: "asc" }));
+    ?.map((column) => ({
+      name: column.name,
+      direction: "asc",
+      ...(column?.cfType ? { cfType: column.cfType } : undefined),
+    }));
   const nameOption: Sort = { name: "name", direction: "asc" };
   columnsSortOptions.splice(1, 0, nameOption);
 

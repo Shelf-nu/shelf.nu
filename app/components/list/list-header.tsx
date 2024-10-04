@@ -81,7 +81,12 @@ export const ListHeader = ({
       <thead
         className={tw(
           "border-b",
-          modeIsAdvanced ? "sticky top-0 z-10 bg-white" : "",
+          modeIsAdvanced
+            ? tw(
+                "sticky top-0 z-10 border-b bg-white",
+                "before:absolute before:inset-x-0 before:bottom-0 before:border-b before:border-gray-200 before:content-['']" // creates a border at the bottom of the header
+              )
+            : "",
           className
         )}
         ref={originalHeaderRef}
@@ -117,7 +122,7 @@ function AdvancedModeDropdown() {
         <PopoverContent
           align="end"
           className={tw(
-            "mt-2  w-[200px] rounded-md border border-gray-300 bg-white p-0"
+            "z-20 mt-2 w-[200px] rounded-md border border-gray-300 bg-white p-0"
           )}
         >
           <freezeFetcher.Form action="/api/asset-index-settings" method="post">
