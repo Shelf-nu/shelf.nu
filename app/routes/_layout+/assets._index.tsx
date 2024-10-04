@@ -106,7 +106,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ]);
 
     const settings = await getAssetIndexSettings({ userId, organizationId });
-
     const mode = settings.mode;
 
     return mode === "SIMPLE"
@@ -217,7 +216,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
-  const { canImportAssets } = useLoaderData<typeof loader>();
+  const { canImportAssets, settings } = useLoaderData<typeof loader>();
+  console.log(settings.columns);
 
   return (
     <>

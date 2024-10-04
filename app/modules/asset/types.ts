@@ -9,6 +9,7 @@ import type {
   Prisma,
   Tag,
   User,
+  CustomFieldType,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -148,4 +149,5 @@ export interface CustomFieldSorting {
   name: string;
   valueKey: string;
   alias: string;
+  fieldType?: CustomFieldType;
 }

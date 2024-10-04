@@ -88,6 +88,15 @@ export function ConfigureColumnsDropdown() {
                     <Reorder.Item key={column.name} value={column}>
                       <ColumnRow key={column.name}>
                         <div className="flex items-center gap-1">
+                          {/* We only add this data for custom fields, because cfType has to be  of type CustomFieldType. It cant be an empty string  */}
+                          {column.name.startsWith("cf_") && (
+                            <input
+                              type="hidden"
+                              name={`columns[${index}][cfType]`}
+                              value={column.cfType}
+                            />
+                          )}
+
                           <input
                             type="hidden"
                             name={`columns[${index}][name]`}

@@ -1,4 +1,5 @@
-import type { CustomFieldType, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
 import type { CustomFieldSorting } from "../asset/types";
 
@@ -79,7 +80,7 @@ export const generateColumnsSchema = (customFields: string[]) => {
       .transform((val) => val === "on" || val === true) // Convert "on" to boolean true
       .default(false), // if not present in the formData, convert to false. That means the checkbox was unselected
     position: z.union([z.string(), z.number()]).transform(Number), // Ensure position is a number
-    // cfType: z.optional(z.enum())
+    cfType: z.nativeEnum(CustomFieldType).optional(), // Optionally validate custom field type
   });
 
   // Return the final schema
@@ -104,8 +105,12 @@ export function parseSortingOptions(sortBy: string[]): {
   customFieldSortings: CustomFieldSorting[];
 } {
   const fields = sortBy.map((s) => {
-    const [name, direction] = s.split(":");
-    return { name, direction } as { name: string; direction: "asc" | "desc" };
+    const [name, direction, fieldType] = s.split(":");
+    return { name, direction, fieldType } as {
+      name: string;
+      direction: "asc" | "desc";
+      fieldType: string;
+    };
   });
 
   const orderByParts: string[] = [];
@@ -135,8 +140,9 @@ export function parseSortingOptions(sortBy: string[]): {
       const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
       customFieldSortings.push({
         name: customFieldName,
-        valueKey: "raw", // Assuming 'raw' is always the key for the sortable value
+        valueKey: "raw", // We'll handle this in the SQL query
         alias,
+        fieldType: field.fieldType as CustomFieldType, // We can safely cast here
       });
       orderByParts.push(`${alias} ${field.direction}`);
     } else {

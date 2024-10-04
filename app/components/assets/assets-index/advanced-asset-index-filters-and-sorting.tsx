@@ -78,7 +78,6 @@ function AdvancedSorting() {
     return { name, direction, fieldType } as Sort;
   });
   const disabled = useDisabled();
-  console.log(initialSorts);
 
   useEffect(() => {
     setSorts(initialSorts);
