@@ -43,7 +43,7 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
           <div className="px-6 pb-4">
             <p className="mb-4">
               Are you sure you want to revert{" "}
-              <span className="font-bold">{booking.name}</span> booking back to 
+              <span className="font-bold">{booking.name}</span> booking back to
               draft?
             </p>
 
