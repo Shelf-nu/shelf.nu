@@ -18,6 +18,7 @@ import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
 import {
+  installPwaPromptCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
@@ -76,7 +77,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
-    const cookie = await initializePerPageCookieOnLayout(request);
+    const userPrefsCookie = await initializePerPageCookieOnLayout(request);
+
+    const cookieHeader = request.headers.get("Cookie");
+    const pwaPromptCookie =
+      (await installPwaPromptCookie.parse(cookieHeader)) || {};
 
     if (!user.onboarded) {
       return redirect("onboarding");
@@ -98,9 +103,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         )?.roles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
-        hideNoticeCard: cookie.hideNoticeCard,
-        minimizedSidebar: cookie.minimizedSidebar,
-        hideInstallPwaPrompt: cookie.hideInstallPwaPrompt,
+        hideNoticeCard: userPrefsCookie.hideNoticeCard,
+        minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
@@ -113,7 +118,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             }),
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
+        headers: [setCookie(await userPrefs.serialize(userPrefsCookie))],
       }
     );
   } catch (cause) {
@@ -127,6 +132,14 @@ export default function App() {
   const { currentOrganizationId, disabledTeamOrg } =
     useLoaderData<typeof loader>();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+
+  const renderInstallPwaPromptOnMobile = () =>
+    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
+    window.matchMedia("(max-width: 640px)").matches &&
+    !window.matchMedia("(display-mode: standalone)").matches ? (
+      <InstallPwaPromptModal />
+    ) : null;
+
   return (
     <>
       <div
@@ -151,12 +164,7 @@ export default function App() {
             </div>
             <Toaster />
             <ClientOnly fallback={null}>
-              {() =>
-                window.matchMedia("(max-width: 640px)").matches &&
-                !window.matchMedia("(display-mode: standalone)").matches ? (
-                  <InstallPwaPromptModal />
-                ) : null
-              }
+              {renderInstallPwaPromptOnMobile}
             </ClientOnly>
           </main>
         </div>
