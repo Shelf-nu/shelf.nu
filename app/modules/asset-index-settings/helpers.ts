@@ -1,10 +1,13 @@
-import type { Prisma } from "@prisma/client";
+import type { CustomFieldType, Prisma } from "@prisma/client";
 import { z } from "zod";
+import type { CustomFieldSorting } from "../asset/types";
 
 export type Column = {
   name: string;
   visible: boolean;
   position: number;
+  /** Optionally for custom fields add the type */
+  cfType?: CustomFieldType;
 };
 // Define the fixed fields
 export const fixedFields = [
@@ -76,6 +79,7 @@ export const generateColumnsSchema = (customFields: string[]) => {
       .transform((val) => val === "on" || val === true) // Convert "on" to boolean true
       .default(false), // if not present in the formData, convert to false. That means the checkbox was unselected
     position: z.union([z.string(), z.number()]).transform(Number), // Ensure position is a number
+    // cfType: z.optional(z.enum())
   });
 
   // Return the final schema
@@ -95,61 +99,53 @@ export function parseColumnName(name: string) {
   return columnsLabelsMap[name as keyof typeof columnsLabelsMap];
 }
 
-// @TODO - do we still need this
-export function parseSortingOptions(sortBy: string[]) {
+export function parseSortingOptions(sortBy: string[]): {
+  orderByClause: string;
+  customFieldSortings: CustomFieldSorting[];
+} {
   const fields = sortBy.map((s) => {
     const [name, direction] = s.split(":");
     return { name, direction } as { name: string; direction: "asc" | "desc" };
   });
 
-  const orderBy = [];
+  const orderByParts: string[] = [];
+  const customFieldSortings: CustomFieldSorting[] = [];
 
-  /** We need to build the orderBy object based on how prisma works.
-   * OrderBy can be an array with multiple ordering parameters. Example from prisma:
-  orderBy: [
-    {
-      role: 'desc',
-    },
-    {
-      email: 'desc',
-    },
-  ]
-   * We need to consider 2 options:
-   * 1. Asset fields
-   * 2. Relation fields
-   * Example of how relation fields are managed:
-   * orderBy: {
-        posts: {
-          count: 'desc',
-        },
-      },
-   */
-
-  const directAssetFields = [
-    "id",
-    "name",
-    "status",
-    "description",
-    "valuation",
-    "createdAt",
-  ];
+  const directAssetFields = ["id", "status", "description", "createdAt"];
 
   for (const field of fields) {
-    if (directAssetFields.includes(field.name)) {
-      orderBy.push({
-        [field.name === "name" ? "title" : field.name]: field.direction,
-      });
+    if (field.name === "name") {
+      orderByParts.push(`a."title" ${field.direction}`);
+    } else if (field.name === "valuation") {
+      orderByParts.push(`a."value" ${field.direction}`);
+    } else if (directAssetFields.includes(field.name)) {
+      orderByParts.push(`a."${field.name}" ${field.direction}`);
+    } else if (field.name === "kit") {
+      orderByParts.push(`k."name" ${field.direction}`);
+    } else if (field.name === "category") {
+      orderByParts.push(`c."name" ${field.direction}`);
+    } else if (field.name === "location") {
+      orderByParts.push(`l."name" ${field.direction}`);
+    } else if (field.name === "custody") {
+      orderByParts.push(
+        `COALESCE(tm.name, CONCAT(bu."firstName", ' ', bu."lastName"), btm.name) ${field.direction}`
+      );
     } else if (field.name.startsWith("cf_")) {
-      return;
-      orderBy.push({
-        customFields: {
-          value: field.name.slice(3),
-          direction: field.direction,
-        },
+      const customFieldName = field.name.slice(3); // Remove 'cf_' prefix
+      const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
+      customFieldSortings.push({
+        name: customFieldName,
+        valueKey: "raw", // Assuming 'raw' is always the key for the sortable value
+        alias,
       });
+      orderByParts.push(`${alias} ${field.direction}`);
     } else {
-      orderBy.push({ [field.name]: { name: field.direction } });
+      console.warn(`Unknown sort field: ${field.name}`);
     }
   }
-  return orderBy;
+
+  const orderByClause =
+    orderByParts.length > 0 ? `ORDER BY ${orderByParts.join(", ")}` : "";
+
+  return { orderByClause, customFieldSortings };
 }
