@@ -38,7 +38,7 @@ export const ListHeader = ({
 
   const headerContent = useMemo(
     () => (
-      <tr className="">
+      <tr>
         {bulkActions ? <BulkListHeader /> : null}
         {hideFirstColumn ? null : (
           <Th
@@ -81,30 +81,13 @@ export const ListHeader = ({
       <thead
         className={tw(
           "border-b",
-          modeIsAdvanced ? "z-10 bg-white" : "",
+          modeIsAdvanced ? "sticky top-0 z-10 bg-white" : "",
           className
         )}
         ref={originalHeaderRef}
       >
         {headerContent}
       </thead>
-      {/* <StickyHeader
-        isSticky={isSticky}
-        stickyHeaderRef={stickyHeaderRef}
-        coords={coords}
-      >
-        <table>
-          <thead
-            className={tw(
-              "relative w-full border-b",
-              modeIsAdvanced ? "z-10 bg-white" : "",
-              className
-            )}
-          >
-            {headerContent}
-          </thead>
-        </table>
-      </StickyHeader> */}
     </>
   );
 };

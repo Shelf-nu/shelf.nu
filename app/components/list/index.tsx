@@ -128,7 +128,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       className={tw(
         "-mx-4 border border-gray-200 bg-white md:mx-0 md:rounded",
         customPagination && "mb-[50px]",
-        modeIsAdvanced ? "flex h-full flex-col": 'overflow-auto',
+        modeIsAdvanced ? "flex h-full flex-col" : "overflow-auto",
         className
       )}
     >
@@ -207,7 +207,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           </div>
           <Table
             className={tw(
-              "list relative flex-1 overflow-hidden",
+              "list",
               bulkActions && !isBaseOrSelfService && "list-with-bulk-actions"
             )}
           >

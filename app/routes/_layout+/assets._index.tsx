@@ -24,7 +24,6 @@ import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
-import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -112,25 +111,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     return mode === "SIMPLE"
       ? await simpleModeLoader({
-        request,
-        userId,
-        organizationId,
-        organizations,
-        role,
-        currentOrganization,
-        user,
-        settings,
-      })
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        })
       : await advancedModeLoader({
-        request,
-        userId,
-        organizationId,
-        organizations,
-        role,
-        currentOrganization,
-        user,
-        settings,
-      });
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -220,31 +219,33 @@ export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
 
-  return <>
-    <Header>
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.create,
-        })}
-      >
-        <>
-          <ImportButton canImportAssets={canImportAssets} />
-          <Button
-            to="new"
-            role="link"
-            aria-label={`new asset`}
-            icon="asset"
-            data-test-id="createNewAsset"
-          >
-            New asset
-          </Button>
-        </>
-      </When>
-    </Header>
-    <AssetsList />
-  </>
+  return (
+    <>
+      <Header>
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.create,
+          })}
+        >
+          <>
+            <ImportButton canImportAssets={canImportAssets} />
+            <Button
+              to="new"
+              role="link"
+              aria-label={`new asset`}
+              icon="asset"
+              data-test-id="createNewAsset"
+            >
+              New asset
+            </Button>
+          </>
+        </When>
+      </Header>
+      <AssetsList />
+    </>
+  );
 }
 
 export const AssetsList = ({
@@ -290,39 +291,41 @@ export const AssetsList = ({
     <AdvancedTableHeader columns={columns} />
   );
 
-  return <div className="flex h-full flex-col gap-4 pt-4">
-    {isSwappingMode ? (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ delay: 0.2 }}
-        className="absolute inset-[3px] z-[11] flex flex-col items-center border border-gray-200 bg-gray-25/95 pt-[200px]"
-      >
-        <Spinner />
-        <p className="mt-2">Changing mode...</p>
-      </motion.div>
-    ) : (
-      <></>
-    )}
-    <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
-    <List
-      title="Assets"
-      ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-      customPagination={<AssetIndexPagination />}
-      /**
-       * Using remix's navigate is the default behaviour, however it can receive also a custom function
-       */
-      navigate={
-        modeIsSimple ? (itemId) => navigate(`/assets/${itemId}`) : undefined
-      }
-      bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
-      customEmptyStateContent={
-        customEmptyState ? customEmptyState : undefined
-      }
-      headerChildren={headerChildren}
-    />
-  </div>
+  return (
+    <div className="flex h-full flex-col gap-4 pt-4">
+      {isSwappingMode ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ delay: 0.2 }}
+          className="absolute inset-[3px] z-[11] flex flex-col items-center border border-gray-200 bg-gray-25/95 pt-[200px]"
+        >
+          <Spinner />
+          <p className="mt-2">Changing mode...</p>
+        </motion.div>
+      ) : (
+        <></>
+      )}
+      <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
+      <List
+        title="Assets"
+        ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+        customPagination={<AssetIndexPagination />}
+        /**
+         * Using remix's navigate is the default behaviour, however it can receive also a custom function
+         */
+        navigate={
+          modeIsSimple ? (itemId) => navigate(`/assets/${itemId}`) : undefined
+        }
+        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+        customEmptyStateContent={
+          customEmptyState ? customEmptyState : undefined
+        }
+        headerChildren={headerChildren}
+      />
+    </div>
+  );
 };
 
 const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
@@ -421,12 +424,12 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
                     name: custody.custodian.name,
                     user: custody.custodian?.user
                       ? {
-                        firstName: custody.custodian?.user?.firstName || null,
-                        lastName: custody.custodian?.user?.lastName || null,
-                        profilePicture:
-                          custody.custodian?.user?.profilePicture || null,
-                        email: custody.custodian?.user?.email || "",
-                      }
+                          firstName: custody.custodian?.user?.firstName || null,
+                          lastName: custody.custodian?.user?.lastName || null,
+                          profilePicture:
+                            custody.custodian?.user?.profilePicture || null,
+                          email: custody.custodian?.user?.email || "",
+                        }
                       : undefined,
                   })}
                 </span>
