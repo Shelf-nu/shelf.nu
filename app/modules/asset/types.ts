@@ -125,7 +125,7 @@ export type AdvancedIndexAsset = Pick<
         lastName: string | null;
         profilePicture: string | null;
         email: string;
-      };
+      } | null;
     };
   } | null;
   customFields: (AssetCustomFieldValue & {
@@ -143,3 +143,9 @@ export type AdvancedIndexQueryResult = Array<{
   total_count: number;
   assets: AdvancedIndexAsset[];
 }>;
+
+export interface CustomFieldSorting {
+  name: string;
+  valueKey: string;
+  alias: string;
+}

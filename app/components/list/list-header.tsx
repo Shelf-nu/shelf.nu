@@ -81,7 +81,7 @@ export const ListHeader = ({
       <thead
         className={tw(
           "border-b",
-          modeIsAdvanced ? "z-10 bg-white" : "",
+          modeIsAdvanced ? " z-10 bg-white " : "",
           className
         )}
         ref={originalHeaderRef}

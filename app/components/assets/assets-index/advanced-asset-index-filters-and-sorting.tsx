@@ -22,6 +22,8 @@ import { tw } from "~/utils/tw";
 interface Sort {
   name: string;
   direction: "asc" | "desc";
+  // Only relevant for custom fields
+  fieldType?: string;
 }
 
 export function AdvancedFilteringAndSorting() {
@@ -72,10 +74,11 @@ function AdvancedSorting() {
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
-    const [name, direction] = s.split(":");
-    return { name, direction } as Sort;
+    const [name, direction, fieldType] = s.split(":");
+    return { name, direction, fieldType } as Sort;
   });
   const disabled = useDisabled();
+  console.log(initialSorts);
 
   useEffect(() => {
     setSorts(initialSorts);
@@ -100,7 +103,7 @@ function AdvancedSorting() {
 
       // Append new sortBy parameters
       sorts.forEach((s) => {
-        prev.append("sortBy", `${s.name}:${s.direction}`);
+        prev.append("sortBy", `${s.name}:${s.direction}:${s.fieldType}`);
       });
 
       return searchParams;
@@ -137,7 +140,7 @@ function AdvancedSorting() {
             ) : (
               <Reorder.Group values={sorts} onReorder={setSorts}>
                 {sorts.map((s, index) => (
-                  <Reorder.Item key={s.name} value={s.name}>
+                  <Reorder.Item key={s.name} value={s}>
                     <div className="flex items-center justify-between">
                       <div className="flex h-full items-center gap-2 py-[6px]">
                         <div className="inline-block h-auto w-[10px] text-gray-500 hover:text-gray-600">
@@ -215,11 +218,21 @@ function PickAColumnToSortBy({
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns;
 
+  console.log("columns", columns);
+
   const columnsSortOptions: Sort[] = (columns as Column[])
     .filter((c) => !sorts.map((sort) => sort.name).includes(c.name))
     ?.map((column) => ({ name: column.name, direction: "asc" }));
   const nameOption: Sort = { name: "name", direction: "asc" };
   columnsSortOptions.splice(1, 0, nameOption);
+
+  /** We need to remove unnecessary columns which dont make sense to sort by:
+   * - tags
+   */
+  const tagsIndex = columnsSortOptions.findIndex((c) => c.name === "tags");
+  if (tagsIndex > -1) {
+    columnsSortOptions.splice(tagsIndex, 1);
+  }
 
   function addSort(column: Sort) {
     setSorts((prev) => {
