@@ -131,7 +131,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
       asset.bookings = [currentBooking];
     }
-
     /** We only need customField with same category of asset or without any category */
     let customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -227,6 +226,7 @@ export default function AssetOverview() {
     asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
       : [];
+
   const location = asset && asset.location;
   usePosition();
   const fetcher = useFetcher();
