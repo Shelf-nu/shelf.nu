@@ -62,6 +62,14 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import {
+  assetQueryFragment,
+  assetQueryJoins,
+  assetReturnFragment,
+  generateCustomFieldSelect,
+  generateWhereClause,
+  parseSortingOptions,
+} from "./advanced-index-query.server";
 import { assetIndexFields } from "./fields";
 import type {
   AdvancedIndexAsset,
@@ -75,7 +83,6 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
-import { parseSortingOptions } from "../asset-index-settings/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -687,136 +694,26 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
 
+    const whereClause = generateWhereClause(organizationId, search);
     const { orderByClause, customFieldSortings } = parseSortingOptions(
       searchParams.getAll("sortBy")
     );
-
-    let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
-
-    if (search) {
-      const words = search.trim().split(/\s+/).filter(Boolean);
-      if (words.length > 0) {
-        const searchVector = words.join(" & ");
-        whereClause = Prisma.sql`${whereClause} AND (to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchVector}))`;
-      }
-    }
-
-    // Handle the case when there are no custom field sortings
-    const customFieldSelect =
-      customFieldSortings.length > 0
-        ? Prisma.sql`, ${Prisma.join(
-            customFieldSortings.map(
-              (cf) =>
-                Prisma.sql`(SELECT acfv.value->>'${cf.valueKey}'
-            FROM public."AssetCustomFieldValue" acfv
-            JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-            WHERE acfv."assetId" = a.id AND cf.name = ${cf.name}
-          ) AS ${Prisma.raw(cf.alias)}`
-            )
-          )}`
-        : Prisma.empty;
+    const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
 
     const query = Prisma.sql`
       WITH asset_query AS (
-        SELECT 
-          a.id, a.title, a.description, a."createdAt", a."updatedAt", a."userId",
-          a."mainImage", a."mainImageExpiration", a."locationId", a."organizationId",
-          a.status, a.value AS valuation, a."availableToBook",
-          k.id AS "kitId", k.name AS "kitName",
-          c.id AS "categoryId", c.name AS "categoryName", c.color AS "categoryColor",
-          l.name AS "locationName",
-          json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) AS tags,
-          COALESCE(
-            CASE 
-              WHEN cu.id IS NOT NULL THEN
-                jsonb_build_object(
-                  'custodian', jsonb_build_object(
-                    'name', tm.name,
-                    'user', CASE 
-                      WHEN u.id IS NOT NULL THEN
-                        jsonb_build_object(
-                          'firstName', u."firstName",
-                          'lastName', u."lastName",
-                          'profilePicture', u."profilePicture",
-                          'email', u.email
-                        )
-                      ELSE NULL
-                    END
-                  )
-                )
-              WHEN b.id IS NOT NULL THEN
-                jsonb_build_object(
-                  'custodian', jsonb_build_object(
-                    'name', COALESCE(
-                      CONCAT(bu."firstName", ' ', bu."lastName"),
-                      btm.name
-                    ),
-                    'user', CASE 
-                      WHEN bu.id IS NOT NULL THEN
-                        jsonb_build_object(
-                          'firstName', bu."firstName",
-                          'lastName', bu."lastName",
-                          'profilePicture', bu."profilePicture",
-                          'email', bu.email
-                        )
-                      ELSE NULL
-                    END
-                  )
-                )
-              ELSE NULL
-            END,
-            NULL
-          ) AS custody,
-          (
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'id', acfv.id,
-                'value', acfv.value,
-                'customField', jsonb_build_object(
-                  'id', cf.id,
-                  'name', cf.name,
-                  'helpText', cf."helpText",
-                  'required', cf.required,
-                  'type', cf.type,
-                  'options', cf.options,
-                  'categories', (
-                    SELECT jsonb_agg(jsonb_build_object('id', cat.id, 'name', cat.name))
-                    FROM public."_CategoryToCustomField" ccf
-                    JOIN public."Category" cat ON ccf."A" = cat.id
-                    WHERE ccf."B" = cf.id
-                  )
-                )
-              )
-            )
-            FROM public."AssetCustomFieldValue" acfv
-            JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-            WHERE acfv."assetId" = a.id AND cf.active = true
-          ) AS "customFields"
-          ${customFieldSelect}
-        FROM public."Asset" a
-        LEFT JOIN public."Kit" k ON a."kitId" = k.id
-        LEFT JOIN public."Category" c ON a."categoryId" = c.id
-        LEFT JOIN public."Location" l ON a."locationId" = l.id
-        LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
-        LEFT JOIN public."Tag" t ON att."B" = t.id
-        LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
-        LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
-        LEFT JOIN public."User" u ON tm."userId" = u.id
-        LEFT JOIN LATERAL (
-          SELECT b.*
-          FROM public."Booking" b
-          JOIN public."_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
-          WHERE b.status IN ('ONGOING', 'OVERDUE')
-          LIMIT 1
-        ) b ON TRUE
-        LEFT JOIN public."User" bu ON b."custodianUserId" = bu.id
-        LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
+        ${assetQueryFragment}
+        ${customFieldSelect}
+        ${assetQueryJoins}
         ${whereClause}
         GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+      ), 
+      sorted_asset_query AS (
+        SELECT * FROM asset_query
         ${Prisma.raw(orderByClause)}
         LIMIT ${take}
         OFFSET ${skip}
-      ), 
+      ),
       count_query AS (
         SELECT COUNT(*)::integer AS total_count
         FROM public."Asset" a
@@ -824,32 +721,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
-        json_agg(
-          jsonb_build_object(
-            'id', aq.id,
-            'title', aq.title,
-            'description', aq.description,
-            'createdAt', aq."createdAt",
-            'updatedAt', aq."updatedAt",
-            'userId', aq."userId",
-            'mainImage', aq."mainImage",
-            'mainImageExpiration', aq."mainImageExpiration",
-            'categoryId', aq."categoryId",
-            'locationId', aq."locationId",
-            'organizationId', aq."organizationId",
-            'status', aq.status,
-            'valuation', aq.valuation,
-            'availableToBook', aq."availableToBook",
-            'kitId', aq."kitId",
-            'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
-            'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
-            'tags', aq.tags,
-            'location', jsonb_build_object('name', aq."locationName"),
-            'custody', aq.custody,
-            'customFields', COALESCE(aq."customFields", '[]'::jsonb)
-          )
-        ) AS assets
-      FROM asset_query aq;
+        ${assetReturnFragment}
+      FROM sorted_asset_query aq;
     `;
 
     const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
@@ -878,106 +751,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     });
   }
 }
-// async function getAdvancedIndexAssetsFromView(params: {
-//   organizationId: Organization["id"];
-//   /** Page number. Starts at 1 */
-//   page: number;
-//   /** Assets to be loaded per page */
-
-//   sortBy: string[];
-//   orderDirection: SortingDirection;
-//   perPage?: number;
-//   search?: string | null;
-//   categoriesIds?: Category["id"][] | null;
-//   tagsIds?: Tag["id"][] | null;
-//   status?: Asset["status"] | null;
-//   hideUnavailable?: Asset["availableToBook"];
-//   bookingFrom?: Booking["from"];
-//   bookingTo?: Booking["to"];
-//   unhideAssetsBookigIds?: Booking["id"][];
-//   locationIds?: Location["id"][] | null;
-//   teamMemberIds?: TeamMember["id"][] | null;
-//   extraInclude?: Prisma.AssetInclude;
-// }) {
-//   let {
-//     organizationId,
-//     sortBy,
-//     orderDirection,
-//     page = 1,
-//     perPage = 8,
-//     search,
-//     categoriesIds,
-//     tagsIds,
-//     status,
-//     bookingFrom,
-//     bookingTo,
-//     hideUnavailable,
-//     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
-//     locationIds,
-//     teamMemberIds,
-//     extraInclude,
-//   } = params;
-
-//   try {
-//     const skip = page > 1 ? (page - 1) * perPage : 0;
-//     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
-
-//     /** Default value of where. Takes the assets belonging to current user */
-//     let where: Prisma.AssetSearchViewWhereInput = {
-//       asset: { organizationId },
-//     };
-
-//     /** If the search string exists, add it to the where object */
-//     if (search) {
-//       const words = search
-//         .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
-//         .trim()
-//         .replace(/ +/g, " ") //replace multiple spaces into 1
-//         .split(" ")
-//         .map((w) => w.trim() + ":*") //remove leading and trailing spaces
-//         .filter(Boolean)
-//         .join(" & ");
-//       where.searchVector = {
-//         search: words,
-//       };
-//     }
-
-//     const ASSET_INDEX_FIELDS = assetIndexFields({
-//       bookingFrom,
-//       bookingTo,
-//       unavailableBookingStatuses,
-//     });
-//     const [assetSearch, totalAssets] = await Promise.all([
-//       /** Get the assets */
-//       db.assetSearchView.findMany({
-//         skip,
-//         take,
-//         where,
-//         include: {
-//           asset: {
-//             include: {
-//               ...ASSET_INDEX_FIELDS,
-//               ...extraInclude,
-//             },
-//           },
-//         },
-//         orderBy: { asset: { [orderBy]: orderDirection } },
-//       }),
-
-//       /** Count them */
-//       db.assetSearchView.count({ where }),
-//     ]);
-
-//     return { assets: assetSearch.map((a) => a.asset), totalAssets };
-//   } catch (cause) {
-//     throw new ShelfError({
-//       cause,
-//       message: "Something went wrong while fetching assets from view",
-//       additionalData: { ...params },
-//       label,
-//     });
-//   }
-// }
 
 export async function createAsset({
   title,

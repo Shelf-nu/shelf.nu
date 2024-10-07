@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
-import type { CustomFieldSorting } from "../asset/types";
 
 export type Column = {
   name: string;
@@ -98,60 +97,4 @@ export function parseColumnName(name: string) {
 
   /** For fixed fields, return the label */
   return columnsLabelsMap[name as keyof typeof columnsLabelsMap];
-}
-
-export function parseSortingOptions(sortBy: string[]): {
-  orderByClause: string;
-  customFieldSortings: CustomFieldSorting[];
-} {
-  const fields = sortBy.map((s) => {
-    const [name, direction, fieldType] = s.split(":");
-    return { name, direction, fieldType } as {
-      name: string;
-      direction: "asc" | "desc";
-      fieldType: string;
-    };
-  });
-
-  const orderByParts: string[] = [];
-  const customFieldSortings: CustomFieldSorting[] = [];
-
-  const directAssetFields = ["id", "status", "description", "createdAt"];
-
-  for (const field of fields) {
-    if (field.name === "name") {
-      orderByParts.push(`a."title" ${field.direction}`);
-    } else if (field.name === "valuation") {
-      orderByParts.push(`a."value" ${field.direction}`);
-    } else if (directAssetFields.includes(field.name)) {
-      orderByParts.push(`a."${field.name}" ${field.direction}`);
-    } else if (field.name === "kit") {
-      orderByParts.push(`k."name" ${field.direction}`);
-    } else if (field.name === "category") {
-      orderByParts.push(`c."name" ${field.direction}`);
-    } else if (field.name === "location") {
-      orderByParts.push(`l."name" ${field.direction}`);
-    } else if (field.name === "custody") {
-      orderByParts.push(
-        `COALESCE(tm.name, CONCAT(bu."firstName", ' ', bu."lastName"), btm.name) ${field.direction}`
-      );
-    } else if (field.name.startsWith("cf_")) {
-      const customFieldName = field.name.slice(3); // Remove 'cf_' prefix
-      const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
-      customFieldSortings.push({
-        name: customFieldName,
-        valueKey: "raw", // We'll handle this in the SQL query
-        alias,
-        fieldType: field.fieldType as CustomFieldType, // We can safely cast here
-      });
-      orderByParts.push(`${alias} ${field.direction}`);
-    } else {
-      console.warn(`Unknown sort field: ${field.name}`);
-    }
-  }
-
-  const orderByClause =
-    orderByParts.length > 0 ? `ORDER BY ${orderByParts.join(", ")}` : "";
-
-  return { orderByClause, customFieldSortings };
 }

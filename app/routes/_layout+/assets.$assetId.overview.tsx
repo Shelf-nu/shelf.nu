@@ -357,6 +357,7 @@ export default function AssetOverview() {
                     const fieldValue =
                       field.value as unknown as ShelfAssetCustomFieldValueType["value"];
 
+                    console.log(fieldValue);
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
                       fieldValue,
                       { locale, timeZone }

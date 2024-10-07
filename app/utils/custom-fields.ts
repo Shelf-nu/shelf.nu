@@ -188,6 +188,11 @@ export const getCustomFieldDisplayValue = (
     return parseMarkdownToReact(value.raw as string);
   }
 
+  if (value.valueBoolean) {
+    console.log(value);
+    return value.valueBoolean ? "Yes" : "No";
+  }
+
   if (value.valueDate && value.raw) {
     return hints
       ? formatDateBasedOnLocaleOnly(value.valueDate as string, hints.locale)
