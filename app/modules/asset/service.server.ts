@@ -2301,10 +2301,8 @@ export async function bulkDeleteAssets({
     });
 
     try {
-      await db.$transaction(async (tx) => {
-        await tx.asset.deleteMany({
-          where: { id: { in: assets.map((asset) => asset.id) } },
-        });
+      await db.asset.deleteMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
       });
 
       /** Deleting images of the assets (if any) */
