@@ -249,6 +249,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "archive",
           "cancel",
           "removeKit",
+          "revert-to-draft",
         ]),
         nameChangeOnly: z
           .string()
@@ -270,6 +271,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
+      "revert-to-draft": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -534,6 +536,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ booking: b }), {
           headers,
         });
+      }
+      case "revert-to-draft": {
+        await upsertBooking(
+          { id, status: BookingStatus.DRAFT },
+          getClientHint(request)
+        );
+
+        sendNotification({
+          title: "Booking reverted",
+          message: "Your booking has been reverted back to draft successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
       }
       default: {
         checkExhaustiveSwitch(intent);

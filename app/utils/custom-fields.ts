@@ -150,8 +150,8 @@ export const buildCustomFieldValue = (
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;
-
-    if (!raw) {
+    /** We handle boolean different because it returns false */
+    if (def.type !== "BOOLEAN" && !raw) {
       return undefined;
     }
 
@@ -188,8 +188,7 @@ export const getCustomFieldDisplayValue = (
     return parseMarkdownToReact(value.raw as string);
   }
 
-  if (value.valueBoolean) {
-    console.log(value);
+  if (Object.hasOwnProperty.call(value, "valueBoolean")) {
     return value.valueBoolean ? "Yes" : "No";
   }
 
