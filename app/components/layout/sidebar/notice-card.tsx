@@ -3,28 +3,28 @@ import { XIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/_layout";
 
-export const ChatWithAnExpert = () => {
-  const { hideSupportBanner } = useLoaderData<typeof loader>();
+export const SidebarNoticeCard = () => {
+  const { hideNoticeCard } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
-  let optimisticHideSupportBanner = hideSupportBanner;
+  let optimisticHideNoticeCard = hideNoticeCard;
   if (fetcher.formData) {
-    optimisticHideSupportBanner =
-      fetcher.formData.get("bannerVisibility") === "hidden";
+    optimisticHideNoticeCard =
+      fetcher.formData.get("noticeCardVisibility") === "hidden";
   }
 
-  return optimisticHideSupportBanner ? null : (
+  return optimisticHideNoticeCard ? null : (
     <div className="support-banner mb-6 hidden rounded bg-gray-50 px-4 py-5 md:mt-10 md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
-          New: Order Asset Labels
+          Install Shelf for Mobile
         </h5>
         <div className="mt-[-6px]">
           <fetcher.Form
             method="post"
-            action="/api/user/prefs/dismiss-support-banner"
+            action="/api/user/prefs/dismiss-notice-card"
           >
-            <input type="hidden" name="bannerVisibility" value="hidden" />
+            <input type="hidden" name="noticeCardVisibility" value="hidden" />
             <button type="submit">
               <XIcon />
             </button>
@@ -33,9 +33,7 @@ export const ChatWithAnExpert = () => {
       </div>
 
       <p className="text-gray-600">
-        We are happy to announce that we have the infrastructure to produce
-        custom branded labels for your business. Affordable rates, fast
-        turnaround, global shipping, various materials.
+        Always available access to shelf, with all features you have on desktop.
       </p>
       <img
         src="/static/images/carlos-support.jpg"
@@ -45,9 +43,9 @@ export const ChatWithAnExpert = () => {
       <p>
         <Button
           variant="link"
-          to="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio"
+          to="https://www.shelf.nu/blog/new-shelf-pwa-progresive-web-application-live-learn-how-to-use"
         >
-          View offer
+          Written Tutorial
         </Button>
       </p>
     </div>
