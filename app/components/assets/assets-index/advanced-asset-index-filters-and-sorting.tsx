@@ -8,7 +8,7 @@ import {
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Switch } from "~/components/forms/switch";
-import { ChevronRight, HandleIcon } from "~/components/icons/library";
+import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -18,6 +18,8 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+import { OperatorSelector } from "./advanced-filters/operator-selector";
+import type { FilterOperator } from "./advanced-filters/types";
 
 interface Sort {
   name: string;
@@ -41,8 +43,46 @@ const getTriggerClasses = (open: boolean, activeItems: number) =>
     activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
   );
 
+export interface Filter {
+  name: string;
+  operator: FilterOperator;
+  value: string;
+}
+
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const { settings } = useLoaderData<AssetIndexLoaderData>();
+  const columns = settings.columns as Column[];
+  const disabled = useDisabled();
+
+  const [filters, setFilters] = useState<Filter[]>([]);
+  function removeFilter(columnName: Filter["name"]) {
+    setFilters((prev) => prev.filter((f) => f.name !== columnName));
+  }
+  function clearAllFilters() {
+    setFilters([]);
+  }
+  function applyFilters() {
+    // Apply filters
+  }
+
+  function addFilter() {
+    setFilters((prev) => {
+      const newCols = [...prev];
+      newCols.push({ name: columns[0].name, operator: "is", value: "" });
+      return newCols;
+    });
+  }
+
+  const initialFilters = [] satisfies Filter[];
+
+  useEffect(() => {
+    setFilters(initialFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const haveFiltersChanged =
+    JSON.stringify(initialFilters) !== JSON.stringify(filters);
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -59,10 +99,93 @@ function AdvancedFilter() {
         <PopoverContent
           align="start"
           className={tw(
-            "mt-2 w-[480px] rounded-md border border-gray-200 bg-white p-3"
+            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
           )}
         >
-          Hello
+          <div className="border-b p-4 pb-5">
+            {filters.length === 0 ? (
+              <div>
+                <h5>No filters applied to this view</h5>
+                <p>Add a column below to filter the view</p>
+              </div>
+            ) : (
+              <>
+                {filters.map((filter, index) => (
+                  <div
+                    className="flex items-center justify-between gap-3"
+                    key={filter.name + index}
+                  >
+                    <div className="mt-[-2px]">
+                      {parseColumnName(filter.name)}
+                    </div>
+                    <div></div>
+                    <div>
+                      <OperatorSelector
+                        name={filter.name}
+                        operator={filter.operator}
+                        value={filter.value}
+                      />
+                    </div>
+                    <input
+                      value={filter.value}
+                      onChange={(event) => {
+                        // Update filter value
+                        setFilters((prev) => {
+                          const newFilters = [...prev];
+                          newFilters[index].value = event.target.value;
+                          return newFilters;
+                        });
+                      }}
+                    />
+                    <Button
+                      variant="block-link-gray"
+                      className="mt-[2px] text-[10px] font-normal text-gray-600"
+                      icon="x"
+                      onClick={() => removeFilter(filter.name)}
+                    />
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <Button
+                variant="secondary"
+                className="text-[14px]"
+                size="xs"
+                onClick={addFilter}
+              >
+                <div className="mr-1 inline-block size-[14px] align-middle">
+                  <PlusIcon />
+                </div>
+                <span className="inline-block align-middle">Add filter</span>
+              </Button>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              {filters.length > 0 && (
+                <Button
+                  variant="block-link"
+                  size="xs"
+                  className="mt-0 text-[14px]"
+                  onClick={clearAllFilters}
+                >
+                  Clear all
+                </Button>
+              )}
+
+              <Button
+                variant="secondary"
+                className="text-[14px]"
+                size="xs"
+                disabled={!haveFiltersChanged || disabled}
+                onClick={applyFilters}
+              >
+                Apply filters
+              </Button>
+            </div>
+          </div>
         </PopoverContent>
       </PopoverPortal>
     </Popover>

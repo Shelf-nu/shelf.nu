@@ -151,8 +151,10 @@ export function AdvancedIndexColumn({
           }
         />
       );
+
     case "id":
       return <TextColumn value={item.id} />;
+
     case "status":
       return (
         <StatusColumn
