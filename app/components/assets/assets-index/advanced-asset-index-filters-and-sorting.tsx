@@ -121,9 +121,19 @@ function AdvancedFilter() {
                     <div></div>
                     <div>
                       <OperatorSelector
-                        name={filter.name}
-                        operator={filter.operator}
-                        value={filter.value}
+                        filter={{
+                          name: filter.name,
+                          operator: filter.operator,
+                          value: filter.value,
+                        }}
+                        setFilter={(operator) => {
+                          // Update filter operator
+                          setFilters((prev) => {
+                            const newFilters = [...prev];
+                            newFilters[index].operator = operator;
+                            return newFilters;
+                          });
+                        }}
                       />
                     </div>
                     <input

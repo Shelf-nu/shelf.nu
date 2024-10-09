@@ -18,9 +18,9 @@ function FilterOperatorDisplay({
   text: string;
 }) {
   return (
-    <div className="flex items-center text-[14px] ">
+    <div className="flex items-center gap-2 text-[14px] ">
       <span className="text-gray-500">{symbol}</span>
-      <span>{text}</span>
+      <span className=" text-nowrap">{text}</span>
     </div>
   );
 }
@@ -42,7 +42,13 @@ const operatorsMap: Record<FilterOperator, React.ReactElement> = {
   containsAny: <FilterOperatorDisplay symbol={"⊃"} text={"Contains any"} />,
 };
 
-export function OperatorSelector(filter: Filter) {
+export function OperatorSelector({
+  filter,
+  setFilter,
+}: {
+  filter: Filter;
+  setFilter: (filter: Filter["operator"]) => void;
+}) {
   const [operator, setOperator] = useState<FilterOperator>();
   useEffect(() => {
     setOperator(filter.operator);
@@ -51,7 +57,9 @@ export function OperatorSelector(filter: Filter) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="secondary">{operatorsMap[operator]}</Button>
+        <Button variant="secondary">
+          {operatorsMap[operator as FilterOperator]}
+        </Button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
@@ -60,7 +68,15 @@ export function OperatorSelector(filter: Filter) {
             "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
           )}
         >
-          {Object.entries(operatorsMap).map(([_k, v]) => v)}
+          {Object.entries(operatorsMap).map(([_k, v], index) => (
+            <div
+              key={_k + index}
+              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+              onClick={() => setFilter(_k as FilterOperator)}
+            >
+              {v}
+            </div>
+          ))}
         </PopoverContent>
       </PopoverPortal>
     </Popover>
