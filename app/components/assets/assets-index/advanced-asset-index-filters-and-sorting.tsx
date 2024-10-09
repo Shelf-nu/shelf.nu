@@ -7,6 +7,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
+import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -18,6 +19,7 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+import { FieldSelector } from "./advanced-filters/field-selector";
 import { OperatorSelector } from "./advanced-filters/operator-selector";
 import type { FilterOperator } from "./advanced-filters/types";
 
@@ -56,9 +58,7 @@ function AdvancedFilter() {
   const disabled = useDisabled();
 
   const [filters, setFilters] = useState<Filter[]>([]);
-  function removeFilter(columnName: Filter["name"]) {
-    setFilters((prev) => prev.filter((f) => f.name !== columnName));
-  }
+
   function clearAllFilters() {
     setFilters([]);
   }
@@ -109,23 +109,28 @@ function AdvancedFilter() {
                 <p>Add a column below to filter the view</p>
               </div>
             ) : (
-              <>
+              <div className="flex flex-col gap-2">
                 {filters.map((filter, index) => (
                   <div
-                    className="flex items-center justify-between gap-3"
+                    className="flex w-full items-center gap-2  "
                     key={filter.name + index}
                   >
-                    <div className="mt-[-2px]">
-                      {parseColumnName(filter.name)}
+                    <div>
+                      <FieldSelector
+                        filter={filter}
+                        setFilter={(name) => {
+                          // Update filter name
+                          setFilters((prev) => {
+                            const newFilters = [...prev];
+                            newFilters[index].name = name;
+                            return newFilters;
+                          });
+                        }}
+                      />
                     </div>
-                    <div></div>
                     <div>
                       <OperatorSelector
-                        filter={{
-                          name: filter.name,
-                          operator: filter.operator,
-                          value: filter.value,
-                        }}
+                        currentOperator={filter.operator}
                         setFilter={(operator) => {
                           // Update filter operator
                           setFilters((prev) => {
@@ -136,7 +141,7 @@ function AdvancedFilter() {
                         }}
                       />
                     </div>
-                    <input
+                    <Input
                       value={filter.value}
                       onChange={(event) => {
                         // Update filter value
@@ -146,16 +151,23 @@ function AdvancedFilter() {
                           return newFilters;
                         });
                       }}
+                      label={"Filter value"}
+                      hideLabel
+                      inputClassName="px-4 py-2 text-[14px] leading-5"
                     />
                     <Button
                       variant="block-link-gray"
                       className="mt-[2px] text-[10px] font-normal text-gray-600"
                       icon="x"
-                      onClick={() => removeFilter(filter.name)}
+                      onClick={() => {
+                        setFilters((prev) =>
+                          prev.filter((_, i) => i !== index)
+                        );
+                      }}
                     />
                   </div>
                 ))}
-              </>
+              </div>
             )}
           </div>
 

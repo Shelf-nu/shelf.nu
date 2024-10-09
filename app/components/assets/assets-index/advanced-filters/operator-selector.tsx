@@ -20,65 +20,74 @@ function FilterOperatorDisplay({
   return (
     <div className="flex items-center gap-2 text-[14px] ">
       <span className="text-gray-500">{symbol}</span>
-      <span className=" text-nowrap">{text}</span>
+      <span className=" whitespace-nowrap">{text}</span>
     </div>
   );
 }
 
 /** Maps the FilterOperator to a user friendly name */
-const operatorsMap: Record<FilterOperator, React.ReactElement> = {
-  is: <FilterOperatorDisplay symbol={"="} text={"is"} />,
-  isNot: <FilterOperatorDisplay symbol={"≠"} text={"Is not"} />,
-  contains: <FilterOperatorDisplay symbol={"∋"} text={"Contains"} />,
-  before: <FilterOperatorDisplay symbol={"<"} text={"Before"} />,
-  after: <FilterOperatorDisplay symbol={">"} text={"After"} />,
-  between: <FilterOperatorDisplay symbol={"<>"} text={"Between"} />,
-  gt: <FilterOperatorDisplay symbol={">"} text={"Greater than"} />,
-  lt: <FilterOperatorDisplay symbol={"<"} text={"Lower than"} />,
-  gte: <FilterOperatorDisplay symbol={">="} text={"Greater or equal"} />,
-  lte: <FilterOperatorDisplay symbol={"<="} text={"Lower or equal"} />,
-  in: <FilterOperatorDisplay symbol={"∈"} text={"Contains"} />,
-  containsAll: <FilterOperatorDisplay symbol={"⊇"} text={"Contains all"} />,
-  containsAny: <FilterOperatorDisplay symbol={"⊃"} text={"Contains any"} />,
+const operatorsMap: Record<FilterOperator, string[]> = {
+  is: ["=", "is"],
+  isNot: ["≠", "Is not"],
+  contains: ["∋", "Contains"],
+  before: ["<", "Before"],
+  after: [">", "After"],
+  between: ["<>", "Between"],
+  gt: [">", "Greater than"],
+  lt: ["<", "Lower than"],
+  gte: [">=", "Greater or equal"],
+  lte: ["<=", "Lower or equal"],
+  in: ["∈", "Contains"],
+  containsAll: ["⊇", "Contains all"],
+  containsAny: ["⊃", "Contains any"],
 };
 
 export function OperatorSelector({
-  filter,
+  currentOperator,
   setFilter,
 }: {
-  filter: Filter;
+  currentOperator: Filter["operator"];
   setFilter: (filter: Filter["operator"]) => void;
 }) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+
   const [operator, setOperator] = useState<FilterOperator>();
   useEffect(() => {
-    setOperator(filter.operator);
-  }, [filter.operator]);
+    setOperator(currentOperator);
+  }, [currentOperator]);
 
-  return (
-    <Popover>
+  return operator ? (
+    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
-        <Button variant="secondary">
-          {operatorsMap[operator as FilterOperator]}
+        <Button
+          variant="secondary"
+          title={operatorsMap[operator][1]}
+          className="w-[50px]"
+        >
+          {operatorsMap[operator][0]}
         </Button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
           )}
         >
-          {Object.entries(operatorsMap).map(([_k, v], index) => (
+          {Object.entries(operatorsMap).map(([k, v], index) => (
             <div
-              key={_k + index}
+              key={k + index}
               className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => setFilter(_k as FilterOperator)}
+              onClick={() => {
+                setFilter(k as FilterOperator);
+                setIsPopoverOpen(false);
+              }}
             >
-              {v}
+              <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
             </div>
           ))}
         </PopoverContent>
       </PopoverPortal>
     </Popover>
-  );
+  ) : null;
 }
