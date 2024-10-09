@@ -21,6 +21,25 @@ export function generateWhereClause(
 }
 
 // 2. Sorting
+type DirectAssetField =
+  | "id"
+  | "name"
+  | "valuation"
+  | "status"
+  | "description"
+  | "createdAt"
+  | "availableToBook";
+
+const directAssetFields: Record<DirectAssetField, string> = {
+  id: "assetId",
+  name: "assetTitle",
+  valuation: "assetValue",
+  status: "assetStatus",
+  description: "assetDescription",
+  createdAt: "assetCreatedAt",
+  availableToBook: "assetAvailableToBook",
+};
+
 export function parseSortingOptions(sortBy: string[]): {
   orderByClause: string;
   customFieldSortings: CustomFieldSorting[];
@@ -37,19 +56,10 @@ export function parseSortingOptions(sortBy: string[]): {
   const orderByParts: string[] = [];
   const customFieldSortings: CustomFieldSorting[] = [];
 
-  const directAssetFields = ["id", "status", "description", "createdAt"];
-
   for (const field of fields) {
-    if (field.name === "name") {
-      orderByParts.push(`"assetTitle" ${field.direction}`);
-    } else if (field.name === "valuation") {
-      orderByParts.push(`"assetValue" ${field.direction}`);
-    } else if (directAssetFields.includes(field.name)) {
-      orderByParts.push(
-        `"asset${field.name.charAt(0).toUpperCase() + field.name.slice(1)}" ${
-          field.direction
-        }`
-      );
+    if (field.name in directAssetFields) {
+      const columnName = directAssetFields[field.name as DirectAssetField];
+      orderByParts.push(`"${columnName}" ${field.direction}`);
     } else if (field.name === "kit") {
       orderByParts.push(`"kitName" ${field.direction}`);
     } else if (field.name === "category") {
@@ -69,6 +79,7 @@ export function parseSortingOptions(sortBy: string[]): {
       });
       orderByParts.push(`${alias} ${field.direction}`);
     } else {
+      // eslint-disable-next-line no-console
       console.warn(`Unknown sort field: ${field.name}`);
     }
   }

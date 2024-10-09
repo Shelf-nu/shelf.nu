@@ -87,8 +87,8 @@ function AdvancedSorting() {
   const haveSortsChanged =
     JSON.stringify(initialSorts) !== JSON.stringify(sorts);
 
-  function removeSort(columnValue: Sort) {
-    setSorts((prev) => prev.filter((s) => s !== columnValue));
+  function removeSort(columnName: Sort["name"]) {
+    setSorts((prev) => prev.filter((s) => s.name !== columnName));
   }
 
   function applySorting() {
@@ -112,6 +112,17 @@ function AdvancedSorting() {
 
       return searchParams;
     });
+  }
+
+  function clearAllSorts() {
+    setSorts([]);
+    /** If there are already sorts, clear them from the search params */
+    if (searchParams.has("sortBy")) {
+      setSearchParams((prev) => {
+        prev.delete("sortBy");
+        return prev;
+      });
+    }
   }
 
   return (
@@ -183,7 +194,7 @@ function AdvancedSorting() {
                           variant="block-link-gray"
                           className="mt-[2px] text-[10px] font-normal text-gray-600"
                           icon="x"
-                          onClick={() => removeSort(s)}
+                          onClick={() => removeSort(s.name)}
                         />
                       </div>
                     </div>
@@ -194,16 +205,31 @@ function AdvancedSorting() {
           </div>
 
           <div className="flex items-center justify-between px-4 py-3">
-            <PickAColumnToSortBy sorts={sorts} setSorts={setSorts} />
-            <Button
-              variant="secondary"
-              className="text-[14px]"
-              size="xs"
-              disabled={!haveSortsChanged || disabled}
-              onClick={applySorting}
-            >
-              Apply sorting
-            </Button>
+            <div>
+              <PickAColumnToSortBy sorts={sorts} setSorts={setSorts} />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              {sorts.length > 0 && (
+                <Button
+                  variant="block-link"
+                  size="xs"
+                  className="mt-0 text-[14px]"
+                  onClick={clearAllSorts}
+                >
+                  Clear all
+                </Button>
+              )}
+
+              <Button
+                variant="secondary"
+                className="text-[14px]"
+                size="xs"
+                disabled={!haveSortsChanged || disabled}
+                onClick={applySorting}
+              >
+                Apply sorting
+              </Button>
+            </div>
           </div>
         </PopoverContent>
       </PopoverPortal>
@@ -239,6 +265,17 @@ function PickAColumnToSortBy({
   if (tagsIndex > -1) {
     columnsSortOptions.splice(tagsIndex, 1);
   }
+
+  /** Make sure name is always first */
+  columnsSortOptions.sort((a, b) => {
+    if (a.name === "name") {
+      return -1;
+    }
+    if (b.name === "name") {
+      return 1;
+    }
+    return 0;
+  });
 
   function addSort(column: Sort) {
     setSorts((prev) => {

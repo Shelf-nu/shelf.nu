@@ -10,6 +10,7 @@ import { Reorder } from "framer-motion";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { useDisabled } from "~/hooks/use-disabled";
 import {
   parseColumnName,
   type Column,
@@ -45,6 +46,8 @@ export function ConfigureColumnsDropdown() {
 
   const hasChanges =
     JSON.stringify(initialColumns) !== JSON.stringify(currentColumns);
+
+  const disabled = useDisabled(fetcher);
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -148,7 +151,11 @@ export function ConfigureColumnsDropdown() {
               </div>
             </div>
             <footer className="absolute bottom-0 w-full border-t bg-white p-[10px]">
-              <Button disabled={!hasChanges} variant="secondary" width="full">
+              <Button
+                disabled={!hasChanges || disabled}
+                variant="secondary"
+                width="full"
+              >
                 Apply
               </Button>
             </footer>

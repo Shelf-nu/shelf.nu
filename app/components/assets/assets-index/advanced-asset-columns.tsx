@@ -55,7 +55,7 @@ export function AdvancedIndexColumn({
   item,
 }: {
   column: (typeof fixedFields)[number];
-  item: AdvancedIndexAsset;
+  item: AssetsFromViewItem;
 }) {
   const { locale, currentOrganization, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
@@ -190,6 +190,9 @@ export function AdvancedIndexColumn({
 
     case "custody":
       return <CustodyColumn custody={item.custody} />;
+
+    case "availableToBook":
+      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
   }
 }
 

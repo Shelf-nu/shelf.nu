@@ -2173,7 +2173,6 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
   assets: T[]
 ) {
   try {
-    console.log("THIS RUNS------------------");
     /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
     const checkedOutAssetsIds = assets
       .filter((a) => a.status === "CHECKED_OUT")

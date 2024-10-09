@@ -216,8 +216,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
-  const { canImportAssets, settings } = useLoaderData<typeof loader>();
-  console.log(settings.columns);
+  const { canImportAssets } = useLoaderData<typeof loader>();
 
   return (
     <>

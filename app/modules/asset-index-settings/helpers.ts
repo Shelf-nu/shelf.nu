@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
 
@@ -15,6 +14,7 @@ export const fixedFields = [
   "status",
   "description",
   "valuation",
+  "availableToBook",
   "createdAt",
   "category",
   "tags",
@@ -29,6 +29,7 @@ export const columnsLabelsMap: Record<(typeof fixedFields)[number], string> = {
   status: "Status",
   description: "Description",
   valuation: "Value",
+  availableToBook: "Available to book",
   createdAt: "Created at",
   category: "Category",
   tags: "Tags",
@@ -42,13 +43,15 @@ export const defaultFields = [
   { name: "status", visible: true, position: 1 },
   { name: "description", visible: true, position: 2 },
   { name: "valuation", visible: true, position: 3 },
-  { name: "createdAt", visible: true, position: 4 },
-  { name: "category", visible: true, position: 5 },
-  { name: "tags", visible: true, position: 6 },
-  { name: "location", visible: true, position: 7 },
-  { name: "kit", visible: true, position: 8 },
-  { name: "custody", visible: true, position: 9 },
-] as Prisma.JsonArray;
+  { name: "availableToBook", visible: true, position: 4 },
+  { name: "createdAt", visible: true, position: 5 },
+  { name: "category", visible: true, position: 6 },
+  { name: "tags", visible: true, position: 7 },
+  { name: "location", visible: true, position: 8 },
+  { name: "kit", visible: true, position: 9 },
+  { name: "custody", visible: true, position: 10 },
+];
+// as Prisma.JsonArray;
 
 // Function that generates Zod schema
 export const generateColumnsSchema = (customFields: string[]) => {

@@ -3,7 +3,7 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
-import { defaultFields, type Column } from "./helpers";
+import { defaultFields, fixedFields, type Column } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
 const label: ErrorLabel = "Asset Index Settings";
@@ -84,7 +84,17 @@ export async function getAssetIndexSettings({
       return newAssetIndexSettings;
     }
 
-    return assetIndexSettings;
+    /** Makes sure all default fields are available in the columns.  */
+    const updatedAssetIndexSettings = await validateDefaultFieldsColumns({
+      userId,
+      organizationId,
+      columns: assetIndexSettings?.columns as Column[],
+    });
+
+    /** If the settings were updated, return the new ones */
+    return updatedAssetIndexSettings
+      ? updatedAssetIndexSettings
+      : assetIndexSettings;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -218,4 +228,50 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
       label,
     });
   }
+}
+
+/** Makes sure that each default field is present in the columns
+ * This is very useful when we start adding more default fields as it will make sure it's present in the columns
+ */
+async function validateDefaultFieldsColumns({
+  userId,
+  organizationId,
+  columns,
+}: {
+  userId: string;
+  organizationId: string;
+  columns: Column[];
+}) {
+  /** Filter out the custom fields so we can make the check */
+  const withoutCustomFields = columns.filter(
+    (col) => !col.name.startsWith("cf_")
+  );
+
+  /** Make array of names for easier comparison */
+  const columnsNames = withoutCustomFields.map((col) => col.name);
+
+  /** Detect missing field names */
+  const missingFieldsNames = fixedFields.filter(
+    (field) => !columnsNames.includes(field)
+  );
+
+  /** If there are missing names, update the cols and return the new cols */
+  if (missingFieldsNames.length > 0) {
+    /** Get the missing fields from the default fields */
+    const missingFields = missingFieldsNames.map((name) => {
+      const field = defaultFields.find((f) => f.name === name);
+      return field as Column; // WE can assume that the field is present in the defualt fields
+    });
+    const newColumns = [...columns, ...missingFields];
+
+    /** Run the update */
+    const updatedSettings = await updateColumns({
+      userId,
+      organizationId,
+      columns: newColumns,
+    });
+    return updatedSettings;
+  }
+
+  return null;
 }
