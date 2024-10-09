@@ -28,18 +28,18 @@ function FilterOperatorDisplay({
 /** Maps the FilterOperator to a user friendly name */
 const operatorsMap: Record<FilterOperator, React.ReactElement> = {
   is: <FilterOperatorDisplay symbol={"="} text={"is"} />,
-  isNot: <FilterOperatorDisplay symbol={"≠"} text={"isNot"} />,
-  contains: <FilterOperatorDisplay symbol={"∋"} text={"contains"} />,
-  before: <FilterOperatorDisplay symbol={"<"} text={"before"} />,
-  after: <FilterOperatorDisplay symbol={">"} text={"after"} />,
-  between: <FilterOperatorDisplay symbol={"<>"} text={"between"} />,
-  gt: <FilterOperatorDisplay symbol={">"} text={"gt"} />,
-  lt: <FilterOperatorDisplay symbol={"<"} text={"lt"} />,
-  gte: <FilterOperatorDisplay symbol={">="} text={"gte"} />,
-  lte: <FilterOperatorDisplay symbol={"<="} text={"lte"} />,
-  in: <FilterOperatorDisplay symbol={"∈"} text={"in"} />,
-  containsAll: <FilterOperatorDisplay symbol={"⊇"} text={"containsAll"} />,
-  containsAny: <FilterOperatorDisplay symbol={"⊃"} text={"containsAny"} />,
+  isNot: <FilterOperatorDisplay symbol={"≠"} text={"Is not"} />,
+  contains: <FilterOperatorDisplay symbol={"∋"} text={"Contains"} />,
+  before: <FilterOperatorDisplay symbol={"<"} text={"Before"} />,
+  after: <FilterOperatorDisplay symbol={">"} text={"After"} />,
+  between: <FilterOperatorDisplay symbol={"<>"} text={"Between"} />,
+  gt: <FilterOperatorDisplay symbol={">"} text={"Greater than"} />,
+  lt: <FilterOperatorDisplay symbol={"<"} text={"Lower than"} />,
+  gte: <FilterOperatorDisplay symbol={">="} text={"Greater or equal"} />,
+  lte: <FilterOperatorDisplay symbol={"<="} text={"Lower or equal"} />,
+  in: <FilterOperatorDisplay symbol={"∈"} text={"Contains"} />,
+  containsAll: <FilterOperatorDisplay symbol={"⊇"} text={"Contains all"} />,
+  containsAny: <FilterOperatorDisplay symbol={"⊃"} text={"Contains any"} />,
 };
 
 export function OperatorSelector(filter: Filter) {
