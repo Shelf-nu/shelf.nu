@@ -260,3 +260,49 @@ In this example, the `useUserData` hook is used to retrieve the current user's e
 
 - `useRouteLoaderData`: A hook from `@remix-run/react` that returns the loader data for a given route by ID.
 - `loader` type from `~/routes/_layout+/_layout`: Used to type the loader data.
+
+## useTableIsOverflowing
+
+**Overview**
+
+The `useTableIsOverflowing` hook is used to handle the table's right-side scroll fade effect. It checks whether the table is overflowing and determines if the fade effect should be applied.
+
+**Returns:**
+
+- `containerRef`: A reference to the table container element.
+
+- `isOverflowing`: A boolean indicating whether the table is overflowing and has not reached the end.
+
+**Usage:**
+
+```typescript
+import React from "react";
+import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
+import { tw } from "~/utils/tw";
+
+export function Table({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const { containerRef, isOverflowing } = useTableIsOverflowing();
+
+  return (
+    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
+      <div className="fixed-gradient"></div>
+      <div
+        ref={containerRef}
+        className="scrollbar-top scrollbar-always-visible"
+      >
+        <table className={tw("w-full table-auto border-collapse", className)}>
+          {children}
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+In this example hook detects if the table content exceeds the container's width. When it does, isOverflowing becomes true, adding the overflowing class to the outer div. This class can trigger visual indicators like gradients to show users there's more content to scroll through.
