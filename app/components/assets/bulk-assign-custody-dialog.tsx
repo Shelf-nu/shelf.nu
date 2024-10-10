@@ -1,5 +1,8 @@
+import type { TeamMember } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -16,6 +19,9 @@ export const BulkAssignCustodySchema = z.object({
 export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
+  const { isSelfService } = useUserRoleHelper();
+  const { rawTeamMembers } = useLoaderData<{ rawTeamMembers: TeamMember[] }>();
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
@@ -29,7 +35,15 @@ export default function BulkAssignCustodyDialog() {
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
             <DynamicSelect
-              disabled={disabled}
+              defaultValue={
+                isSelfService
+                  ? JSON.stringify({
+                      id: rawTeamMembers[0].id,
+                      name: resolveTeamMemberName(rawTeamMembers[0]),
+                    })
+                  : undefined
+              }
+              disabled={disabled || isSelfService}
               model={{
                 name: "teamMember",
                 queryKey: "name",

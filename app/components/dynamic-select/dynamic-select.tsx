@@ -149,7 +149,10 @@ export default function DynamicSelect({
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger disabled={disabled} asChild>
             <button
-              className={disabled ? "cursor-not-allowed opacity-60" : "w-full"}
+              className={tw(
+                "w-full",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
             >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>

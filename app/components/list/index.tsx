@@ -103,7 +103,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
 
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBase } = useUserRoleHelper();
 
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
@@ -195,17 +195,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 </div>
               </div>
             </div>
-            {!isBaseOrSelfService ? <div>{bulkActions}</div> : null}
+            {!isBase ? <div>{bulkActions}</div> : null}
           </div>
 
           <Table
             className={tw(
               "list",
-              bulkActions && !isBaseOrSelfService && "list-with-bulk-actions"
+              bulkActions && !isBase && "list-with-bulk-actions"
             )}
           >
             <ListHeader
-              bulkActions={!isBaseOrSelfService ? bulkActions : undefined}
+              bulkActions={!isBase ? bulkActions : undefined}
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
@@ -216,7 +216,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   key={`${item.id}-${i}`}
                   navigate={navigate}
                 >
-                  {bulkActions && !isBaseOrSelfService ? (
+                  {bulkActions && !isBase ? (
                     <BulkListItemCheckbox item={item} />
                   ) : null}
                   <ItemComponent item={item} />
