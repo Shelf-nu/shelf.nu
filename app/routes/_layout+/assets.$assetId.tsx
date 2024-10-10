@@ -215,7 +215,7 @@ export default function AssetDetailsPage() {
           truthy={userHasPermission({
             roles,
             entity: PermissionEntity.asset,
-            action: PermissionAction.update,
+            action: [PermissionAction.update, PermissionAction.custody],
           })}
         >
           <ActionsDropdown />

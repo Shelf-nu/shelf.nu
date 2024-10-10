@@ -126,7 +126,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
-  const { roles } = useUserRoleHelper();
+  const { roles, isBaseOrSelfService } = useUserRoleHelper();
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
@@ -187,7 +187,9 @@ export default function KitsIndexPage() {
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={
+            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          }
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>

@@ -1,9 +1,11 @@
+import { OrganizationRoles } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
+import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -18,11 +20,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.checkin,
+      action: PermissionAction.custody,
     });
 
     const formData = await request.formData();
@@ -31,6 +33,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
     );
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const custodies = await db.custody.findMany({
+        where: { assetId: { in: assetIds } },
+        select: { custodian: { select: { id: true, userId: true } } },
+      });
+
+      if (custodies.some((custody) => custody.custodian.userId !== userId)) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can release custody of themselves only.",
+          additionalData: { userId, assetIds },
+          label: "Assets",
+        });
+      }
+    }
 
     await bulkCheckInAssets({
       userId,

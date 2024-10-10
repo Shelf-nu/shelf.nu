@@ -148,7 +148,12 @@ export default function DynamicSelect({
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger disabled={disabled} asChild>
-            <div>
+            <button
+              className={tw(
+                "w-full",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+            >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
                   {label}
@@ -164,7 +169,7 @@ export default function DynamicSelect({
                 </span>
                 <ChevronDownIcon />
               </div>
-            </div>
+            </button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent

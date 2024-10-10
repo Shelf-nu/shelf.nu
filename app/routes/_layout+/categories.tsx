@@ -19,6 +19,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteCategory,
   getCategories,
@@ -146,6 +147,8 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <Header>
@@ -163,7 +166,9 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={
+            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          }
           ItemComponent={CategoryItem}
           headerChildren={
             <>
