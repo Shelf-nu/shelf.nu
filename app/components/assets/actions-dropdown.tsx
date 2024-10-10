@@ -10,18 +10,24 @@ import {
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const assetCanBeReleased = asset.custody;
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
-  const { isSelfService } = useUserRoleHelper();
+  const { roles, isSelfService } = useUserRoleHelper();
 
   const {
     ref: dropdownRef,
@@ -98,132 +104,146 @@ const ConditionalActionsDropdown = () => {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            {!isSelfService ? (
-              <>
-                <DropdownMenuItem
-                  className="border-b px-4 py-1 md:p-0"
-                  disabled={assetIsCheckedOut && !assetCanBeReleased}
-                >
-                  {assetCanBeReleased ? (
-                    <Button
-                      to="overview/release-custody"
-                      role="link"
-                      variant="link"
-                      className={tw(
-                        "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-                      )}
-                      width="full"
-                      onClick={() => setOpen(false)}
-                      disabled={assetIsPartOfUnavailableKit}
-                    >
-                      <span className="flex items-center gap-1">
-                        <Icon icon="release-custody" /> Release custody
-                      </span>
-                    </Button>
-                  ) : (
-                    <Button
-                      to="overview/assign-custody"
-                      role="link"
-                      variant="link"
-                      className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                      width="full"
-                      onClick={() => setOpen(false)}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Icon icon="assign-custody" /> Assign custody
-                      </span>
-                    </Button>
-                  )}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className={tw("px-4 py-1 md:p-0")}
-                  disabled={assetIsCheckedOut}
-                >
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.update,
+              })}
+            >
+              <DropdownMenuItem
+                className="border-b px-4 py-1 md:p-0"
+                disabled={assetIsCheckedOut && !assetCanBeReleased}
+              >
+                {assetCanBeReleased ? (
                   <Button
-                    to="overview/update-location"
+                    to="overview/release-custody"
                     role="link"
                     variant="link"
                     className={tw(
-                      "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                      "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     )}
                     width="full"
                     onClick={() => setOpen(false)}
+                    disabled={assetIsPartOfUnavailableKit}
                   >
-                    <span className="flex items-center gap-2">
-                      <Icon icon="location" /> Update location
+                    <span className="flex items-center gap-1">
+                      <Icon icon="release-custody" /> Release custody
                     </span>
                   </Button>
-                </DropdownMenuItem>
-
-                <DropdownMenuItem
-                  className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
-                >
-                  <UpdateGpsCoordinatesForm
-                    // Closes the dropdown when the button is clicked
-                    callback={() => setOpen(false)}
-                  />
-                </DropdownMenuItem>
-                <DropdownMenuItem className="px-4 py-1 md:p-0">
+                ) : (
                   <Button
-                    to="edit"
+                    to="overview/assign-custody"
                     role="link"
                     variant="link"
                     className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon icon="pen" /> Edit
-                    </span>
-                  </Button>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="px-4 py-1 md:p-0">
-                  <Button
-                    to="overview/duplicate"
-                    role="link"
-                    variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                    width="full"
                     onClick={() => setOpen(false)}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon="duplicate" /> Duplicate
+                      <Icon icon="assign-custody" /> Assign custody
                     </span>
                   </Button>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="px-4 py-1 md:p-0"
-                  onSelect={(e) => {
-                    e.preventDefault();
-                  }}
-                  disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={tw("px-4 py-1 md:p-0")}
+                disabled={assetIsCheckedOut}
+              >
+                <Button
+                  to="overview/update-location"
+                  role="link"
+                  variant="link"
+                  className={tw(
+                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  )}
+                  width="full"
+                  onClick={() => setOpen(false)}
                 >
-                  <DeleteAsset asset={asset} />
-                </DropdownMenuItem>
-                <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
-                  <Button
-                    role="button"
-                    variant="secondary"
-                    className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                    width="full"
-                    onClick={() => setOpen(false)}
-                  >
-                    Close
-                  </Button>
-                </DropdownMenuItem>
-                {assetIsCheckedOut ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being checked
-                    out.
-                  </div>
-                ) : null}
-                {assetIsPartOfUnavailableKit ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being part of a
-                    kit.
-                  </div>
-                ) : null}
-              </>
-            ) : (
+                  <span className="flex items-center gap-2">
+                    <Icon icon="location" /> Update location
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
+              >
+                <UpdateGpsCoordinatesForm
+                  // Closes the dropdown when the button is clicked
+                  callback={() => setOpen(false)}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  to="edit"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  width="full"
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="pen" /> Edit
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  to="overview/duplicate"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={() => setOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="duplicate" /> Duplicate
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+                disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
+              >
+                <DeleteAsset asset={asset} />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
+                <Button
+                  role="button"
+                  variant="secondary"
+                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  width="full"
+                  onClick={() => setOpen(false)}
+                >
+                  Close
+                </Button>
+              </DropdownMenuItem>
+              {assetIsCheckedOut ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being checked out.
+                </div>
+              ) : null}
+              {assetIsPartOfUnavailableKit ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being part of a
+                  kit.
+                </div>
+              ) : null}
+            </When>
+
+            {/* We have to check for `isSelfService` because owner/admin will have all permission so this action will be displayed two times. */}
+            <When
+              truthy={
+                userHasPermission({
+                  roles,
+                  entity: PermissionEntity.asset,
+                  action: PermissionAction.custody,
+                }) && isSelfService
+              }
+            >
               <DropdownMenuItem
                 className="border-b px-4 py-1 md:p-0"
                 disabled={assetIsCheckedOut && !assetCanBeReleased}
@@ -257,7 +277,7 @@ const ConditionalActionsDropdown = () => {
                   </Button>
                 )}
               </DropdownMenuItem>
-            )}
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

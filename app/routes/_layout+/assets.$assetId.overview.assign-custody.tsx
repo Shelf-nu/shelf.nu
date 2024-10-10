@@ -50,7 +50,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: [PermissionAction.update, PermissionAction.custody],
+      action: PermissionAction.custody,
     });
 
     const asset = await db.asset
@@ -145,7 +145,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: [PermissionAction.update, PermissionAction.custody],
+      action: PermissionAction.custody,
     });
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;

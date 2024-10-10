@@ -51,7 +51,7 @@ export async function requirePermission({
   userId: string;
   request: Request;
   entity: PermissionEntity;
-  action: PermissionAction | PermissionAction[];
+  action: PermissionAction;
 }) {
   /**
    * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow

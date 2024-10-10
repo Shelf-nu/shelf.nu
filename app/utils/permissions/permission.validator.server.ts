@@ -12,7 +12,7 @@ export interface PermissionCheckProps {
   organizationId: string;
   roles?: OrganizationRoles[];
   userId: string;
-  action: PermissionAction | PermissionAction[];
+  action: PermissionAction;
   entity: PermissionEntity;
 }
 
@@ -48,8 +48,6 @@ export async function hasPermission(
       return true;
     }
 
-    const actionsToCheck = typeof action === "string" ? [action] : action;
-
     const validRoles = roles.filter((role) => {
       const entityPermMap = Role2PermissionMap[role];
 
@@ -59,9 +57,7 @@ export async function hasPermission(
 
       const permissions = entityPermMap[entity];
 
-      return permissions.some((permission) =>
-        actionsToCheck.includes(permission)
-      );
+      return permissions.includes(action);
     });
 
     return validRoles.length > 0;
