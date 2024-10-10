@@ -14,7 +14,8 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-import type { Filter } from "../advanced-asset-index-filters-and-sorting";
+import { getFieldType } from "./helpers";
+import type { Filter } from "./types";
 
 export function FieldSelector({
   filter,
@@ -39,14 +40,14 @@ export function FieldSelector({
           className="w-[150px] justify-start truncate whitespace-nowrap [&_span]:max-w-full [&_span]:truncate"
         >
           <ChevronRight className="ml-[2px] inline-block rotate-90" />
-          <span className="ml-2">{parseColumnName(fieldName)}</span>
+          <span className="ml-2">{parseColumnName(fieldName)}</span>{" "}
         </Button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2  max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
           {columns.map((column, index) => (
@@ -55,7 +56,10 @@ export function FieldSelector({
               className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
               onClick={() => setFilter(column.name)}
             >
-              {parseColumnName(column.name)}
+              <span>{parseColumnName(column.name)}</span>
+              <span className="ml-2 text-gray-500">
+                {getFieldType({ column, friendlyName: true })}
+              </span>
             </div>
           ))}
         </PopoverContent>

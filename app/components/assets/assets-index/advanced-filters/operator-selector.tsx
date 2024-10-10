@@ -7,8 +7,7 @@ import {
 } from "@radix-ui/react-popover";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
-import type { FilterOperator } from "./types";
-import type { Filter } from "../advanced-asset-index-filters-and-sorting";
+import type { Filter, FilterDefinition, FilterOperator } from "./types";
 
 function FilterOperatorDisplay({
   symbol,
@@ -42,19 +41,33 @@ const operatorsMap: Record<FilterOperator, string[]> = {
   containsAny: ["⊃", "Contains any"],
 };
 
+// Define the allowed operators for each field type
+export const operatorsPerType: FilterDefinition = {
+  string: ["is", "isNot", "contains"],
+  text: ["contains"],
+  boolean: ["is"],
+  date: ["is", "isNot", "before", "after", "between"],
+  number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
+  enum: ["is", "isNot", "in"],
+  array: ["contains", "containsAll", "containsAny"],
+};
+
 export function OperatorSelector({
-  currentOperator,
+  filter,
   setFilter,
 }: {
-  currentOperator: Filter["operator"];
+  filter: Filter;
   setFilter: (filter: Filter["operator"]) => void;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   const [operator, setOperator] = useState<FilterOperator>();
   useEffect(() => {
-    setOperator(currentOperator);
-  }, [currentOperator]);
+    setOperator(filter.operator);
+  }, [filter.operator]);
+
+  /** Get the correct operators, based on the field type */
+  const operators = operatorsPerType[filter.type];
 
   return operator ? (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -74,18 +87,22 @@ export function OperatorSelector({
             "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
           )}
         >
-          {Object.entries(operatorsMap).map(([k, v], index) => (
-            <div
-              key={k + index}
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => {
-                setFilter(k as FilterOperator);
-                setIsPopoverOpen(false);
-              }}
-            >
-              <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
-            </div>
-          ))}
+          {operators.map((operator, index) => {
+            const k = operator as FilterOperator;
+            const v = operatorsMap[k];
+            return (
+              <div
+                key={k + index}
+                className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                onClick={() => {
+                  setFilter(k as FilterOperator);
+                  setIsPopoverOpen(false);
+                }}
+              >
+                <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
+              </div>
+            );
+          })}
         </PopoverContent>
       </PopoverPortal>
     </Popover>

@@ -7,7 +7,6 @@ import {
 } from "@radix-ui/react-popover";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
-import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -20,8 +19,13 @@ import {
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
-import { OperatorSelector } from "./advanced-filters/operator-selector";
-import type { FilterOperator } from "./advanced-filters/types";
+import { getFieldType } from "./advanced-filters/helpers";
+import {
+  operatorsPerType,
+  OperatorSelector,
+} from "./advanced-filters/operator-selector";
+import type { Filter, FilterFieldType } from "./advanced-filters/types";
+import { ValueField } from "./advanced-filters/value-field";
 
 interface Sort {
   name: string;
@@ -45,12 +49,6 @@ const getTriggerClasses = (open: boolean, activeItems: number) =>
     activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
   );
 
-export interface Filter {
-  name: string;
-  operator: FilterOperator;
-  value: string;
-}
-
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings } = useLoaderData<AssetIndexLoaderData>();
@@ -69,7 +67,12 @@ function AdvancedFilter() {
   function addFilter() {
     setFilters((prev) => {
       const newCols = [...prev];
-      newCols.push({ name: columns[0].name, operator: "is", value: "" });
+      newCols.push({
+        name: columns[0].name,
+        operator: "is",
+        value: "",
+        type: getFieldType({ column: columns[0] }) as FilterFieldType,
+      });
       return newCols;
     });
   }
@@ -121,8 +124,18 @@ function AdvancedFilter() {
                         setFilter={(name) => {
                           // Update filter name
                           setFilters((prev) => {
+                            const column = columns.find(
+                              (c) => c.name === name
+                            ) as Column;
+                            const fieldType = getFieldType({
+                              column,
+                            }) as FilterFieldType;
+
                             const newFilters = [...prev];
                             newFilters[index].name = name;
+                            newFilters[index].type = fieldType;
+                            newFilters[index].operator =
+                              operatorsPerType[fieldType][0];
                             return newFilters;
                           });
                         }}
@@ -130,7 +143,7 @@ function AdvancedFilter() {
                     </div>
                     <div>
                       <OperatorSelector
-                        currentOperator={filter.operator}
+                        filter={filter}
                         setFilter={(operator) => {
                           // Update filter operator
                           setFilters((prev) => {
@@ -141,20 +154,17 @@ function AdvancedFilter() {
                         }}
                       />
                     </div>
-                    <Input
-                      value={filter.value}
-                      onChange={(event) => {
-                        // Update filter value
+                    <ValueField
+                      filter={filter}
+                      setFilter={(value) => {
                         setFilters((prev) => {
                           const newFilters = [...prev];
-                          newFilters[index].value = event.target.value;
+                          newFilters[index].value = value;
                           return newFilters;
                         });
                       }}
-                      label={"Filter value"}
-                      hideLabel
-                      inputClassName="px-4 py-2 text-[14px] leading-5"
                     />
+
                     <Button
                       variant="block-link-gray"
                       className="mt-[2px] text-[10px] font-normal text-gray-600"

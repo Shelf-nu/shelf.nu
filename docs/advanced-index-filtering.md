@@ -2,103 +2,103 @@
 
 ## Fields
 
-#### **id**: "ID"
+### id: "ID"
 
 ```
 type: string
 ```
 
-#### name: "Name"
+### name: "Name"
 
 ```
 type: string
 ```
 
-#### status: "Status"
+### status: "Status"
 
 ```
 type: enum (from a set of fixed options)
 ```
 
-#### description: "Description"
+### description: "Description"
 
 ```
 type: text
 ```
 
-#### valuation: "Value"
+### valuation: "Value"
 
 ```
 type: number
 ```
 
-#### availableToBook: "Available to book"
+### availableToBook: "Available to book"
 
 ```
 type: boolean
 ```
 
-#### createdAt: "Created at"
+### createdAt: "Created at"
 
 ```
 type: Date
 ```
 
-#### category: "Category" - relation category.name
+### category: "Category" - relation category.name
 
 ```
 type: string
 ```
 
-#### tags: "Tags"
+### tags: "Tags"
 
 ```
 type: array
 ```
 
-#### location: "Location" - relation - location.name
+### location: "Location" - relation - location.name
 
 ```
 type: string
 ```
 
-#### kit: "Kit" - relation - kit.name
+### kit: "Kit" - relation - kit.name
 
 ```
 type: string
 ```
 
-### custody: "Custody" - relation - teamMember.name or user.firstName + user.#### Name
+### custody: "Custody" - relation - teamMember.name or user.firstName + user.lastName
 
 ```
 type: string
 ```
 
-#### CustomField - single line text
+### CustomField - single line text
 
 ```
 type: string
 ```
 
-#### CustomField - multiline text
+### CustomField - multiline text
 
 ```
 type: text
 ```
 
-#### CustomField - BOOLEAN
+### CustomField - BOOLEAN
 
 ```
 type: boolean
 ```
 
-#### CustomField - DATE
+### CustomField - DATE
 
 ```
 type: date
 ```
 
-#### CustomField - OPTION
+### CustomField - OPTION
 
 ```
 type: enum (from a set of fixed options)
@@ -107,29 +107,32 @@ type: enum (from a set of fixed options)
 ## Operators
 
 - string
-
-is, is not, contains
-
+  - is
+  - is not
+  - contains
 - text
-
-contains
-
+  - contains
 - boolean
-
-is (true || false)
-
+  - is (true || false)
 - date
-
-is, isNot, before, after, range
-
+  - is
+  - isNot
+  - before
+  - after
+  - between
 - number
-
-is, isNot, >, <
-
+  - is
+  - isNot
+  - >
+  - <
+  - > =
+  - <=
+  - between
 - enum
-
-is, isNot
-
+  - is
+  - isNot
+  - in
 - array
-
-contains
+  - contains
+  - contains all
+  - contains any

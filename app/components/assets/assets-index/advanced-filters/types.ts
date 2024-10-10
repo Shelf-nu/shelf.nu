@@ -13,12 +13,22 @@ export type FilterOperator =
   | "containsAll"
   | "containsAny";
 
+export type FilterFieldType =
+  | "string"
+  | "text"
+  | "boolean"
+  | "date"
+  | "number"
+  | "enum"
+  | "array";
+
 export type FilterDefinition = {
-  string: ("is" | "isNot" | "contains")[];
-  text: ["contains"];
-  boolean: ["is"];
-  date: ("is" | "isNot" | "before" | "after" | "between")[];
-  number: ("is" | "isNot" | "gt" | "lt" | "gte" | "lte" | "between")[];
-  enum: ("is" | "isNot" | "in")[];
-  array: ("contains" | "containsAll" | "containsAny")[];
+  [K in FilterFieldType]: FilterOperator[];
+};
+
+export type Filter = {
+  name: string;
+  type: FilterFieldType;
+  operator: FilterOperator;
+  value: any | [any, any]; // This could be further refined based on the field type
 };
