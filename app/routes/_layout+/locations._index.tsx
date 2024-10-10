@@ -12,6 +12,7 @@ import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -89,6 +90,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function LocationsIndexPage() {
   const navigate = useNavigate();
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <Header>
@@ -105,7 +108,9 @@ export default function LocationsIndexPage() {
       <ListContentWrapper>
         <Filters />
         <List
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={
+            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          }
           ItemComponent={ListItemContent}
           navigate={(itemId) => navigate(itemId)}
           headerChildren={

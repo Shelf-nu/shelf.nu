@@ -356,7 +356,7 @@ export const AssetsList = ({
   }
   const hasFiltersToClear = useSearchParamHasValue(...searchParams);
   const clearFilters = useClearValueFromParams(...searchParams);
-  const { roles } = useUserRoleHelper();
+  const { roles, isBase } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
@@ -490,7 +490,9 @@ export const AssetsList = ({
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
         navigate={(itemId) => navigate(`/assets/${itemId}`)}
-        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+        bulkActions={
+          disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
+        }
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }
