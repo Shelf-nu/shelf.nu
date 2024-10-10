@@ -1,5 +1,11 @@
 import Input from "~/components/forms/input";
-import { Select } from "~/components/forms/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/forms/select";
 import type { Filter } from "./types";
 
 export function ValueField({
@@ -17,8 +23,8 @@ export function ValueField({
     setFilter(event.target.value);
   }
 
-  function handleBooleanChange(event: React.ChangeEvent<HTMLSelectElement>) {
-    setFilter(event.target.value === "true");
+  function handleBooleanChange(value: "true" | "false") {
+    setFilter(value === "true");
   }
 
   function handleDateChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -67,13 +73,39 @@ export function ValueField({
       return (
         <Select
           value={filter.value?.toString()}
-          onChange={handleBooleanChange}
-          options={[
-            { value: "true", label: "True" },
-            { value: "false", label: "False" },
-          ]}
-          placeholder="Select true or false"
-        />
+          onValueChange={handleBooleanChange}
+        >
+          <SelectTrigger className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
+            <SelectValue placeholder="Select availability" />
+          </SelectTrigger>
+
+          <SelectContent
+            className=" w-full min-w-[250px] p-0 z-[999999]"
+            position="popper"
+            align="end"
+          >
+            <div className="max-h-[320px] overflow-auto">
+              <SelectItem
+                value={"true"}
+                key={"true"}
+                className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+              >
+                <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+                  True
+                </span>
+              </SelectItem>
+              <SelectItem
+                value={"false"}
+                key={"false"}
+                className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+              >
+                <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+                  False
+                </span>
+              </SelectItem>
+            </div>
+          </SelectContent>
+        </Select>
       );
 
     case "date":
