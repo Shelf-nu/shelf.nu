@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -33,7 +34,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
 
     const custody = await db.custody
@@ -111,14 +112,35 @@ export const action = async ({
   });
 
   try {
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const user = await getUserByID(userId);
+
+    if (isSelfService) {
+      const custody = await db.custody.findUnique({
+        where: { assetId },
+        select: {
+          custodian: {
+            select: { id: true, userId: true },
+          },
+        },
+      });
+
+      if (custody?.custodian?.userId !== user.id) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can release custody of themselves only.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      }
+    }
 
     const asset = await releaseCustody({ assetId });
 
@@ -136,9 +158,9 @@ export const action = async ({
 
       /** Once the asset is updated, we create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${
-          user.lastName
-        }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
+        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
+          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
+        } custody over **${asset.title?.trim()}**`,
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
