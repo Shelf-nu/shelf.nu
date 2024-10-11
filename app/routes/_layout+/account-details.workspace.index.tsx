@@ -129,7 +129,8 @@ export default function WorkspacePage() {
   let upgradeMessage: string | React.ReactNode = (
     <>
       You are currently able to have a maximum of {tierLimit.maxOrganizations}{" "}
-      workspaces. If you want to create more than {tierLimit.maxOrganizations - 1} Team workspaces, please get in touch with{" "}
+      workspaces. If you want to create more than{" "}
+      {tierLimit.maxOrganizations - 1} Team workspaces, please get in touch with{" "}
       <CrispButton variant="link">sales</CrispButton>.
     </>
   );
