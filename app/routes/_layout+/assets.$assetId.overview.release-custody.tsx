@@ -7,6 +7,7 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -189,6 +190,9 @@ export default function Custody() {
   const { custody, asset } = useLoaderData<typeof loader>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+
+  const { isSelfService } = useUserRoleHelper();
+
   return (
     <>
       <div className="modal-content-wrapper">
@@ -199,9 +203,13 @@ export default function Custody() {
           <h4>Release custody of asset</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">
-              {resolveTeamMemberName(custody?.custodian)}’s
-            </span>{" "}
+            {isSelfService ? (
+              "your"
+            ) : (
+              <span className="font-medium">
+                {resolveTeamMemberName(custody?.custodian)}'s'
+              </span>
+            )}{" "}
             custody over <span className="font-medium">{asset.title}</span>?
           </p>
         </div>

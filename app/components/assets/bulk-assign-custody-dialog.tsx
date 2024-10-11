@@ -26,8 +26,10 @@ export default function BulkAssignCustodyDialog() {
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="assign-custody"
-      title="Assign custody of assets"
-      description="These assets are currently available. You're about to assign custody to one of your team members."
+      title={`${isSelfService ? "Take" : "Assign"} custody of assets`}
+      description={`These assets are currently available. You're about to assign custody to ${
+        isSelfService ? "yourself" : "one of your team members"
+      }.`}
       actionUrl="/api/assets/bulk-assign-custody"
       arrayFieldId="assetIds"
     >
