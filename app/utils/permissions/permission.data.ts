@@ -87,7 +87,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.dashboard]: [],
     [PermissionEntity.generalSettings]: [],
     [PermissionEntity.subscription]: [],
-    [PermissionEntity.kit]: [PermissionAction.read],
+    [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [PermissionAction.read],

@@ -380,7 +380,7 @@ export default function KitDetails() {
           truthy={userHasPermission({
             roles,
             entity: PermissionEntity.kit,
-            action: PermissionAction.update,
+            action: [PermissionAction.update, PermissionAction.custody],
           })}
         >
           <ActionsDropdown />

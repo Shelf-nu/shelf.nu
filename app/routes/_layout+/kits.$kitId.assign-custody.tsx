@@ -1,4 +1,10 @@
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  KitStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import {
@@ -14,6 +20,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getKit } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -47,11 +54,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
 
     const kit = await getKit({
@@ -99,9 +106,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
+    const where = {
+      deletedAt: null,
+      organizationId,
+      userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+    } satisfies Prisma.TeamMemberWhereInput;
+
     const teamMembers = await db.teamMember
       .findMany({
-        where: { deletedAt: null, organizationId },
+        where,
         include: { user: true },
         orderBy: { userId: "asc" },
         take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -115,9 +128,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const totalTeamMembers = await db.teamMember.count({
-      where: { deletedAt: null, organizationId },
-    });
+    const totalTeamMembers = await db.teamMember.count({ where });
 
     return json(
       data({
@@ -144,12 +155,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const { custodian } = parseData(
       await request.formData(),
@@ -164,6 +176,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { id: custodianId, name: custodianName } = custodian;
 
     const user = await getUserByID(userId);
+
+    if (isSelfService) {
+      const custodian = await db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: { id: true, userId: true },
+      });
+
+      if (custodian?.userId !== user.id) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can only assign custody to themselves only.",
+          additionalData: { userId, kitId, custodianId },
+          label: "Kit",
+        });
+      }
+    }
 
     const kit = await db.kit.update({
       where: { id: kitId },
@@ -229,7 +257,9 @@ export default function GiveKitCustody() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, teamMembers } = useLoaderData<typeof loader>();
+
+  const { isSelfService } = useUserRoleHelper();
 
   const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
 
@@ -241,17 +271,26 @@ export default function GiveKitCustody() {
         </div>
 
         <div className="mb-5">
-          <h4>Assign custody of kit</h4>
+          <h4>{isSelfService ? "Take" : "Assign"} custody of kit</h4>
           <p>
             This kit is currently available. You're about to assign custody to
-            one of your team members. All the assets in this kit will also be
-            assigned the same custody.
+            {isSelfService ? "yourself" : "one of your team members"}. All the
+            assets in this kit will also be assigned the same custody.
           </p>
         </div>
 
         <div className="relative z-50 mb-8">
           <DynamicSelect
-            disabled={disabled}
+            showSearch={!isSelfService}
+            disabled={disabled || isSelfService}
+            defaultValue={
+              isSelfService
+                ? JSON.stringify({
+                    id: teamMembers[0].id,
+                    name: resolveTeamMemberName(teamMembers[0]),
+                  })
+                : undefined
+            }
             model={{
               name: "teamMember",
               queryKey: "name",

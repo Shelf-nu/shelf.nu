@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 
@@ -6,10 +7,12 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getKit, releaseCustody } from "~/modules/kit/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -32,7 +35,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.kit,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
 
     const kit = await getKit({ id: kitId, organizationId });
@@ -68,12 +71,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    if (isSelfService) {
+      const custody = await db.kitCustody.findUnique({
+        where: { kitId },
+        select: {
+          custodian: {
+            select: { id: true, userId: true },
+          },
+        },
+      });
+
+      if (custody?.custodian?.userId !== userId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can release custody of themselves only.",
+          additionalData: { userId, kitId },
+          label: "Kit",
+        });
+      }
+    }
 
     const kit = await releaseCustody({
       kitId,
@@ -114,6 +138,8 @@ export default function ReleaseKitCustody() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  const { isSelfService } = useUserRoleHelper();
+
   return (
     <>
       <div className="modal-content-wrapper">
@@ -124,9 +150,13 @@ export default function ReleaseKitCustody() {
           <h4>Release custody of kit</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">
-              {resolveTeamMemberName(kit.custody.custodian)}’s
-            </span>{" "}
+            {isSelfService ? (
+              "your"
+            ) : (
+              <span className="font-medium">
+                {resolveTeamMemberName(kit.custody.custodian)}’s
+              </span>
+            )}{" "}
             custody over <span className="font-medium">{kit.name}</span>?
           </p>
         </div>
