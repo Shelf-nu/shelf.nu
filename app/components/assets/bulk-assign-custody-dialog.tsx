@@ -36,7 +36,7 @@ export default function BulkAssignCustodyDialog() {
           <div className="relative z-50 mb-8">
             <DynamicSelect
               defaultValue={
-                isSelfService
+                isSelfService && rawTeamMembers?.length > 0
                   ? JSON.stringify({
                       id: rawTeamMembers[0].id,
                       name: resolveTeamMemberName(rawTeamMembers[0]),

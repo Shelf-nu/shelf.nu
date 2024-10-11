@@ -108,7 +108,7 @@ const ConditionalActionsDropdown = () => {
               truthy={userHasPermission({
                 roles,
                 entity: PermissionEntity.asset,
-                action: PermissionAction.update,
+                action: PermissionAction.custody,
               })}
             >
               <DropdownMenuItem
@@ -120,9 +120,7 @@ const ConditionalActionsDropdown = () => {
                     to="overview/release-custody"
                     role="link"
                     variant="link"
-                    className={tw(
-                      "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-                    )}
+                    className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
                     disabled={assetIsPartOfUnavailableKit}
@@ -141,11 +139,21 @@ const ConditionalActionsDropdown = () => {
                     onClick={() => setOpen(false)}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon="assign-custody" /> Assign custody
+                      <Icon icon="assign-custody" />{" "}
+                      {isSelfService ? "Take" : "Assign"} custody
                     </span>
                   </Button>
                 )}
               </DropdownMenuItem>
+            </When>
+
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.update,
+              })}
+            >
               <DropdownMenuItem
                 className={tw("px-4 py-1 md:p-0")}
                 disabled={assetIsCheckedOut}
@@ -232,51 +240,6 @@ const ConditionalActionsDropdown = () => {
                   kit.
                 </div>
               ) : null}
-            </When>
-
-            {/* We have to check for `isSelfService` because owner/admin will have all permission so this action will be displayed two times. */}
-            <When
-              truthy={
-                userHasPermission({
-                  roles,
-                  entity: PermissionEntity.asset,
-                  action: PermissionAction.custody,
-                }) && isSelfService
-              }
-            >
-              <DropdownMenuItem
-                className="border-b px-4 py-1 md:p-0"
-                disabled={assetIsCheckedOut && !assetCanBeReleased}
-              >
-                {assetCanBeReleased ? (
-                  <Button
-                    to="overview/release-custody"
-                    role="link"
-                    variant="link"
-                    className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-                    width="full"
-                    onClick={() => setOpen(false)}
-                    disabled={assetIsPartOfUnavailableKit}
-                  >
-                    <span className="flex items-center gap-1">
-                      <Icon icon="release-custody" /> Release custody
-                    </span>
-                  </Button>
-                ) : (
-                  <Button
-                    to="overview/assign-custody"
-                    role="link"
-                    variant="link"
-                    className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                    width="full"
-                    onClick={() => setOpen(false)}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon icon="assign-custody" /> Take custody
-                    </span>
-                  </Button>
-                )}
-              </DropdownMenuItem>
             </When>
           </div>
         </DropdownMenuContent>
