@@ -47,6 +47,8 @@ import {
   ToolIcon,
   AddTagsIcon,
   RemoveTagsIcon,
+  AvailableIcon,
+  UnavailableIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -100,7 +102,9 @@ export type IconType =
   | "deactivate"
   | "scan"
   | "tool"
-  | "rows";
+  | "rows"
+  | "available"
+  | "unavailable";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -157,6 +161,8 @@ export const iconsMap: IconsMap = {
   scan: <ScanIcon />,
   tool: <ToolIcon />,
   rows: <RowsIcon />,
+  available: <AvailableIcon />,
+  unavailable: <UnavailableIcon />,
 };
 
 export default iconsMap;
