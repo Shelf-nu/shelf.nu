@@ -27,48 +27,51 @@ export function ValueField({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log("Current filter:", filter);
     validateFilter(filter);
   }, [filter]);
 
   function validateFilter(filter: Filter) {
+    console.log("Validating filter:", filter);
     const result = filterSchema.safeParse(filter);
     if (!result.success) {
+      console.log("Validation failed:", result.error);
       setError(result.error.errors[0].message);
       return;
     }
 
     if (filter.operator === "between" && Array.isArray(filter.value)) {
       const [start, end] = filter.value;
-      if (
-        start !== "" &&
-        end !== "" &&
-        start !== undefined &&
-        end !== undefined
-      ) {
+      console.log("Validating between:", start, end);
+
+      // Only validate if both values are present
+      if (start !== "" && end !== "") {
         if (filter.type === "date") {
           const startDate = new Date(start);
           const endDate = new Date(end);
-          if (
-            !isNaN(startDate.getTime()) &&
-            !isNaN(endDate.getTime()) &&
-            startDate > endDate
-          ) {
-            setError("Start date must be before or equal to end date");
-            return;
+          if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+            if (startDate > endDate) {
+              setError("Start date must be before or equal to end date");
+              return;
+            }
           }
         } else if (filter.type === "number") {
           const startNum = parseFloat(start);
           const endNum = parseFloat(end);
-          if (!isNaN(startNum) && !isNaN(endNum) && startNum > endNum) {
-            setError("Start value must be less than or equal to end value");
-            return;
+          if (!isNaN(startNum) && !isNaN(endNum)) {
+            if (startNum > endNum) {
+              setError("Start value must be less than or equal to end value");
+              return;
+            }
           }
         }
       }
     }
 
+    // If we've made it this far, clear any existing error
     setError(null);
   }
+
   function handleChange(
     event: React.ChangeEvent<
       HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
@@ -76,23 +79,21 @@ export function ValueField({
   ) {
     const newValue = event.target.value;
     setFilter(newValue);
-    validateFilter({ ...filter, value: newValue });
   }
 
   function handleBooleanChange(value: "true" | "false") {
     const newValue = value === "true";
     setFilter(newValue);
-    validateFilter({ ...filter, value: newValue });
   }
 
   function handleBetweenChange(index: 0 | 1) {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = [
-        ...(Array.isArray(filter.value) ? filter.value : [null, null]),
+        ...(Array.isArray(filter.value) ? filter.value : ["", ""]),
       ] as [string, string];
       newValue[index] = event.target.value;
+      console.log("Setting new between value:", newValue);
       setFilter(newValue);
-      validateFilter({ ...filter, value: newValue });
     };
   }
 
@@ -145,11 +146,11 @@ export function ValueField({
       } else {
         return (
           <Input
+            {...commonInputProps}
             type="number"
             value={filter.value as number}
             onChange={handleChange}
             placeholder="Enter number"
-            {...commonInputProps}
           />
         );
       }

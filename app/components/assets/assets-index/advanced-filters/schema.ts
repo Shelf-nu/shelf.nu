@@ -62,49 +62,28 @@ export const filterSchema = z
     type: filterFieldTypeSchema,
     operator: filterOperatorSchema,
     value: z.union([
-      z.any(),
-      z.tuple([z.string().optional(), z.string().optional()]), // for "between" operator
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.string().optional()),
     ]),
   })
   .refine(
     (data) => {
-      if (data.operator === "between") {
-        if (!Array.isArray(data.value) || data.value.length !== 2) {
-          return false;
-        }
+      if (data.operator === "between" && Array.isArray(data.value)) {
         const [start, end] = data.value;
-        // Allow empty or undefined values
-        if (
-          start === "" ||
-          end === "" ||
-          start === undefined ||
-          end === undefined
-        ) {
-          return true;
-        }
+        if (start === undefined || end === undefined) return true;
+        if (start === "" || end === "") return true;
         if (data.type === "date") {
           const startDate = new Date(start);
           const endDate = new Date(end);
-          return (
-            !isNaN(startDate.getTime()) &&
-            !isNaN(endDate.getTime()) &&
-            startDate <= endDate
-          );
+          return !isNaN(startDate.getTime()) && !isNaN(endDate.getTime());
         }
         if (data.type === "number") {
           const startNum = parseFloat(start);
           const endNum = parseFloat(end);
-          return !isNaN(startNum) && !isNaN(endNum) && startNum <= endNum;
+          return !isNaN(startNum) && !isNaN(endNum);
         }
-      }
-      if (data.type === "boolean") {
-        return typeof data.value === "boolean";
-      }
-      if (data.type === "enum" && data.name === "status") {
-        return (
-          typeof data.value === "string" &&
-          AssetStatus[data.value as keyof typeof AssetStatus] !== undefined
-        );
       }
       return true;
     },
