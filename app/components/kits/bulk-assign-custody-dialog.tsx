@@ -1,5 +1,8 @@
+import type { TeamMember } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -16,12 +19,17 @@ export const BulkAssignKitCustodySchema = z.object({
 export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignKitCustody", BulkAssignKitCustodySchema);
 
+  const { isSelfService } = useUserRoleHelper();
+  const { teamMembers } = useLoaderData<{ teamMembers: TeamMember[] }>();
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="assign-custody"
-      title="Assign custody of kit"
-      description="These kits are currently available. You're about to assign custody to one of your team members."
+      title={`${isSelfService ? "Take" : "Assign"} custody of kit`}
+      description={`These kits are currently available. You're about to assign custody to ${
+        isSelfService ? "yourself" : "one of your team members"
+      }.`}
       arrayFieldId="kitIds"
       actionUrl="/api/kits/bulk-actions"
     >
@@ -31,7 +39,15 @@ export default function BulkAssignCustodyDialog() {
             <input type="hidden" value="bulk-assign-custody" name="intent" />
 
             <DynamicSelect
-              disabled={disabled}
+              defaultValue={
+                isSelfService && teamMembers?.length > 0
+                  ? JSON.stringify({
+                      id: teamMembers[0].id,
+                      name: resolveTeamMemberName(teamMembers[0]),
+                    })
+                  : undefined
+              }
+              disabled={disabled || isSelfService}
               model={{
                 name: "teamMember",
                 queryKey: "name",

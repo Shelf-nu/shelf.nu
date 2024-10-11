@@ -1,8 +1,10 @@
+import { OrganizationRoles } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
 import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
+import { db } from "~/database/db.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   bulkAssignKitCustody,
@@ -11,7 +13,7 @@ import {
 } from "~/modules/kit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -41,16 +43,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const intent2ActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
-      "bulk-assign-custody": PermissionAction.checkout,
-      "bulk-release-custody": PermissionAction.checkin,
+      "bulk-assign-custody": PermissionAction.custody,
+      "bulk-release-custody": PermissionAction.custody,
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: intent2ActionMap[intent],
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     switch (intent) {
       case "bulk-delete": {
@@ -79,6 +82,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkAssignKitCustodySchema
         );
 
+        if (isSelfService) {
+          const teamMember = await db.teamMember.findUnique({
+            where: { id: custodian.id },
+            select: { id: true, userId: true },
+          });
+
+          if (teamMember?.userId !== userId) {
+            throw new ShelfError({
+              cause: null,
+              message: "Self user can only assign custody to themselves only.",
+              additionalData: { userId, kitIds, custodian },
+              label: "Kit",
+            });
+          }
+        }
+
         await bulkAssignKitCustody({
           kitIds,
           custodianId: custodian.id,
@@ -101,6 +120,24 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
       case "bulk-release-custody": {
         const { kitIds } = parseData(formData, BulkReleaseKitCustodySchema);
+
+        if (isSelfService) {
+          const custodies = await db.kitCustody.findMany({
+            where: { kitId: { in: kitIds } },
+            select: { custodian: { select: { id: true, userId: true } } },
+          });
+
+          if (
+            custodies.some((custody) => custody.custodian.userId !== userId)
+          ) {
+            throw new ShelfError({
+              cause: null,
+              message: "Self user can release custody of themselves only.",
+              additionalData: { userId, kitIds },
+              label: "Kit",
+            });
+          }
+        }
 
         await bulkReleaseKitCustody({
           userId,

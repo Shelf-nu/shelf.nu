@@ -4,8 +4,14 @@ import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
@@ -19,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import When from "../when/when";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -54,6 +61,8 @@ function ConditionalDropdown() {
 
   const selectedKits = useAtomValue(selectedBulkItemsAtom);
   const allSelected = isSelectingAllItems(selectedKits);
+
+  const { roles, isSelfService } = useUserRoleHelper();
 
   /**
    * Due to select all multi page selection,
@@ -97,9 +106,26 @@ function ConditionalDropdown() {
         />
       )}
 
-      <BulkDeleteDialog />
-      <BulkAssignCustodyDialog />
-      <BulkReleaseCustodyDialog />
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.update,
+        })}
+      >
+        <BulkDeleteDialog />
+      </When>
+
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.custody,
+        })}
+      >
+        <BulkAssignCustodyDialog />
+        <BulkReleaseCustodyDialog />
+      </When>
 
       <DropdownMenu
         modal={false}
@@ -154,58 +180,75 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="release-custody"
-                label="Release custody"
-                onClick={closeMenu}
-                disabled={
-                  !allKitsInCustody
-                    ? {
-                        reason: "Some of the selected kits are not in custody",
-                      }
-                    : isLoading
-                }
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="assign-custody"
-                label="Assign custody"
-                onClick={closeMenu}
-                disabled={
-                  !allKitsAvailable || someAssetsInsideKitsCheckedOutOrInCustody
-                    ? {
-                        reason: someAssetsInsideKitsCheckedOutOrInCustody
-                          ? "Some of the asset(s) inside this kits are either checked out or in custody. You need to resolve that before you can assign custody."
-                          : "Some of the selected kits are not available",
-                      }
-                    : isLoading
-                }
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.kit,
+                action: PermissionAction.custody,
+              })}
             >
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Delete"
-                onClick={closeMenu}
-                disabled={
-                  someKitsCheckedOut
-                    ? {
-                        reason:
-                          "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
-                      }
-                    : isLoading
-                }
-              />
-            </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="release-custody"
+                  label="Release custody"
+                  onClick={closeMenu}
+                  disabled={
+                    !allKitsInCustody
+                      ? {
+                          reason:
+                            "Some of the selected kits are not in custody",
+                        }
+                      : isLoading
+                  }
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="assign-custody"
+                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  onClick={closeMenu}
+                  disabled={
+                    !allKitsAvailable ||
+                    someAssetsInsideKitsCheckedOutOrInCustody
+                      ? {
+                          reason: someAssetsInsideKitsCheckedOutOrInCustody
+                            ? "Some of the asset(s) inside this kits are either checked out or in custody. You need to resolve that before you can assign custody."
+                            : "Some of the selected kits are not available",
+                        }
+                      : isLoading
+                  }
+                />
+              </DropdownMenuItem>
+            </When>
+
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.kit,
+                action: PermissionAction.update,
+              })}
+            >
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="trash"
+                  label="Delete"
+                  onClick={closeMenu}
+                  disabled={
+                    someKitsCheckedOut
+                      ? {
+                          reason:
+                            "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
+                        }
+                      : isLoading
+                  }
+                />
+              </DropdownMenuItem>
+            </When>
 
             <DropdownMenuItem className="border-t md:hidden lg:p-0">
               <Button
