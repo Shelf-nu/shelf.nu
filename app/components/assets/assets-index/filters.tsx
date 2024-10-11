@@ -178,6 +178,7 @@ function AdvancedAssetIndexFilters() {
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
       }}
+      searchClassName="leading-5"
     >
       <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
         <ConfigureColumnsDropdown />

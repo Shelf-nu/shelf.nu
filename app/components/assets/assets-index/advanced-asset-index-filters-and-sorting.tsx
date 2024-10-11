@@ -102,7 +102,7 @@ function AdvancedFilter() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -115,10 +115,10 @@ function AdvancedFilter() {
               <div className="flex flex-col gap-2">
                 {filters.map((filter, index) => (
                   <div
-                    className="flex w-full items-center gap-2  "
+                    className="flex w-full items-start gap-1"
                     key={filter.name + index}
                   >
-                    <div>
+                    <div className="w-[150px] shrink-0">
                       <FieldSelector
                         filter={filter}
                         setFilter={(name) => {
@@ -141,7 +141,7 @@ function AdvancedFilter() {
                         }}
                       />
                     </div>
-                    <div>
+                    <div className="w-[50px] shrink-0">
                       <OperatorSelector
                         filter={filter}
                         setFilter={(operator) => {
@@ -154,20 +154,21 @@ function AdvancedFilter() {
                         }}
                       />
                     </div>
-                    <ValueField
-                      filter={filter}
-                      setFilter={(value) => {
-                        setFilters((prev) => {
-                          const newFilters = [...prev];
-                          newFilters[index].value = value;
-                          return newFilters;
-                        });
-                      }}
-                    />
-
+                    <div className="min-w-0 grow">
+                      <ValueField
+                        filter={filter}
+                        setFilter={(value) => {
+                          setFilters((prev) => {
+                            const newFilters = [...prev];
+                            newFilters[index].value = value;
+                            return newFilters;
+                          });
+                        }}
+                      />
+                    </div>
                     <Button
                       variant="block-link-gray"
-                      className="mt-[2px] text-[10px] font-normal text-gray-600"
+                      className="mt-[2px] shrink-0 text-[10px] font-normal text-gray-600"
                       icon="x"
                       onClick={() => {
                         setFilters((prev) =>

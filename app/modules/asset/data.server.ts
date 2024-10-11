@@ -24,6 +24,7 @@ import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
+import { getActiveCustomFields } from "../custom-field/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
 type Org = Prisma.OrganizationGetPayload<{
@@ -183,6 +184,7 @@ export async function simpleModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      customFields: [], // we return an empty array in simple mode for easier to manage types
     }),
     {
       headers,
@@ -220,6 +222,7 @@ export async function advancedModeLoader({
   let [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
+    customFields,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -229,6 +232,10 @@ export async function advancedModeLoader({
       request,
       organizationId,
       filters,
+    }),
+    // We need the custom fields so we can create the options for filtering
+    getActiveCustomFields({
+      organizationId,
     }),
   ]);
 
@@ -290,6 +297,7 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      customFields,
     }),
     {
       headers,
