@@ -90,6 +90,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.kit]: [PermissionAction.read],
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
-    [PermissionEntity.custody]: [],
+    [PermissionEntity.custody]: [PermissionAction.read],
   },
 };
