@@ -67,6 +67,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {
         custody: true,
         kit: true,
+        qrCodes: true,
       },
     });
 
