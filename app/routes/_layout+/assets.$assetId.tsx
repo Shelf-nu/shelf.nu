@@ -22,7 +22,9 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
+  updateAssetQrCode,
 } from "~/modules/asset/service.server";
+import { claimQrCode } from "~/modules/qr/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -105,11 +107,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete"]) })
+      z.object({ intent: z.enum(["delete", "relink-qr-code"]) })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
+      "relink-qr-code": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -144,7 +147,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return redirect(`/assets`);
+        return redirect("/assets");
+      }
+
+      case "relink-qr-code": {
+        const { newQrId } = parseData(
+          formData,
+          z.object({ newQrId: z.string() })
+        );
+
+        await Promise.all([
+          claimQrCode({
+            id: newQrId,
+            organizationId,
+            userId,
+          }),
+          updateAssetQrCode({
+            newQrId,
+            assetId: id,
+            organizationId,
+          }),
+        ]);
+
+        sendNotification({
+          title: "QR Relinked",
+          message: "A new qr code has been linked to your asset.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
       }
 
       default: {
