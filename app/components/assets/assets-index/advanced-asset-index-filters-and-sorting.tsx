@@ -19,7 +19,7 @@ import {
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
-import { getFieldType } from "./advanced-filters/helpers";
+import { getFieldType, useInitialFilters } from "./advanced-filters/helpers";
 import {
   operatorsPerType,
   OperatorSelector,
@@ -54,14 +54,36 @@ function AdvancedFilter() {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
   const disabled = useDisabled();
+  const [_searchParams, setSearchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<Filter[]>([]);
+  const initialFilters = useInitialFilters(columns);
+
+  // Set the intial filters
+  useEffect(() => {
+    setFilters(initialFilters);
+  }, []);
 
   function clearAllFilters() {
     setFilters([]);
   }
+
   function applyFilters() {
-    // Apply filters
+    setSearchParams((prev) => {
+      // Clear existing filter params
+      columns.forEach((column) => {
+        if (prev.has(column.name)) {
+          prev.delete(column.name);
+        }
+      });
+
+      // Add new filter params
+      filters.forEach((filter) => {
+        prev.set(filter.name, `${filter.operator}:${filter.value}`);
+      });
+
+      return prev;
+    });
   }
 
   function addFilter() {
@@ -76,14 +98,6 @@ function AdvancedFilter() {
       return newCols;
     });
   }
-
-  const initialFilters = [] satisfies Filter[];
-
-  useEffect(() => {
-    setFilters(initialFilters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const haveFiltersChanged =
     JSON.stringify(initialFilters) !== JSON.stringify(filters);
 
@@ -92,10 +106,13 @@ function AdvancedFilter() {
       <PopoverTrigger asChild>
         <Button
           variant="secondary"
-          className={getTriggerClasses(isPopoverOpen, 0)}
+          className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
           icon="filter"
         >
-          Filter
+          {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
+          {initialFilters.length > 0
+            ? `Filtered by ${initialFilters.length}`
+            : "Filter"}
         </Button>
       </PopoverTrigger>
       <PopoverPortal>
@@ -164,6 +181,7 @@ function AdvancedFilter() {
                             return newFilters;
                           });
                         }}
+                        applyFilters={applyFilters}
                       />
                     </div>
                     <Button
@@ -266,7 +284,7 @@ function AdvancedSorting() {
         prev.append("sortBy", sortA.join(":"));
       });
 
-      return searchParams;
+      return prev;
     });
   }
 

@@ -1,5 +1,6 @@
+import { useSearchParams } from "~/hooks/search-params";
 import type { Column } from "~/modules/asset-index-settings/helpers";
-import type { FilterFieldType } from "./types";
+import type { FilterFieldType, Filter, FilterOperator } from "./types";
 
 const friendlyFieldTypeNames = {
   string: "Single-line text",
@@ -76,4 +77,27 @@ export function getFieldType({
   }
 
   return friendlyName ? friendlyFieldTypeNames[fieldType] : fieldType;
+}
+
+/** Gets the intial filters of the advanced index based on search params
+ * @returns intialFilters -{@link Filter, Filter[]}
+ */
+export function useInitialFilters(columns: Column[]) {
+  const [searchParams] = useSearchParams();
+
+  const initialFilters: Filter[] = [];
+  searchParams.forEach((value, key) => {
+    const column = columns.find((c) => c.name === key);
+    if (column) {
+      const [operator, filterValue] = value.split(":");
+
+      initialFilters.push({
+        name: key,
+        operator: operator as FilterOperator,
+        value: operator === "between" ? filterValue.split(",") : filterValue, // Split the value if it's a range
+        type: getFieldType({ column }) as FilterFieldType,
+      });
+    }
+  });
+  return initialFilters;
 }

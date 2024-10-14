@@ -1,4 +1,3 @@
-import { AssetStatus } from "@prisma/client";
 import { z } from "zod";
 import { operatorsPerType } from "./operator-selector";
 

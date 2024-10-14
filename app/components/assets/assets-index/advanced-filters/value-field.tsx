@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import {
   Popover,
@@ -13,38 +13,25 @@ import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-import { filterSchema } from "./schema";
 import type { Filter } from "./types";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
 export function ValueField({
   filter,
   setFilter,
+  applyFilters,
 }: {
   filter: Filter;
   setFilter: (value: Filter["value"]) => void;
+  applyFilters: () => void;
 }) {
+  const [localValue, setLocalValue] = useState<[string, string]>(
+    Array.isArray(filter.value) ? (filter.value as [string, string]) : ["", ""]
+  );
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    console.log("Current filter:", filter);
-    validateFilter(filter);
-  }, [filter]);
-
-  function validateFilter(filter: Filter) {
-    console.log("Validating filter:", filter);
-    const result = filterSchema.safeParse(filter);
-    if (!result.success) {
-      console.log("Validation failed:", result.error);
-      setError(result.error.errors[0].message);
-      return;
-    }
-
-    if (filter.operator === "between" && Array.isArray(filter.value)) {
-      const [start, end] = filter.value;
-      console.log("Validating between:", start, end);
-
-      // Only validate if both values are present
+  const validateBetweenFilter = useCallback(() => {
+    if (filter.operator === "between") {
+      const [start, end] = localValue;
       if (start !== "" && end !== "") {
         if (filter.type === "date") {
           const startDate = new Date(start);
@@ -67,10 +54,12 @@ export function ValueField({
         }
       }
     }
-
-    // If we've made it this far, clear any existing error
     setError(null);
-  }
+  }, [filter.operator, filter.type, localValue]);
+
+  useEffect(() => {
+    validateBetweenFilter();
+  }, [localValue, validateBetweenFilter]);
 
   function handleChange(
     event: React.ChangeEvent<
@@ -88,12 +77,12 @@ export function ValueField({
 
   function handleBetweenChange(index: 0 | 1) {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = [
-        ...(Array.isArray(filter.value) ? filter.value : ["", ""]),
-      ] as [string, string];
+      const newValue = [...localValue] as [string, string];
       newValue[index] = event.target.value;
-      console.log("Setting new between value:", newValue);
-      setFilter(newValue);
+      setLocalValue(newValue);
+      if (newValue[0] !== "" && newValue[1] !== "") {
+        setFilter(newValue);
+      }
     };
   }
 
@@ -103,16 +92,23 @@ export function ValueField({
     label: filter.name,
   };
 
+  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      applyFilters();
+    }
+  };
+
   switch (filter.type) {
     case "string":
     case "text":
       return (
         <Input
+          {...commonInputProps}
           type="text"
           value={filter.value as string}
           onChange={handleChange}
           placeholder="Enter value"
-          {...commonInputProps}
+          onKeyUp={submitOnEnter}
         />
       );
 
@@ -125,17 +121,21 @@ export function ValueField({
                 {...commonInputProps}
                 label="Start Value"
                 type="number"
-                value={Array.isArray(filter.value) ? filter.value[0] || "" : ""}
+                value={localValue[0]}
                 onChange={handleBetweenChange(0)}
                 className="w-1/2"
+                min={0}
+                onKeyUp={submitOnEnter}
               />
               <Input
                 {...commonInputProps}
                 label="End Value"
                 type="number"
-                value={Array.isArray(filter.value) ? filter.value[1] || "" : ""}
+                value={localValue[1]}
                 onChange={handleBetweenChange(1)}
                 className="w-1/2"
+                min={0}
+                onKeyUp={submitOnEnter}
               />
             </div>
             {error && (
@@ -151,6 +151,8 @@ export function ValueField({
             value={filter.value as number}
             onChange={handleChange}
             placeholder="Enter number"
+            min={0}
+            onKeyUp={submitOnEnter}
           />
         );
       }
@@ -172,20 +174,22 @@ export function ValueField({
                 {...commonInputProps}
                 label="Start Date"
                 type="date"
-                value={Array.isArray(filter.value) ? filter.value[0] || "" : ""}
+                value={localValue[0]}
                 onChange={handleBetweenChange(0)}
                 className="w-1/2"
+                onKeyUp={submitOnEnter}
               />
               <Input
                 {...commonInputProps}
                 label="End Date"
                 type="date"
-                value={Array.isArray(filter.value) ? filter.value[1] || "" : ""}
+                value={localValue[1]}
                 onChange={handleBetweenChange(1)}
                 className="w-1/2"
+                onKeyUp={submitOnEnter}
               />
             </div>
-            {error && (
+            {error && localValue[0] !== "" && localValue[1] !== "" && (
               <div className="!mt-0 text-[12px] text-red-500">{error}</div>
             )}
           </div>
@@ -194,10 +198,10 @@ export function ValueField({
         return (
           <Input
             {...commonInputProps}
-            label="Date"
             type="date"
             value={filter.value as string}
             onChange={handleChange}
+            onKeyUp={submitOnEnter}
           />
         );
       }
@@ -209,7 +213,6 @@ export function ValueField({
           fieldName={filter.name}
           handleChange={(value: string) => {
             setFilter(value);
-            validateFilter({ ...filter, value });
           }}
         />
       );
@@ -228,9 +231,9 @@ export function ValueField({
               .split(",")
               .map((item) => item.trim());
             setFilter(newValue);
-            validateFilter({ ...filter, value: newValue });
           }}
           placeholder="Enter comma-separated values"
+          onKeyUp={submitOnEnter}
         />
       );
 
@@ -247,7 +250,6 @@ function BooleanField({
   handleBooleanChange: (value: "true" | "false") => void;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-
   return (
     <>
       <input type="hidden" value={String(value)} />
@@ -316,7 +318,7 @@ function EnumField({
 
   const displayValue =
     value === ""
-      ? "Select option"
+      ? options[0]
       : isStatusField
       ? userFriendlyAssetStatus(value as AssetStatus)
       : value;
