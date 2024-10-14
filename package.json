@@ -66,7 +66,7 @@
     "@zxing/library": "^0.20.0",
     "changedpi": "^1.0.4",
     "chardet": "^2.0.0",
-    "cookie": "^0.6.0",
+    "cookie": "^0.7.0",
     "crisp-sdk-web": "^1.0.21",
     "csv-parse": "^5.5.3",
     "date-fns": "^3.3.1",
