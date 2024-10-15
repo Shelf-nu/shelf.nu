@@ -11,6 +11,7 @@ import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
+export * from "../server";
 
 // === start: register scheduler and workers ===
 schedulerService

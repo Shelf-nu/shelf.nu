@@ -16,36 +16,44 @@ export function Breadcrumb({
   if (typeof breadcrumb === "string") {
     if (breadcrumb === "single") {
       if (match?.data?.location) {
-        breadcrumb =
-          <span className="single-crumb">{match?.data?.location?.name}</span> ||
-          "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.location?.name || "Not found"}
+          </span>
+        );
       } else if (match?.data?.organization) {
-        breadcrumb =
-          (
-            <span className="single-crumb">
-              {match?.data?.organization?.name}
-            </span>
-          ) || "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.organization?.name || "Not found"}
+          </span>
+        );
       } else if (match?.data?.booking) {
-        breadcrumb =
-          <span className="single-crumb">{match?.data?.booking?.name}</span> ||
-          "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.booking?.name || "Not found"}
+          </span>
+        );
       } else if (match?.data?.kit) {
-        breadcrumb =
-          <span className="single-crumb">{match?.data?.kit?.name}</span> ||
-          "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.kit?.name || "Not found"}
+          </span>
+        );
       } else if (match?.data?.userName) {
-        breadcrumb =
-          <span className="single-crumb">{match?.data?.userName}</span> ||
-          "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.userName || "Not found"}
+          </span>
+        );
       } else {
-        breadcrumb =
-          <span className="single-crumb">{match?.data?.asset?.title}</span> ||
-          "Not found";
+        breadcrumb = (
+          <span className="single-crumb">
+            {match?.data?.asset?.title || "Not found"}
+          </span>
+        );
       }
     } else {
-      breadcrumb =
-        <span className="single-crumb">{breadcrumb}</span> || "Not found";
+      breadcrumb = <span className="single-crumb">{breadcrumb}</span>;
     }
   }
 

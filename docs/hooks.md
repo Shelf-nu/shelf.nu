@@ -220,3 +220,89 @@ export default function AssetIndexPage() {
 **Dependencies:**
 
 - `useRouteLoaderData`: hook from `@remix-run/react` that returns the loader data for a given route by ID.
+
+## `useUserData`
+
+The `useUserData` hook is used to access the current user's data from within any component in the application, particularly those nested under the `_layout` route.
+
+**Overview**
+
+This hook simplifies the process of retrieving user data that is loaded in the `_layout` route. It uses the `useRouteLoaderData` hook from Remix to access the loader data, making it easy to get user information without prop drilling.
+
+**Returns**
+
+- `user`: The user data object from the `_layout` route loader. This typically includes properties like `email` and possibly other user-related information.
+
+**Usage:**
+
+Here's an example of how to use the `useUserData` hook in a component:
+
+```typescript
+import React from 'react';
+import { useUserData } from '~/hooks/use-user-data';
+
+export const RequestDeleteUser = () => {
+  const user = useUserData();
+
+  return (
+    <form>
+      {/* Other form elements */}
+      <input type="hidden" name="email" value={user?.email} />
+      {/* Rest of the component */}
+    </form>
+  );
+}
+```
+
+In this example, the `useUserData` hook is used to retrieve the current user's email address, which is then used in a hidden form field.
+
+## Dependencies
+
+- `useRouteLoaderData`: A hook from `@remix-run/react` that returns the loader data for a given route by ID.
+- `loader` type from `~/routes/_layout+/_layout`: Used to type the loader data.
+
+## useTableIsOverflowing
+
+**Overview**
+
+The `useTableIsOverflowing` hook is used to handle the table's right-side scroll fade effect. It checks whether the table is overflowing and determines if the fade effect should be applied.
+
+**Returns:**
+
+- `containerRef`: A reference to the table container element.
+
+- `isOverflowing`: A boolean indicating whether the table is overflowing and has not reached the end.
+
+**Usage:**
+
+```typescript
+import React from "react";
+import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
+import { tw } from "~/utils/tw";
+
+export function Table({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const { containerRef, isOverflowing } = useTableIsOverflowing();
+
+  return (
+    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
+      <div className="fixed-gradient"></div>
+      <div
+        ref={containerRef}
+        className="scrollbar-top scrollbar-always-visible"
+      >
+        <table className={tw("w-full table-auto border-collapse", className)}>
+          {children}
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+In this example hook detects if the table content exceeds the container's width. When it does, isOverflowing becomes true, adding the overflowing class to the outer div. This class can trigger visual indicators like gradients to show users there's more content to scroll through.

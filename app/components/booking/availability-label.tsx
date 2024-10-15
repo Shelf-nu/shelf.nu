@@ -25,15 +25,29 @@ export function AvailabilityLabel({
   isCheckedOut,
   showKitStatus,
   isAddedThroughKit,
+  isAlreadyAdded,
 }: {
   asset: AssetWithBooking;
   isCheckedOut: boolean;
   showKitStatus?: boolean;
   isAddedThroughKit?: boolean;
+  isAlreadyAdded?: boolean;
 }) {
   const isPartOfKit = !!asset.kitId;
 
   const { booking } = useLoaderData<{ booking: Booking }>();
+
+  /** User scanned the asset and it is already in booking */
+  if (isAlreadyAdded) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already added to this booking"
+        tooltipTitle="Asset is part of booking"
+        tooltipContent="This asset is already added to the current booking."
+      />
+    );
+  }
+
   /**
    * Marked as not allowed for booking
    */

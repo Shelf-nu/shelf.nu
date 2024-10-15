@@ -9,7 +9,6 @@ import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 
-import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -29,9 +28,10 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -43,12 +43,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, isSelfServiceOrBase, currentOrganization } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
+
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =
@@ -217,16 +229,15 @@ export default function BookingsIndexPage({
           bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
-          className="overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
-              <Th className="hidden md:table-cell" />
-              <Th className="hidden md:table-cell">Description</Th>
+              <Th />
+              <Th>Description</Th>
 
-              <Th className="hidden md:table-cell">From</Th>
-              <Th className="hidden md:table-cell">To</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
-              <Th className="hidden md:table-cell">Created by</Th>
+              <Th>From</Th>
+              <Th>To</Th>
+              <Th>Custodian</Th>
+              <Th>Created by</Th>
             </>
           }
         />
@@ -301,10 +312,6 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
 
@@ -314,7 +321,7 @@ const ListAssetContent = ({
        * 2. Have custody
        * 3. Have other bookings with the same period - this I am not sure how to handle yet
        * */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {hasUnavaiableAssets ? (
           <AvailabilityBadge
             badgeText={"Includes unavailable assets"}
@@ -326,12 +333,12 @@ const ListAssetContent = ({
         ) : null}
       </Td>
 
-      <Td className="hidden md:table-cell">
+      <Td className="max-w-62">
         {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {item.displayFrom ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -343,7 +350,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* To */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {item.displayTo ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
@@ -355,7 +362,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {item?.custodianUser ? (
           <UserBadge
             img={
@@ -372,7 +379,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Created by */}
-      <Td className="hidden md:table-cell">
+      <Td>
         <UserBadge
           img={
             item?.creator?.profilePicture || "/static/images/default_pfp.jpg"

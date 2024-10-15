@@ -38,7 +38,11 @@ type BulkDialogType =
   | "activate"
   | "deactivate"
   | "archive"
-  | "cancel";
+  | "tag-add"
+  | "tag-remove"
+  | "cancel"
+  | "available"
+  | "unavailable";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -234,7 +238,7 @@ const BulkUpdateDialogContent = forwardRef<
       <Dialog
         open={isDialogOpen}
         onClose={handleCloseDialog}
-        className="lg:w-[400px]"
+        className="bulk-tagging-dialog lg:w-[400px]"
         title={
           <div className="w-full">
             {type !== "cancel" ? (

@@ -23,7 +23,7 @@ export default function ActionsDropdown({
 
   if (!isHydrated) {
     return (
-      <Button variant="secondary" to="#">
+      <Button variant="secondary" to="#" className={fullWidth && "w-full"}>
         <span className="flex items-center gap-2">
           Actions <ChevronRight className="chev rotate-90" />
         </span>
@@ -32,7 +32,7 @@ export default function ActionsDropdown({
   }
 
   return (
-    <div className="actions-dropdown flex">
+    <div className={tw("actions-dropdown flex", fullWidth && "w-full")}>
       <ConditionalActionsDropdown fullWidth={fullWidth} />
     </div>
   );
@@ -92,6 +92,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         <Button
           variant="secondary"
           className="actions-dropdown sm:hidden"
+          width="full"
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">

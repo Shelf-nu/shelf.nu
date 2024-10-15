@@ -207,7 +207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(`/assets/new`);
     }
 
-    return redirect(`/assets/${id}`);
+    return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });

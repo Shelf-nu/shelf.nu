@@ -6,6 +6,7 @@ import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -20,6 +21,7 @@ import {
 } from "../forms/select";
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
+import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 
 export default function AssetCustomFields({
@@ -52,11 +54,12 @@ export default function AssetCustomFields({
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const hints = useHints();
 
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? getCustomFieldDisplayValue(value) : "";
+    return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
   };
 
   const fieldTypeToCompMap: {
@@ -169,6 +172,29 @@ export default function AssetCustomFields({
         </>
       );
     },
+    MULTILINE_TEXT: (field) => {
+      const value = customFieldsValues?.find(
+        (cfv) => cfv.customFieldId === field.id
+      )?.value?.raw;
+
+      const error = zo.errors[`cf-${field.id}`]()?.message;
+
+      return (
+        <>
+          <MarkdownEditor
+            name={`cf-${field.id}`}
+            label={field.name}
+            defaultValue={value ? String(value) : ""}
+            placeholder={field.helpText ?? field.name}
+            disabled={disabled}
+            maxLength={5000}
+          />
+          {error ? (
+            <p className="mt-1 text-sm text-error-500">{error}</p>
+          ) : null}
+        </>
+      );
+    },
   };
 
   return (
@@ -187,7 +213,9 @@ export default function AssetCustomFields({
           const value = customFieldsValues?.find(
             (cfv) => cfv.customFieldId === field.id
           )?.value;
-          const displayVal = value ? getCustomFieldDisplayValue(value) : "";
+          const displayVal = value
+            ? (getCustomFieldDisplayValue(value) as string)
+            : "";
           return (
             <FormRow
               key={field.id + index}
@@ -202,9 +230,6 @@ export default function AssetCustomFields({
                 <Input
                   hideLabel
                   placeholder={field.helpText || undefined}
-                  inputType={
-                    field.type === "MULTILINE_TEXT" ? "textarea" : "input"
-                  }
                   type={field.type.toLowerCase()}
                   label={field.name}
                   name={`cf-${field.id}`}

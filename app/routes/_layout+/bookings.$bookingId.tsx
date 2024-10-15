@@ -5,7 +5,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -52,6 +52,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { RouteHandleWithName } from "./bookings";
 import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -220,6 +221,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => "single",
+  name: "bookings.$bookingId",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -247,6 +249,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "archive",
           "cancel",
           "removeKit",
+          "revert-to-draft",
         ]),
         nameChangeOnly: z
           .string()
@@ -268,6 +271,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
+      "revert-to-draft": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -533,6 +537,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
+      case "revert-to-draft": {
+        await upsertBooking(
+          { id, status: BookingStatus.DRAFT },
+          getClientHint(request)
+        );
+
+        sendNotification({
+          title: "Booking reverted",
+          message: "Your booking has been reverted back to draft successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
@@ -548,8 +567,16 @@ export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
-  return (
+  /**When we are on the booking.scan-assets route, we render an outlet */
+  const shouldRenderOutlet =
+    currentRoute?.handle?.name === "booking.scan-assets";
+
+  return shouldRenderOutlet ? (
+    <Outlet />
+  ) : (
     <>
       <Header
         title={hasName ? name : booking.name}

@@ -28,7 +28,7 @@ import {
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
 import { createLocationsIfNotExists } from "~/modules/location/service.server";
-import { getQr } from "~/modules/qr/service.server";
+import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
@@ -47,6 +47,7 @@ import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
+  isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -102,6 +103,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
         "The asset you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -738,10 +740,11 @@ export async function createAsset({
      * 2. If the qr code belongs to the current organization
      * 3. If the qr code is not linked to an asset or a kit
      */
-    const qr = qrId ? await getQr(qrId) : null;
+
+    const qr = qrId ? await getQr({ id: qrId }) : null;
     const qrCodes =
       qr &&
-      qr.organizationId === organizationId &&
+      (qr.organizationId === organizationId || !qr.organizationId) &&
       qr.assetId === null &&
       qr.kitId === null
         ? { connect: { id: qrId } }
@@ -1735,6 +1738,12 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    const qrCodesPerAsset = await parseQrCodesFromImportData({
+      data,
+      organizationId,
+      userId,
+    });
+
     const kits = await createKitsIfNotExists({
       data,
       userId,
@@ -1789,6 +1798,7 @@ export async function createAssetsFromContentImport({
         }, [] as ShelfAssetCustomFieldValueType[]);
 
       await createAsset({
+        qrId: qrCodesPerAsset.find((item) => item?.title === asset.title)?.qrId,
         organizationId,
         title: asset.title,
         description: asset.description || "",
@@ -1810,12 +1820,17 @@ export async function createAssetsFromContentImport({
       });
     }
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
+      message: isShelfError
         ? cause?.message
         : "Something went wrong while creating assets from content import",
-      additionalData: { userId, organizationId },
+      additionalData: {
+        userId,
+        organizationId,
+        ...(isShelfError && cause.additionalData),
+      },
       label,
     });
   }
@@ -2285,15 +2300,13 @@ export async function bulkDeleteAssets({
       select: { id: true, mainImage: true },
     });
 
-    return await db.$transaction(async (tx) => {
-      /** Deleting all assets */
-      await tx.asset.deleteMany({
+    try {
+      await db.asset.deleteMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
       });
 
       /** Deleting images of the assets (if any) */
       const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
-
       await Promise.all(
         assetsWithImages.map((asset) =>
           deleteOtherImages({
@@ -2303,11 +2316,23 @@ export async function bulkDeleteAssets({
           })
         )
       );
-    });
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message:
+          "Something went wrong while deleting assets. The transaction was failed.",
+        label: "Assets",
+      });
+    }
   } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting assets";
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk deleting assets",
+      message,
       additionalData: { assetIds, organizationId },
       label,
     });
@@ -2633,6 +2658,93 @@ export async function bulkUpdateAssetCategory({
       cause,
       message: "Something went wrong while bulk updating category.",
       additionalData: { userId, assetIds, organizationId, categoryId },
+      label,
+    });
+  }
+}
+
+export async function bulkAssignAssetTags({
+  userId,
+  assetIds,
+  organizationId,
+  tagsIds,
+  currentSearchParams,
+  remove,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  tagsIds: string[];
+  currentSearchParams?: string | null;
+  remove: boolean;
+}) {
+  try {
+    const shouldUpdateAll = assetIds.includes(ALL_SELECTED_KEY);
+    let _assetIds = assetIds;
+
+    if (shouldUpdateAll) {
+      const allOrgAssetIds = await db.asset.findMany({
+        where: getAssetsWhereInput({ organizationId, currentSearchParams }),
+        select: { id: true },
+      });
+      _assetIds = allOrgAssetIds.map((a) => a.id);
+    }
+
+    const updatePromises = _assetIds.map((id) =>
+      db.asset.update({
+        where: { id },
+        data: {
+          tags: {
+            [remove ? "disconnect" : "connect"]: tagsIds.map((id) => ({ id })), // IDs of tags you want to connect
+          },
+        },
+      })
+    );
+
+    await Promise.all(updatePromises);
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating category.",
+      additionalData: { userId, assetIds, organizationId, tagsIds },
+      label,
+    });
+  }
+}
+
+export async function bulkMarkAvailability({
+  organizationId,
+  assetIds,
+  type,
+  currentSearchParams,
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  type: "available" | "unavailable";
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /* If we are selecting all assets in list then we have to consider other filters too */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    await db.asset.updateMany({
+      where: {
+        ...where,
+        availableToBook: type === "unavailable",
+      },
+      data: { availableToBook: type === "available" },
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while marking assets as available.",
+      additionalData: { assetIds, organizationId },
       label,
     });
   }

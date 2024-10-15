@@ -25,7 +25,7 @@ model Image {
   ownerOrg   Organization @relation("owner", fields: [ownerOrgId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   ownerOrgId String
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User   @relation(fields: [userId], references: [id],  onUpdate: Cascade)
   userId String
 }
 
@@ -45,6 +45,9 @@ model User {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Used to flag if the user is soft deleted
+  deletedAt DateTime?
 
   // Relationships
 
@@ -92,7 +95,7 @@ model Asset {
   // Relationships
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId         String
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
   category       Category?    @relation(fields: [categoryId], references: [id])
   categoryId     String?
@@ -143,12 +146,12 @@ model Category {
 
   // Relationships
   assets Asset[]
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
   customFields CustomField[]
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
@@ -162,9 +165,9 @@ model Tag {
   //relations
   assets Asset[]
   userId String
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   // Datetime
@@ -184,8 +187,8 @@ model Note {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId  String
+  user    User?   @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId  String?
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 }
@@ -311,7 +314,7 @@ model Location {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   assets Asset[]
@@ -339,11 +342,11 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId  String
   custodies       Custody[]
   receivedInvites Invite[]
-  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   userId          String?
   kitCustodies    KitCustody[]
 
@@ -372,7 +375,7 @@ model Organization {
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
-  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade) 
   userId   String
   currency Currency @default(USD)
 
@@ -406,9 +409,9 @@ model Organization {
 model UserOrganization {
   id String @id @unique @default(cuid())
 
-  user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId         String
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   roles     OrganizationRoles[]
@@ -484,7 +487,7 @@ model TierLimit {
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
   id               String   @id @unique @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id])
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId           String?  @unique // This is the foreign key
   canImportAssets  Boolean  @default(true)
   canExportAssets  Boolean  @default(true)
@@ -507,10 +510,10 @@ model CustomField {
   options String[]
 
   // Relationships
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId    String
 
   categories Category[]
@@ -541,7 +544,7 @@ model AssetCustomFieldValue {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 
-  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade)
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   customFieldId String
 
   // Datetime
@@ -558,10 +561,13 @@ enum Currency {
   CAD // Canadian Dollar
   CHF // Swiss Franc
   CNY // Chinese Yuan
+  CZK // Czech Koruna
   DKK // Danish Krone
   INR // Indian Rupee
+  IDR // Indonesian Rupiah
   ZAR // South African Rand
   BRL // Brazilian Real
+  LKR // Sri Lankan Rupee
   MYR // Malaysian Ringgit
   MXN // Mexican Peso
   SGD // Singapore Dollar
@@ -589,7 +595,7 @@ model Invite {
   //relations
   inviter           User         @relation("inviter", fields: [inviterId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   inviterId         String
-  organization      Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId    String
   inviteeUser       User?        @relation("invitee", fields: [inviteeUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   inviteeUserId     String?
@@ -651,7 +657,7 @@ model Booking {
   custodianTeamMember   TeamMember? @relation(fields: [custodianTeamMemberId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   custodianTeamMemberId String?
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   assets Asset[]
@@ -678,10 +684,10 @@ model Kit {
   qrCodes Qr[]
   reports ReportFound[]
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
 
   createdAt DateTime @default(now())

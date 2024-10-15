@@ -120,7 +120,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     <div
       ref={ref}
       className={tw(
-        "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded",
+        "-mx-4  overflow-auto border border-gray-200  bg-white md:mx-0 md:rounded",
         className
       )}
     >
@@ -170,8 +170,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                         selectedBulkItemsCount < totalItems && (
                           <Button
                             onClick={handleSelectAllItems}
-                            variant="link"
-                            className="-mt-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
+                            variant="block-link"
                           >
                             Select all {totalItems} entries
                           </Button>

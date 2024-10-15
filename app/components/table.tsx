@@ -1,5 +1,6 @@
 import type { TdHTMLAttributes } from "react";
 import React from "react";
+import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
 import { tw } from "~/utils/tw";
 
 export function Table({
@@ -9,10 +10,20 @@ export function Table({
   children: React.ReactNode;
   className?: string;
 }) {
+  const { containerRef, isOverflowing } = useTableIsOverflowing();
+
   return (
-    <table className={tw("w-full table-auto border-collapse", className)}>
-      {children}
-    </table>
+    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
+      <div className="fixed-gradient"></div>
+      <div
+        ref={containerRef}
+        className="scrollbar-top scrollbar-always-visible"
+      >
+        <table className={tw("w-full table-auto border-collapse", className)}>
+          {children}
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -56,7 +67,10 @@ interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
 export function Td({ children, className, ...props }: TdProps) {
   return (
     <td
-      className={tw("whitespace-nowrap border-b p-4 md:px-6", className)}
+      className={tw(
+        "max-w-[250px] truncate whitespace-nowrap border-b p-4 md:px-6",
+        className
+      )}
       {...props}
     >
       {children}

@@ -1,3 +1,4 @@
+import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
@@ -6,6 +7,7 @@ import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
 import { formatDateBasedOnLocaleOnly } from "./client-hints";
 import { ShelfError } from "./error";
+import { parseMarkdownToReact } from "./md";
 
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -148,8 +150,8 @@ export const buildCustomFieldValue = (
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;
-
-    if (!raw) {
+    /** We handle boolean different because it returns false */
+    if (def.type !== "BOOLEAN" && !raw) {
       return undefined;
     }
 
@@ -181,10 +183,18 @@ export const buildCustomFieldValue = (
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   hints?: ClientHint
-): string => {
+): string | RenderableTreeNode => {
+  if (value.valueMultiLineText) {
+    return parseMarkdownToReact(value.raw as string);
+  }
+
+  if (Object.hasOwnProperty.call(value, "valueBoolean")) {
+    return value.valueBoolean ? "Yes" : "No";
+  }
+
   if (value.valueDate && value.raw) {
     return hints
-      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+      ? formatDateBasedOnLocaleOnly(value.valueDate as string, hints.locale)
       : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);

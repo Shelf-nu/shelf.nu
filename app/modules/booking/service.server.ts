@@ -14,7 +14,7 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -525,6 +525,9 @@ export async function getBookings(params: {
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
   extraInclude?: Prisma.BookingInclude;
+
+  /** Controls whether entries should be paginated or not */
+  takeAll?: boolean;
 }) {
   const {
     organizationId,
@@ -540,6 +543,7 @@ export async function getBookings(params: {
     bookingFrom,
     userId,
     extraInclude,
+    takeAll = false,
   } = params;
 
   try {
@@ -625,8 +629,10 @@ export async function getBookings(params: {
 
     const [bookings, bookingCount] = await Promise.all([
       db.booking.findMany({
-        skip,
-        take,
+        ...(!takeAll && {
+          skip,
+          take,
+        }),
         where,
         include: {
           ...commonInclude,
@@ -864,6 +870,7 @@ export async function getBooking(
       },
     });
   } catch (cause) {
+    const is404 = isNotFoundError(cause);
     throw new ShelfError({
       cause,
       title: "Booking not found",
@@ -871,6 +878,7 @@ export async function getBooking(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { booking },
       label,
+      shouldBeCaptured: !is404,
     });
   }
 }
@@ -908,6 +916,7 @@ export async function getBookingsForCalendar(params: {
         custodianTeamMember: true,
         custodianUser: true,
       },
+      takeAll: true,
     });
 
     const events = bookings
@@ -1098,12 +1107,15 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
   );
 
+  const hasKits = assets.some((asset) => !!asset.kitId);
+
   return {
     hasAssets,
     hasUnavailableAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
+    hasKits,
   };
 }
 
@@ -1476,6 +1488,50 @@ export async function bulkCancelBookings({
       cause,
       message,
       additionalData: { bookingIds, organizationId, userId },
+      label,
+    });
+  }
+}
+
+export async function addScannedAssetsToBooking({
+  assetIds,
+  bookingId,
+  organizationId,
+}: {
+  assetIds: Asset["id"][];
+  bookingId: Booking["id"];
+  organizationId: Booking["organizationId"];
+}) {
+  try {
+    const booking = await db.booking.findFirstOrThrow({
+      where: { id: bookingId, organizationId },
+    });
+
+    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
+     * If there are already checked out or in custody assets, the user wont be able to check out
+     */
+
+    /** Adding assets into booking */
+    return await db.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while adding scanned assets to booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetIds, bookingId, organizationId },
       label,
     });
   }
