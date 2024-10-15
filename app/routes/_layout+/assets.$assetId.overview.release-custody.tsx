@@ -136,6 +136,7 @@ export const action = async ({
       if (custody?.custodian?.userId !== user.id) {
         throw new ShelfError({
           cause: null,
+          title: "Action not allowed",
           message: "Self user can release custody of themselves only.",
           additionalData: { userId, assetId },
           label: "Assets",

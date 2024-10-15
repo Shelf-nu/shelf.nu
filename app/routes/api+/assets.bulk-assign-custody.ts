@@ -43,6 +43,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (teamMember?.userId !== userId) {
         throw new ShelfError({
           cause: null,
+          title: "Action not allowed",
           message: "Self user can only assign custody to themselves only.",
           additionalData: { userId, assetIds, custodian },
           label: "Assets",

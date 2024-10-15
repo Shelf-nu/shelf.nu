@@ -92,6 +92,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (custody?.custodian?.userId !== userId) {
         throw new ShelfError({
           cause: null,
+          title: "Action not allowed",
           message: "Self user can release custody of themselves only.",
           additionalData: { userId, kitId },
           label: "Kit",

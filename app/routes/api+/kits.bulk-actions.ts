@@ -91,6 +91,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           if (teamMember?.userId !== userId) {
             throw new ShelfError({
               cause: null,
+              title: "Action not allowed",
               message: "Self user can only assign custody to themselves only.",
               additionalData: { userId, kitIds, custodian },
               label: "Kit",
@@ -132,6 +133,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           ) {
             throw new ShelfError({
               cause: null,
+              title: "Action not allowed",
               message: "Self user can release custody of themselves only.",
               additionalData: { userId, kitIds },
               label: "Kit",

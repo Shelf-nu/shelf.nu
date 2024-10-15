@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
@@ -63,6 +64,7 @@ function ConditionalDropdown() {
   const allSelected = isSelectingAllItems(selectedKits);
 
   const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   /**
    * Due to select all multi page selection,
@@ -91,6 +93,11 @@ function ConditionalDropdown() {
   );
 
   const disabled = selectedKits.length === 0;
+
+  const selfUserCustody = selectedKits.some(
+    (k) => k?.custody?.custodian?.userId === user?.id
+  );
+  const disableReleaseCustody = isSelfService && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -193,10 +200,11 @@ function ConditionalDropdown() {
                   label="Release custody"
                   onClick={closeMenu}
                   disabled={
-                    !allKitsInCustody
+                    !allKitsInCustody || disableReleaseCustody
                       ? {
-                          reason:
-                            "Some of the selected kits are not in custody",
+                          reason: disableReleaseCustody
+                            ? "Self service can release their own custody only."
+                            : "Some of the selected kits are not in custody",
                         }
                       : isLoading
                   }

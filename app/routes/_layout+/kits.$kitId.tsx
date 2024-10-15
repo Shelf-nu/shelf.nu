@@ -117,6 +117,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                 include: {
                   user: {
                     select: {
+                      id: true,
                       firstName: true,
                       lastName: true,
                       profilePicture: true,

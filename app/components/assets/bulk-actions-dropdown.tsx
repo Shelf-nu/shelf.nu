@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
@@ -69,6 +70,7 @@ function ConditionalDropdown() {
   const allSelected = isSelectingAllItems(selectedAssets);
 
   const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   /**
    * Due to select all multi page selection,
@@ -90,6 +92,11 @@ function ConditionalDropdown() {
   const someAssetPartOfUnavailableKit = selectedAssets.some(
     (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
   );
+
+  const selfUserCustody = selectedAssets.some(
+    (a) => a?.custody?.custodian?.userId === user?.id
+  );
+  const disableReleaseCustody = isSelfService && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -197,10 +204,14 @@ function ConditionalDropdown() {
                   label="Release custody"
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreInCustody || someAssetPartOfUnavailableKit
+                    !allAssetsAreInCustody ||
+                    someAssetPartOfUnavailableKit ||
+                    disableReleaseCustody
                       ? {
                           reason: someAssetPartOfUnavailableKit
                             ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
+                            : disableReleaseCustody
+                            ? "Self service can release their own custody only."
                             : "Some of the selected assets are not in custody.",
                         }
                       : isLoading

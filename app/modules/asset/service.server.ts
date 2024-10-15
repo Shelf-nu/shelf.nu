@@ -384,6 +384,7 @@ async function getAssetsFromView(params: {
                   custodian: {
                     select: {
                       name: true,
+                      userId: true,
                       user: {
                         select: {
                           firstName: true,
@@ -635,6 +636,7 @@ async function getAssets(params: {
             select: {
               custodian: {
                 select: {
+                  userId: true,
                   name: true,
                   user: {
                     select: {

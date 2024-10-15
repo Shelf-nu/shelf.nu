@@ -65,7 +65,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       organizationId,
       include: {
-        custody: true,
+        custody: { include: { custodian: true } },
         kit: true,
       },
     });

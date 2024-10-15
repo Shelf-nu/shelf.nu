@@ -1,6 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import {
@@ -50,11 +52,16 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const kitCanBeReleased = kit.custody;
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 
+  const kitCustody = kit.custody as unknown as Prisma.KitCustodyGetPayload<{
+    select: { custodian: { select: { userId: true } } };
+  }>;
+
   const someAssetIsNotAvailable = kit.assets.some(
     (asset) => asset.status !== "AVAILABLE"
   );
 
   const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   const {
     ref: dropdownRef,
@@ -63,6 +70,9 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+
+  const isSelfUserCustody =
+    isSelfService && kitCustody?.custodian?.userId === user?.id;
 
   return (
     <>
@@ -147,6 +157,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
+                    disabled={!isSelfUserCustody}
                   >
                     <span className="flex items-center gap-1">
                       <Icon icon="release-custody" /> Release custody

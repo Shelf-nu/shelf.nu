@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
@@ -28,6 +29,7 @@ const ConditionalActionsDropdown = () => {
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
   const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   const {
     ref: dropdownRef,
@@ -40,6 +42,9 @@ const ConditionalActionsDropdown = () => {
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
+
+  const isSelfUserCustody =
+    isSelfService && asset.custody?.custodian?.userId === user?.id;
 
   return (
     <>
@@ -123,7 +128,7 @@ const ConditionalActionsDropdown = () => {
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={assetIsPartOfUnavailableKit}
+                    disabled={assetIsPartOfUnavailableKit || !isSelfUserCustody}
                   >
                     <span className="flex items-center gap-1">
                       <Icon icon="release-custody" /> Release custody
