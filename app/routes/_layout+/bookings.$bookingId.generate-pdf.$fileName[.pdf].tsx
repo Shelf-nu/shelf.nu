@@ -189,13 +189,17 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
           <span style={styles.infoLabel}>Custodian</span>
           <span style={styles.infoValue}>{custodianName}</span>
         </div>
-        <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
+        <div style={styles.infoRow}>
           <span style={styles.infoLabel}>Booking period</span>
           <span style={styles.infoValue}>
             {pdfMeta?.from && pdfMeta?.to
               ? `${pdfMeta.from} - ${pdfMeta.to}`
               : ""}
           </span>
+        </div>
+        <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
+          <span style={styles.infoLabel}>Description</span>
+          <span style={styles.infoValue}>{booking?.description || ""}</span>
         </div>
       </section>
       <table style={styles.bookingTable}>
