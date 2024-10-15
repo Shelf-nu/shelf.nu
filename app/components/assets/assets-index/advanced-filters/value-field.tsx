@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import {
   Popover,
@@ -7,11 +7,14 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useLoaderData } from "@remix-run/react";
+import { format, parseISO } from "date-fns";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import Input from "~/components/forms/input";
 
 import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { useHints } from "~/utils/client-hints";
 import { tw } from "~/utils/tw";
 import type { Filter } from "./types";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
@@ -25,6 +28,8 @@ export function ValueField({
   setFilter: (value: Filter["value"]) => void;
   applyFilters: () => void;
 }) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+  const customFields = useMemo(() => data?.customFields || [], [data]);
   const [localValue, setLocalValue] = useState<[string, string]>(
     Array.isArray(filter.value) ? (filter.value as [string, string]) : ["", ""]
   );
@@ -60,6 +65,21 @@ export function ValueField({
   useEffect(() => {
     validateBetweenFilter();
   }, [localValue, validateBetweenFilter]);
+
+  useEffect(() => {
+    if (filter.type === "boolean" && filter.value === "") {
+      setFilter(true); // Set default value to true when boolean field is selected
+    }
+
+    if (filter.type === "enum" && filter.value === "") {
+      const options =
+        filter.name === "status"
+          ? Object.values(AssetStatus)
+          : customFields.find((field) => field?.name === filter.name.slice(3))
+              ?.options || [];
+      setFilter(options[0]); // Set default value to first option when enum field is selected
+    }
+  }, [customFields, filter.name, filter.type, filter.value, setFilter]);
 
   function handleChange(
     event: React.ChangeEvent<
@@ -166,45 +186,13 @@ export function ValueField({
       );
 
     case "date":
-      if (filter.operator === "between") {
-        return (
-          <div className="space-y-2">
-            <div className="flex max-w-full items-center justify-normal gap-[2px]">
-              <Input
-                {...commonInputProps}
-                label="Start Date"
-                type="date"
-                value={localValue[0]}
-                onChange={handleBetweenChange(0)}
-                className="w-1/2"
-                onKeyUp={submitOnEnter}
-              />
-              <Input
-                {...commonInputProps}
-                label="End Date"
-                type="date"
-                value={localValue[1]}
-                onChange={handleBetweenChange(1)}
-                className="w-1/2"
-                onKeyUp={submitOnEnter}
-              />
-            </div>
-            {error && localValue[0] !== "" && localValue[1] !== "" && (
-              <div className="!mt-0 text-[12px] text-red-500">{error}</div>
-            )}
-          </div>
-        );
-      } else {
-        return (
-          <Input
-            {...commonInputProps}
-            type="date"
-            value={filter.value as string}
-            onChange={handleChange}
-            onKeyUp={submitOnEnter}
-          />
-        );
-      }
+      return (
+        <DateField
+          filter={filter}
+          setFilter={setFilter}
+          applyFilters={applyFilters}
+        />
+      );
 
     case "enum":
       return (
@@ -246,13 +234,16 @@ function BooleanField({
   value,
   handleBooleanChange,
 }: {
-  value: boolean;
+  value: boolean | string;
   handleBooleanChange: (value: "true" | "false") => void;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+
+  const boolValue = value === "" ? true : value === "true" || value === true;
+
   return (
     <>
-      <input type="hidden" value={String(value)} />
+      <input type="hidden" value={String(boolValue)} />
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -260,9 +251,7 @@ function BooleanField({
             className="w-full justify-start truncate whitespace-nowrap [&_span]:max-w-full [&_span]:truncate"
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
-            <span className="ml-2">
-              {value === undefined ? "Select value" : value ? "Yes" : "No"}
-            </span>{" "}
+            <span className="ml-2">{boolValue ? "Yes" : "No"}</span>{" "}
           </Button>
         </PopoverTrigger>
         <PopoverPortal>
@@ -353,7 +342,7 @@ function EnumField({
 
   return (
     <>
-      <input type="hidden" value={value} />
+      <input type="hidden" value={value === "" ? options[0] : value} />
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -377,4 +366,124 @@ function EnumField({
       </Popover>
     </>
   );
+}
+
+// Define the props for the DateField component
+type DateFieldProps = {
+  filter: Filter;
+  setFilter: (value: Filter["value"]) => void;
+  applyFilters: () => void;
+};
+
+/**
+ * DateField component for handling date-based filters
+ * Supports both single date and date range selections
+ */
+export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
+  const { timeZone } = useHints();
+  const [localValue, setLocalValue] = useState<[string, string]>(["", ""]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function adjustDateToUserTimezone(dateString: string): string {
+      const date = toZonedTime(parseISO(dateString), timeZone);
+      return format(date, "yyyy-MM-dd");
+    }
+
+    if (filter.value) {
+      if (Array.isArray(filter.value)) {
+        setLocalValue([
+          adjustDateToUserTimezone(filter.value[0]),
+          adjustDateToUserTimezone(filter.value[1]),
+        ]);
+      } else {
+        setLocalValue([adjustDateToUserTimezone(filter.value as string), ""]);
+      }
+    }
+  }, [filter.value, timeZone]);
+
+  function adjustDateToUTC(dateString: string): string {
+    const zonedDate = toZonedTime(parseISO(dateString), timeZone);
+    const utcDate = fromZonedTime(zonedDate, timeZone);
+    return format(utcDate, "yyyy-MM-dd");
+  }
+
+  function handleDateChange(index: 0 | 1) {
+    return (event: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = [...localValue] as [string, string];
+      newValue[index] = event.target.value;
+      setLocalValue(newValue);
+
+      if (filter.operator === "between" && newValue[0] && newValue[1]) {
+        setFilter([adjustDateToUTC(newValue[0]), adjustDateToUTC(newValue[1])]);
+      } else if (filter.operator !== "between" && newValue[0]) {
+        setFilter(adjustDateToUTC(newValue[0]));
+      }
+      validateDates(newValue);
+    };
+  }
+
+  function validateDates([start, end]: [string, string]) {
+    if (start && end) {
+      const startDate = parseISO(start);
+      const endDate = parseISO(end);
+      if (startDate > endDate) {
+        setError("Start date must be before or equal to end date");
+      } else {
+        setError(null);
+      }
+    } else {
+      setError(null);
+    }
+  }
+
+  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !error) {
+      applyFilters();
+    }
+  };
+
+  const commonInputProps = {
+    inputClassName: "px-4 py-2 text-[14px] leading-5",
+    hideLabel: true,
+    label: filter.name,
+    onKeyUp: submitOnEnter,
+  };
+
+  if (filter.operator === "between") {
+    return (
+      <div className="space-y-2">
+        <div className="flex max-w-full items-center justify-normal gap-[2px]">
+          <Input
+            {...commonInputProps}
+            label="Start Date"
+            type="date"
+            value={localValue[0]}
+            onChange={handleDateChange(0)}
+            className="w-1/2"
+          />
+          <Input
+            {...commonInputProps}
+            label="End Date"
+            type="date"
+            value={localValue[1]}
+            onChange={handleDateChange(1)}
+            className="w-1/2"
+          />
+        </div>
+        {error && localValue[0] !== "" && localValue[1] !== "" && (
+          <div className="!mt-0 text-[12px] text-red-500">{error}</div>
+        )}
+      </div>
+    );
+  } else {
+    return (
+      <Input
+        {...commonInputProps}
+        type="date"
+        value={localValue[0]}
+        onChange={handleDateChange(0)}
+      />
+    );
+  }
 }

@@ -48,7 +48,7 @@ export const operatorsPerType: FilterDefinition = {
   boolean: ["is"],
   date: ["is", "isNot", "before", "after", "between"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
-  enum: ["is", "isNot", "in"],
+  enum: ["is", "isNot"],
   array: ["contains", "containsAll", "containsAny"],
 };
 

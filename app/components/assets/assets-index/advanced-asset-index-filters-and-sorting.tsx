@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
@@ -62,6 +62,7 @@ function AdvancedFilter() {
   // Set the intial filters
   useEffect(() => {
     setFilters(initialFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function clearAllFilters() {
@@ -98,9 +99,41 @@ function AdvancedFilter() {
       return newCols;
     });
   }
-  const haveFiltersChanged =
-    JSON.stringify(initialFilters) !== JSON.stringify(filters);
-
+  const haveFiltersChanged = useCallback(
+    () =>
+      filters.some((filter, index) => {
+        const initialFilter = initialFilters[index];
+        if (
+          !initialFilter ||
+          filter.name !== initialFilter.name ||
+          filter.operator !== initialFilter.operator
+        ) {
+          return true;
+        }
+        if (filter.type === "date") {
+          // Compare date values
+          const formatDate = (date: string) => date.split("T")[0]; // Remove time part
+          if (
+            Array.isArray(filter.value) &&
+            Array.isArray(initialFilter.value)
+          ) {
+            return (
+              formatDate(filter.value[0]) !==
+                formatDate(initialFilter.value[0]) ||
+              formatDate(filter.value[1]) !== formatDate(initialFilter.value[1])
+            );
+          } else {
+            return (
+              formatDate(filter.value as string) !==
+              formatDate(initialFilter.value as string)
+            );
+          }
+        }
+        // For other types, you can use direct comparison
+        return filter.value !== initialFilter.value;
+      }),
+    [filters, initialFilters]
+  );
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
@@ -139,6 +172,20 @@ function AdvancedFilter() {
                       <FieldSelector
                         filter={filter}
                         setFilter={(name) => {
+                          /** Special handling of name because its not available in columns array */
+                          if (name === "name") {
+                            // Update filter name
+                            setFilters((prev) => {
+                              const newFilters = [...prev];
+                              newFilters[index].name = "name";
+                              newFilters[index].type = "string";
+                              newFilters[index].operator =
+                                operatorsPerType["string"][0];
+                              return newFilters;
+                            });
+                            return;
+                          }
+
                           // Update filter name
                           setFilters((prev) => {
                             const column = columns.find(

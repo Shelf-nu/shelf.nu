@@ -27,6 +27,11 @@ export function FieldSelector({
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
 
+  const localColumns = [
+    { name: "name", position: 0, visible: true },
+    ...columns,
+  ];
+
   const [fieldName, setFieldName] = useState<string>("");
   useEffect(() => {
     setFieldName(filter.name);
@@ -50,7 +55,7 @@ export function FieldSelector({
             "z-[999999]  mt-2  max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
-          {columns.map((column, index) => (
+          {localColumns.map((column, index) => (
             <div
               key={column.name + index}
               className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
