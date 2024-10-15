@@ -1,8 +1,8 @@
-import type { TeamMember } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { type loader } from "~/routes/_layout+/assets._index";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -20,7 +20,7 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  const { rawTeamMembers } = useLoaderData<{ rawTeamMembers: TeamMember[] }>();
+  const { rawTeamMembers } = useLoaderData<typeof loader>();
 
   return (
     <BulkUpdateDialogContent
