@@ -16,6 +16,7 @@ import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
@@ -238,12 +239,14 @@ const ConditionalActionsDropdown = () => {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <RelinkQrCodeDialog
-        open={isRelinkQrDialogOpen}
-        onClose={() => {
-          setIsRelinkQrDialogOpen(false);
-        }}
-      />
+      <When truthy={isRelinkQrDialogOpen}>
+        <RelinkQrCodeDialog
+          open={isRelinkQrDialogOpen}
+          onClose={() => {
+            setIsRelinkQrDialogOpen(false);
+          }}
+        />
+      </When>
     </>
   );
 };
