@@ -97,7 +97,7 @@
     "react-map-gl": "^7.1.7",
     "react-media-devices": "^1.1.5",
     "react-microsoft-clarity": "^1.2.0",
-    "react-router-hono-server": "^0.1.0",
+    "react-router-hono-server": "^0.2.0",
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^2.15.1",
     "react-zorm": "^0.9.0",
