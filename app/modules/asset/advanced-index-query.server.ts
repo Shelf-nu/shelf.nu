@@ -1,29 +1,249 @@
 import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
+import type {
+  Filter,
+  FilterFieldType,
+  FilterOperator,
+} from "~/components/assets/assets-index/advanced-filters/types";
 import type { CustomFieldSorting } from "./types";
 
 // 1. Filtering
 export function generateWhereClause(
   organizationId: string,
-  search: string | null
+  search: string | null,
+  filters: Filter[]
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
   if (search) {
     const words = search.trim().split(/\s+/).filter(Boolean);
     if (words.length > 0) {
-      const searchQuery = words
-        .map((word) => `${word}:* | ${word}`)
-        .join(" | ");
-      whereClause = Prisma.sql`
-        ${whereClause} AND (
-          to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchQuery})
-        )
-      `;
+      const searchVector = words.join(" & ");
+      whereClause = Prisma.sql`${whereClause} AND (to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchVector}))`;
+    }
+  }
+
+  // Process each filter
+  for (const filter of filters) {
+    switch (filter.type) {
+      case "string":
+      case "text":
+        whereClause = addStringFilter(whereClause, filter);
+        break;
+      case "number":
+        whereClause = addNumberFilter(whereClause, filter);
+        break;
+      case "boolean":
+        whereClause = addBooleanFilter(whereClause, filter);
+        break;
+      case "date":
+        whereClause = addDateFilter(whereClause, filter);
+        break;
+      case "enum":
+        whereClause = addEnumFilter(whereClause, filter);
+        break;
+      // Add other cases as needed
     }
   }
 
   return whereClause;
+}
+
+function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
+        filter.value
+      }`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
+        filter.value
+      }`;
+    case "contains":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}" ILIKE ${`%${filter.value}%`}`;
+    default:
+      return whereClause;
+  }
+}
+
+function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
+        filter.value
+      }`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
+        filter.value
+      }`;
+    case "gt":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
+        filter.value
+      }`;
+    case "lt":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
+        filter.value
+      }`;
+    case "gte":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" >= ${
+        filter.value
+      }`;
+    case "lte":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" <= ${
+        filter.value
+      }`;
+    case "between":
+      const [min, max] = filter.value as [number, number];
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}" BETWEEN ${min} AND ${max}`;
+    default:
+      return whereClause;
+  }
+}
+
+function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
+    filter.value
+  }`;
+}
+
+function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}"::date = ${filter.value}::date`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}"::date != ${filter.value}::date`;
+    case "before":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
+        filter.value
+      }::date`;
+    case "after":
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
+        filter.value
+      }::date`;
+    case "between":
+      const [start, end] = filter.value as [string, string];
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}" BETWEEN ${start}::date AND ${end}::date`;
+    default:
+      return whereClause;
+  }
+}
+
+function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  if (filter.name === "status") {
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND a.status = ${filter.value}::public."AssetStatus"`;
+      case "isNot":
+        return Prisma.sql`${whereClause} AND a.status != ${filter.value}::public."AssetStatus"`;
+      case "in":
+        const statusValues = (filter.value as string[])
+          .map((v) => `'${v}'::public."AssetStatus"`)
+          .join(", ");
+        return Prisma.sql`${whereClause} AND a.status IN (${Prisma.raw(
+          statusValues
+        )})`;
+      default:
+        return whereClause;
+    }
+  }
+  // Add handling for other enum fields if needed
+  return whereClause;
+}
+
+// Add this mapping object at the top of your file
+const API_TO_DB_FIELD_MAP: Record<string, string> = {
+  valuation: "value",
+  // Add any other API to DB field mappings here
+};
+/**
+ * Parses a filter string into an array of Filter objects
+ * @param filtersString - The string containing the filters
+ * @returns An array of Filter objects
+ */
+export function parseFilters(filtersString: string): Filter[] {
+  const searchParams = new URLSearchParams(filtersString);
+  const filters: Filter[] = [];
+
+  searchParams.forEach((value, key) => {
+    const [operator, filterValue] = value.split(":");
+    /** Here we will handle special cases. */
+    const dbKey = API_TO_DB_FIELD_MAP[key] || key;
+
+    const filter: Filter = {
+      name: dbKey,
+      type: getFilterFieldType(key),
+      operator: operator as FilterOperator,
+      value: parseFilterValue(key, operator as FilterOperator, filterValue),
+    };
+    filters.push(filter);
+  });
+
+  return filters;
+}
+
+/**
+ * Determines the FilterFieldType based on the field name
+ * @param fieldName - The name of the field
+ * @returns The corresponding FilterFieldType
+ */
+function getFilterFieldType(fieldName: string): FilterFieldType {
+  switch (fieldName) {
+    case "id":
+    case "title":
+      return "string";
+    case "status":
+      return "enum";
+    case "description":
+      return "text";
+    case "valuation":
+      return "number";
+    case "availableToBook":
+      return "boolean";
+    case "createdAt":
+    case "updatedAt":
+      return "date";
+    default:
+      // For custom fields, you might want to implement a more sophisticated logic
+      return "string";
+  }
+}
+
+/**
+ * Parses the filter value based on the field type and operator
+ * @param field - The name of the field
+ * @param operator - The filter operator
+ * @param value - The raw filter value
+ * @returns The parsed filter value
+ */
+function parseFilterValue(
+  field: string,
+  operator: FilterOperator,
+  value: string
+): any {
+  switch (getFilterFieldType(field)) {
+    case "number":
+      return operator === "between"
+        ? value.split(",").map(Number)
+        : Number(value);
+    case "boolean":
+      return value.toLowerCase() === "true";
+    case "date":
+      return operator === "between" ? value.split(",") : value;
+    case "enum":
+      return operator === "in" ? value.split(",") : value;
+    default:
+      return value;
+  }
 }
 
 // 2. Sorting

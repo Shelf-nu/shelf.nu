@@ -68,6 +68,7 @@ import {
   assetReturnFragment,
   generateCustomFieldSelect,
   generateWhereClause,
+  parseFilters,
   parseSortingOptions,
 } from "./advanced-index-query.server";
 import { assetIndexFields } from "./fields";
@@ -693,8 +694,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
+    const parsedFilters = parseFilters(filters);
 
-    const whereClause = generateWhereClause(organizationId, search);
+    const whereClause = generateWhereClause(
+      organizationId,
+      search,
+      parsedFilters
+    );
     const { orderByClause, customFieldSortings } = parseSortingOptions(
       searchParams.getAll("sortBy")
     );

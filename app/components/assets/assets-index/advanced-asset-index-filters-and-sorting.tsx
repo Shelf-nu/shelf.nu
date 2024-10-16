@@ -172,20 +172,6 @@ function AdvancedFilter() {
                       <FieldSelector
                         filter={filter}
                         setFilter={(name) => {
-                          /** Special handling of name because its not available in columns array */
-                          if (name === "name") {
-                            // Update filter name
-                            setFilters((prev) => {
-                              const newFilters = [...prev];
-                              newFilters[index].name = "name";
-                              newFilters[index].type = "string";
-                              newFilters[index].operator =
-                                operatorsPerType["string"][0];
-                              return newFilters;
-                            });
-                            return;
-                          }
-
                           // Update filter name
                           setFilters((prev) => {
                             const column = columns.find(
