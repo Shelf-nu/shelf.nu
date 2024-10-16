@@ -12,8 +12,14 @@ export function generateWhereClause(
   if (search) {
     const words = search.trim().split(/\s+/).filter(Boolean);
     if (words.length > 0) {
-      const searchVector = words.join(" & ");
-      whereClause = Prisma.sql`${whereClause} AND (to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchVector}))`;
+      const searchQuery = words
+        .map((word) => `${word}:* | ${word}`)
+        .join(" | ");
+      whereClause = Prisma.sql`
+        ${whereClause} AND (
+          to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchQuery})
+        )
+      `;
     }
   }
 

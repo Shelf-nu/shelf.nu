@@ -100,7 +100,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
-  const totalIncomingItems = items.length;
+  const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
