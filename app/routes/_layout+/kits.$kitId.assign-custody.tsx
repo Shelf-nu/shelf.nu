@@ -274,7 +274,7 @@ export default function GiveKitCustody() {
         <div className="mb-5">
           <h4>{isSelfService ? "Take" : "Assign"} custody of kit</h4>
           <p>
-            This kit is currently available. You're about to assign custody to
+            This kit is currently available. You're about to assign custody to{" "}
             {isSelfService ? "yourself" : "one of your team members"}. All the
             assets in this kit will also be assigned the same custody.
           </p>

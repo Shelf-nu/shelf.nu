@@ -211,7 +211,7 @@ function ConditionalDropdown() {
                           reason: someAssetPartOfUnavailableKit
                             ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
                             : disableReleaseCustody
-                            ? "Self service can release their own custody only."
+                            ? "Self service can only release their own custody."
                             : "Some of the selected assets are not in custody.",
                         }
                       : isLoading

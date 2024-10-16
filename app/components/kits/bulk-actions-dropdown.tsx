@@ -203,7 +203,7 @@ function ConditionalDropdown() {
                     !allKitsInCustody || disableReleaseCustody
                       ? {
                           reason: disableReleaseCustody
-                            ? "Self service can release their own custody only."
+                            ? "Self service can only release their own custody."
                             : "Some of the selected kits are not in custody",
                         }
                       : isLoading
