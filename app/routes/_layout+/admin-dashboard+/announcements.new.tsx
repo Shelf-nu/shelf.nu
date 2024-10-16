@@ -73,10 +73,10 @@ export default function NewAnnouncement() {
             Announcement Content
           </label>
           <MarkdownEditor
-            label={"content"}
+            defaultValue=""
+            label="content"
             name="content"
             placeholder={"Announcement content"}
-            // @ts-ignore
             rows={4}
             className="rounded-b-none"
             required

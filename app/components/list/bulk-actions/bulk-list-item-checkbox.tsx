@@ -27,12 +27,12 @@ export default function BulkListItemCheckbox({
   }
 
   return (
-    <Td
-      className="table-cell md:pl-4 md:pr-3"
-      onClick={handleBulkItemSelection}
-    >
+    <Td className="md:pl-4 md:pr-3" onClick={handleBulkItemSelection}>
       <FakeCheckbox
-        className={tw("text-white", checked ? "text-primary" : "")}
+        className={tw(
+          "overflow-visible text-white",
+          checked ? "text-primary" : ""
+        )}
         checked={checked}
       />
     </Td>

@@ -867,6 +867,58 @@ export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const AddTagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m21 10.923-7.594-7.53c-.519-.514-.778-.77-1.081-.955a3.015 3.015 0 0 0-.867-.356C11.112 2 10.745 2 10.012 2H6M3 8.643v1.958c0 .485 0 .727.055.955.05.203.13.396.24.574.123.2.296.371.642.714l7.8 7.734c.792.785 1.188 1.178 1.645 1.325.402.13.834.13 1.236 0 .457-.147.853-.54 1.645-1.325l2.474-2.454c.792-.785 1.188-1.177 1.337-1.63.13-.399.13-.828 0-1.226-.149-.453-.545-.845-1.337-1.63l-7.3-7.238c-.346-.343-.519-.515-.72-.638a2.011 2.011 0 0 0-.579-.237c-.23-.055-.474-.055-.963-.055H6.2c-1.12 0-1.68 0-2.108.216-.376.19-.682.494-.874.867C3 6.977 3 7.533 3 8.643Z"
+    />
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.3}
+      d="M22.714 3.357H18M20.357 1v4.714"
+    />
+  </svg>
+);
+
+export const RemoveTagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m20 11-7.594-7.594c-.519-.519-.778-.778-1.081-.964a3.001 3.001 0 0 0-.867-.36C10.112 2 9.746 2 9.012 2H5M2 8.7v1.975c0 .489 0 .733.055.963.05.204.13.4.24.579.123.201.296.374.642.72l7.8 7.8c.792.792 1.188 1.188 1.645 1.337a2 2 0 0 0 1.236 0c.457-.149.853-.545 1.645-1.337l2.474-2.474c.792-.792 1.188-1.188 1.337-1.645a2 2 0 0 0 0-1.236c-.149-.457-.545-.853-1.337-1.645l-7.3-7.3c-.346-.346-.519-.519-.72-.642a2 2 0 0 0-.579-.24c-.23-.055-.474-.055-.963-.055H5.2c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C2 7.02 2 7.58 2 8.7Z"
+    />
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.3}
+      d="M22.024 5.024 18.69 1.69m3.334 0L18.69 5.024"
+    />
+  </svg>
+);
+
 export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="18"
@@ -1546,6 +1598,69 @@ export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinejoin="round"
       strokeWidth={2}
       d="M17 9V5.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C14.72 1 13.88 1 12.2 1H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 3.28 1 4.12 1 5.8v10.4c0 1.68 0 2.52.327 3.162a3 3 0 0 0 1.311 1.311C3.28 21 4.12 21 5.8 21h1.7M10 10H5m3 4H5m8-8H5m11.25 10v-1.75a1.75 1.75 0 1 0-3.5 0V16m-.15 4h3.8c.56 0 .84 0 1.054-.109a1 1 0 0 0 .437-.437C18 19.24 18 18.96 18 18.4v-.8c0-.56 0-.84-.109-1.054a1 1 0 0 0-.437-.437C17.24 16 16.96 16 16.4 16h-3.8c-.56 0-.84 0-1.054.109a1 1 0 0 0-.437.437C11 16.76 11 17.04 11 17.6v.8c0 .56 0 .84.109 1.054a1 1 0 0 0 .437.437C11.76 20 12.04 20 12.6 20Z"
+    />
+  </svg>
+);
+
+export const ScanIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="20"
+    height="20"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.667}
+      d="M6.667 2.5H6.5c-1.4 0-2.1 0-2.635.272a2.5 2.5 0 0 0-1.093 1.093C2.5 4.4 2.5 5.1 2.5 6.5v.167M6.667 17.5H6.5c-1.4 0-2.1 0-2.635-.273a2.5 2.5 0 0 1-1.093-1.092C2.5 15.6 2.5 14.9 2.5 13.5v-.167m15-6.666V6.5c0-1.4 0-2.1-.273-2.635a2.5 2.5 0 0 0-1.092-1.093C15.6 2.5 14.9 2.5 13.5 2.5h-.167M17.5 13.333v.167c0 1.4 0 2.1-.273 2.635a2.5 2.5 0 0 1-1.092 1.092c-.535.273-1.235.273-2.635.273h-.167M2.5 10h.008m3.742 0h.008m7.492 0h.008M10 10h.008m7.492 0h.008"
+    />
+  </svg>
+);
+
+export const UnavailableIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M21 10H3M16 2V6M8 2V6M7.8 22H16.2C17.8802 22 18.7202 22 19.362 21.673C19.9265 21.3854 20.3854 20.9265 20.673 20.362C21 19.7202 21 18.8802 21 17.2V8.8C21 7.11984 21 6.27976 20.673 5.63803C20.3854 5.07354 19.9265 4.6146 19.362 4.32698C18.7202 4 17.8802 4 16.2 4H7.8C6.11984 4 5.27976 4 4.63803 4.32698C4.07354 4.6146 3.6146 5.07354 3.32698 5.63803C3 6.27976 3 7.11984 3 8.8V17.2C3 18.8802 3 19.7202 3.32698 20.362C3.6146 20.9265 4.07354 21.3854 4.63803 21.673C5.27976 22 6.11984 22 7.8 22Z"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M9 13L12 16L15 19M15 13L9 19"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const AvailableIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M21 10H3M16 2V6M8 2V6M9 16L11 18L15.5 13.5M7.8 22H16.2C17.8802 22 18.7202 22 19.362 21.673C19.9265 21.3854 20.3854 20.9265 20.673 20.362C21 19.7202 21 18.8802 21 17.2V8.8C21 7.11984 21 6.27976 20.673 5.63803C20.3854 5.07354 19.9265 4.6146 19.362 4.32698C18.7202 4 17.8802 4 16.2 4H7.8C6.11984 4 5.27976 4 4.63803 4.32698C4.07354 4.6146 3.6146 5.07354 3.32698 5.63803C3 6.27976 3 7.11984 3 8.8V17.2C3 18.8802 3 19.7202 3.32698 20.362C3.6146 20.9265 4.07354 21.3854 4.63803 21.673C5.27976 22 6.11984 22 7.8 22Z"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
   </svg>
 );

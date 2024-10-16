@@ -317,6 +317,7 @@ export const canUseBookings = (
   currentOrganization: Pick<Organization, "type">
 ) => {
   if (!premiumIsEnabled) return true;
+
   if (currentOrganization.type !== OrganizationType.TEAM) return false;
 
   return true;

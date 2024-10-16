@@ -1,5 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
+import type { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { ValidationError } from "./http";
 
 /**
@@ -172,6 +173,8 @@ export class ShelfError extends Error {
         : shouldBeCaptured) ?? true;
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
+      : isNotFoundError(cause)
+      ? 404
       : status || 500;
     this.traceId = traceId || createId();
   }
@@ -187,6 +190,20 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
       cause !== null &&
       "label" in cause &&
       "message" in cause)
+  );
+}
+
+/**
+ * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
+ */
+export function isNotFoundError(
+  cause: unknown
+): cause is PrismaClientKnownRequestError {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "P2025"
   );
 }
 

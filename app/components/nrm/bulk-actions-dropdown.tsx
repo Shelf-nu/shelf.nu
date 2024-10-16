@@ -40,7 +40,7 @@ function ConditionalDropdown() {
   const actionsButtonDisabled = selectedNRMs.length === 0;
 
   const someNRMHasCustody = selectedNRMs.some(
-    (nrm) => nrm._count.custodies > 0
+    (nrm) => nrm?._count?.custodies > 0
   );
 
   const {

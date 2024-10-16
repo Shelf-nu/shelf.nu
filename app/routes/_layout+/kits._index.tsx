@@ -10,6 +10,7 @@ import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
@@ -190,11 +191,9 @@ export default function KitsIndexPage() {
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell">Assets</Th>
-              {canReadCustody && (
-                <Th className="hidden md:table-cell">Custodian</Th>
-              )}
+              <Th>Description</Th>
+              <Th>Assets</Th>
+              {canReadCustody && <Th>Custodian</Th>}
             </>
           }
         />
@@ -269,20 +268,21 @@ function ListContent({
               </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
-
-      <Td className="hidden max-w-96 truncate md:table-cell">
-        {item.description}
+      <Td className="max-w-62 md:max-w-96">
+        {item.description ? (
+          <LineBreakText
+            className="md:max-w-96"
+            text={item.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
+        ) : null}
       </Td>
-
-      <Td className="hidden md:table-cell">{item._count.assets}</Td>
+      <Td>{item._count.assets}</Td>
       {canReadCustody && (
-        <Td className="hidden md:table-cell">
+        <Td>
           {item.custody ? (
             <GrayBadge>
               <>

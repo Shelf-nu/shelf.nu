@@ -1,4 +1,4 @@
-import { CalendarIcon } from "@radix-ui/react-icons";
+import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import { Spinner } from "./spinner";
 
 import {
@@ -42,7 +42,13 @@ import {
   AssetLabel,
   LockIcon,
   ActiveSwitchIcon,
+  ScanIcon,
   MapIcon,
+  ToolIcon,
+  AddTagsIcon,
+  RemoveTagsIcon,
+  AvailableIcon,
+  UnavailableIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -66,6 +72,8 @@ export type IconType =
   | "question"
   | "write"
   | "tag"
+  | "tag-remove"
+  | "tag-add"
   | "category"
   | "location"
   | "gps"
@@ -91,7 +99,12 @@ export type IconType =
   | "asset-label"
   | "lock"
   | "activate"
-  | "deactivate";
+  | "deactivate"
+  | "scan"
+  | "tool"
+  | "rows"
+  | "available"
+  | "unavailable";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -117,6 +130,8 @@ export const iconsMap: IconsMap = {
   question: <QuestionsIcon />,
   write: <WriteIcon />,
   tag: <TagsIcon />,
+  "tag-add": <AddTagsIcon />,
+  "tag-remove": <RemoveTagsIcon />,
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
   gps: <GpsMarkerIcon />,
@@ -143,6 +158,11 @@ export const iconsMap: IconsMap = {
   lock: <LockIcon />,
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
+  scan: <ScanIcon />,
+  tool: <ToolIcon />,
+  rows: <RowsIcon />,
+  available: <AvailableIcon />,
+  unavailable: <UnavailableIcon />,
 };
 
 export default iconsMap;

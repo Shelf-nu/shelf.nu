@@ -10,11 +10,15 @@ export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
   category: false,
   "assign-custody": false,
   "release-custody": false,
+  "tag-add": false,
+  "tag-remove": false,
   trash: false,
   activate: false,
   deactivate: false,
   archive: false,
   cancel: false,
+  available: false,
+  unavailable: false,
 });
 
 /**

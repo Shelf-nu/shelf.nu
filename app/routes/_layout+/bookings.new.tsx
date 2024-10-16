@@ -118,6 +118,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
+    const intent = formData.get("intent") as string;
 
     const payload = parseData(
       formData,
@@ -169,6 +170,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     const hasAssetIds = Boolean(assetIds);
+
+    if (intent === "scan") {
+      return redirect(`/bookings/${booking.id}/scan-assets`);
+    }
 
     if (hasAssetIds) {
       return redirect(`/bookings/${booking.id}`);

@@ -109,7 +109,7 @@ const Row = ({
       </Td>
 
       {/* Category */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}

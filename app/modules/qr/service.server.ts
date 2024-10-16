@@ -17,6 +17,7 @@ import { id } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
 // eslint-disable-next-line import/no-cycle
 import { generateCode } from "./utils.server";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
@@ -52,11 +53,22 @@ export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   }
 }
 
-export async function getQr(id: Qr["id"]) {
+type QrWithInclude<T extends Prisma.QrInclude | undefined> =
+  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Qr;
+
+export async function getQr<T extends Prisma.QrInclude | undefined>({
+  id,
+  include,
+}: Pick<Asset, "id"> & {
+  include?: T;
+}): Promise<QrWithInclude<T>> {
   try {
-    return await db.qr.findUniqueOrThrow({
+    const qr = await db.qr.findUniqueOrThrow({
       where: { id },
+      include: { ...include },
     });
+
+    return qr as QrWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -401,7 +413,7 @@ export async function claimQrCode({
 }) {
   try {
     /** First, just in case we check whether its claimed */
-    const qr = await getQr(id);
+    const qr = await getQr({ id });
     if (qr.organizationId) {
       throw new ShelfError({
         message:
@@ -474,4 +486,129 @@ export async function getQrCodeMaps({
     console.error("Error generating QR code maps:", err);
   }
   return finalMap;
+}
+
+/** Extracts qrCodes from data and checks their validity for import
+ * You can only import unclaimed or unlinked codes
+ * - For non-existing codes - we can allow them to be imported
+ * - For linked codes - we don't allow any imports
+ * - For unlinked - we can only allowed if the code is already claimed within the current workspace the user is trying to import to
+ * - For unclaimed - there are not really any limitations we need to place. This should work directly
+ */
+
+export type QRCodePerImportedAsset = {
+  title: string;
+  qrId: string;
+};
+
+export async function parseQrCodesFromImportData({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const qrCodePerAsset = data
+      .map((asset) => {
+        if (asset.qrId) {
+          return {
+            title: asset.title,
+            qrId: asset.qrId,
+          };
+        }
+        return null;
+      })
+      .filter((asset) => asset !== null); // Filter out null values
+
+    const codes = await db.qr.findMany({
+      where: {
+        id: {
+          in: qrCodePerAsset.map((asset) => asset?.qrId),
+        },
+      },
+    });
+
+    /** Check for any codes that are present more than 1 time in the data */
+    const duplicateCodes = qrCodePerAsset.filter(
+      (asset, index, self) =>
+        self.findIndex((t) => t?.qrId === asset?.qrId) !== index
+    );
+
+    if (duplicateCodes.length) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some of the QR codes you are trying to import are present more than once in the data. Please make sure each QR code is only present once.",
+        additionalData: { duplicateCodes },
+        label,
+      });
+    }
+
+    /** Check if any of the codes are non-existent */
+    const nonExistentCodes = qrCodePerAsset.filter(
+      (asset) => !codes.find((code) => code.id === asset?.qrId) && asset?.qrId
+    );
+
+    if (nonExistentCodes.length) {
+      throw new ShelfError({
+        cause: null,
+        message: "Some of the QR codes you are trying to import do not exist",
+        additionalData: { nonExistentCodes },
+        label,
+      });
+    }
+
+    /** Check for codes already linked to asset or kit. Returns QRCodePerImportedAsset[] */
+    const linkedCodes = qrCodePerAsset.filter((asset) =>
+      codes.find(
+        (code) => code.id === asset?.qrId && (code.assetId || code.kitId)
+      )
+    );
+    if (linkedCodes.length) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some of the QR codes you are trying to import are already linked to an asset or a kit. Please use unlinkned or unclaimed codes for your import.",
+        additionalData: { linkedCodes },
+        label,
+      });
+    }
+
+    /** Check for codes linked to other any organization and the organization is different than the current one */
+    const connectedToOtherOrgs = qrCodePerAsset.filter((asset) =>
+      codes.find(
+        (code) =>
+          code.id === asset?.qrId &&
+          code.organizationId &&
+          code.organizationId !== organizationId
+      )
+    );
+    if (connectedToOtherOrgs.length) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some of the QR codes you are trying to import don't belong to your current organization. You can only import codes that are unclaimed, unlinked or linked to your organization.",
+        additionalData: { connectedToOtherOrgs },
+        label,
+      });
+    }
+
+    return qrCodePerAsset;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError ? cause.message : "Failed to get qr codes",
+      additionalData: {
+        data,
+        userId,
+        organizationId,
+        ...(isShelfError && cause.additionalData),
+      },
+      label,
+    });
+  }
 }

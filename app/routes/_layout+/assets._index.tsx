@@ -8,7 +8,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -67,6 +67,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -191,7 +192,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         modelName,
-        canImportAssets: canImportAssets(tierLimit),
+        canImportAssets:
+          canImportAssets(tierLimit) &&
+          (await hasPermission({
+            organizationId,
+            userId,
+            roles: role ? [role] : [],
+            entity: PermissionEntity.asset,
+            action: PermissionAction.import,
+          })),
         searchFieldLabel: "Search assets",
         searchFieldTooltip: {
           title: "Search your asset database",
@@ -298,6 +307,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
+  const { canImportAssets } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -310,13 +320,7 @@ export default function AssetIndexPage() {
           })}
         >
           <>
-            <ImportButton
-              canImportAssets={userHasPermission({
-                roles,
-                entity: PermissionEntity.asset,
-                action: PermissionAction.import,
-              })}
-            />
+            <ImportButton canImportAssets={canImportAssets} />
             <Button
               to="new"
               role="link"
@@ -484,15 +488,14 @@ export const AssetsList = ({
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
         navigate={(itemId) => navigate(`/assets/${itemId}`)}
-        className=" overflow-x-visible md:overflow-x-auto"
         bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }
         headerChildren={
           <>
-            <Th className="hidden md:table-cell">Category</Th>
-            <Th className="hidden md:table-cell">Tags</Th>
+            <Th>Category</Th>
+            <Th>Tags</Th>
             <When
               truthy={userHasPermission({
                 roles,
@@ -500,9 +503,9 @@ export const AssetsList = ({
                 action: PermissionAction.read,
               })}
             >
-              <Th className="hidden md:table-cell">Custodian</Th>
+              <Th>Custodian</Th>
             </When>
-            <Th className="hidden md:table-cell">Location</Th>
+            <Th>Location</Th>
           </>
         }
       />
@@ -580,15 +583,11 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
 
       {/* Category */}
-      <Td className="hidden md:table-cell">
+      <Td>
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
@@ -601,7 +600,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Tags */}
-      <Td className="hidden text-left md:table-cell">
+      <Td className="text-left">
         <ListItemTagsColumn tags={tags} />
       </Td>
 
@@ -613,7 +612,7 @@ const ListAssetContent = ({
           action: PermissionAction.read,
         })}
       >
-        <Td className="hidden md:table-cell">
+        <Td>
           {custody ? (
             <GrayBadge>
               <>
@@ -648,9 +647,7 @@ const ListAssetContent = ({
       </When>
 
       {/* Location */}
-      <Td className="hidden md:table-cell">
-        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
-      </Td>
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };

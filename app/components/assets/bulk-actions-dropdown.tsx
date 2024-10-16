@@ -7,10 +7,13 @@ import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
+import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
+import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
+import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -93,10 +96,14 @@ function ConditionalDropdown() {
         />
       )}
       <BulkLocationUpdateDialog />
+      <BulkAssignTagsDialog />
+      <BulkRemoveTagsDialog />
       <BulkCategoryUpdateDialog />
       <BulkAssignCustodyDialog />
       <BulkReleaseCustodyDialog />
       <BulkDeleteDialog />
+      <BulkMarkAvailabilityDialog type="available" />
+      <BulkMarkAvailabilityDialog type="unavailable" />
 
       <DropdownMenu
         modal={false}
@@ -167,7 +174,6 @@ function ConditionalDropdown() {
                 }
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="border-b py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="assign-custody"
@@ -184,23 +190,52 @@ function ConditionalDropdown() {
                 }
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="tag-add"
+                onClick={closeMenu}
+                disabled={isLoading}
+                label="Assign tags"
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem className="py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="tag-remove"
+                onClick={closeMenu}
+                disabled={isLoading}
+                label="Remove tags"
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem className="border-t py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="location"
                 onClick={closeMenu}
                 disabled={isLoading}
               />
             </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
+            <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="category"
                 onClick={closeMenu}
                 disabled={isLoading}
               />
             </DropdownMenuItem>
-
+            <DropdownMenuItem className="border-t py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                label="Mark as available"
+                type="available"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                label="Mark as unavailable"
+                type="unavailable"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
+            </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="trash"
@@ -216,7 +251,6 @@ function ConditionalDropdown() {
                 }
               />
             </DropdownMenuItem>
-
             <DropdownMenuItem className="border-t md:hidden lg:p-0">
               <Button
                 role="button"

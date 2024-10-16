@@ -1,3 +1,5 @@
+import type { RenderableTreeNode } from "@markdoc/markdoc";
+import { CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -14,6 +16,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
+import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { QrPreview } from "~/components/qr/qr-preview";
 
 import { Badge } from "~/components/shared/badge";
@@ -128,6 +131,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
       asset.bookings = [currentBooking];
     }
+    /** We only need customField with same category of asset or without any category */
+    let customFields = asset.categoryId
+      ? asset.customFields.filter(
+          (cf) =>
+            !cf.customField.categories.length ||
+            cf.customField.categories
+              .map((c) => c.id)
+              .includes(asset.categoryId!)
+        )
+      : asset.customFields;
 
     const header: HeaderData = {
       title: `${asset.title}'s overview`,
@@ -142,16 +155,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             timeStyle: "short",
           }).format(asset.createdAt),
           custody,
-          /** We only need customField with same category of asset or without any category */
-          customFields: asset.categoryId
-            ? asset.customFields.filter(
-                (cf) =>
-                  !cf.customField.categories.length ||
-                  cf.customField.categories
-                    .map((c) => c.id)
-                    .includes(asset.categoryId!)
-              )
-            : asset.customFields,
+          customFields,
         },
         lastScan,
         header,
@@ -222,6 +226,7 @@ export default function AssetOverview() {
     asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
       : [];
+
   const location = asset && asset.location;
   usePosition();
   const fetcher = useFetcher();
@@ -350,10 +355,14 @@ export default function AssetOverview() {
               <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
                   {customFieldsValues.map((field, _index) => {
+                    const fieldValue =
+                      field.value as unknown as ShelfAssetCustomFieldValueType["value"];
+
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
-                      field.value as unknown as ShelfAssetCustomFieldValueType["value"],
+                      fieldValue,
                       { locale, timeZone }
                     );
+
                     return (
                       <li
                         className={tw(
@@ -364,8 +373,21 @@ export default function AssetOverview() {
                         <span className="w-1/4 text-[14px] font-medium text-gray-900">
                           {field.customField.name}
                         </span>
-                        <div className="mt-1 max-w-[250px] text-gray-600 md:mt-0 md:w-3/5">
-                          {isLink(customFieldDisplayValue) ? (
+                        <div
+                          className={tw(
+                            "mt-1 text-gray-600 md:mt-0 md:w-3/5",
+                            field.customField.type !==
+                              CustomFieldType.MULTILINE_TEXT && "max-w-[250px]"
+                          )}
+                        >
+                          {field.customField.type ===
+                          CustomFieldType.MULTILINE_TEXT ? (
+                            <MarkdownViewer
+                              content={
+                                customFieldDisplayValue as RenderableTreeNode
+                              }
+                            />
+                          ) : isLink(customFieldDisplayValue as string) ? (
                             <Button
                               role="link"
                               variant="link"
@@ -373,10 +395,10 @@ export default function AssetOverview() {
                               target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
-                              {customFieldDisplayValue}
+                              {customFieldDisplayValue as string}
                             </Button>
                           ) : (
-                            customFieldDisplayValue
+                            (customFieldDisplayValue as string)
                           )}
                         </div>
                       </li>
