@@ -282,6 +282,7 @@ export default function GiveKitCustody() {
 
         <div className="relative z-50 mb-8">
           <DynamicSelect
+            hidden={isSelfService}
             showSearch={!isSelfService}
             disabled={disabled || isSelfService}
             defaultValue={

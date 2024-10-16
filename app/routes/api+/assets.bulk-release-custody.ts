@@ -44,7 +44,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
-          message: "Self user can release custody of themselves only.",
+          message:
+            "Self service user can only release custody of assets assigned to their user.",
           additionalData: { userId, assetIds },
           label: "Assets",
         });

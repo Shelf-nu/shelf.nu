@@ -3,6 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -39,6 +40,7 @@ export default function BulkAssignCustodyDialog() {
             <input type="hidden" value="bulk-assign-custody" name="intent" />
 
             <DynamicSelect
+              hidden={isSelfService}
               defaultValue={
                 isSelfService && teamMembers?.length > 0
                   ? JSON.stringify({
@@ -78,7 +80,7 @@ export default function BulkAssignCustodyDialog() {
             ) : null}
           </div>
 
-          <div className="flex gap-3">
+          <div className={tw("flex gap-3", isSelfService && "-mt-10")}>
             <Button
               variant="secondary"
               width="full"

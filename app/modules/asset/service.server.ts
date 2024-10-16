@@ -1411,6 +1411,8 @@ export async function getPaginatedAndFilterableAssets({
   excludeSearchFromView = false,
   excludeLocationQuery = false,
   filters = "",
+  isSelfService,
+  userId,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1425,6 +1427,8 @@ export async function getPaginatedAndFilterableAssets({
    *  instead of the AssetSearchView
    */
   excludeSearchFromView?: boolean;
+  isSelfService?: boolean;
+  userId?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1499,6 +1503,8 @@ export async function getPaginatedAndFilterableAssets({
         organizationId,
         selectedTeamMembers: teamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
+        isSelfService,
+        userId,
       }),
     ]);
 

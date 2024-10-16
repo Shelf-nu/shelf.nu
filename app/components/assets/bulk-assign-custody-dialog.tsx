@@ -3,6 +3,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type loader } from "~/routes/_layout+/assets._index";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -37,6 +38,7 @@ export default function BulkAssignCustodyDialog() {
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
             <DynamicSelect
+              hidden={isSelfService}
               defaultValue={
                 isSelfService && rawTeamMembers?.length > 0
                   ? JSON.stringify({
@@ -78,7 +80,7 @@ export default function BulkAssignCustodyDialog() {
             ) : null}
           </div>
 
-          <div className="flex gap-3">
+          <div className={tw("flex gap-3", isSelfService && "-mt-10")}>
             <Button
               variant="secondary"
               width="full"

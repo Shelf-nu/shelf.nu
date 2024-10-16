@@ -53,6 +53,7 @@ type Props = ModelFilterProps & {
    * Allow item to unselect on clicking again
    */
   allowClear?: boolean;
+  hidden?: boolean;
 };
 
 export default function DynamicSelect({
@@ -76,6 +77,7 @@ export default function DynamicSelect({
   onChange = null,
   allowClear,
   selectionMode = "none",
+  hidden = false,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -134,6 +136,17 @@ export default function DynamicSelect({
       ? renderItem({ ...selectedItem, metadata: selectedItem })
       : selectedItem.name
     : placeholder;
+
+  if (hidden) {
+    return (
+      <input
+        key={`${selectedValue}-${defaultValue}`}
+        type="hidden"
+        value={selectedValue}
+        name={fieldName ?? model.name}
+      />
+    );
+  }
 
   return (
     <>

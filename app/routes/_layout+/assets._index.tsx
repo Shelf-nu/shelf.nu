@@ -109,6 +109,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
     const {
       filters,
       serializedCookie: filtersCookie,
@@ -148,16 +151,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         filters,
+        isSelfService,
+        userId,
       }),
     ]);
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
+    if (isSelfService) {
       /* For self service users we don`t return the assets that are not available to book */
       assets = assets.filter((a) => a.availableToBook);
-
-      /* For self service we only return teamMember with current user's id */
-      rawTeamMembers = rawTeamMembers.filter((tm) => tm.userId === userId);
-      totalTeamMembers = 1;
     }
 
     assets = await updateAssetsWithBookingCustodians(assets);
