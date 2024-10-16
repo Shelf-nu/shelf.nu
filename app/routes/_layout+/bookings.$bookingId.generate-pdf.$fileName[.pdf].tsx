@@ -199,7 +199,9 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
         </div>
         <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
           <span style={styles.infoLabel}>Description</span>
-          <span style={styles.infoValue}>{booking?.description || ""}</span>
+          <span style={{ ...styles.infoValue, whiteSpace: "pre-wrap" }}>
+            {booking?.description || ""}
+          </span>
         </div>
       </section>
       <table style={styles.bookingTable}>
