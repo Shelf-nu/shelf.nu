@@ -208,10 +208,14 @@ export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
   getAll,
+  isSelfService,
+  userId,
 }: {
   organizationId: Organization["id"];
   selectedTeamMembers?: TeamMember["id"][];
   getAll?: boolean;
+  isSelfService?: boolean;
+  userId?: string;
 }) {
   try {
     const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
@@ -221,6 +225,7 @@ export async function getTeamMemberForCustodianFilter({
             organizationId,
             id: { notIn: selectedTeamMembers },
             deletedAt: null,
+            userId: isSelfService && userId ? userId : undefined,
           },
           include: {
             user: {

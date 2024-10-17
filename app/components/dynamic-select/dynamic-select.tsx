@@ -53,6 +53,7 @@ type Props = ModelFilterProps & {
    * Allow item to unselect on clicking again
    */
   allowClear?: boolean;
+  hidden?: boolean;
 };
 
 export default function DynamicSelect({
@@ -76,6 +77,7 @@ export default function DynamicSelect({
   onChange = null,
   allowClear,
   selectionMode = "none",
+  hidden = false,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -135,6 +137,17 @@ export default function DynamicSelect({
       : selectedItem.name
     : placeholder;
 
+  if (hidden) {
+    return (
+      <input
+        key={`${selectedValue}-${defaultValue}`}
+        type="hidden"
+        value={selectedValue}
+        name={fieldName ?? model.name}
+      />
+    );
+  }
+
   return (
     <>
       <div className="relative w-full">
@@ -148,7 +161,12 @@ export default function DynamicSelect({
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger disabled={disabled} asChild>
-            <div>
+            <button
+              className={tw(
+                "w-full",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+            >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
                   {label}
@@ -164,7 +182,7 @@ export default function DynamicSelect({
                 </span>
                 <ChevronDownIcon />
               </div>
-            </div>
+            </button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent

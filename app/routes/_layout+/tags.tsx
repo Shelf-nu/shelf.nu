@@ -19,6 +19,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -146,6 +147,8 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <Header>
@@ -163,7 +166,9 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={
+            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          }
           ItemComponent={TagItem}
           headerChildren={
             <>

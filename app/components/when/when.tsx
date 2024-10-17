@@ -1,6 +1,6 @@
 type Props = {
   truthy: boolean | null | undefined;
-  children: React.ReactElement;
+  children: React.ReactNode;
 };
 
 export default function When({ truthy, children }: Props) {
