@@ -216,11 +216,13 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               </DropdownMenuItem>
             </When>
 
-            {kitIsCheckedOut || someAssetIsNotAvailable ? (
-              <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to asset(s) not being Available.
-              </div>
-            ) : null}
+            <When truthy={!isSelfService}>
+              {kitIsCheckedOut || someAssetIsNotAvailable ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to asset(s) not being Available.
+                </div>
+              ) : null}
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

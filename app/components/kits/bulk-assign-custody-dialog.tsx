@@ -80,7 +80,7 @@ export default function BulkAssignCustodyDialog() {
             ) : null}
           </div>
 
-          <div className={tw("flex gap-3", isSelfService && "-mt-10")}>
+          <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
             <Button
               variant="secondary"
               width="full"
