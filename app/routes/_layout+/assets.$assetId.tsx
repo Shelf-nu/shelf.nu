@@ -22,9 +22,8 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
-  updateAssetQrCode,
+  relinkQrCode,
 } from "~/modules/asset/service.server";
-import { claimQrCode } from "~/modules/qr/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -156,18 +155,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ newQrId: z.string() })
         );
 
-        await Promise.all([
-          claimQrCode({
-            id: newQrId,
-            organizationId,
-            userId,
-          }),
-          updateAssetQrCode({
-            newQrId,
-            assetId: id,
-            organizationId,
-          }),
-        ]);
+        await relinkQrCode({
+          qrId: newQrId,
+          assetId: id,
+          organizationId,
+          userId,
+        });
 
         sendNotification({
           title: "QR Relinked",
