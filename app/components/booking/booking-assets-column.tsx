@@ -169,7 +169,7 @@ export function BookingAssetsColumn() {
                                 className="text-gray-900 hover:text-gray-700"
                               >
                                 <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
-                                {kit.name}
+                                  {kit.name}
                                 </div>
                               </Button>
 
