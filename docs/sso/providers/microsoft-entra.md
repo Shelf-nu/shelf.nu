@@ -121,6 +121,9 @@ For each workspace you will have to create 3 groups, each one representing a dif
 - Self service group
 - Base user group
 
+> [!NOTE]
+> A user should not be added to more than 1 group within the application as it may cause undesired behaviour.
+
 ### Step 8.1: Create groups
 
 Navigate to Groups interface within Microsoft Entra and click click _New group_ to create the groups.
