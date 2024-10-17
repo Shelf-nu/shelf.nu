@@ -162,13 +162,15 @@ export function BookingAssetsColumn() {
                       return (
                         <React.Fragment key={kit.id}>
                           <ListItem item={kit} className="bg-gray-50">
-                            <Td className="w-full">
+                            <Td className="max-w-full">
                               <Button
                                 to={`/kits/${kit.id}`}
                                 variant="link"
                                 className="text-gray-900 hover:text-gray-700"
                               >
-                                {kit.name}
+                                <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
+                                  {kit.name}
+                                </div>
                               </Button>
 
                               <p className="text-sm text-gray-600">
