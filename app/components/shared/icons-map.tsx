@@ -47,6 +47,7 @@ import {
   ToolIcon,
   AddTagsIcon,
   RemoveTagsIcon,
+  InstallIcon,
   AvailableIcon,
   UnavailableIcon,
 } from "../icons/library";
@@ -103,6 +104,7 @@ export type IconType =
   | "scan"
   | "tool"
   | "rows"
+  | "install"
   | "available"
   | "unavailable";
 
@@ -161,6 +163,7 @@ export const iconsMap: IconsMap = {
   scan: <ScanIcon />,
   tool: <ToolIcon />,
   rows: <RowsIcon />,
+  install: <InstallIcon />,
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
 };

@@ -119,3 +119,9 @@ export async function getFiltersFromRequest(
   }
   return { filters };
 }
+
+/** HIDE PWA INSTALL PROMPT COOKIE */
+
+export const installPwaPromptCookie = createCookie("hide-pwa-install-prompt", {
+  maxAge: 60 * 60 * 24 * 14, // two weeks
+});
