@@ -19,7 +19,7 @@ export function generateWhereClause(
     const words = search.trim().split(/\s+/).filter(Boolean);
     if (words.length > 0) {
       const searchVector = words.join(" & ");
-      whereClause = Prisma.sql`${whereClause} AND (to_tsvector('english', a."title" || ' ' || COALESCE(a."description", '')) @@ to_tsquery('english', ${searchVector}))`;
+      whereClause = Prisma.sql`${whereClause} AND (to_tsvector('english', a."title") @@ to_tsquery('english', ${searchVector}))`;
     }
   }
 
@@ -145,13 +145,6 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return Prisma.sql`${whereClause} AND a.status = ${filter.value}::public."AssetStatus"`;
       case "isNot":
         return Prisma.sql`${whereClause} AND a.status != ${filter.value}::public."AssetStatus"`;
-      case "in":
-        const statusValues = (filter.value as string[])
-          .map((v) => `'${v}'::public."AssetStatus"`)
-          .join(", ");
-        return Prisma.sql`${whereClause} AND a.status IN (${Prisma.raw(
-          statusValues
-        )})`;
       default:
         return whereClause;
     }
