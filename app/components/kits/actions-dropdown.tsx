@@ -71,8 +71,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     setOpen,
   } = useControlledDropdownMenu();
 
-  const isSelfUserCustody =
-    isSelfService && kitCustody?.custodian?.userId === user?.id;
+  const disableReleaseForSelfService =
+    isSelfService && kitCustody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -157,7 +157,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={!isSelfUserCustody}
+                    disabled={disableReleaseForSelfService}
                   >
                     <span className="flex items-center gap-1">
                       <Icon icon="release-custody" /> Release custody

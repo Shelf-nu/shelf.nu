@@ -43,8 +43,8 @@ const ConditionalActionsDropdown = () => {
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
 
-  const isSelfUserCustody =
-    isSelfService && asset.custody?.custodian?.userId === user?.id;
+  const disableReleaseForSelfService =
+    isSelfService && asset.custody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -128,7 +128,10 @@ const ConditionalActionsDropdown = () => {
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={assetIsPartOfUnavailableKit || !isSelfUserCustody}
+                    disabled={
+                      assetIsPartOfUnavailableKit ||
+                      disableReleaseForSelfService
+                    }
                   >
                     <span className="flex items-center gap-1">
                       <Icon icon="release-custody" /> Release custody
