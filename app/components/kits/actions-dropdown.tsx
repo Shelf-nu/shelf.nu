@@ -1,7 +1,15 @@
+import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import DeleteKit from "./delete-kit";
 import Icon from "../icons/icon";
@@ -13,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import When from "../when/when";
 
 export default function ActionsDropdown({
   fullWidth,
@@ -43,9 +52,16 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const kitCanBeReleased = kit.custody;
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 
+  const kitCustody = kit.custody as unknown as Prisma.KitCustodyGetPayload<{
+    select: { custodian: { select: { userId: true } } };
+  }>;
+
   const someAssetIsNotAvailable = kit.assets.some(
     (asset) => asset.status !== "AVAILABLE"
   );
+
+  const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   const {
     ref: dropdownRef,
@@ -54,6 +70,9 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+
+  const disableReleaseForSelfService =
+    isSelfService && kitCustody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -122,67 +141,88 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem className="border-b  px-4 py-1 md:p-0">
-              {kitCanBeReleased ? (
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.kit,
+                action: PermissionAction.custody,
+              })}
+            >
+              <DropdownMenuItem className="border-b  px-4 py-1 md:p-0">
+                {kitCanBeReleased ? (
+                  <Button
+                    to="release-custody"
+                    role="link"
+                    variant="link"
+                    className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                    width="full"
+                    onClick={() => setOpen(false)}
+                    disabled={disableReleaseForSelfService}
+                  >
+                    <span className="flex items-center gap-1">
+                      <Icon icon="release-custody" /> Release custody
+                    </span>
+                  </Button>
+                ) : (
+                  <Button
+                    to="assign-custody"
+                    role="link"
+                    variant="link"
+                    className={tw(
+                      "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                    )}
+                    width="full"
+                    onClick={() => setOpen(false)}
+                    disabled={someAssetIsNotAvailable}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon icon="assign-custody" />{" "}
+                      {isSelfService ? "Take" : "Assign"} custody
+                    </span>
+                  </Button>
+                )}
+              </DropdownMenuItem>
+            </When>
+
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.kit,
+                action: PermissionAction.update,
+              })}
+            >
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
-                  to="release-custody"
+                  to="edit"
                   role="link"
                   variant="link"
-                  className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
-                  onClick={() => setOpen(false)}
-                >
-                  <span className="flex items-center gap-1">
-                    <Icon icon="release-custody" /> Release custody
-                  </span>
-                </Button>
-              ) : (
-                <Button
-                  to="assign-custody"
-                  role="link"
-                  variant="link"
-                  className={tw(
-                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                  )}
-                  width="full"
-                  onClick={() => setOpen(false)}
-                  disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="assign-custody" /> Assign custody
+                    <Icon icon="pen" /> Edit
                   </span>
                 </Button>
-              )}
-            </DropdownMenuItem>
+              </DropdownMenuItem>
 
-            <DropdownMenuItem className="px-4 py-1 md:p-0">
-              <Button
-                to="edit"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                width="full"
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+                disabled={kitIsCheckedOut || someAssetIsNotAvailable}
               >
-                <span className="flex items-center gap-2">
-                  <Icon icon="pen" /> Edit
-                </span>
-              </Button>
-            </DropdownMenuItem>
+                <DeleteKit kit={kit} />
+              </DropdownMenuItem>
+            </When>
 
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
-              disabled={kitIsCheckedOut || someAssetIsNotAvailable}
-            >
-              <DeleteKit kit={kit} />
-            </DropdownMenuItem>
-            {kitIsCheckedOut || someAssetIsNotAvailable ? (
-              <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to asset(s) not being Available.
-              </div>
-            ) : null}
+            <When truthy={!isSelfService}>
+              {kitIsCheckedOut || someAssetIsNotAvailable ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to asset(s) not being Available.
+                </div>
+              ) : null}
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

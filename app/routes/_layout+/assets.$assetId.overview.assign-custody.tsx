@@ -1,4 +1,5 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -14,6 +15,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -44,11 +46,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
 
     const asset = await db.asset
@@ -90,15 +92,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const searchParams = getCurrentSearchParams(request);
 
     /** We get all the team members that are part of the user's personal organization */
+    const where = {
+      deletedAt: null,
+      organizationId,
+      userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+    } satisfies Prisma.TeamMemberWhereInput;
+
     const teamMembers = await db.teamMember
       .findMany({
-        where: {
-          deletedAt: null,
-          organizationId,
-        },
-        include: {
-          user: true,
-        },
+        where,
+        include: { user: true },
         orderBy: {
           userId: "asc",
         },
@@ -114,12 +117,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const totalTeamMembers = await db.teamMember.count({
-      where: {
-        deletedAt: null,
-        organizationId,
-      },
-    });
+    const totalTeamMembers = await db.teamMember.count({ where });
 
     return json(
       data({
@@ -143,12 +141,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
+
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const { custodian } = parseData(
       await request.formData(),
@@ -174,6 +174,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * Name is used to create the note
      */
     const { id: custodianId, name: custodianName } = custodian;
+
+    if (isSelfService) {
+      const custodian = await db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: { id: true, userId: true },
+      });
+
+      if (custodian?.userId !== user.id) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self user can only assign custody to themselves only.",
+          additionalData: { userId, assetId, custodianId },
+          label: "Assets",
+        });
+      }
+    }
 
     /** In order to do it with a single query
      * 1. We update the asset status
@@ -212,7 +229,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** Once the asset is updated, we create the note */
     await createNote({
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+        isSelfService ? "taken" : `given **${custodianName.trim()}**`
+      } custody over **${asset.title.trim()}**`,
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
@@ -238,11 +257,13 @@ export function links() {
 }
 
 export default function Custody() {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, teamMembers } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+
+  const { isSelfService } = useUserRoleHelper();
 
   return (
     <>
@@ -252,15 +273,24 @@ export default function Custody() {
             <UserIcon />
           </div>
           <div className="mb-5">
-            <h4>Assign custody of asset</h4>
+            <h4>{isSelfService ? "Take" : "Assign"} custody of asset</h4>
             <p>
               This asset is currently available. You’re about to assign custody
-              to one of your team members.
+              to {isSelfService ? "yourself" : "one of your team members"}.
             </p>
           </div>
-          <div className=" relative z-50 mb-8">
+          <div className="relative z-50 mb-8">
             <DynamicSelect
-              disabled={disabled}
+              hidden={isSelfService}
+              defaultValue={
+                isSelfService
+                  ? JSON.stringify({
+                      id: teamMembers[0].id,
+                      name: resolveTeamMemberName(teamMembers[0]),
+                    })
+                  : undefined
+              }
+              disabled={disabled || isSelfService}
               model={{
                 name: "teamMember",
                 queryKey: "name",
@@ -273,6 +303,7 @@ export default function Custody() {
               placeholder="Select a team member"
               allowClear
               closeOnSelect
+              showSearch={!isSelfService}
               transformItem={(item) => ({
                 ...item,
                 id: JSON.stringify({
