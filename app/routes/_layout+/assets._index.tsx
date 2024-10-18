@@ -109,6 +109,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
     const {
       filters,
       serializedCookie: filtersCookie,
@@ -148,13 +151,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         filters,
+        isSelfService,
+        userId,
       }),
     ]);
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      /**
-       * For self service users we dont return the assets that are not available to book
-       */
+    if (isSelfService) {
+      /* For self service users we don`t return the assets that are not available to book */
       assets = assets.filter((a) => a.availableToBook);
     }
 
@@ -354,7 +357,7 @@ export const AssetsList = ({
   }
   const hasFiltersToClear = useSearchParamHasValue(...searchParams);
   const clearFilters = useClearValueFromParams(...searchParams);
-  const { roles } = useUserRoleHelper();
+  const { roles, isBase } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
@@ -488,7 +491,9 @@ export const AssetsList = ({
          * Using remix's navigate is the default behaviour, however it can receive also a custom function
          */
         navigate={(itemId) => navigate(`/assets/${itemId}`)}
-        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+        bulkActions={
+          disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
+        }
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }

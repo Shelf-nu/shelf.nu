@@ -66,10 +66,11 @@ In the meantime, you can continue with the next steps that will show you how to 
 ## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
 
 In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping.
-For each workspace you will have to create 2 groups, each one representing a different role in Shelf:
+For each workspace you will have to create 3 groups, each one representing a different role in Shelf:
 
 - Admin group
 - Self service group
+- Base user group
 
 ### 8.1: Create your groups in Google Workspace [#](#81-create-your-groups-in-google-workspace)
 

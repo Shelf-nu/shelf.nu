@@ -9,7 +9,7 @@ Shelf currently provides SAML SSO for Team and Enterprise plan customers. Please
 Shelf supports most identity providers that support the SAML 2.0 SSO protocol. We've prepared these guides for commonly used identity providers to help you get started. If you use a different provider, our support stands ready to help you out.
 
 - [Google Workspaces (formerly GSuite)](./providers/google-workspace.md)
-- Microsoft Entra (formerly Azure Active Directory)
+- [Microsoft Entra (formerly Azure Active Directory)](./providers/microsoft-entra.md)
 - Okta
 
 Accounts signing in with SSO have certain limitations. The following sections outline the limitations when SSO is enabled or disabled for your team.
