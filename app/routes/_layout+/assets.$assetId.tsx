@@ -8,7 +8,9 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
-import ActionsDropdown, { BookActionsDropDown } from "~/components/assets/actions-dropdown";
+import ActionsDropdown, {
+  BookActionsDropDown,
+} from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 
@@ -219,7 +221,7 @@ export default function AssetDetailsPage() {
         >
           <ActionsDropdown />
         </When>
-        <BookActionsDropDown/>
+        <BookActionsDropDown />
       </Header>
       <HorizontalTabs items={items} />
       <div>

@@ -13,24 +13,32 @@ import type { IconType } from "~/components/shared/icons-map";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "./tw";
 
-
 export interface Link {
-    role?: string;
-    variant?:string;
-    label: string;
-    to: string;
-    indexType: string;
-    id: string
-    disabled?: boolean;
-    icon: IconType;
-    testId: string
-    disabled_reason: boolean | {
+  role?: string;
+  variant?: string;
+  label: string;
+  to: string;
+  indexType: string;
+  id: string;
+  disabled?: boolean;
+  icon: IconType;
+  testId: string;
+  disabled_reason:
+    | boolean
+    | {
         title?: string;
         reason: React.ReactNode | string;
-    } | undefined;
+      }
+    | undefined;
 }
 
-const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexType:string}) => {
+const ConditionalBookActionsDropdown = ({
+  links,
+  indexType,
+}: {
+  links: Link[];
+  indexType: string;
+}) => {
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -39,7 +47,7 @@ const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexT
     setOpen,
   } = useControlledDropdownMenu();
 
-  const disabled_reason = links.find((link) => link.disabled)?.disabled_reason
+  const disabled_reason = links.find((link) => link.disabled)?.disabled_reason;
 
   return (
     <>
@@ -63,7 +71,11 @@ const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexT
           onClick={() => setOpen(true)}
           asChild
         >
-          <Button variant="primary" data-test-id={`${indexType}bookActionsButton`} disabled={disabled_reason}>
+          <Button
+            variant="primary"
+            data-test-id={`${indexType}bookActionsButton`}
+            disabled={disabled_reason}
+          >
             <span className="flex items-center gap-2">
               Book {indexType} <ChevronRight className="chev" />
             </span>
@@ -75,7 +87,9 @@ const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexT
           variant="primary"
           data-test-id={`${indexType}bookActionsButton`}
           className="asset-actions sm:hidden"
-          onClick={() =>{setOpen(true)}}
+          onClick={() => {
+            setOpen(true);
+          }}
           disabled={disabled_reason}
         >
           <span className="flex items-center gap-2">
@@ -105,26 +119,30 @@ const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexT
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            {links && links.map((link: Link)=><DropdownMenuItem key={link.label}
-                className={tw("px-4 py-1 md:p-0")}
-                disabled={!!link.disabled}
-              >
-                <Button
-                  to={link.to}
-                  role="link"
-                  variant="link"
-                  aria-label={link.label}
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                  prefetch="none"
-                  width="full"
-                  onClick={()=>setOpen(false)}
-                  disabled={link.disabled_reason}
+            {links &&
+              links.map((link: Link) => (
+                <DropdownMenuItem
+                  key={link.label}
+                  className={tw("px-4 py-1 md:p-0")}
+                  disabled={!!link.disabled}
                 >
-                  <span className="flex items-center gap-2">
-                    <Icon icon={link.icon} /> {link.label}
-                  </span>
-                </Button>
-              </DropdownMenuItem>)}
+                  <Button
+                    to={link.to}
+                    role="link"
+                    variant="link"
+                    aria-label={link.label}
+                    className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                    prefetch="none"
+                    width="full"
+                    onClick={() => setOpen(false)}
+                    disabled={link.disabled_reason}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon icon={link.icon} /> {link.label}
+                    </span>
+                  </Button>
+                </DropdownMenuItem>
+              ))}
             <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
               <Button
                 role="button"
@@ -143,24 +161,32 @@ const ConditionalBookActionsDropdown = ({links, indexType}:{links:Link[], indexT
   );
 };
 
-
-export const BookActionsDropDown = ({links, indexType}:{links:Link[], indexType:string}) => {
+export const BookActionsDropDown = ({
+  links,
+  indexType,
+}: {
+  links: Link[];
+  indexType: string;
+}) => {
   const isHydrated = useHydrated();
 
   if (!isHydrated)
     return (
-      <Button variant="primary" to="#" data-test-id={`${indexType}bookActionsButton`}>
+      <Button
+        variant="primary"
+        to="#"
+        data-test-id={`${indexType}bookActionsButton`}
+      >
         <div className="flex items-center gap-2">
-          <span>Book {indexType}</span> <ChevronRight className="chev rotate-90" />
+          <span>Book {indexType}</span>{" "}
+          <ChevronRight className="chev rotate-90" />
         </div>
       </Button>
     );
-  
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalBookActionsDropdown links= {links} indexType={indexType}/>
+      <ConditionalBookActionsDropdown links={links} indexType={indexType} />
     </div>
   );
 };
-

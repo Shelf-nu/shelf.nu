@@ -47,7 +47,6 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
 export type ModelFilters = z.infer<typeof ModelFiltersSchema>;
 
-
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -60,7 +59,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
-    console.log(" url.searchParams===>",  url.searchParams);
     const searchParams: Record<string, any> = {};
     for (const [key, value] of url.searchParams.entries()) {
       if (value === "null") {
@@ -79,14 +77,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
     };
 
-    const genericKeys = ['deletedAt'];
+    const genericKeys = ["deletedAt"];
 
     const customFilters = {} as Record<string, any>;
     const genericFilters = {} as Record<string, any>;
     for (const [key, value] of Object.entries(filters)) {
       if (!genericKeys.includes(key)) {
         customFilters[key] = value;
-      }else {
+      } else {
         genericFilters[key] = value;
       }
     }
@@ -109,11 +107,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    if(customFilters) {
+    if (customFilters) {
       where = {
         ...where,
-        ...customFilters
-      }
+        ...customFilters,
+      };
     }
     const queryData = (await db[name].dynamicFindMany({
       where: { ...where, ...genericFilters },
