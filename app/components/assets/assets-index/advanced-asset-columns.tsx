@@ -28,10 +28,9 @@ import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
-  AssetsFromViewItem,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
-import type { fixedFields } from "~/modules/asset-index-settings/helpers";
+import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
 // eslint-disable-next-line import/no-cycle
 import {
   ListItemTagsColumn,
@@ -54,8 +53,8 @@ export function AdvancedIndexColumn({
   column,
   item,
 }: {
-  column: (typeof fixedFields)[number];
-  item: AssetsFromViewItem;
+  column: ColumnLabelKey;
+  item: AdvancedIndexAsset;
 }) {
   const { locale, currentOrganization, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
@@ -119,7 +118,6 @@ export function AdvancedIndexColumn({
       </Td>
     );
   }
-
   switch (column) {
     case "name":
       return (
@@ -153,7 +151,8 @@ export function AdvancedIndexColumn({
       );
 
     case "id":
-      return <TextColumn value={item.id} />;
+    case "qrId":
+      return <TextColumn value={item[column]} />;
 
     case "status":
       return (
@@ -214,7 +213,22 @@ function TextColumn({
       )}
       {...rest}
     >
-      {value}
+      {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
+      {typeof value === "string" && value.length > 60 ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger className="text-left">
+              {value.slice(0, 60)}...
+            </TooltipTrigger>
+
+            <TooltipContent side="top" className="max-w-[400px]">
+              <p className="text-sm">{value}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <span>{value}</span>
+      )}
     </Td>
   );
 }
@@ -296,7 +310,7 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
 function CustodyColumn({
   custody,
 }: {
-  custody: AssetsFromViewItem["custody"];
+  custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
 

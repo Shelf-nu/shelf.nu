@@ -235,6 +235,7 @@ export async function advancedModeLoader({
       request,
       organizationId,
       filters,
+      settings,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({

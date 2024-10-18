@@ -6,6 +6,7 @@ import type {
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/types";
 import type { CustomFieldSorting } from "./types";
+import type { Column } from "../asset-index-settings/helpers";
 
 // 1. Filtering
 export function generateWhereClause(
@@ -27,6 +28,12 @@ export function generateWhereClause(
   for (const filter of filters) {
     switch (filter.type) {
       case "string":
+        if (["location", "kit", "category", "qrId"].includes(filter.name)) {
+          whereClause = addRelationFilter(whereClause, filter);
+        } else {
+          whereClause = addStringFilter(whereClause, filter);
+        }
+        break;
       case "text":
         whereClause = addStringFilter(whereClause, filter);
         break;
@@ -153,21 +160,70 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   return whereClause;
 }
 
+function addRelationFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter
+): Prisma.Sql {
+  const relationAliasMap: Record<string, string> = {
+    location: "l",
+    kit: "k",
+    category: "c",
+    qrId: "q",
+  };
+
+  const alias = relationAliasMap[filter.name];
+
+  // Special handling for qrId
+  if (filter.name === "qrId") {
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ${filter.value})`;
+      case "isNot":
+        return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ${filter.value})`;
+      case "contains":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id ILIKE ${`%${filter.value}%`})`;
+      default:
+        return whereClause;
+    }
+  }
+
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND ${Prisma.raw(alias)}.name = ${
+        filter.value
+      }`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND ${Prisma.raw(alias)}.name != ${
+        filter.value
+      }`;
+    case "contains":
+      return Prisma.sql`${whereClause} AND ${Prisma.raw(
+        alias
+      )}.name ILIKE ${`%${filter.value}%`}`;
+    default:
+      return whereClause;
+  }
+}
 // Add this mapping object at the top of your file
 const API_TO_DB_FIELD_MAP: Record<string, string> = {
   valuation: "value",
-  // Add any other API to DB field mappings here
 };
 /**
  * Parses a filter string into an array of Filter objects
  * @param filtersString - The string containing the filters
  * @returns An array of Filter objects
  */
-export function parseFilters(filtersString: string): Filter[] {
+export function parseFilters(
+  filtersString: string,
+  columns: Column[]
+): Filter[] {
   const searchParams = new URLSearchParams(filtersString);
   const filters: Filter[] = [];
 
   searchParams.forEach((value, key) => {
+    /** If the key is not part of the columns, dont add it to filters */
+    if (columns.find((c) => c.name === key) === undefined) return;
+
     const [operator, filterValue] = value.split(":");
     /** Here we will handle special cases. */
     const dbKey = API_TO_DB_FIELD_MAP[key] || key;
@@ -193,6 +249,10 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
   switch (fieldName) {
     case "id":
     case "title":
+    case "qrId": // relation
+    case "location": // relation
+    case "kit": // relation
+    case "category": // relation
       return "string";
     case "status":
       return "enum";
@@ -279,6 +339,8 @@ export function parseSortingOptions(sortBy: string[]): {
     if (field.name in directAssetFields) {
       const columnName = directAssetFields[field.name as DirectAssetField];
       orderByParts.push(`"${columnName}" ${field.direction}`);
+    } else if (field.name === "qrId") {
+      orderByParts.push(`"qrId" ${field.direction}`);
     } else if (field.name === "kit") {
       orderByParts.push(`"kitName" ${field.direction}`);
     } else if (field.name === "category") {
@@ -341,6 +403,12 @@ export function generateCustomFieldSelect(
 export const assetQueryFragment = Prisma.sql`
   SELECT 
     a.id AS "assetId",
+    (
+      SELECT q.id
+      FROM public."Qr" q
+      WHERE q."assetId" = a.id
+      LIMIT 1
+    ) AS "qrId",
     a.title AS "assetTitle",
     a.description AS "assetDescription",
     a."createdAt" AS "assetCreatedAt",
@@ -455,6 +523,7 @@ export const assetReturnFragment = Prisma.sql`
   json_agg(
     jsonb_build_object(
       'id', aq."assetId",
+      'qrId', aq."qrId",
       'title', aq."assetTitle",
       'description', aq."assetDescription",
       'createdAt', aq."assetCreatedAt",

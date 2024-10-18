@@ -99,41 +99,8 @@ function AdvancedFilter() {
       return newCols;
     });
   }
-  const haveFiltersChanged = useCallback(
-    () =>
-      filters.some((filter, index) => {
-        const initialFilter = initialFilters[index];
-        if (
-          !initialFilter ||
-          filter.name !== initialFilter.name ||
-          filter.operator !== initialFilter.operator
-        ) {
-          return true;
-        }
-        if (filter.type === "date") {
-          // Compare date values
-          const formatDate = (date: string) => date.split("T")[0]; // Remove time part
-          if (
-            Array.isArray(filter.value) &&
-            Array.isArray(initialFilter.value)
-          ) {
-            return (
-              formatDate(filter.value[0]) !==
-                formatDate(initialFilter.value[0]) ||
-              formatDate(filter.value[1]) !== formatDate(initialFilter.value[1])
-            );
-          } else {
-            return (
-              formatDate(filter.value as string) !==
-              formatDate(initialFilter.value as string)
-            );
-          }
-        }
-        // For other types, you can use direct comparison
-        return filter.value !== initialFilter.value;
-      }),
-    [filters, initialFilters]
-  );
+  const haveFiltersChanged =
+    JSON.stringify(initialFilters) !== JSON.stringify(filters);
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>

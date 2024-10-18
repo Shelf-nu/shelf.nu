@@ -10,6 +10,7 @@ import type {
   TeamMember,
   Booking,
   Kit,
+  AssetIndexSettings,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -84,6 +85,7 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
+import type { Column } from "../asset-index-settings/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -614,6 +616,7 @@ async function getAssets(params: {
                   name: true,
                   user: {
                     select: {
+                      email: true,
                       firstName: true,
                       lastName: true,
                       profilePicture: true,
@@ -671,16 +674,18 @@ async function getAssets(params: {
 }
 
 /**
- * Fetches assets from AssetSearchView
+ * Fetches assets for advanced index
  * This is used to have a more advanced search however its less performant
  */
 export async function getAdvancedPaginatedAndFilterableAssets({
   request,
   organizationId,
+  settings,
   filters = "",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
+  settings: AssetIndexSettings;
   filters?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
@@ -695,7 +700,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = parseFilters(filters);
+    const parsedFilters = parseFilters(filters, settings.columns as Column[]);
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -723,14 +728,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       ),
       count_query AS (
         SELECT COUNT(*)::integer AS total_count
-        FROM public."Asset" a
-        ${whereClause}
+        FROM asset_query
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment}
       FROM sorted_asset_query aq;
     `;
+    // Log the query for debugging
+    console.log("Generated SQL:", query.sql);
+    console.log("Query values:", query.values);
+
     const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;

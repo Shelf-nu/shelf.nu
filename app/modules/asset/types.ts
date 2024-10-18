@@ -114,6 +114,7 @@ export type AdvancedIndexAsset = Pick<
   | "availableToBook"
   | "kitId"
 > & {
+  qrId: string; // QR code will always be available
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name">[];
@@ -138,7 +139,6 @@ export type AdvancedIndexAsset = Pick<
     };
   })[];
 };
-
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
   total_count: number;
