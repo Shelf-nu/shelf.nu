@@ -66,7 +66,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       organizationId,
       include: {
-        custody: true,
+        custody: { include: { custodian: true } },
         kit: true,
       },
     });
@@ -216,7 +216,7 @@ export default function AssetDetailsPage() {
           truthy={userHasPermission({
             roles,
             entity: PermissionEntity.asset,
-            action: PermissionAction.update,
+            action: [PermissionAction.update, PermissionAction.custody],
           })}
         >
           <ActionsDropdown />

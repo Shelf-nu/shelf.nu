@@ -1,9 +1,11 @@
+import { OrganizationRoles } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
+import { db } from "~/database/db.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -18,11 +20,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
-      action: PermissionAction.checkout,
+      action: PermissionAction.custody,
     });
 
     const formData = await request.formData();
@@ -31,6 +33,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const teamMember = await db.teamMember.findUnique({
+        where: { id: custodian.id },
+        select: { id: true, userId: true },
+      });
+
+      if (teamMember?.userId !== userId) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self user can only assign custody to themselves only.",
+          additionalData: { userId, assetIds, custodian },
+          label: "Assets",
+        });
+      }
+    }
 
     await bulkCheckOutAssets({
       userId,

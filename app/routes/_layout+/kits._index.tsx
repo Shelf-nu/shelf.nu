@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { KitStatus } from "@prisma/client";
+import { KitStatus, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -39,7 +39,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -64,7 +64,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       db.teamMember
         .findMany({
-          where: { deletedAt: null, organizationId },
+          where: {
+            deletedAt: null,
+            organizationId,
+            userId:
+              role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+          },
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -126,7 +131,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
-  const { roles } = useUserRoleHelper();
+  const { roles, isBase } = useUserRoleHelper();
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
@@ -187,7 +192,7 @@ export default function KitsIndexPage() {
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
-          bulkActions={<BulkActionsDropdown />}
+          bulkActions={isBase ? undefined : <BulkActionsDropdown />}
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>

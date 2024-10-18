@@ -19,6 +19,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -178,6 +179,8 @@ export default function BookingsIndexPage({
   const navigate = useNavigate();
   const matches = useMatches();
 
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**
@@ -227,7 +230,11 @@ export default function BookingsIndexPage({
           }}
         />
         <List
-          bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+          bulkActions={
+            disableBulkActions || isBaseOrSelfService ? undefined : (
+              <BulkActionsDropdown />
+            )
+          }
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           headerChildren={
