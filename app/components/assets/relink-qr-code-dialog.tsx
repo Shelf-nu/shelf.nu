@@ -98,7 +98,7 @@ export default function RelinkQrCodeDialog({
           <>
             {videoMediaDevices && videoMediaDevices.length > 0 ? (
               <ZXingScanner
-                className="max-h-[1000px]"
+                className="h-[470px]"
                 overlayClassName="md:h-[320px] max-w-xs"
                 isLoading={false}
                 videoMediaDevices={videoMediaDevices}
@@ -201,7 +201,6 @@ export default function RelinkQrCodeDialog({
               <Button
                 className="flex-1"
                 variant="secondary"
-                disabled={isSubmitting}
                 onClick={() => {
                   setNewQrId(undefined);
                   setCurrentState("initial");
