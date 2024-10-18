@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
@@ -18,6 +19,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
@@ -25,6 +27,8 @@ import When from "../when/when";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
+  const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
+
   const assetCanBeReleased = asset.custody;
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
@@ -42,6 +46,10 @@ const ConditionalActionsDropdown = () => {
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
+
+  function handleMenuClose() {
+    setOpen(false);
+  }
 
   const disableReleaseForSelfService =
     isSelfService && asset.custody?.custodian?.userId !== user?.id;
@@ -127,7 +135,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
-                    onClick={() => setOpen(false)}
+                    onClick={handleMenuClose}
                     disabled={
                       assetIsPartOfUnavailableKit ||
                       disableReleaseForSelfService
@@ -144,7 +152,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
-                    onClick={() => setOpen(false)}
+                    onClick={handleMenuClose}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}
@@ -174,7 +182,7 @@ const ConditionalActionsDropdown = () => {
                     "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   )}
                   width="full"
-                  onClick={() => setOpen(false)}
+                  onClick={handleMenuClose}
                 >
                   <span className="flex items-center gap-2">
                     <Icon icon="location" /> Update location
@@ -182,13 +190,27 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               </DropdownMenuItem>
 
-              <DropdownMenuItem
-                className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
-              >
+              <DropdownMenuItem className={tw("border-b px-4 py-1 md:p-0")}>
                 <UpdateGpsCoordinatesForm
                   // Closes the dropdown when the button is clicked
-                  callback={() => setOpen(false)}
+                  callback={handleMenuClose}
                 />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="mb-1.5 border-b px-4 py-1 md:p-0">
+                <Button
+                  role="button"
+                  variant="link"
+                  className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                  onClick={() => {
+                    handleMenuClose();
+                    setIsRelinkQrDialogOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="barcode" />
+                    Relink QR Code
+                  </span>
+                </Button>
               </DropdownMenuItem>
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
@@ -210,7 +232,7 @@ const ConditionalActionsDropdown = () => {
                   variant="link"
                   className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                   width="full"
-                  onClick={() => setOpen(false)}
+                  onClick={handleMenuClose}
                 >
                   <span className="flex items-center gap-2">
                     <Icon icon="duplicate" /> Duplicate
@@ -232,7 +254,7 @@ const ConditionalActionsDropdown = () => {
                   variant="secondary"
                   className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
                   width="full"
-                  onClick={() => setOpen(false)}
+                  onClick={handleMenuClose}
                 >
                   Close
                 </Button>
@@ -252,6 +274,15 @@ const ConditionalActionsDropdown = () => {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <When truthy={isRelinkQrDialogOpen}>
+        <RelinkQrCodeDialog
+          open={isRelinkQrDialogOpen}
+          onClose={() => {
+            setIsRelinkQrDialogOpen(false);
+          }}
+        />
+      </When>
     </>
   );
 };

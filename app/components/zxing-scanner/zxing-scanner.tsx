@@ -11,6 +11,7 @@ import type { loader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { isQrId } from "~/utils/id";
+import { tw } from "~/utils/tw";
 import {
   Select,
   SelectContent,
@@ -27,6 +28,10 @@ type ZXingScannerProps = {
   isLoading?: boolean;
   backButtonText?: string;
   allowNonShelfCodes?: boolean;
+  hideBackButtonText?: boolean;
+  className?: string;
+  overlayClassName?: string;
+  paused?: boolean;
 };
 
 export const ZXingScanner = ({
@@ -35,6 +40,10 @@ export const ZXingScanner = ({
   isLoading: incomingIsLoading,
   backButtonText = "Back",
   allowNonShelfCodes = false,
+  hideBackButtonText = false,
+  className,
+  overlayClassName,
+  paused = false,
 }: ZXingScannerProps) => {
   const { scannerCameraId } = useLoaderData<typeof loader>();
 
@@ -88,6 +97,7 @@ export const ZXingScanner = ({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
     timeBetweenDecodingAttempts: 5,
+    paused,
     onDecodeResult(result) {
       void decodeQRCodes(result.getText());
     },
@@ -102,7 +112,12 @@ export const ZXingScanner = ({
   });
 
   return (
-    <div className="relative size-full min-h-[400px] overflow-hidden">
+    <div
+      className={tw(
+        "relative size-full min-h-[400px] overflow-hidden",
+        className
+      )}
+    >
       {isSwitchingCamera ? (
         <div className="mt-4 flex flex-col items-center justify-center">
           <Spinner /> Switching cameras...
@@ -111,13 +126,15 @@ export const ZXingScanner = ({
         <>
           <div className="absolute inset-x-0 top-0 z-10 flex w-full items-center justify-between bg-transparent  text-white">
             <div>
-              <Link
-                to=".."
-                className="inline-flex items-center justify-start p-2 text-[11px] leading-[11px] text-white"
-              >
-                <TriangleLeftIcon className="size-[14px]" />{" "}
-                <span className="mt-[-0.5px]">{backButtonText}</span>
-              </Link>
+              {!hideBackButtonText ? (
+                <Link
+                  to=".."
+                  className="inline-flex items-center justify-start p-2 text-[11px] leading-[11px] text-white"
+                >
+                  <TriangleLeftIcon className="size-[14px]" />{" "}
+                  <span className="mt-[-0.5px]">{backButtonText}</span>
+                </Link>
+              ) : null}
             </div>
             <div>
               <fetcher.Form
@@ -170,7 +187,18 @@ export const ZXingScanner = ({
           />
 
           {/* Overlay */}
-          <div className="absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2  rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]" />
+          <div
+            className={tw(
+              "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2  rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]",
+              overlayClassName
+            )}
+          >
+            {paused && (
+              <div className="flex h-full flex-col items-center justify-center text-center">
+                <h5>Scanner paused</h5>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>
