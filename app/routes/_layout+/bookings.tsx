@@ -193,6 +193,7 @@ export default function BookingsIndexPage({
     "bookings.new",
     "$assetId.bookings",
     "$userId.bookings",
+    "bookings.update-existing",
   ];
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);

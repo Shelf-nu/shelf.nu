@@ -38,10 +38,15 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
   }),
+  BasicModelFilters.extend({
+    name: z.literal("booking"),
+    // status: z.union([z.string(), z.array(z.string())]).optional(),
+  }),
 ]);
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
 export type ModelFilters = z.infer<typeof ModelFiltersSchema>;
+
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -55,6 +60,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
+    console.log(" url.searchParams===>",  url.searchParams);
     const searchParams: Record<string, any> = {};
     for (const [key, value] of url.searchParams.entries()) {
       if (value === "null") {
@@ -68,10 +74,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { name, queryKey, queryValue, selectedValues, ...filters } =
       parseData(searchParams, ModelFiltersSchema);
 
-    const where: Record<string, any> = {
+    let where: Record<string, any> = {
       organizationId,
       OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
     };
+
+    const genericKeys = ['deletedAt'];
+
+    const customFilters = {} as Record<string, any>;
+    const genericFilters = {} as Record<string, any>;
+    for (const [key, value] of Object.entries(filters)) {
+      if (!genericKeys.includes(key)) {
+        customFilters[key] = value;
+      }else {
+        genericFilters[key] = value;
+      }
+    }
 
     /**
      * When searching for teamMember, we have to search for
@@ -91,8 +109,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    if(customFilters) {
+      where = {
+        ...where,
+        ...customFilters
+      }
+    }
     const queryData = (await db[name].dynamicFindMany({
-      where: { ...where, ...filters },
+      where: { ...where, ...genericFilters },
       include:
         /** We need user's information to resolve teamMember's name */
         name === "teamMember"
