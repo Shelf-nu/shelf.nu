@@ -98,12 +98,12 @@ export const assetIndexFields = ({
         custodian: {
           select: {
             name: true,
+            userId: true,
             user: {
               select: {
                 firstName: true,
                 lastName: true,
                 profilePicture: true,
-                email: true,
               },
             },
           },

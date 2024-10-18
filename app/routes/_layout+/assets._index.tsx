@@ -269,7 +269,12 @@ export const AssetsList = ({
   const isSwappingMode = modeFetcher?.formData;
 
   const columns = useAssetIndexColumns();
-  const { roles } = useUserRoleHelper();
+  const { roles, isBase } = useUserRoleHelper();
+
+  const searchParams: string[] = ["category", "tag", "location"];
+  if (!disableTeamMemberFilter) {
+    searchParams.push("teamMember");
+  }
 
   const headerChildren = modeIsSimple ? (
     <>
@@ -317,7 +322,9 @@ export const AssetsList = ({
         navigate={
           modeIsSimple ? (itemId) => navigate(`/assets/${itemId}`) : undefined
         }
-        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
+        bulkActions={
+          disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
+        }
         customEmptyStateContent={
           customEmptyState ? customEmptyState : undefined
         }

@@ -69,6 +69,7 @@ export async function simpleModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
   /** Parse filters */
   const {
@@ -112,10 +113,12 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
+      isSelfService,
+      userId,
     }),
   ]);
 
-  if (role === OrganizationRoles.SELF_SERVICE) {
+  if (isSelfService) {
     /**
      * For self service users we dont return the assets that are not available to book
      */

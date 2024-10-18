@@ -467,7 +467,9 @@ export default function AssetOverview() {
                     )}
                     target="_blank"
                   >
-                    {asset.kit.name}
+                    <div className="max-w-[250px] truncate">
+                      {asset.kit.name}
+                    </div>
                   </Button>
                 </div>
               </div>

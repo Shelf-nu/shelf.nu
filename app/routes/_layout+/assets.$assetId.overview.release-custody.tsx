@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -6,6 +7,7 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -33,7 +35,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
 
     const custody = await db.custody
@@ -111,14 +113,37 @@ export const action = async ({
   });
 
   try {
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      action: PermissionAction.custody,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const user = await getUserByID(userId);
+
+    if (isSelfService) {
+      const custody = await db.custody.findUnique({
+        where: { assetId },
+        select: {
+          custodian: {
+            select: { id: true, userId: true },
+          },
+        },
+      });
+
+      if (custody?.custodian?.userId !== user.id) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message:
+            "Self service user can only release custody of assets assigned to their user.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      }
+    }
 
     const asset = await releaseCustody({ assetId });
 
@@ -136,9 +161,9 @@ export const action = async ({
 
       /** Once the asset is updated, we create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${
-          user.lastName
-        }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
+        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
+          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
+        } custody over **${asset.title?.trim()}**`,
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
@@ -167,6 +192,9 @@ export default function Custody() {
   const { custody, asset } = useLoaderData<typeof loader>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+
+  const { isSelfService } = useUserRoleHelper();
+
   return (
     <>
       <div className="modal-content-wrapper">
@@ -177,9 +205,13 @@ export default function Custody() {
           <h4>Release custody of asset</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">
-              {resolveTeamMemberName(custody?.custodian)}’s
-            </span>{" "}
+            {isSelfService ? (
+              "your"
+            ) : (
+              <span className="font-medium">
+                {resolveTeamMemberName(custody?.custodian)}'s'
+              </span>
+            )}{" "}
             custody over <span className="font-medium">{asset.title}</span>?
           </p>
         </div>
