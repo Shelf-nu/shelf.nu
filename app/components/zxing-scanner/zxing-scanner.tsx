@@ -192,7 +192,13 @@ export const ZXingScanner = ({
               "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2  rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]",
               overlayClassName
             )}
-          />
+          >
+            {paused && (
+              <div className="flex h-full flex-col items-center justify-center text-center">
+                <h5>Scanner paused</h5>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

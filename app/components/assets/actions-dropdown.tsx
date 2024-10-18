@@ -190,13 +190,27 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               </DropdownMenuItem>
 
-              <DropdownMenuItem
-                className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
-              >
+              <DropdownMenuItem className={tw("border-b px-4 py-1 md:p-0")}>
                 <UpdateGpsCoordinatesForm
                   // Closes the dropdown when the button is clicked
                   callback={handleMenuClose}
                 />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="mb-1.5 border-b px-4 py-1 md:p-0">
+                <Button
+                  role="button"
+                  variant="link"
+                  className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                  onClick={() => {
+                    handleMenuClose();
+                    setIsRelinkQrDialogOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="barcode" />
+                    Relink QR Code
+                  </span>
+                </Button>
               </DropdownMenuItem>
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
