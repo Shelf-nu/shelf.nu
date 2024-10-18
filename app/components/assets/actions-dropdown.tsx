@@ -11,13 +11,13 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
+import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
+import type { Link } from "~/utils/booking-drop-down-actions";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import type { Link } from "~/utils/booking-drop-down-actions";
-import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
@@ -306,7 +306,7 @@ export const BookActionsDropDown = () => {
       id: asset.id,
       disabled,
       label: "Create new booking",
-      icon: "plus",
+      icon: "bookings",
       disabled_reason: reason,
       to: `/bookings/new?assetId=${asset.id}`,
     },
@@ -314,7 +314,7 @@ export const BookActionsDropDown = () => {
       indexType: "asset",
       id: asset.id,
       label: "Add to existing booking",
-      icon: "plus",
+      icon: "book-existing",
       disabled,
       disabled_reason: reason,
       to: `/bookings/update-existing?tab=assets&id=${asset.id}`,

@@ -1,6 +1,6 @@
+import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { useHydrated } from "remix-utils/use-hydrated";
 import Icon from "~/components/icons/icon";
-import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -67,7 +67,7 @@ const ConditionalBookActionsDropdown = ({
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className={`${indexType}-actions hidden sm:flex`}
+          className={`asset-actions hidden sm:flex`}
           onClick={() => setOpen(true)}
           asChild
         >
@@ -75,9 +75,10 @@ const ConditionalBookActionsDropdown = ({
             variant="primary"
             data-test-id={`${indexType}bookActionsButton`}
             disabled={disabled_reason}
+            icon="bookings"
           >
             <span className="flex items-center gap-2">
-              Book {indexType} <ChevronRight className="chev" />
+              Book {indexType} <ChevronRightIcon className="chev" />
             </span>
           </Button>
         </DropdownMenuTrigger>
@@ -90,10 +91,11 @@ const ConditionalBookActionsDropdown = ({
           onClick={() => {
             setOpen(true);
           }}
+          icon="bookings"
           disabled={disabled_reason}
         >
           <span className="flex items-center gap-2">
-            Book {indexType} <ChevronRight className="chev" />
+            Book {indexType} <ChevronRightIcon className="chev" />
           </span>
         </Button>
 
@@ -176,10 +178,11 @@ export const BookActionsDropDown = ({
         variant="primary"
         to="#"
         data-test-id={`${indexType}bookActionsButton`}
+        icon="bookings"
       >
         <div className="flex items-center gap-2">
           <span>Book {indexType}</span>{" "}
-          <ChevronRight className="chev rotate-90" />
+          <ChevronRightIcon className="chev rotate-90" />
         </div>
       </Button>
     );

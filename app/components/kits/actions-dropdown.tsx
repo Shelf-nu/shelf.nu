@@ -5,13 +5,13 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
+import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
+import type { Link } from "~/utils/booking-drop-down-actions";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import type { Link } from "~/utils/booking-drop-down-actions";
-import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
 import { tw } from "~/utils/tw";
 import DeleteKit from "./delete-kit";
 import Icon from "../icons/icon";
@@ -257,7 +257,7 @@ export const BookActionsDropDown = () => {
       id: kit.id,
       disabled,
       label: "Create new booking",
-      icon: "plus",
+      icon: "bookings",
       disabled_reason: reason,
       to: `/bookings/new?${kit.assets.map((a) => `assetId=${a.id}`).join("&")}`,
     },
@@ -265,7 +265,7 @@ export const BookActionsDropDown = () => {
       indexType: "kit",
       id: kit.id,
       label: "Add to existing booking",
-      icon: "plus",
+      icon: "book-existing",
       disabled,
       disabled_reason: reason,
       to: `/bookings/update-existing?tab=kits&id=${kit.id}`,

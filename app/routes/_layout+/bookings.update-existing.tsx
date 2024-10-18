@@ -2,9 +2,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
+import styles from "~/components/booking/styles.update-existing.css?url";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { PenIcon } from "~/components/icons/library";
+import { BookingExistIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
@@ -13,7 +14,6 @@ import { getBookings, upsertBooking } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
-import styles from "~/styles/layout/custom-modal.css?url";
 import {
   getClientHint,
   getDateTimeFormat,
@@ -31,7 +31,6 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
-import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -43,38 +42,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      });
-
-    if (isPersonalOrg(currentOrganization)) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not allowed",
-        message:
-          "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-    /**
-     * We need to fetch the team members to be able to display them in the custodian dropdown.
-     */
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        deletedAt: null,
-        organizationId,
-      },
-      include: {
-        user: true,
-      },
-      orderBy: {
-        userId: "asc",
-      },
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
     });
 
     const searchParams = getCurrentSearchParams(request);
@@ -86,7 +58,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       perPage,
       search,
       userId: authSession?.userId,
-      // If status is in the params, we filter based on it
       statuses: ["DRAFT", "RESERVED"],
       ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
@@ -106,18 +77,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     const hints = getClientHint(request);
-    const selfServiceOrBaseUser = isSelfServiceOrBase
-      ? teamMembers.find((member) => member.userId === authSession.userId)
-      : undefined;
-
-    if (isSelfServiceOrBase && !selfServiceOrBaseUser) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "Seems like something is wrong with your user. Please contact support to get this resolved. Make sure to include the trace id seen below.",
-        label: "Booking",
-      });
-    }
 
     const items = bookings.map((b) => {
       if (b.from && b.to) {
@@ -415,107 +374,100 @@ export default function ExistingBooking() {
   }
 
   return (
-    <>
-      <Form method="post">
-        <div className="modal-content-wrapper">
-          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-            <PenIcon />
-          </div>
-          <div className="mb-5">
-            <h3>Add to Existing Booking</h3>
-            <p>You can only add an asset to bookings that</p>
-            <p>are in Draft or Reserved State.</p>
-          </div>
-          {tab === "assets" &&
-            ids?.map((item, i) => (
-              <input
-                key={item}
-                type="hidden"
-                name={`assetIds[${i}]`}
-                value={item}
-              />
-            ))}
-          {tab === "kits" &&
-            ids?.map((kitId, i) => (
-              <input
-                key={kitId}
-                type="hidden"
-                name={`kitIds[${i}]`}
-                value={kitId}
-              />
-            ))}
-          <input key="tab" type="hidden" name="tab" value={tab} />
-
-          <div className=" relative z-50 mb-2">
-            <DynamicSelect
-              model={{
-                name: "booking",
-                queryKey: "name",
-                // we can achieve it using this also. currently it is accepting only one status value.
-                // status: ['DRAFT', 'RESERVED']
-              }}
-              fieldName="bookingId"
-              contentLabel=" Existing Bookings"
-              initialDataKey="bookings"
-              countKey="bookingCount"
-              placeholder="Select a Booking"
-              allowClear
-              closeOnSelect
-              required={true}
-              transformItem={(item) => ({
-                ...item,
-                displayFrom: formatDate(item?.metadata?.from),
-                displayTo: formatDate(item?.metadata?.to),
-                status: item?.metadata?.status,
-              })}
-              renderItem={(item: any) =>
-                isValidBooking(item) ? (
-                  <div
-                    className="flex flex-col gap-1 text-black"
-                    key={item.id || item.name}
-                  >
-                    <h3 className="max-w-[250px] truncate">{item.name}</h3>
-                    <p>
-                      {item.displayFrom} - {item.displayTo}
-                    </p>
-                  </div>
-                ) : null
-              }
+    <Form method="post">
+      <div>
+        <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+          <BookingExistIcon />
+        </div>
+        <div className="mb-5">
+          <h3>Add to Existing Booking</h3>
+          <p>You can only add an asset to bookings that</p>
+          <p>are in Draft or Reserved State.</p>
+        </div>
+        {tab === "assets" &&
+          ids?.map((item, i) => (
+            <input
+              key={item}
+              type="hidden"
+              name={`assetIds[${i}]`}
+              value={item}
             />
-            <div className="mt-2 text-gray-500">
-              Only Draft and Reserved Bookings Shown
-            </div>
-          </div>
-          {actionData?.error && (
-            <div>
-              <div className="text-red-500">
-                {actionData?.error?.message || ""}
-              </div>
-            </div>
-          )}
+          ))}
+        {tab === "kits" &&
+          ids?.map((kitId, i) => (
+            <input
+              key={kitId}
+              type="hidden"
+              name={`kitIds[${i}]`}
+              value={kitId}
+            />
+          ))}
+        <input key="tab" type="hidden" name="tab" value={tab} />
 
-          <div className="mb-8"></div>
-          <div className="flex gap-3">
-            <Button
-              to=".."
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              width="full"
-              name="intent"
-              type={`Add${tab}`}
-              disabled={disabled}
-            >
-              Confirm
-            </Button>
+        <div className=" relative z-50 mb-2">
+          <DynamicSelect
+            model={{
+              name: "booking",
+              queryKey: "name",
+              // we can achieve it using this also. currently it is accepting only one status value.
+              // status: ['DRAFT', 'RESERVED']
+            }}
+            fieldName="bookingId"
+            contentLabel=" Existing Bookings"
+            initialDataKey="bookings"
+            countKey="bookingCount"
+            placeholder="Select a Booking"
+            allowClear
+            closeOnSelect
+            required={true}
+            transformItem={(item) => ({
+              ...item,
+              displayFrom: formatDate(item?.metadata?.from),
+              displayTo: formatDate(item?.metadata?.to),
+              status: item?.metadata?.status,
+            })}
+            renderItem={(item: any) =>
+              isValidBooking(item) ? (
+                <div
+                  className="flex flex-col items-start gap-1 text-black"
+                  key={item.id || item.name}
+                >
+                  <h3 className="max-w-[250px] truncate">{item.name}</h3>
+                  <p>
+                    {item.displayFrom} - {item.displayTo}
+                  </p>
+                </div>
+              ) : null
+            }
+          />
+          <div className="mt-2 text-gray-500">
+            Only Draft and Reserved Bookings Shown
           </div>
         </div>
-      </Form>
-    </>
+        {actionData?.error && (
+          <div>
+            <div className="text-red-500">
+              {actionData?.error?.message || ""}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-8"></div>
+        <div className="flex gap-3">
+          <Button to=".." variant="secondary" width="full" disabled={disabled}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            width="full"
+            name="intent"
+            type={`Add${tab}`}
+            disabled={disabled}
+          >
+            Confirm
+          </Button>
+        </div>
+      </div>
+    </Form>
   );
 }
