@@ -31,6 +31,7 @@ type ZXingScannerProps = {
   hideBackButtonText?: boolean;
   className?: string;
   overlayClassName?: string;
+  paused?: boolean;
 };
 
 export const ZXingScanner = ({
@@ -42,6 +43,7 @@ export const ZXingScanner = ({
   hideBackButtonText = false,
   className,
   overlayClassName,
+  paused = false,
 }: ZXingScannerProps) => {
   const { scannerCameraId } = useLoaderData<typeof loader>();
 
@@ -95,6 +97,7 @@ export const ZXingScanner = ({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
     timeBetweenDecodingAttempts: 5,
+    paused,
     onDecodeResult(result) {
       void decodeQRCodes(result.getText());
     },

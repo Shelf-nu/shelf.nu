@@ -36,11 +36,13 @@ export default function RelinkQrCodeDialog({
 
   const [currentState, setCurrentState] = useState<CurrentState>("initial");
   const [newQrId, setNewQrId] = useState<string>();
+  const [errorMessage, setErrorMessage] = useState("");
 
   const navigation = useNavigation();
   const isSubmitting = isFormProcessing(navigation.state);
 
   const qrCode = asset.qrCodes[0];
+  const isNewCodeSameAsCurrent = qrCode?.id === newQrId;
 
   function handleQrDetectionSuccess(qrId: string) {
     setNewQrId(qrId);
@@ -49,6 +51,7 @@ export default function RelinkQrCodeDialog({
   const handleClose = useCallback(() => {
     setNewQrId(undefined);
     setCurrentState("initial");
+    setErrorMessage("");
     onClose();
   }, [onClose]);
 
@@ -59,6 +62,15 @@ export default function RelinkQrCodeDialog({
       }
     },
     [actionData, handleClose]
+  );
+
+  useEffect(
+    function showActionError() {
+      if (actionData?.error) {
+        setErrorMessage(actionData.error.message);
+      }
+    },
+    [actionData?.error]
   );
 
   return (
@@ -93,6 +105,7 @@ export default function RelinkQrCodeDialog({
                 onQrDetectionSuccess={handleQrDetectionSuccess}
                 allowNonShelfCodes
                 hideBackButtonText
+                paused={!!newQrId}
               />
             ) : (
               <div className="mt-4 flex h-full flex-col items-center justify-center">
@@ -118,6 +131,13 @@ export default function RelinkQrCodeDialog({
               </div>
             </div>
 
+            <When truthy={isNewCodeSameAsCurrent}>
+              <p className="mt-4 px-8 text-center text-sm text-error-500">
+                The new code you scanned is the same as the current code of the
+                asset. Please scan a different code.
+              </p>
+            </When>
+
             <div className="flex items-center gap-4 p-4">
               <Button
                 className="flex-1"
@@ -131,7 +151,7 @@ export default function RelinkQrCodeDialog({
               </Button>
               <Button
                 className="flex-1"
-                disabled={!newQrId}
+                disabled={!newQrId || isNewCodeSameAsCurrent}
                 onClick={() => {
                   setCurrentState("qr-selected");
                 }}
@@ -161,7 +181,7 @@ export default function RelinkQrCodeDialog({
                 <p className="font-medium">{qrCode ? qrCode.id : "N/A"}</p>
               </div>
             </div>
-            <div className="mb-8 flex items-center gap-2.5 rounded border border-gray-200 p-2">
+            <div className="flex items-center gap-2.5 rounded border border-gray-200 p-2">
               <div className="flex items-center justify-center rounded-lg border border-gray-200 p-2.5">
                 <ArrowRightIcon />
               </div>
@@ -171,14 +191,24 @@ export default function RelinkQrCodeDialog({
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <When truthy={!!errorMessage}>
+              <p className="mt-4 px-8 text-center text-sm text-error-500">
+                {errorMessage}
+              </p>
+            </When>
+
+            <div className="mt-8 flex items-center gap-3">
               <Button
                 className="flex-1"
                 variant="secondary"
-                onClick={handleClose}
                 disabled={isSubmitting}
+                onClick={() => {
+                  setNewQrId(undefined);
+                  setCurrentState("initial");
+                  setErrorMessage("");
+                }}
               >
-                Cancel
+                Rescan
               </Button>
               <Form method="post" className="flex-1">
                 <input type="hidden" value={newQrId} name="newQrId" />
@@ -195,10 +225,6 @@ export default function RelinkQrCodeDialog({
             </div>
           </div>
         </When>
-
-        {actionData?.error ? (
-          <p className="p-6 text-error-500">{actionData.error.message}</p>
-        ) : null}
       </Dialog>
     </DialogPortal>
   );
