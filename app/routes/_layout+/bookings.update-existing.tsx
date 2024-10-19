@@ -272,7 +272,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           if (!val && val === "") {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: "Please select a custodian",
+              message: "Invalid operation. Please contact support.",
             });
             return z.NEVER;
           }
