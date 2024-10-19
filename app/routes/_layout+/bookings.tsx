@@ -207,8 +207,12 @@ export default function BookingsIndexPage({
     "$userId.bookings",
   ].includes(currentRoute?.handle?.name);
 
+  const isBookingUpdateExisting = currentRoute?.handle?.name ===
+    "bookings.update-existing";
+
   return shouldRenderIndex ? (
-    <>
+    //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
+    <div className={`${isBookingUpdateExisting ? "booking-update-existing-wrapper" : ""}`}>
       {!isChildBookingsPage ? (
         <Header>
           <Button
@@ -251,7 +255,7 @@ export default function BookingsIndexPage({
         />
       </ListContentWrapper>
       <ContextualModal />
-    </>
+    </div>
   ) : (
     <Outlet />
   );
