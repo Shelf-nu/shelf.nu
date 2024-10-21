@@ -1,8 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
-import type { Link } from "~/utils/booking-drop-down-actions";
-
+import type { CustomLink } from "../shared/actions-drop-down";
+import { ActionsDropDown } from "../shared/actions-drop-down";
 import { Button } from "../shared/button";
 
 export default function BookingActionsDropDown() {
@@ -47,11 +46,16 @@ export default function BookingActionsDropDown() {
       disabledReason: reason,
       to: `/bookings/update-existing?indexType=assets&id=${asset.id}`,
     },
-  ] as Link[];
+  ] as CustomLink[];
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalBookActionsDropdown links={links} indexType={"Asset"} />
+      <ActionsDropDown
+        links={links}
+        key={"asset"}
+        label={"Book Asset"}
+        disabledReason={reason}
+      />
     </div>
   );
 }

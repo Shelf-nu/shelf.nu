@@ -11,9 +11,9 @@ import {
 } from "~/components/shared/dropdown";
 import type { IconType } from "~/components/shared/icons-map";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { tw } from "./tw";
+import { tw } from "~/utils/tw";
 
-export interface Link {
+export interface CustomLink {
   role?: string;
   variant?: string;
   label: string;
@@ -23,7 +23,7 @@ export interface Link {
   disabled?: boolean;
   icon: IconType;
   testId: string;
-  disabledReason:
+  disabledReason?:
     | boolean
     | {
         title?: string;
@@ -32,12 +32,18 @@ export interface Link {
     | undefined;
 }
 
-const ConditionalBookActionsDropdown = ({
+const ConditionalActionsDropdown = ({
   links,
-  indexType,
+  disabledReason,
+  label,
+  key,
 }: {
-  links: Link[];
-  indexType: string;
+  links: CustomLink[];
+  disabledReason?:
+    | boolean
+    | { title?: string; reason: React.ReactNode | string };
+  label: string;
+  key: string;
 }) => {
   const {
     ref: dropdownRef,
@@ -46,8 +52,6 @@ const ConditionalBookActionsDropdown = ({
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
-
-  const disabledReason = links.find((link) => link.disabled)?.disabledReason;
 
   return (
     <>
@@ -73,12 +77,12 @@ const ConditionalBookActionsDropdown = ({
         >
           <Button
             variant="primary"
-            data-test-id={`${indexType}bookActionsButton`}
+            data-test-id={`${key}bookActionsButton`}
             disabled={disabledReason}
             icon="bookings"
           >
             <span className="flex items-center gap-2">
-              Book {indexType} <ChevronRightIcon className="chev" />
+              {label} <ChevronRightIcon className="chev" />
             </span>
           </Button>
         </DropdownMenuTrigger>
@@ -86,7 +90,7 @@ const ConditionalBookActionsDropdown = ({
         {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="primary"
-          data-test-id={`${indexType}bookActionsButton`}
+          data-test-id={`${key}bookActionsButton`}
           className="asset-actions sm:hidden"
           onClick={() => {
             setOpen(true);
@@ -95,7 +99,7 @@ const ConditionalBookActionsDropdown = ({
           disabled={disabledReason}
         >
           <span className="flex items-center gap-2">
-            Book {indexType} <ChevronRightIcon className="chev" />
+            {label} <ChevronRightIcon className="chev" />
           </span>
         </Button>
 
@@ -122,7 +126,7 @@ const ConditionalBookActionsDropdown = ({
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             {links &&
-              links.map((link: Link) => (
+              links.map((link: CustomLink) => (
                 <DropdownMenuItem
                   key={link.label}
                   className={tw("px-4 py-1 md:p-0")}
@@ -163,12 +167,18 @@ const ConditionalBookActionsDropdown = ({
   );
 };
 
-export const BookActionsDropDown = ({
+export const ActionsDropDown = ({
   links,
-  indexType,
+  disabledReason,
+  label,
+  key,
 }: {
-  links: Link[];
-  indexType: string;
+  links: CustomLink[];
+  disabledReason?:
+    | boolean
+    | { title?: string; reason: React.ReactNode | string };
+  label: string;
+  key: string;
 }) => {
   const isHydrated = useHydrated();
 
@@ -177,19 +187,23 @@ export const BookActionsDropDown = ({
       <Button
         variant="primary"
         to="#"
-        data-test-id={`${indexType}bookActionsButton`}
+        data-test-id={`${key}bookActionsButton`}
         icon="bookings"
       >
         <div className="flex items-center gap-2">
-          <span>Book {indexType}</span>{" "}
-          <ChevronRightIcon className="chev rotate-90" />
+          <span>{label}</span> <ChevronRightIcon className="chev rotate-90" />
         </div>
       </Button>
     );
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalBookActionsDropdown links={links} indexType={indexType} />
+      <ConditionalActionsDropdown
+        links={links}
+        label={label}
+        key={key}
+        disabledReason={disabledReason}
+      />
     </div>
   );
 };

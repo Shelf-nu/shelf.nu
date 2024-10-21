@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
+import { ActionsDropDown } from "~/components/shared/actions-drop-down";
+import type { CustomLink } from "~/components/shared/actions-drop-down";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
-import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
-import type { Link } from "~/utils/booking-drop-down-actions";
 
 export default function BookingActionsDropDown() {
   const { kit } = useLoaderData<typeof loader>();
@@ -41,11 +41,16 @@ export default function BookingActionsDropDown() {
       disabledReason: reason,
       to: `/bookings/update-existing?indexType=kits&id=${kit.id}`,
     },
-  ] as Link[];
+  ] as CustomLink[];
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalBookActionsDropdown links={links} indexType={"Kit"} />
+      <ActionsDropDown
+        links={links}
+        key={"Kit"}
+        label={"Book Kit"}
+        disabledReason={reason}
+      />
     </div>
   );
 }
