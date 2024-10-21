@@ -1156,3 +1156,31 @@ export async function updateKitQrCode({
     });
   }
 }
+export async function getAvailableKitAssetForBooking(
+  kitIds: Kit["id"][]
+): Promise<string[]> {
+  try {
+    const selectedKits = await db.kit.findMany({
+      where: { id: { in: kitIds } },
+      select: { assets: { select: { id: true, status: true } } },
+    });
+
+    const allAssets = selectedKits.flatMap((kit) => kit.assets);
+
+    if (allAssets.some((asset) => asset.status === "CHECKED_OUT")) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "One or more assets are already checked out in the kit, so they cannot be added to the booking.",
+        label: "Booking",
+      });
+    }
+    return allAssets.map((asset) => asset.id);
+  } catch (cause) {
+    throw new ShelfError({
+      cause: cause,
+      message: "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
+}

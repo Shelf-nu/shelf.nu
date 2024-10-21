@@ -11,8 +11,6 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import { BookActionsDropDown as ConditionalBookActionsDropdown } from "~/utils/booking-drop-down-actions";
-import type { Link } from "~/utils/booking-drop-down-actions";
 import {
   PermissionAction,
   PermissionEntity,
@@ -273,57 +271,6 @@ const ActionsDropdown = () => {
   return (
     <div className="actions-dropdown flex">
       <ConditionalActionsDropdown />
-    </div>
-  );
-};
-
-export const BookActionsDropDown = () => {
-  const { asset } = useLoaderData<typeof loader>();
-  const assetIsCheckedOut = asset.status === "CHECKED_OUT";
-  const assetIsPartOfUnavailableKit = Boolean(
-    asset.kit && asset.kit.status !== "AVAILABLE"
-  );
-
-  const reason = asset.kit
-    ? {
-        reason: (
-          <>
-            Cannot book this asset directly because it's part of a kit. Please
-            book the{" "}
-            <Button to={`/kits/${asset.kit.id}`} target="_blank" variant="link">
-              kit
-            </Button>{" "}
-            instead.
-          </>
-        ),
-      }
-    : false;
-  const disabled =
-    assetIsCheckedOut || assetIsPartOfUnavailableKit || asset.kit;
-  const links = [
-    {
-      indexType: "asset",
-      id: asset.id,
-      disabled,
-      label: "Create new booking",
-      icon: "bookings",
-      disabled_reason: reason,
-      to: `/bookings/new?assetId=${asset.id}`,
-    },
-    {
-      indexType: "asset",
-      id: asset.id,
-      label: "Add to existing booking",
-      icon: "book-existing",
-      disabled,
-      disabled_reason: reason,
-      to: `/bookings/update-existing?tab=assets&id=${asset.id}`,
-    },
-  ] as Link[];
-
-  return (
-    <div className="actions-dropdown flex">
-      <ConditionalBookActionsDropdown links={links} indexType={"Asset"} />
     </div>
   );
 };

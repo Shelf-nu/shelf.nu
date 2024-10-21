@@ -12,10 +12,9 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import ActionsDropdown, {
-  BookActionsDropDown,
-} from "~/components/kits/actions-dropdown";
+import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
+import BookingActionsDropDown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -388,7 +387,7 @@ export default function KitDetails() {
         >
           <ActionsDropdown />
         </When>
-        <BookActionsDropDown />
+        <BookingActionsDropDown />
       </Header>
 
       <ContextualModal />

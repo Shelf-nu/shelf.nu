@@ -8,11 +8,10 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
-import ActionsDropdown, {
-  BookActionsDropDown,
-} from "~/components/assets/actions-dropdown";
+import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import BookingActionsDropDown from "~/components/assets/booking-actions-dropdown";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -221,7 +220,7 @@ export default function AssetDetailsPage() {
         >
           <ActionsDropdown />
         </When>
-        <BookActionsDropDown />
+        <BookingActionsDropDown />
       </Header>
       <HorizontalTabs items={items} />
       <div>

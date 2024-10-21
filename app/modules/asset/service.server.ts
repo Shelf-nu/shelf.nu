@@ -2757,3 +2757,27 @@ export async function bulkMarkAvailability({
     });
   }
 }
+export async function getAvailableAssetsForBooking(
+  assetIds: Asset["id"][]
+): Promise<string[]> {
+  try {
+    const selectedAssets = await db.asset.findMany({
+      where: { id: { in: assetIds }, status: "AVAILABLE" },
+      select: { status: true, id: true, kit: true },
+    });
+    if (selectedAssets.some((asset) => asset.kit)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add assets that belong to a kit.",
+        label: "Booking",
+      });
+    }
+    return selectedAssets.map((asset) => asset.id);
+  } catch (err) {
+    throw new ShelfError({
+      cause: err,
+      message: "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
+}

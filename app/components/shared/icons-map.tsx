@@ -106,7 +106,7 @@ export type IconType =
   | "rows"
   | "available"
   | "unavailable"
-  | "book-existing";
+  | "booking-exist";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -165,7 +165,7 @@ export const iconsMap: IconsMap = {
   rows: <RowsIcon />,
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
-  "book-existing": <BookingExistIcon />,
+  "booking-exist": <BookingExistIcon />,
 };
 
 export default iconsMap;

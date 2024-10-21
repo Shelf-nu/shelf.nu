@@ -8,9 +8,14 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { BookingExistIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
+import { getAvailableAssetsForBooking } from "~/modules/asset/service.server";
 
-import { getBookings, upsertBooking } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  getExistingBookingDetails,
+  upsertBooking,
+} from "~/modules/booking/service.server";
+import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -36,6 +41,33 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { intersected } from "~/utils/utils";
+
+const updateBookingSchema = z.object({
+  assetIds: z.array(z.string()).optional(),
+  bookingId: z.string().transform((val, ctx) => {
+    if (!val && val === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Please select a custodian",
+      });
+      return z.NEVER;
+    }
+    return val;
+  }),
+  indexType: z.string().transform((val, ctx) => {
+    if (!val && val === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid operation. Please contact support.",
+      });
+      return z.NEVER;
+    }
+    return val;
+  }),
+  kitIds: z.array(z.string()).optional(),
+});
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
   const ids = searchParams.getAll("id");
@@ -50,7 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, search, tab } = getParamsValues(searchParams);
+    const { page, search, indexType } = getParamsValues(searchParams);
     const perPage = 20;
     const { bookings, bookingCount } = await getBookings({
       organizationId,
@@ -117,7 +149,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ids: ids.length ? ids : undefined,
-        tab,
+        indexType,
         hints,
       }),
       {
@@ -132,113 +164,60 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
-const getBookingDetails = async (
-  bookingId: string
-): Promise<{ id: string; status: string; assets: { id: string }[] } | null> => {
-  const booking = await db.booking.findFirst({
-    where: { id: bookingId },
-    select: { id: true, status: true, assets: { select: { id: true } } },
-  });
-
-  if (!booking) {
-    throw new ShelfError({
-      cause: null,
-      message: "No booking found. Contact support.",
-      label: "Booking",
-    });
-  }
-
-  if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
-    throw new ShelfError({
-      cause: null,
-      message: "Booking is not in Draft or Reserved status.",
-      label: "Booking",
-    });
-  }
-  return booking;
-};
-
-const getKitAssets = async (kitIds: string[]): Promise<string[]> => {
-  const selectedKits = await db.kit.findMany({
-    where: { id: { in: kitIds } },
-    select: { assets: { select: { id: true, status: true } } },
-  });
-
-  const allAssets = selectedKits.flatMap((kit) => kit.assets);
-
-  if (allAssets.some((asset) => asset.status === "CHECKED_OUT")) {
-    throw new Error(
-      "One or more assets are already checked out in the kit, so they cannot be added to the booking."
-    );
-  }
-
-  return allAssets.map((asset) => asset.id);
-};
-
-const getAvailableAssets = async (assetIds: string[]): Promise<string[]> => {
-  const selectedAssets = await db.asset.findMany({
-    where: { id: { in: assetIds }, status: "AVAILABLE" },
-    select: { status: true, id: true, kit: true },
-  });
-
-  if (selectedAssets.some((asset) => asset.kit)) {
-    throw new ShelfError({
-      cause: null,
-      message: "Cannot add assets that belong to a kit.",
-      label: "Booking",
-    });
-  }
-
-  return selectedAssets.map((asset) => asset.id);
-};
-
 const processBooking = async (
-  tab: string,
+  indexType: string,
   bookingId: string,
   assetIds: string[] | undefined,
   kitIds: string[] | undefined
 ) => {
-  let finalAssetIds: string[] = [];
-  let booking;
-  if (tab === "kits" && kitIds && kitIds.length > 0) {
-    const promises = [getKitAssets(kitIds), getBookingDetails(bookingId)];
-    const [assetIdsFromKits, bookingDetails] = await Promise.all(promises);
+  try {
+    let finalAssetIds: string[] = [];
+    let booking;
+    if (indexType === "kits" && kitIds && kitIds.length > 0) {
+      const promises = [
+        getAvailableKitAssetForBooking(kitIds),
+        getExistingBookingDetails(bookingId),
+      ];
+      const [assetIdsFromKits, bookingDetails] = await Promise.all(promises);
 
-    finalAssetIds = assetIdsFromKits as string[];
-    booking = bookingDetails;
-  } else if (tab === "assets" && assetIds && assetIds.length > 0) {
-    const promises = [
-      getAvailableAssets(assetIds),
-      getBookingDetails(bookingId),
-    ];
-    const [assetIdsFromAssets, bookingDetails] = await Promise.all(promises);
+      finalAssetIds = assetIdsFromKits as string[];
+      booking = bookingDetails;
+    } else if (indexType === "assets" && assetIds && assetIds.length > 0) {
+      const promises = [
+        getAvailableAssetsForBooking(assetIds),
+        getExistingBookingDetails(bookingId),
+      ];
 
-    finalAssetIds = assetIdsFromAssets as string[];
-    booking = bookingDetails;
-  } else {
+      const [assets, bookingDetails] = await Promise.all(promises);
+      finalAssetIds = assets as string[];
+      booking = bookingDetails;
+    } else {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid operation. Please contact support.",
+        label: "Booking",
+      });
+    }
+
+    if (finalAssetIds.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No assets available.",
+        label: "Booking",
+      });
+    }
+
+    return {
+      finalAssetIds,
+      bookingInfo: booking,
+    };
+  } catch (err) {
     throw new ShelfError({
-      cause: null,
-      message: "Invalid operation. Please contact support.",
+      cause: err,
+      message: "Something went wrong while processing the booking.",
       label: "Booking",
     });
   }
-
-  if (finalAssetIds.length === 0) {
-    throw new ShelfError({
-      cause: null,
-      message: "No assets available.",
-      label: "Booking",
-    });
-  }
-
-  return {
-    finalAssetIds,
-    bookingInfo: booking as {
-      id: string;
-      status: string;
-      assets: { id: string }[];
-    },
-  };
 };
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -252,34 +231,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-
     const formData = await request.formData();
-    const { assetIds, bookingId, tab, kitIds } = parseData(
+    const { assetIds, bookingId, indexType, kitIds } = parseData(
       formData,
-      z.object({
-        assetIds: z.array(z.string()).optional(),
-        bookingId: z.string().transform((val, ctx) => {
-          if (!val && val === "") {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Please select a custodian",
-            });
-            return z.NEVER;
-          }
-          return val;
-        }),
-        tab: z.string().transform((val, ctx) => {
-          if (!val && val === "") {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Invalid operation. Please contact support.",
-            });
-            return z.NEVER;
-          }
-          return val;
-        }),
-        kitIds: z.array(z.string()).optional(),
-      }),
+      updateBookingSchema,
       {
         additionalData: { userId },
         message: "Please select a Booking",
@@ -291,26 +246,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     const { finalAssetIds, bookingInfo } = await processBooking(
-      tab,
+      indexType,
       bookingId,
       assetIds,
       kitIds
     );
 
-    function intersected(arr1: string[], arr2: string[]): boolean {
-      return !!arr1.find((value) =>
-        arr2.find((innerValue) => innerValue?.toString() == value?.toString())
-      );
-    }
-
-    const bookingAssets = (bookingInfo ? bookingInfo.assets : []).map(
-      (asset) => asset.id
-    );
+    const bookingAssets = (
+      "assets" in bookingInfo ? bookingInfo.assets : []
+    ).map((asset) => asset.id);
 
     if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
       throw new ShelfError({
         cause: null,
-        message: `Booking already contains ${tab}`,
+        message: `Booking already contains ${indexType}`,
         label: "Booking",
       });
     }
@@ -355,7 +304,7 @@ export function links() {
 }
 
 export default function ExistingBooking() {
-  const { ids, tab, hints } = useLoaderData<typeof loader>();
+  const { ids, indexType, hints } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -381,10 +330,12 @@ export default function ExistingBooking() {
         </div>
         <div className="mb-5">
           <h3>Add to Existing Booking</h3>
-          <p>You can only add an asset to bookings that</p>
-          <p>are in Draft or Reserved State.</p>
+          <div>
+            You can only add an asset to bookings that are in Draft or Reserved
+            State.
+          </div>
         </div>
-        {tab === "assets" &&
+        {indexType === "assets" &&
           ids?.map((item, i) => (
             <input
               key={item}
@@ -393,7 +344,7 @@ export default function ExistingBooking() {
               value={item}
             />
           ))}
-        {tab === "kits" &&
+        {indexType === "kits" &&
           ids?.map((kitId, i) => (
             <input
               key={kitId}
@@ -402,7 +353,12 @@ export default function ExistingBooking() {
               value={kitId}
             />
           ))}
-        <input key="tab" type="hidden" name="tab" value={tab} />
+        <input
+          key="indexType"
+          type="hidden"
+          name="indexType"
+          value={indexType}
+        />
 
         <div className=" relative z-50 mb-2">
           <DynamicSelect
@@ -432,10 +388,12 @@ export default function ExistingBooking() {
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}
                 >
-                  <h3 className="max-w-[250px] truncate">{item.name}</h3>
-                  <p>
+                  <div className="semi-bold max-w-[250px] truncate text-[16px]">
+                    {item.name}
+                  </div>
+                  <div className="text-[14px]">
                     {item.displayFrom} - {item.displayTo}
-                  </p>
+                  </div>
                 </div>
               ) : null
             }
@@ -461,7 +419,7 @@ export default function ExistingBooking() {
             variant="primary"
             width="full"
             name="intent"
-            type={`Add${tab}`}
+            type={`Add${indexType}`}
             disabled={disabled}
           >
             Confirm

@@ -1536,3 +1536,36 @@ export async function addScannedAssetsToBooking({
     });
   }
 }
+
+export async function getExistingBookingDetails(bookingId: string) {
+  try {
+    const booking = await db.booking.findFirst({
+      where: { id: bookingId },
+      select: { id: true, status: true, assets: { select: { id: true } } },
+    });
+
+    if (booking === null) {
+      throw new ShelfError({
+        cause: null,
+        message: "No booking found. Contact support.",
+        label: "Booking",
+      });
+    }
+
+    if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking is not in Draft or Reserved status.",
+        label: "Booking",
+      });
+    }
+    return booking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting existing booking details.",
+      additionalData: { bookingId },
+      label: "Booking",
+    });
+  }
+}

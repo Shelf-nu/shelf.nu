@@ -23,7 +23,7 @@ export interface Link {
   disabled?: boolean;
   icon: IconType;
   testId: string;
-  disabled_reason:
+  disabledReason:
     | boolean
     | {
         title?: string;
@@ -47,7 +47,7 @@ const ConditionalBookActionsDropdown = ({
     setOpen,
   } = useControlledDropdownMenu();
 
-  const disabled_reason = links.find((link) => link.disabled)?.disabled_reason;
+  const disabledReason = links.find((link) => link.disabled)?.disabledReason;
 
   return (
     <>
@@ -74,7 +74,7 @@ const ConditionalBookActionsDropdown = ({
           <Button
             variant="primary"
             data-test-id={`${indexType}bookActionsButton`}
-            disabled={disabled_reason}
+            disabled={disabledReason}
             icon="bookings"
           >
             <span className="flex items-center gap-2">
@@ -92,7 +92,7 @@ const ConditionalBookActionsDropdown = ({
             setOpen(true);
           }}
           icon="bookings"
-          disabled={disabled_reason}
+          disabled={disabledReason}
         >
           <span className="flex items-center gap-2">
             Book {indexType} <ChevronRightIcon className="chev" />
@@ -137,7 +137,7 @@ const ConditionalBookActionsDropdown = ({
                     prefetch="none"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={link.disabled_reason}
+                    disabled={link.disabledReason}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon={link.icon} /> {link.label}
