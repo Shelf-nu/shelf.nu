@@ -1,3 +1,5 @@
+import type { CustomFieldType } from "@prisma/client";
+
 export type FilterOperator =
   | "is"
   | "isNot"
@@ -20,7 +22,8 @@ export type FilterFieldType =
   | "date"
   | "number"
   | "enum"
-  | "array";
+  | "array"
+  | "customField";
 
 export type FilterDefinition = {
   [K in FilterFieldType]: FilterOperator[];
@@ -28,7 +31,8 @@ export type FilterDefinition = {
 
 export type Filter = {
   name: string;
-  type: FilterFieldType;
+  type: FilterFieldType | "customField";
   operator: FilterOperator;
-  value: any | [any, any]; // This could be further refined based on the field type
+  value: any | [any, any];
+  fieldType?: CustomFieldType; // Add this for custom fields
 };

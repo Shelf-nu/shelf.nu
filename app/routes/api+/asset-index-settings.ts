@@ -3,6 +3,10 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import type {
+  Column,
+  ColumnLabelKey,
+} from "~/modules/asset-index-settings/helpers";
 import { generateColumnsSchema } from "~/modules/asset-index-settings/helpers";
 import {
   changeMode,
@@ -77,11 +81,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
         );
         const columnsSchema = generateColumnsSchema(customFieldsNames);
 
-        const { columns } = parseData(formData, columnsSchema);
+        const parsedData = parseData(formData, columnsSchema);
+
+        // Ensure the parsed columns match the Column type
+        const typedColumns: Column[] = parsedData.columns.map((column) => ({
+          name: column.name as ColumnLabelKey,
+          visible: column.visible,
+          position: column.position,
+          cfType: column.cfType,
+        }));
+
         await updateColumns({
           userId,
           organizationId,
-          columns,
+          columns: typedColumns,
         });
 
         sendNotification({

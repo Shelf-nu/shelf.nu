@@ -3,7 +3,8 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
-import { defaultFields, fixedFields, type Column } from "./helpers";
+import type { Column } from "./helpers";
+import { defaultFields, fixedFields } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
 const label: ErrorLabel = "Asset Index Settings";

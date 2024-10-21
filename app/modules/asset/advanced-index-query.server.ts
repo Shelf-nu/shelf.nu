@@ -1,5 +1,4 @@
-import { Prisma } from "@prisma/client";
-import type { CustomFieldType } from "@prisma/client";
+import { Prisma, CustomFieldType } from "@prisma/client";
 import type {
   Filter,
   FilterFieldType,
@@ -49,6 +48,9 @@ export function generateWhereClause(
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
         break;
+      case "customField":
+        whereClause = addCustomFieldFilter(whereClause, filter);
+        break;
       // Add other cases as needed
     }
   }
@@ -56,6 +58,96 @@ export function generateWhereClause(
   return whereClause;
 }
 
+function addCustomFieldFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter
+): Prisma.Sql {
+  const customFieldName = filter.name.slice(3); // Remove 'cf_' prefix
+
+  // Create a subquery to get the custom field value
+  const subquery = Prisma.sql`(
+    SELECT acfv.value->>'raw'
+    FROM public."AssetCustomFieldValue" acfv
+    JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
+    WHERE acfv."assetId" = a.id AND cf.name = ${customFieldName}
+  )`;
+
+  switch (filter.fieldType) {
+    case "TEXT":
+    case "MULTILINE_TEXT":
+      return addCustomFieldStringFilter(whereClause, filter, subquery);
+    case "DATE":
+      return addCustomFieldDateFilter(whereClause, filter, subquery);
+    case "BOOLEAN":
+      return addCustomFieldBooleanFilter(whereClause, filter, subquery);
+    case "OPTION":
+      return addCustomFieldOptionFilter(whereClause, filter, subquery);
+    default:
+      return whereClause;
+  }
+}
+
+function addCustomFieldStringFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  subquery: Prisma.Sql
+): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND ${subquery} = ${filter.value}`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
+    case "contains":
+      return Prisma.sql`${whereClause} AND ${subquery} ILIKE ${`%${filter.value}%`}`;
+    default:
+      return whereClause;
+  }
+}
+
+function addCustomFieldDateFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  subquery: Prisma.Sql
+): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND (${subquery})::date = ${filter.value}::date`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND (${subquery})::date != ${filter.value}::date`;
+    case "before":
+      return Prisma.sql`${whereClause} AND (${subquery})::date < ${filter.value}::date`;
+    case "after":
+      return Prisma.sql`${whereClause} AND (${subquery})::date > ${filter.value}::date`;
+    case "between":
+      const [start, end] = filter.value as [string, string];
+      return Prisma.sql`${whereClause} AND (${subquery})::date BETWEEN ${start}::date AND ${end}::date`;
+    default:
+      return whereClause;
+  }
+}
+
+function addCustomFieldBooleanFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  subquery: Prisma.Sql
+): Prisma.Sql {
+  return Prisma.sql`${whereClause} AND (${subquery})::boolean = ${filter.value}`;
+}
+
+function addCustomFieldOptionFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  subquery: Prisma.Sql
+): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND ${subquery} = ${filter.value}`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
+    default:
+      return whereClause;
+  }
+}
 function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "is":
@@ -221,20 +313,25 @@ export function parseFilters(
   const filters: Filter[] = [];
 
   searchParams.forEach((value, key) => {
-    /** If the key is not part of the columns, dont add it to filters */
-    if (columns.find((c) => c.name === key) === undefined) return;
+    const column = columns.find((c) => c.name === key);
+    if (column) {
+      const [operator, filterValue] = value.split(":");
+      const dbKey = API_TO_DB_FIELD_MAP[key] || key;
 
-    const [operator, filterValue] = value.split(":");
-    /** Here we will handle special cases. */
-    const dbKey = API_TO_DB_FIELD_MAP[key] || key;
-
-    const filter: Filter = {
-      name: dbKey,
-      type: getFilterFieldType(key),
-      operator: operator as FilterOperator,
-      value: parseFilterValue(key, operator as FilterOperator, filterValue),
-    };
-    filters.push(filter);
+      const filter: Filter = {
+        name: dbKey,
+        type: key.startsWith("cf_") ? "customField" : getFilterFieldType(key),
+        operator: operator as FilterOperator,
+        value: parseFilterValue(
+          key,
+          operator as FilterOperator,
+          filterValue,
+          columns
+        ),
+        fieldType: column.cfType,
+      };
+      filters.push(filter);
+    }
   });
 
   return filters;
@@ -246,6 +343,10 @@ export function parseFilters(
  * @returns The corresponding FilterFieldType
  */
 function getFilterFieldType(fieldName: string): FilterFieldType {
+  if (fieldName.startsWith("cf_")) {
+    return "customField";
+  }
+
   switch (fieldName) {
     case "id":
     case "title":
@@ -281,8 +382,22 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
 function parseFilterValue(
   field: string,
   operator: FilterOperator,
-  value: string
+  value: string,
+  columns: Column[]
 ): any {
+  if (field.startsWith("cf_")) {
+    const column = columns.find((c) => c.name === field);
+    if (column && column.cfType) {
+      switch (column.cfType) {
+        case CustomFieldType.BOOLEAN:
+          return value.toLowerCase() === "true";
+        case CustomFieldType.DATE:
+          return operator === "between" ? value.split(",") : value;
+        default:
+          return value;
+      }
+    }
+  }
   switch (getFilterFieldType(field)) {
     case "number":
       return operator === "between"
@@ -384,10 +499,12 @@ export function generateCustomFieldSelect(
         CASE ${cf.fieldType}
           WHEN 'DATE' THEN 
             (acfv.value->>'valueDate')::timestamp::text
-          WHEN 'NUMBER' THEN 
-            (acfv.value->>'raw')::numeric::text
           WHEN 'BOOLEAN' THEN 
             (acfv.value->>'valueBoolean')::boolean::text
+          WHEN 'MULTILINE_TEXT' THEN
+            (acfv.value->>'valueMultiLineText')::text
+          WHEN 'OPTION' THEN
+            (acfv.value->>'valueOption')::text
           ELSE
             acfv.value->>'raw'
         END

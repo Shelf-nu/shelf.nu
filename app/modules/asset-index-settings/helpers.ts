@@ -5,7 +5,6 @@ export type Column = {
   name: ColumnLabelKey;
   visible: boolean;
   position: number;
-  /** Optionally for custom fields add the type */
   cfType?: CustomFieldType;
 };
 // Define the fixed fields
@@ -63,35 +62,64 @@ export const defaultFields: Column[] = [
   { name: "custody", visible: true, position: 11 },
 ];
 
+// export const generateColumnsSchema = (customFields: string[]) => {
+//   // Combine fixed and custom fields to form ColumnLabelKey
+//   const allFields = [
+//     ...fixedFields,
+//     ...customFields.map((cf) => `cf_${cf}`),
+//   ] as const;
+
+//   // Create Zod schema for the name field based on all possible fields (ColumnLabelKey)
+//   let nameSchema: z.ZodType<ColumnLabelKey>;
+//   if (allFields.length === 1) {
+//     nameSchema = z.literal(allFields[0]); // Single field case
+//   } else if (allFields.length >= 2) {
+//     nameSchema = z.union(
+//       allFields.map((field) => z.literal(field)) as [
+//         z.ZodLiteral<ColumnLabelKey>,
+//         z.ZodLiteral<ColumnLabelKey>,
+//         ...z.ZodLiteral<ColumnLabelKey>[],
+//       ]
+//     );
+//   } else {
+//     throw new Error("There should be at least one field to validate");
+//   }
+
+//   // Create Zod schema for each column object
+//   const columnSchema = z.object({
+//     name: nameSchema, // Name must be one of the fixed or custom fields (ColumnLabelKey)
+//     visible: z
+//       .union([z.boolean(), z.string()])
+//       .transform((val) => val === "on" || val === true)
+//       .default(false),
+//     position: z.union([z.string(), z.number()]).transform(Number),
+//     cfType: z.nativeEnum(CustomFieldType).optional(),
+//   });
+
+//   // Return the final schema
+//   return z.object({
+//     intent: z.literal("changeColumns"),
+//     columns: z.array(columnSchema), // Validate columns as an array of Column objects
+//   });
+// };
+
 export const generateColumnsSchema = (customFields: string[]) => {
   // Combine fixed and custom fields to form ColumnLabelKey
   const allFields = [
     ...fixedFields,
-    ...customFields.map((cf) => `cf_${cf}`),
+    "name", // Explicitly include "name"
+    ...customFields,
   ] as const;
 
-  // Create Zod schema for the name field based on all possible fields (ColumnLabelKey)
-  let nameSchema: z.ZodType<ColumnLabelKey>;
-  if (allFields.length === 1) {
-    nameSchema = z.literal(allFields[0]); // Single field case
-  } else if (allFields.length >= 2) {
-    nameSchema = z.union(
-      allFields.map((field) => z.literal(field)) as [
-        z.ZodLiteral<ColumnLabelKey>,
-        z.ZodLiteral<ColumnLabelKey>,
-        ...z.ZodLiteral<ColumnLabelKey>[],
-      ]
-    );
-  } else {
-    throw new Error("There should be at least one field to validate");
-  }
+  // Create a union type of all possible field names
+  const nameSchema = z.enum(allFields);
 
   // Create Zod schema for each column object
   const columnSchema = z.object({
-    name: nameSchema, // Name must be one of the fixed or custom fields (ColumnLabelKey)
+    name: nameSchema,
     visible: z
-      .union([z.boolean(), z.string()])
-      .transform((val) => val === "on" || val === true)
+      .union([z.boolean(), z.literal("on")])
+      .transform((val) => val === true || val === "on")
       .default(false),
     position: z.union([z.string(), z.number()]).transform(Number),
     cfType: z.nativeEnum(CustomFieldType).optional(),
@@ -100,7 +128,7 @@ export const generateColumnsSchema = (customFields: string[]) => {
   // Return the final schema
   return z.object({
     intent: z.literal("changeColumns"),
-    columns: z.array(columnSchema), // Validate columns as an array of Column objects
+    columns: z.array(columnSchema),
   });
 };
 
