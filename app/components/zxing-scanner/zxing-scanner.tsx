@@ -2,16 +2,18 @@ import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import {
   Link,
   useFetcher,
-  useLoaderData,
   useNavigation,
+  useRouteLoaderData,
 } from "@remix-run/react";
+import Lottie from "lottie-react";
 import { useZxing } from "react-zxing";
 
-import type { loader } from "~/routes/_layout+/scanner";
+import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
+import successfullScanAnimation from "./../../lottie/success-scan.json";
 import {
   Select,
   SelectContent,
@@ -45,7 +47,9 @@ export const ZXingScanner = ({
   overlayClassName,
   paused = false,
 }: ZXingScannerProps) => {
-  const { scannerCameraId } = useLoaderData<typeof loader>();
+  const scannerCameraId = useRouteLoaderData<LayoutLoaderResponse>(
+    "routes/_layout+/_layout"
+  )?.scannerCameraId;
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -68,6 +72,11 @@ export const ZXingScanner = ({
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
       if (!match) {
+        onQrDetectionSuccess &&
+          void onQrDetectionSuccess(
+            result,
+            "Scanned code is not a valid Shelf QR code."
+          );
         return;
       }
 
@@ -194,8 +203,16 @@ export const ZXingScanner = ({
             )}
           >
             {paused && (
-              <div className="flex h-full flex-col items-center justify-center text-center">
-                <h5>Scanner paused</h5>
+              <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+                <h5>Code detected</h5>
+                <div>
+                  <Lottie
+                    animationData={successfullScanAnimation}
+                    loop={false}
+                    style={{ width: 200, height: 200 }}
+                  />
+                </div>
+                <p>Scanner paused</p>
               </div>
             )}
           </div>

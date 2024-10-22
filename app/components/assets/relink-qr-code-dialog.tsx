@@ -44,8 +44,21 @@ export default function RelinkQrCodeDialog({
   const qrCode = asset.qrCodes[0];
   const isNewCodeSameAsCurrent = qrCode?.id === newQrId;
 
-  function handleQrDetectionSuccess(qrId: string) {
+  function handleQrDetectionSuccess(qrId: string, error?: string) {
+    /** Set the error returned from the scanner */
+    if (error && error !== "") {
+      setErrorMessage(error);
+    }
+
+    /** Update the qrId */
     setNewQrId(qrId);
+
+    /** If the scanned code is the same code, set an error */
+    if (qrCode?.id === qrId) {
+      setErrorMessage(
+        "The new code you scanned is the same as the current code of the asset. Please scan a different code."
+      );
+    }
   }
 
   const handleClose = useCallback(() => {
@@ -93,12 +106,13 @@ export default function RelinkQrCodeDialog({
             </When>
           </>
         }
+        className="[&_.dialog-body]:flex [&_.dialog-body]:flex-col"
       >
         <When truthy={currentState === "initial"}>
           <>
             {videoMediaDevices && videoMediaDevices.length > 0 ? (
               <ZXingScanner
-                className="h-[470px]"
+                className="h-auto flex-1"
                 overlayClassName="md:h-[320px] max-w-xs"
                 isLoading={false}
                 videoMediaDevices={videoMediaDevices}
@@ -114,27 +128,32 @@ export default function RelinkQrCodeDialog({
             )}
 
             <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
-              <div className="text-right">
+              <div className="flex-1 truncate text-right">
                 <p className="uppercase text-gray-500">Current code</p>
-                <p className="font-medium">
+                <p
+                  className="truncate font-medium"
+                  title={qrCode ? qrCode.id : "Not linked yet"}
+                >
                   {qrCode ? qrCode.id : "Not linked yet"}
                 </p>
               </div>
               <div className="flex items-center justify-center rounded-lg border border-gray-200 p-2.5 shadow-lg">
                 <ArrowRightIcon />
               </div>
-              <div>
+              <div className="flex-1 truncate">
                 <p className="uppercase text-gray-500">New code</p>
-                <p className="font-medium">
+                <p
+                  className="truncate font-medium"
+                  title={newQrId ? newQrId : "Scan a QR code to link..."}
+                >
                   {newQrId ? newQrId : "Scan a QR code to link..."}
                 </p>
               </div>
             </div>
 
-            <When truthy={isNewCodeSameAsCurrent}>
+            <When truthy={!!errorMessage}>
               <p className="mt-4 px-8 text-center text-sm text-error-500">
-                The new code you scanned is the same as the current code of the
-                asset. Please scan a different code.
+                {errorMessage}
               </p>
             </When>
 
@@ -145,13 +164,14 @@ export default function RelinkQrCodeDialog({
                 disabled={!newQrId}
                 onClick={() => {
                   setNewQrId(undefined);
+                  setErrorMessage("");
                 }}
               >
                 Rescan
               </Button>
               <Button
                 className="flex-1"
-                disabled={!newQrId || isNewCodeSameAsCurrent}
+                disabled={!newQrId || isNewCodeSameAsCurrent || !!errorMessage}
                 onClick={() => {
                   setCurrentState("qr-selected");
                 }}
