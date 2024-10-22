@@ -22,7 +22,7 @@ export function FieldSelector({
   setFilter,
 }: {
   filter: Filter;
-  setFilter: (filter: Filter["name"]) => void;
+  setFilter: (name: string) => void;
 }) {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
@@ -47,7 +47,7 @@ export function FieldSelector({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2  max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[999999] mt-2 max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
           {columns.map((column, index) => (

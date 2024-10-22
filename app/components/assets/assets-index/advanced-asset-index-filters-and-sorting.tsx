@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import type { CustomField } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Switch } from "~/components/forms/switch";
@@ -19,7 +21,11 @@ import {
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
-import { getFieldType, useInitialFilters } from "./advanced-filters/helpers";
+import {
+  getDefaultValueForFieldType,
+  getFieldType,
+  useInitialFilters,
+} from "./advanced-filters/helpers";
 import {
   operatorsPerType,
   OperatorSelector,
@@ -51,7 +57,7 @@ const getTriggerClasses = (open: boolean, activeItems: number) =>
 
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const { settings } = useLoaderData<AssetIndexLoaderData>();
+  const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
   const disabled = useDisabled();
   const [_searchParams, setSearchParams] = useSearchParams();
@@ -90,15 +96,24 @@ function AdvancedFilter() {
   function addFilter() {
     setFilters((prev) => {
       const newCols = [...prev];
+      const firstColumn = columns[0];
+      const fieldType = getFieldType({
+        column: firstColumn,
+      }) as FilterFieldType;
+
       newCols.push({
-        name: columns[0].name,
-        operator: "is",
-        value: "",
-        type: getFieldType({ column: columns[0] }) as FilterFieldType,
+        name: firstColumn.name,
+        operator: operatorsPerType[fieldType][0],
+        value: getDefaultValueForFieldType(
+          firstColumn,
+          customFields as SerializeFrom<CustomField>[] | null
+        ),
+        type: fieldType,
       });
       return newCols;
     });
   }
+
   const haveFiltersChanged =
     JSON.stringify(initialFilters) !== JSON.stringify(filters);
   return (
@@ -139,7 +154,6 @@ function AdvancedFilter() {
                       <FieldSelector
                         filter={filter}
                         setFilter={(name) => {
-                          // Update filter name
                           setFilters((prev) => {
                             const column = columns.find(
                               (c) => c.name === name
@@ -149,10 +163,18 @@ function AdvancedFilter() {
                             }) as FilterFieldType;
 
                             const newFilters = [...prev];
-                            newFilters[index].name = name;
-                            newFilters[index].type = fieldType;
-                            newFilters[index].operator =
-                              operatorsPerType[fieldType][0];
+                            newFilters[index] = {
+                              ...newFilters[index],
+                              name,
+                              type: fieldType,
+                              operator: operatorsPerType[fieldType][0],
+                              value: getDefaultValueForFieldType(
+                                column,
+                                customFields as
+                                  | SerializeFrom<CustomField>[]
+                                  | null
+                              ), // Add default value
+                            };
                             return newFilters;
                           });
                         }}

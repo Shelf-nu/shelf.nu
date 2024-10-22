@@ -93,7 +93,7 @@ export function AdvancedIndexColumn({
               <PopoverContent
                 align="end"
                 className={tw(
-                  "mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
+                  "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
                 <MarkdownViewer

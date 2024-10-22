@@ -1,3 +1,5 @@
+import type { CustomField } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { FilterFieldType, Filter, FilterOperator } from "./types";
@@ -100,4 +102,43 @@ export function useInitialFilters(columns: Column[]) {
     }
   });
   return initialFilters;
+}
+
+// Function to get default value based on field type
+export function getDefaultValueForFieldType(
+  column: Column,
+  customFields: SerializeFrom<CustomField[]> | null // Update the type to allow null
+): any {
+  if (column.name.startsWith("cf_")) {
+    // Find the matching custom field, handle potential null customFields
+    const customField = customFields?.find(
+      (cf) => `cf_${cf.name}` === column.name
+    );
+
+    switch (column.cfType) {
+      case "DATE":
+        return new Date().toISOString().split("T")[0];
+      case "BOOLEAN":
+        return true;
+      case "OPTION":
+        return customField?.options?.[0] || "";
+      case "TEXT":
+      case "MULTILINE_TEXT":
+        return "";
+      default:
+        return "";
+    }
+  } else {
+    // Handle regular fields
+    switch (getFieldType({ column })) {
+      case "boolean":
+        return true;
+      case "date":
+        return new Date().toISOString().split("T")[0];
+      case "number":
+        return 0;
+      default:
+        return "";
+    }
+  }
 }
