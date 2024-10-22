@@ -1665,6 +1665,24 @@ export const AvailableIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ChangeIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M1 15h16m0 0-4-4m4 4-4 4m4-14H1m0 0 4-4M1 5l4 4"
+    />
+  </svg>
+);
+
 export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="24"
@@ -1682,18 +1700,18 @@ export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinejoin="round"
     />
     <path
-      d="M2 8H22" // Horizontal line for the header
+      d="M2 8H22"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
     />
     <path
-      d="M9 14L11 16L15 12" // Check mark path
+      d="M9 14L11 16L15 12"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-    />
+     />
   </svg>
 );

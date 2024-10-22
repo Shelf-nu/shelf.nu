@@ -49,6 +49,7 @@ import {
   RemoveTagsIcon,
   AvailableIcon,
   UnavailableIcon,
+  ChangeIcon,
   BookingExistIcon,
 } from "../icons/library";
 
@@ -106,6 +107,7 @@ export type IconType =
   | "rows"
   | "available"
   | "unavailable"
+  | "change"
   | "booking-exist";
 
 type IconsMap = {
@@ -165,6 +167,7 @@ export const iconsMap: IconsMap = {
   rows: <RowsIcon />,
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
+  change: <ChangeIcon />,
   "booking-exist": <BookingExistIcon />,
 };
 
