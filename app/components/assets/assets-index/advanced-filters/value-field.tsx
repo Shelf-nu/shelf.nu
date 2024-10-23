@@ -16,7 +16,7 @@ import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
 import { tw } from "~/utils/tw";
-import type { Filter } from "./types";
+import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
 export function ValueField({
@@ -212,7 +212,11 @@ export function ValueField({
           type="text"
           label="Values"
           value={
-            Array.isArray(filter.value) ? filter.value.join(", ") : filter.value
+            Array.isArray(filter.value)
+              ? filter.value.join(", ")
+              : typeof filter.value === "boolean"
+              ? "yes" // provide a default value for booleans
+              : filter.value
           }
           onChange={(e) => {
             const newValue = e.target.value
@@ -375,6 +379,14 @@ type DateFieldProps = {
   applyFilters: () => void;
 };
 
+function isDateString(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const date = parseISO(value);
+  return !isNaN(date.getTime());
+}
+
 /**
  * DateField component for handling date-based filters
  * Supports both single date and date range selections
@@ -390,15 +402,22 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
       return format(date, "yyyy-MM-dd");
     }
 
-    if (filter.value) {
-      if (Array.isArray(filter.value)) {
-        setLocalValue([
-          adjustDateToUserTimezone(filter.value[0]),
-          adjustDateToUserTimezone(filter.value[1]),
-        ]);
-      } else {
-        setLocalValue([adjustDateToUserTimezone(filter.value as string), ""]);
-      }
+    if (Array.isArray(filter.value)) {
+      const start = isDateString(filter.value[0])
+        ? filter.value[0]
+        : String(filter.value[0]);
+      const end = isDateString(filter.value[1])
+        ? filter.value[1]
+        : String(filter.value[1]);
+      setLocalValue([
+        adjustDateToUserTimezone(start),
+        adjustDateToUserTimezone(end),
+      ]);
+    } else {
+      const value = isDateString(filter.value)
+        ? filter.value
+        : String(filter.value);
+      setLocalValue([adjustDateToUserTimezone(value), ""]);
     }
   }, [filter.value, timeZone]);
 

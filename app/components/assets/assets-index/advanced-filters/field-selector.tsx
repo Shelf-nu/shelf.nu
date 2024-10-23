@@ -15,7 +15,7 @@ import {
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { getAvailableColumns, getFieldType } from "./helpers";
-import type { Filter } from "./types";
+import type { Filter } from "./schema";
 
 export function FieldSelector({
   filter,

@@ -1,35 +1,9 @@
+import { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
 import { operatorsPerType } from "./operator-selector";
 
-export type FilterOperator =
-  | "is"
-  | "isNot"
-  | "contains"
-  | "before"
-  | "after"
-  | "between"
-  | "gt"
-  | "lt"
-  | "gte"
-  | "lte"
-  | "in"
-  | "containsAll"
-  | "containsAny";
-
-export type FilterFieldType =
-  | "string"
-  | "text"
-  | "boolean"
-  | "date"
-  | "number"
-  | "enum"
-  | "array";
-
-export type FilterDefinition = {
-  [K in FilterFieldType]: FilterOperator[];
-};
-
-const filterOperatorSchema = z.enum([
+// Define the base enum schemas
+export const filterOperatorSchema = z.enum([
   "is",
   "isNot",
   "contains",
@@ -45,7 +19,7 @@ const filterOperatorSchema = z.enum([
   "containsAny",
 ]);
 
-const filterFieldTypeSchema = z.enum([
+export const filterFieldTypeSchema = z.enum([
   "string",
   "text",
   "boolean",
@@ -53,22 +27,49 @@ const filterFieldTypeSchema = z.enum([
   "number",
   "enum",
   "array",
+  "customField",
 ]);
 
+// Export the inferred types from the schemas
+export type FilterOperator = z.infer<typeof filterOperatorSchema>;
+export type FilterFieldType = z.infer<typeof filterFieldTypeSchema>;
+
+// Define specific value schemas for different types
+const numberBetweenTuple = z.tuple([z.number(), z.number()]);
+const numberValue = z.number();
+const numberValueSchema = z.union([numberValue, numberBetweenTuple]);
+
+const stringValueSchema = z.string();
+const booleanValueSchema = z.boolean();
+const arrayValueSchema = z.array(z.string());
+
+// Define the main filter schema
 export const filterSchema = z
   .object({
     name: z.string(),
     type: filterFieldTypeSchema,
     operator: filterOperatorSchema,
     value: z.union([
-      z.string(),
-      z.number(),
-      z.boolean(),
-      z.array(z.string().optional()),
+      stringValueSchema,
+      numberValueSchema,
+      booleanValueSchema,
+      arrayValueSchema,
     ]),
+    fieldType: z.nativeEnum(CustomFieldType).optional(),
   })
   .refine(
     (data) => {
+      // Validation for number between
+      if (data.type === "number" && data.operator === "between") {
+        return (
+          Array.isArray(data.value) &&
+          data.value.length === 2 &&
+          typeof data.value[0] === "number" &&
+          typeof data.value[1] === "number"
+        );
+      }
+
+      // General between validation
       if (data.operator === "between" && Array.isArray(data.value)) {
         const [start, end] = data.value;
         if (start === undefined || end === undefined) return true;
@@ -79,8 +80,9 @@ export const filterSchema = z
           return !isNaN(startDate.getTime()) && !isNaN(endDate.getTime());
         }
         if (data.type === "number") {
-          const startNum = parseFloat(start);
-          const endNum = parseFloat(end);
+          const startNum =
+            typeof start === "string" ? parseFloat(start) : start;
+          const endNum = typeof end === "string" ? parseFloat(end) : end;
           return !isNaN(startNum) && !isNaN(endNum);
         }
       }
@@ -92,14 +94,66 @@ export const filterSchema = z
     }
   );
 
+// Export the main Filter type
 export type Filter = z.infer<typeof filterSchema>;
 
-// Additional refinement to check if the operator is valid for the field type
+// Additional refinement for operator validation
 filterSchema.refine(
-  (data) =>
-    operatorsPerType[data.type].includes(data.operator as FilterOperator),
+  (data) => {
+    // Handle custom fields
+    if (data.type === "customField" && data.fieldType) {
+      const customFieldTypeToFilterType: Record<
+        CustomFieldType,
+        FilterFieldType
+      > = {
+        TEXT: "string",
+        MULTILINE_TEXT: "text",
+        BOOLEAN: "boolean",
+        DATE: "date",
+        OPTION: "enum",
+      };
+      const filterType = customFieldTypeToFilterType[data.fieldType];
+      return operatorsPerType[filterType].includes(data.operator);
+    }
+
+    // Handle regular fields
+    return operatorsPerType[
+      data.type as Exclude<FilterFieldType, "customField">
+    ].includes(data.operator);
+  },
   {
     message: "Invalid operator for this field type",
     path: ["operator"],
   }
 );
+
+// Helper types for value access
+export type NumberFilterValue = z.infer<typeof numberValueSchema>;
+export type StringFilterValue = z.infer<typeof stringValueSchema>;
+export type BooleanFilterValue = z.infer<typeof booleanValueSchema>;
+export type ArrayFilterValue = z.infer<typeof arrayValueSchema>;
+
+export type FilterValue<T extends FilterFieldType> = T extends "number"
+  ? NumberFilterValue
+  : T extends "string"
+  ? StringFilterValue
+  : T extends "boolean"
+  ? BooleanFilterValue
+  : T extends "array"
+  ? ArrayFilterValue
+  : never;
+
+// Type guard helpers
+export function isNumberTuple(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number"
+  );
+}
+
+// Type utility for filter definition
+export type FilterDefinition = {
+  [K in FilterFieldType]: FilterOperator[];
+};

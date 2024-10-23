@@ -20,7 +20,6 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-// eslint-disable-next-line import/no-cycle
 import { FieldSelector } from "./advanced-filters/field-selector";
 import {
   getAvailableColumns,
@@ -32,7 +31,7 @@ import {
   operatorsPerType,
   OperatorSelector,
 } from "./advanced-filters/operator-selector";
-import type { Filter, FilterFieldType } from "./advanced-filters/types";
+import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 
 export interface Sort {

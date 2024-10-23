@@ -7,7 +7,7 @@ import {
 } from "@radix-ui/react-popover";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
-import type { Filter, FilterDefinition, FilterOperator } from "./types";
+import type { Filter, FilterDefinition, FilterOperator } from "./schema";
 
 function FilterOperatorDisplay({
   symbol,
@@ -36,7 +36,7 @@ const operatorsMap: Record<FilterOperator, string[]> = {
   lt: ["<", "Lower than"],
   gte: [">=", "Greater or equal"],
   lte: ["<=", "Lower or equal"],
-  in: ["∈", "Contains"],
+  in: ["∈", "Is any of"],
   containsAll: ["⊇", "Contains all"],
   containsAny: ["⊃", "Contains any"],
 };
@@ -48,8 +48,9 @@ export const operatorsPerType: FilterDefinition = {
   boolean: ["is"],
   date: ["is", "isNot", "before", "after", "between"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
-  enum: ["is", "isNot"],
+  enum: ["is", "isNot", "in"],
   array: ["contains", "containsAll", "containsAny"],
+  customField: [], // empty array as customField operators are determined by the actual field type
 };
 
 export function OperatorSelector({

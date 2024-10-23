@@ -2,7 +2,7 @@ import type { CustomField } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
 import type { Column } from "~/modules/asset-index-settings/helpers";
-import type { FilterFieldType, Filter, FilterOperator } from "./types";
+import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
 const friendlyFieldTypeNames = {

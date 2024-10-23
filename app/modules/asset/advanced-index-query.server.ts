@@ -1,9 +1,10 @@
 import { Prisma, CustomFieldType } from "@prisma/client";
+
 import type {
   Filter,
   FilterFieldType,
   FilterOperator,
-} from "~/components/assets/assets-index/advanced-filters/types";
+} from "~/components/assets/assets-index/advanced-filters/schema";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
