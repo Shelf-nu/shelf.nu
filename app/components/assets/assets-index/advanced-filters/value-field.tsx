@@ -11,7 +11,7 @@ import { format, parseISO } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import Input from "~/components/forms/input";
 
-import { CheckIcon, ChevronRight } from "~/components/icons/library";
+import { CheckIcon, ChevronRight, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
@@ -431,6 +431,12 @@ function isDateString(value: unknown): value is string {
   return !isNaN(date.getTime());
 }
 
+function adjustDateToUTC(dateString: string, timeZone: string): string {
+  const zonedDate = toZonedTime(parseISO(dateString), timeZone);
+  const utcDate = fromZonedTime(zonedDate, timeZone);
+  return format(utcDate, "yyyy-MM-dd");
+}
+
 /**
  * DateField component for handling date-based filters
  * Supports both single date and date range selections
@@ -442,8 +448,17 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
 
   useEffect(() => {
     function adjustDateToUserTimezone(dateString: string): string {
-      const date = toZonedTime(parseISO(dateString), timeZone);
-      return format(date, "yyyy-MM-dd");
+      // If the date string is empty or not a valid date format, return empty string
+      if (!dateString || !isDateString(dateString)) {
+        return "";
+      }
+
+      try {
+        const date = toZonedTime(parseISO(dateString), timeZone);
+        return format(date, "yyyy-MM-dd");
+      } catch {
+        return "";
+      }
     }
 
     if (Array.isArray(filter.value)) {
@@ -465,12 +480,6 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
     }
   }, [filter.value, timeZone]);
 
-  function adjustDateToUTC(dateString: string): string {
-    const zonedDate = toZonedTime(parseISO(dateString), timeZone);
-    const utcDate = fromZonedTime(zonedDate, timeZone);
-    return format(utcDate, "yyyy-MM-dd");
-  }
-
   function handleDateChange(index: 0 | 1) {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = [...localValue] as [string, string];
@@ -478,9 +487,12 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
       setLocalValue(newValue);
 
       if (filter.operator === "between" && newValue[0] && newValue[1]) {
-        setFilter([adjustDateToUTC(newValue[0]), adjustDateToUTC(newValue[1])]);
+        setFilter([
+          adjustDateToUTC(newValue[0], timeZone),
+          adjustDateToUTC(newValue[1], timeZone),
+        ]);
       } else if (filter.operator !== "between" && newValue[0]) {
-        setFilter(adjustDateToUTC(newValue[0]));
+        setFilter(adjustDateToUTC(newValue[0], timeZone));
       }
       validateDates(newValue);
     };
@@ -539,6 +551,15 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
         )}
       </div>
     );
+  } else if (filter.operator === "inDates") {
+    return (
+      <MultiDateInput
+        setValue={(value) => setFilter(value)}
+        value={typeof filter.value === "string" ? filter.value : ""}
+        timeZone={timeZone}
+        commonInputProps={commonInputProps}
+      />
+    );
   } else {
     return (
       <Input
@@ -549,4 +570,94 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
       />
     );
   }
+}
+
+function MultiDateInput({
+  setValue,
+  value,
+  timeZone,
+  commonInputProps,
+}: {
+  setValue: (value: string) => void;
+  value: string;
+  timeZone: string;
+  commonInputProps: {
+    inputClassName: string;
+    hideLabel: boolean;
+    label: string;
+    onKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  };
+}) {
+  // Parse initial dates from comma-separated string
+  const [dates, setDates] = useState<string[]>(() => {
+    if (!value) return [""];
+    return value.split(",").map((d) => d.trim());
+  });
+
+  // Handle date change at specific index
+  const handleDateChange =
+    (index: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const newDates = [...dates];
+      newDates[index] = event.target.value;
+      setDates(newDates);
+
+      // Filter out empty dates and convert to UTC
+      const validDates = newDates
+        .filter((date) => date)
+        .map((date) => adjustDateToUTC(date, timeZone));
+
+      // Update parent with comma-separated string
+      setValue(validDates.join(","));
+    };
+
+  // Add new date field
+  const addDateField = () => {
+    setDates([...dates, ""]);
+  };
+  // Remove date field at index
+  const removeDateField = (indexToRemove: number) => {
+    const newDates = dates.filter((_, index) => index !== indexToRemove);
+    setDates(newDates);
+
+    // Update parent with remaining dates
+    const validDates = newDates
+      .filter((date) => date)
+      .map((date) => adjustDateToUTC(date, timeZone));
+    setValue(validDates.join(","));
+  };
+
+  return (
+    <div className="space-y-1">
+      {dates.map((date, index) => (
+        <div key={index} className="relative flex items-center gap-2">
+          <Input
+            {...commonInputProps}
+            type="date"
+            value={date}
+            onChange={handleDateChange(index)}
+            className="flex-1"
+          />
+          {dates.length > 1 && (
+            <Button
+              variant="block-link-gray"
+              className="absolute right-0 -mr-1 mt-[2px] shrink-0 translate-x-full  bg-white  text-[10px] font-normal text-gray-600"
+              icon="x"
+              onClick={() => removeDateField(index)}
+            />
+          )}
+        </div>
+      ))}
+      <Button
+        variant="block-link"
+        className="text-[14px]"
+        size="xs"
+        onClick={addDateField}
+      >
+        <div className="mr-1 inline-block size-[14px] align-middle">
+          <PlusIcon />
+        </div>
+        <span className="inline-block align-middle">Add another date</span>
+      </Button>
+    </div>
+  );
 }

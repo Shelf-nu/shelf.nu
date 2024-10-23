@@ -39,8 +39,6 @@ export const useSearchParams = (): [
   ) => void = (nextInit, navigateOptions) => {
     const prevParams = new URLSearchParams(searchParams.toString());
 
-    console.log("prevParams", prevParams);
-
     const checkAndDestroyCookies = (newParams: URLSearchParams) => {
       const removedKeys: string[] = [];
       prevParams.forEach((_value, key) => {
@@ -56,7 +54,6 @@ export const useSearchParams = (): [
     if (typeof nextInit === "function") {
       setSearchParams((prev) => {
         let newParams = nextInit(prev);
-        console.log("newParams", newParams);
         // Ensure newParams is an instance of URLSearchParams
         if (!(newParams instanceof URLSearchParams)) {
           newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types

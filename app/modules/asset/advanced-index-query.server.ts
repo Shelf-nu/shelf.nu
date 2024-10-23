@@ -137,6 +137,11 @@ function addCustomFieldDateFilter(
     case "between":
       const [start, end] = filter.value as [string, string];
       return Prisma.sql`${whereClause} AND (${subquery})::date BETWEEN ${start}::date AND ${end}::date`;
+    case "inDates": {
+      const dates = (filter.value as string).split(",").map((d) => d.trim());
+      const datesArray = `{${dates.map((d) => `"${d}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::date = ANY(${datesArray}::date[])`;
+    }
     default:
       return whereClause;
   }
@@ -296,6 +301,15 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" BETWEEN ${start}::date AND ${end}::date`;
+    case "inDates": {
+      // Split comma-separated dates and remove whitespace
+      const dates = (filter.value as string).split(",").map((d) => d.trim());
+      // Create array literal for Postgres
+      const datesArray = `{${dates.map((d) => `"${d}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}"::date = ANY(${datesArray}::date[])`;
+    }
     default:
       return whereClause;
   }
@@ -415,6 +429,7 @@ function addRelationFilter(
 const API_TO_DB_FIELD_MAP: Record<string, string> = {
   valuation: "value",
 };
+
 /**
  * Parses a filter string into an array of Filter objects
  * @param filtersString - The string containing the filters

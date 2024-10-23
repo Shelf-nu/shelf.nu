@@ -40,6 +40,7 @@ const operatorsMap: Record<FilterOperator, string[]> = {
   containsAll: ["⊇", "Contains all"],
   containsAny: ["⊃", "Contains any"],
   matchesAny: ["≈", "Matches any"],
+  inDates: ["∈", "In dates"],
 };
 
 // Define the allowed operators for each field type
@@ -47,7 +48,7 @@ export const operatorsPerType: FilterDefinition = {
   string: ["is", "isNot", "contains", "matchesAny", "containsAny"],
   text: ["contains", "matchesAny", "containsAny"],
   boolean: ["is"],
-  date: ["is", "isNot", "before", "after", "between"],
+  date: ["is", "isNot", "before", "after", "between", "inDates"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
   enum: ["is", "isNot", "in"],
   array: ["contains", "containsAll", "containsAny"],

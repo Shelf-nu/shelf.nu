@@ -213,7 +213,7 @@ function AdvancedFilter() {
                     </div>
                     <Button
                       variant="block-link-gray"
-                      className="mt-[2px] shrink-0 text-[10px] font-normal text-gray-600"
+                      className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
                       icon="x"
                       onClick={() => {
                         setFilters((prev) =>

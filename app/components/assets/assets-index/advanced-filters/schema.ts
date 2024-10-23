@@ -18,6 +18,7 @@ export const filterOperatorSchema = z.enum([
   "containsAll",
   "containsAny",
   "matchesAny",
+  "inDates",
 ]);
 
 export const filterFieldTypeSchema = z.enum([
