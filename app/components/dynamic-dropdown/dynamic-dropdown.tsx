@@ -204,7 +204,9 @@ export default function DynamicDropdown({
                   <When
                     truthy={selectedItems.includes(withoutValueItem?.id ?? "")}
                   >
-                    <CheckIcon className="text-primary" />
+                    <span className="h-auto w-[18px] text-primary">
+                      <CheckIcon />
+                    </span>
                   </When>
                 </label>
               </When>
@@ -242,7 +244,9 @@ export default function DynamicDropdown({
                     </span>
 
                     <When truthy={checked}>
-                      <CheckIcon className="text-primary" />
+                      <span className="h-auto w-[18px] text-primary">
+                        <CheckIcon />
+                      </span>
                     </When>
                   </label>
                 );

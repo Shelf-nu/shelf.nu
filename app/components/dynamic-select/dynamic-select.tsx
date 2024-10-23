@@ -273,7 +273,9 @@ export default function DynamicSelect({
                     </div>
 
                     <When truthy={item.id === selectedValue}>
-                      <CheckIcon className="text-primary" />
+                      <span className="h-auto w-[18px] text-primary">
+                        <CheckIcon />
+                      </span>
                     </When>
                   </div>
                 ))}

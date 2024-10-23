@@ -11,7 +11,7 @@ import { format, parseISO } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import Input from "~/components/forms/input";
 
-import { ChevronRight } from "~/components/icons/library";
+import { CheckIcon, ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
@@ -202,6 +202,7 @@ export function ValueField({
           handleChange={(value: string) => {
             setFilter(value);
           }}
+          multiSelect={filter.operator === "in"}
         />
       );
 
@@ -294,10 +295,12 @@ function EnumField({
   fieldName,
   value,
   handleChange,
+  multiSelect = false,
 }: {
   fieldName: string;
   value: string;
   handleChange: (value: string) => void;
+  multiSelect?: boolean;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const data = useLoaderData<AssetIndexLoaderData>();
@@ -309,12 +312,39 @@ function EnumField({
     : customFields.find((field) => field?.name === fieldName.slice(3))
         ?.options || [];
 
-  const displayValue =
-    value === ""
-      ? options[0]
-      : isStatusField
-      ? userFriendlyAssetStatus(value as AssetStatus)
-      : value;
+  // Convert the value into an array for multi-select mode
+  const selectedValues = multiSelect ? value.split(", ") : [value];
+
+  const displayValue = multiSelect
+    ? selectedValues
+        .map((v) =>
+          isStatusField ? userFriendlyAssetStatus(v as AssetStatus) : v
+        )
+        .join(", ")
+    : value === ""
+    ? options[0]
+    : isStatusField
+    ? userFriendlyAssetStatus(value as AssetStatus)
+    : value;
+
+  function handleOptionClick(option: string) {
+    let newValue: string;
+
+    if (multiSelect) {
+      const isSelected = selectedValues.includes(option);
+      const updatedValues = isSelected
+        ? selectedValues.filter((val) => val !== option)
+        : [...selectedValues, option];
+      newValue = updatedValues.join(", ");
+    } else {
+      newValue = option;
+    }
+
+    handleChange(newValue);
+    if (!multiSelect) {
+      setIsPopoverOpen(false); // Close popover for single-select
+    }
+  }
 
   function Content() {
     if (options.length === 0) {
@@ -326,27 +356,32 @@ function EnumField({
       );
     }
 
-    return options.map((option) => (
-      <div
-        key={option}
-        className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-        onClick={() => {
-          handleChange(option);
-          setIsPopoverOpen(false);
-        }}
-      >
-        <span>
-          {isStatusField
-            ? userFriendlyAssetStatus(option as AssetStatus)
-            : option}
-        </span>
-      </div>
-    ));
+    return options.map((option) => {
+      const isSelected = selectedValues.includes(option);
+      return (
+        <div
+          key={option}
+          className="flex items-center justify-between px-4 py-3 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+          onClick={() => handleOptionClick(option)}
+        >
+          <span>
+            {isStatusField
+              ? userFriendlyAssetStatus(option as AssetStatus)
+              : option}
+          </span>
+          {multiSelect && isSelected && (
+            <span className="h-auto w-[14px] text-primary">
+              <CheckIcon />
+            </span>
+          )}
+        </div>
+      );
+    });
   }
 
   return (
     <>
-      <input type="hidden" value={value === "" ? options[0] : value} />
+      <input type="hidden" value={multiSelect ? displayValue : value} />
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -361,7 +396,7 @@ function EnumField({
           <PopoverContent
             align="start"
             className={tw(
-              "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
+              "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
           >
             <Content />

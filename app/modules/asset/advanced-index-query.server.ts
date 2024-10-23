@@ -145,10 +145,37 @@ function addCustomFieldOptionFilter(
       return Prisma.sql`${whereClause} AND ${subquery} = ${filter.value}`;
     case "isNot":
       return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
+    case "in": {
+      let valuesArray;
+
+      // Ensure filter.value is an array, and parse it if necessary
+      if (Array.isArray(filter.value)) {
+        valuesArray = filter.value;
+      } else if (typeof filter.value === "string") {
+        // If filter.value is a string, parse it as a JSON array or split by commas
+        try {
+          valuesArray = JSON.parse(filter.value);
+        } catch {
+          // If parsing fails, fallback to splitting the string by comma (adjust as necessary)
+          valuesArray = filter.value.split(",").map((val) => val.trim());
+        }
+      } else {
+        // If filter.value is neither, default to an empty array
+        valuesArray = [];
+      }
+
+      // Construct the PostgreSQL array literal
+      const arrayLiteral = `{${valuesArray
+        .map((val: string) => `"${val}"`)
+        .join(",")}}`;
+
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${arrayLiteral}::text[])`;
+    }
     default:
       return whereClause;
   }
 }
+
 function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "is":
@@ -240,11 +267,29 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "status") {
+    // Ensure the filter value is trimmed
+    let trimmedValue;
+
+    if (Array.isArray(filter.value)) {
+      // If the value is an array, map through and trim only string values
+      trimmedValue = filter.value.map((val) =>
+        typeof val === "string" ? val.trim() : val
+      );
+    } else if (typeof filter.value === "string") {
+      // If it's a single string value, trim it
+      trimmedValue = filter.value.trim();
+    } else {
+      // For numbers or any other type, leave as is
+      trimmedValue = filter.value;
+    }
+
     switch (filter.operator) {
       case "is":
-        return Prisma.sql`${whereClause} AND a.status = ${filter.value}::public."AssetStatus"`;
+        return Prisma.sql`${whereClause} AND a.status = ${trimmedValue}::public."AssetStatus"`;
       case "isNot":
-        return Prisma.sql`${whereClause} AND a.status != ${filter.value}::public."AssetStatus"`;
+        return Prisma.sql`${whereClause} AND a.status != ${trimmedValue}::public."AssetStatus"`;
+      case "in":
+        return Prisma.sql`${whereClause} AND a.status = ANY(${trimmedValue}::public."AssetStatus"[])`;
       default:
         return whereClause;
     }
