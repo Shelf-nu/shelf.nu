@@ -152,7 +152,18 @@ function ConditionalDropdown() {
           asChild
           disabled={disabled}
         >
-          <Button type="button" variant="secondary">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={
+              disabled
+                ? {
+                    reason:
+                      "You must select at least 1 asset to perform an action",
+                  }
+                : false
+            }
+          >
             <span className="flex items-center gap-2">Actions</span>
           </Button>
         </DropdownMenuTrigger>

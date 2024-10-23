@@ -290,10 +290,10 @@ export async function advancedModeLoader({
           entity: PermissionEntity.asset,
           action: PermissionAction.import,
         })),
-      searchFieldLabel: "Search assets",
+      searchFieldLabel: "Search by asset name",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        text: "Search assets based on asset name Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
       },
       filters,
       organizationId,

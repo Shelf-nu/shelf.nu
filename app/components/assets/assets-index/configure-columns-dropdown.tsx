@@ -8,7 +8,7 @@ import {
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
-import { HandleIcon } from "~/components/icons/library";
+import { ChevronRight, HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
@@ -42,6 +42,20 @@ export function ConfigureColumnsDropdown() {
       );
       return newColumns;
     });
+  };
+
+  /** Handle selecting all columns */
+  const handleSelectAll = () => {
+    setCurrentColumns((prevColumns) =>
+      prevColumns.map((column) => ({ ...column, visible: true }))
+    );
+  };
+
+  /** Handle deselecting all columns */
+  const handleDeselectAll = () => {
+    setCurrentColumns((prevColumns) =>
+      prevColumns.map((column) => ({ ...column, visible: false }))
+    );
   };
 
   const hasChanges =
@@ -80,8 +94,12 @@ export function ConfigureColumnsDropdown() {
               </div>
 
               <div className="border-t py-[2px]">
-                <div className="px-[10px] py-2 text-gray-500">
-                  Columns ({currentColumns.length})
+                <div className="flex items-center justify-between px-[10px] py-2 text-gray-500">
+                  <div>Columns ({currentColumns.length})</div>
+                  <ColumnsBulkActions
+                    onSelectAll={handleSelectAll}
+                    onDeselectAll={handleDeselectAll}
+                  />
                 </div>
                 <Reorder.Group
                   values={currentColumns}
@@ -174,4 +192,53 @@ function ColumnRow({
   className?: string;
 }) {
   return <div className={tw("px-[10px] py-[6px]", className)}>{children}</div>;
+}
+
+function ColumnsBulkActions({
+  onSelectAll,
+  onDeselectAll,
+}: {
+  onSelectAll: () => void;
+  onDeselectAll: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger>
+        <ChevronRight className="mr-2 rotate-90" />
+      </PopoverTrigger>
+      <PopoverPortal>
+        <PopoverContent
+          align="end"
+          className={tw(
+            "z-20 mt-2 w-[200px] rounded-md border border-gray-300 bg-white p-0"
+          )}
+        >
+          <Button
+            className=" justify-start whitespace-nowrap p-2 text-gray-700 hover:bg-gray-50 hover:text-gray-700 "
+            variant="link"
+            width="full"
+            onClick={() => {
+              onSelectAll();
+              setIsOpen(false);
+            }}
+          >
+            Select all
+          </Button>
+
+          <Button
+            className=" justify-start whitespace-nowrap p-2 text-gray-700 hover:bg-gray-50 hover:text-gray-700  "
+            variant="link"
+            width="full"
+            onClick={() => {
+              onDeselectAll();
+              setIsOpen(false);
+            }}
+          >
+            Disselect all
+          </Button>
+        </PopoverContent>
+      </PopoverPortal>
+    </Popover>
+  );
 }

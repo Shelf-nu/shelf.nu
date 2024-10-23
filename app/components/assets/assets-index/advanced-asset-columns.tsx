@@ -141,7 +141,11 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div>
-                <Link to={item.id} className="font-medium underline">
+                <Link
+                  to={item.id}
+                  className="font-medium underline hover:text-gray-600"
+                  title={item.title}
+                >
                   {item.title}
                 </Link>
               </div>
@@ -184,10 +188,42 @@ export function AdvancedIndexColumn({
       return <TagsColumn tags={item.tags ?? []} />;
 
     case "location":
-      return <TextColumn value={item?.location?.name || ""} />;
+      return (
+        <TextColumn
+          value={
+            item?.location?.name ? (
+              <Link
+                to={`/locations/${item.locationId}`}
+                className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
+                title={item.location.name}
+              >
+                {item.location.name}
+              </Link>
+            ) : (
+              ""
+            )
+          }
+        />
+      );
 
     case "kit":
-      return <TextColumn value={item?.kit?.name || ""} />;
+      return (
+        <TextColumn
+          value={
+            item?.kit?.name ? (
+              <Link
+                to={`/kits/${item.kitId}`}
+                className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
+                title={item.kit.name}
+              >
+                {item.kit.name}
+              </Link>
+            ) : (
+              ""
+            )
+          }
+        />
+      );
 
     case "custody":
       return <CustodyColumn custody={item.custody} />;

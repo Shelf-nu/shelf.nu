@@ -735,9 +735,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${assetReturnFragment}
       FROM sorted_asset_query aq;
     `;
-    // Log the query for debugging
-    console.log("Generated SQL:", query.sql);
-    console.log("Query values:", query.values);
 
     const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
     const totalAssets = result[0].total_count;

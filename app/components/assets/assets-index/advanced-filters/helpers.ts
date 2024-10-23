@@ -3,6 +3,7 @@ import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { FilterFieldType, Filter, FilterOperator } from "./types";
+import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
 const friendlyFieldTypeNames = {
   string: "Single-line text",
@@ -141,4 +142,52 @@ export function getDefaultValueForFieldType(
         return "";
     }
   }
+}
+
+/**
+ * Determines what columns are available based on already used columns and operation type
+ * @param columns - All available columns
+ * @param usedColumns - Currently used columns (filters or sorts)
+ * @param operation - Whether we're filtering or sorting
+ * @returns Filtered list of available columns
+ */
+export function getAvailableColumns(
+  columns: Column[],
+  usedColumns: Array<Filter | Sort>,
+  operation: "filter" | "sort"
+) {
+  // Get columns that are visible and not already used
+  const availableColumns = columns.filter(
+    (column) =>
+      column.visible && !usedColumns.find((f) => f.name === column.name)
+  );
+
+  // Apply operation-specific filtering
+  return availableColumns.filter((column) => {
+    // Common exclusions for both operations
+    if (!column.visible) return false;
+
+    if (operation === "sort") {
+      // Columns that can't be sorted
+      const unsortableColumns = ["tags"];
+      if (unsortableColumns.includes(column.name)) return false;
+
+      // Custom fields that can't be sorted
+      if (column.name.startsWith("cf_")) {
+        const unsortableTypes = ["MULTILINE_TEXT"];
+        return !unsortableTypes.includes(column.cfType || "");
+      }
+
+      return true;
+    }
+
+    if (operation === "filter") {
+      const unfilterableColumns: string[] = [];
+      if (unfilterableColumns.includes(column.name)) return false;
+
+      return true;
+    }
+
+    return true;
+  });
 }

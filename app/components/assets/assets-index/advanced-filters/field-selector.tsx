@@ -14,23 +14,27 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-import { getFieldType } from "./helpers";
+import { getAvailableColumns, getFieldType } from "./helpers";
 import type { Filter } from "./types";
 
 export function FieldSelector({
   filter,
+  filters,
   setFilter,
 }: {
   filter: Filter;
+  filters: Filter[];
   setFilter: (name: string) => void;
 }) {
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
-
   const [fieldName, setFieldName] = useState<string>("");
   useEffect(() => {
     setFieldName(filter.name);
   }, [filter.name]);
+
+  /** Filter out the already existing filters and the columns which are not visible */
+  const availableColumns = getAvailableColumns(columns, filters, "filter");
 
   return (
     <Popover>
@@ -50,7 +54,7 @@ export function FieldSelector({
             "z-[999999] mt-2 max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
-          {columns.map((column, index) => (
+          {availableColumns.map((column, index) => (
             <div
               key={column.name + index}
               className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"

@@ -20,8 +20,10 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+// eslint-disable-next-line import/no-cycle
 import { FieldSelector } from "./advanced-filters/field-selector";
 import {
+  getAvailableColumns,
   getDefaultValueForFieldType,
   getFieldType,
   useInitialFilters,
@@ -33,7 +35,7 @@ import {
 import type { Filter, FilterFieldType } from "./advanced-filters/types";
 import { ValueField } from "./advanced-filters/value-field";
 
-interface Sort {
+export interface Sort {
   name: string;
   direction: "asc" | "desc";
   // Only relevant for custom fields
@@ -64,6 +66,7 @@ function AdvancedFilter() {
 
   const [filters, setFilters] = useState<Filter[]>([]);
   const initialFilters = useInitialFilters(columns);
+  const availableColumns = getAvailableColumns(columns, filters, "filter");
 
   // Set the intial filters
   useEffect(() => {
@@ -96,7 +99,9 @@ function AdvancedFilter() {
   function addFilter() {
     setFilters((prev) => {
       const newCols = [...prev];
-      const firstColumn = columns[0];
+      /** We need to make sure the filter we add is not one that already exists */
+
+      const firstColumn = availableColumns[0];
       const fieldType = getFieldType({
         column: firstColumn,
       }) as FilterFieldType;
@@ -153,9 +158,10 @@ function AdvancedFilter() {
                     <div className="w-[150px] shrink-0">
                       <FieldSelector
                         filter={filter}
+                        filters={filters}
                         setFilter={(name) => {
                           setFilters((prev) => {
-                            const column = columns.find(
+                            const column = availableColumns.find(
                               (c) => c.name === name
                             ) as Column;
                             const fieldType = getFieldType({
@@ -228,6 +234,14 @@ function AdvancedFilter() {
                 variant="secondary"
                 className="text-[14px]"
                 size="xs"
+                disabled={
+                  disabled || availableColumns.length === 0
+                    ? {
+                        reason:
+                          "You are not able to add more filters because all columns are already used. If you want to filter by more columns, please enable them on your column settings.",
+                      }
+                    : false
+                }
                 onClick={addFilter}
               >
                 <div className="mr-1 inline-block size-[14px] align-middle">
@@ -252,7 +266,11 @@ function AdvancedFilter() {
                 variant="secondary"
                 className="text-[14px]"
                 size="xs"
-                disabled={!haveFiltersChanged || disabled}
+                disabled={
+                  !haveFiltersChanged || disabled
+                    ? { title: "", reason: "No filters to apply" }
+                    : false
+                }
                 onClick={applyFilters}
               >
                 Apply filters
@@ -442,28 +460,26 @@ function PickAColumnToSortBy({
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings } = useLoaderData<AssetIndexLoaderData>();
-  const columns = settings.columns;
+  const columns = settings.columns as Column[];
+  const availableColumns = getAvailableColumns(columns, sorts, "sort");
 
-  const columnsSortOptions: Sort[] = (columns as Column[])
-    .filter((c) => !sorts.map((sort) => sort.name).includes(c.name))
-    ?.map((column) => ({
-      name: column.name,
+  // Convert to sort options
+  const sortOptions: Sort[] = availableColumns.map((column) => ({
+    name: column.name,
+    direction: "asc",
+    ...(column?.cfType ? { cfType: column.cfType } : undefined),
+  }));
+
+  // Handle the name column if it's not already being sorted
+  if (!sorts.some((s) => s.name === "name")) {
+    sortOptions.unshift({
+      name: "name",
       direction: "asc",
-      ...(column?.cfType ? { cfType: column.cfType } : undefined),
-    }));
-  const nameOption: Sort = { name: "name", direction: "asc" };
-  columnsSortOptions.splice(1, 0, nameOption);
-
-  /** We need to remove unnecessary columns which dont make sense to sort by:
-   * - tags
-   */
-  const tagsIndex = columnsSortOptions.findIndex((c) => c.name === "tags");
-  if (tagsIndex > -1) {
-    columnsSortOptions.splice(tagsIndex, 1);
+    });
   }
 
   /** Make sure name is always first */
-  columnsSortOptions.sort((a, b) => {
+  sortOptions.sort((a, b) => {
     if (a.name === "name") {
       return -1;
     }
@@ -488,6 +504,14 @@ function PickAColumnToSortBy({
         <Button
           variant="block-link-gray"
           className="text-[14px] font-semibold text-gray-600"
+          disabled={
+            availableColumns.length === 0
+              ? {
+                  reason:
+                    "You are not able to add more sorts because all columns are already used. If you want to sort by more columns, please enable them on your column settings.",
+                }
+              : false
+          }
         >
           <span>Pick a column to sort by</span>{" "}
           <ChevronRight className="ml-2 inline-block rotate-90" />{" "}
@@ -497,11 +521,11 @@ function PickAColumnToSortBy({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999] mt-2 h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="">
-            {columnsSortOptions.map((c) => (
+            {sortOptions.map((c) => (
               <div
                 key={c.name}
                 className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"

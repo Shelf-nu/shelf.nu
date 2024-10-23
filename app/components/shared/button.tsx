@@ -150,7 +150,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           {reason && (
             <HoverCardContent side="left">
               <h5 className="text-left text-[14px]">
-                {disabledTitle ? disabledTitle : "Action disabled"}
+                {typeof disabledStyles === "string"
+                  ? disabledTitle
+                  : "Action disabled"}
               </h5>
               <p className="text-left text-[14px]">{reason}</p>
             </HoverCardContent>
