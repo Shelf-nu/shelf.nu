@@ -39,12 +39,13 @@ const operatorsMap: Record<FilterOperator, string[]> = {
   in: ["∈", "Is any of"],
   containsAll: ["⊇", "Contains all"],
   containsAny: ["⊃", "Contains any"],
+  matchesAny: ["≈", "Matches any"],
 };
 
 // Define the allowed operators for each field type
 export const operatorsPerType: FilterDefinition = {
-  string: ["is", "isNot", "contains"],
-  text: ["contains"],
+  string: ["is", "isNot", "contains", "matchesAny", "containsAny"],
+  text: ["contains", "matchesAny", "containsAny"],
   boolean: ["is"],
   date: ["is", "isNot", "before", "after", "between"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],

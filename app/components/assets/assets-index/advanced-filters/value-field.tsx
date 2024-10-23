@@ -118,6 +118,15 @@ export function ValueField({
     }
   };
 
+  /** Generates placeholder for text input fields, based on the operator */
+  function placeholder(operator: Filter["operator"]) {
+    return ["contains", "containsAll", "containsAny", "matchesAny"].includes(
+      operator
+    )
+      ? "Enter comma-separated values"
+      : "Enter value";
+  }
+
   switch (filter.type) {
     case "string":
     case "text":
@@ -127,7 +136,7 @@ export function ValueField({
           type="text"
           value={filter.value as string}
           onChange={handleChange}
-          placeholder="Enter value"
+          placeholder={placeholder(filter.operator)}
           onKeyUp={submitOnEnter}
         />
       );
@@ -225,7 +234,7 @@ export function ValueField({
               .map((item) => item.trim());
             setFilter(newValue);
           }}
-          placeholder="Enter comma-separated values"
+          placeholder={placeholder(filter.operator)}
           onKeyUp={submitOnEnter}
         />
       );

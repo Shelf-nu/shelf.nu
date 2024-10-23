@@ -100,6 +100,21 @@ function addCustomFieldStringFilter(
       return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
     case "contains":
       return Prisma.sql`${whereClause} AND ${subquery} ILIKE ${`%${filter.value}%`}`;
+    case "matchesAny": {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${valuesArray}::text[])`;
+    }
+    case "containsAny": {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      const likeConditions = values.map(
+        (value) => Prisma.sql`${subquery} ILIKE ${`%${value}%`}`
+      );
+      return Prisma.sql`${whereClause} AND (${Prisma.join(
+        likeConditions,
+        " OR "
+      )})`;
+    }
     default:
       return whereClause;
   }
@@ -190,6 +205,27 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" ILIKE ${`%${filter.value}%`}`;
+    case "matchesAny": {
+      // Split comma-separated values and remove whitespace
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      // Create array literal for Postgres
+      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}" = ANY(${valuesArray}::text[])`;
+    }
+    case "containsAny": {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      // Build OR condition for ILIKE
+      const likeConditions = values.map(
+        (value) =>
+          Prisma.sql`a."${Prisma.raw(filter.name)}" ILIKE ${`%${value}%`}`
+      );
+      return Prisma.sql`${whereClause} AND (${Prisma.join(
+        likeConditions,
+        " OR "
+      )})`;
+    }
     default:
       return whereClause;
   }
@@ -320,6 +356,21 @@ function addRelationFilter(
         return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ${filter.value})`;
       case "contains":
         return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id ILIKE ${`%${filter.value}%`})`;
+      case "matchesAny": {
+        const values = (filter.value as string).split(",").map((v) => v.trim());
+        const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ANY(${valuesArray}::text[]))`;
+      }
+      case "containsAny": {
+        const values = (filter.value as string).split(",").map((v) => v.trim());
+        const likeConditions = values.map(
+          (value) => Prisma.sql`q.id ILIKE ${`%${value}%`}`
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND (${Prisma.join(
+          likeConditions,
+          " OR "
+        )}))`;
+      }
       default:
         return whereClause;
     }
@@ -338,10 +389,28 @@ function addRelationFilter(
       return Prisma.sql`${whereClause} AND ${Prisma.raw(
         alias
       )}.name ILIKE ${`%${filter.value}%`}`;
+    case "matchesAny": {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND ${Prisma.raw(
+        alias
+      )}.name = ANY(${valuesArray}::text[])`;
+    }
+    case "containsAny": {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      const likeConditions = values.map(
+        (value) => Prisma.sql`${Prisma.raw(alias)}.name ILIKE ${`%${value}%`}`
+      );
+      return Prisma.sql`${whereClause} AND (${Prisma.join(
+        likeConditions,
+        " OR "
+      )})`;
+    }
     default:
       return whereClause;
   }
 }
+
 // Add this mapping object at the top of your file
 const API_TO_DB_FIELD_MAP: Record<string, string> = {
   valuation: "value",
@@ -444,6 +513,7 @@ function parseFilterValue(
       }
     }
   }
+
   switch (getFilterFieldType(field)) {
     case "number":
       return operator === "between"
@@ -455,6 +525,10 @@ function parseFilterValue(
       return operator === "between" ? value.split(",") : value;
     case "enum":
       return operator === "in" ? value.split(",") : value;
+    case "string":
+    case "text":
+      // For matchesAny and containsAny, keep as comma-separated string
+      return value;
     default:
       return value;
   }
