@@ -28,6 +28,7 @@ export function Table({
       <div
         ref={containerRef}
         className={tw(
+          "list-table-wrapper",
           modeIsAdvanced
             ? "overflow-auto"
             : "scrollbar-top scrollbar-always-visible"

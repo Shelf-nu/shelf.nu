@@ -2,7 +2,7 @@ import { useLoaderData } from "@remix-run/react";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { Button } from "../shared/button";
 
-export const ExportButton = ({
+export const ExportBackupButton = ({
   canExportAssets,
 }: {
   canExportAssets: boolean;

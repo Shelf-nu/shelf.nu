@@ -674,19 +674,29 @@ async function getAssets(params: {
 }
 
 /**
- * Fetches assets for advanced index
- * This is used to have a more advanced search however its less performant
+ * Fetches filtered and paginated assets for advanced asset index view.
+ * @param request - The incoming request
+ * @param organizationId - Organization ID to filter assets by
+ * @param filters - String of filter parameters
+ * @param settings - Asset index settings containing column configuration
+ * @param takeAll - When true, returns all matching assets without pagination
+ * @param assetIds - Optional array of specific asset IDs to filter by
+ * @returns Object containing assets data, pagination info, and search parameters
  */
 export async function getAdvancedPaginatedAndFilterableAssets({
   request,
   organizationId,
   settings,
   filters = "",
+  takeAll = false,
+  assetIds,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   settings: AssetIndexSettings;
   filters?: string;
+  takeAll?: boolean;
+  assetIds?: string[];
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -705,12 +715,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const whereClause = generateWhereClause(
       organizationId,
       search,
-      parsedFilters
+      parsedFilters,
+      assetIds
     );
     const { orderByClause, customFieldSortings } = parseSortingOptions(
       searchParams.getAll("sortBy")
     );
     const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+    // Modify query to conditionally include LIMIT/OFFSET
+    const paginationClause = takeAll
+      ? Prisma.empty
+      : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
 
     const query = Prisma.sql`
       WITH asset_query AS (
@@ -723,8 +738,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       sorted_asset_query AS (
         SELECT * FROM asset_query
         ${Prisma.raw(orderByClause)}
-        LIMIT ${take}
-        OFFSET ${skip}
+        ${paginationClause}
       ),
       count_query AS (
         SELECT COUNT(*)::integer AS total_count

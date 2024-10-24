@@ -11,7 +11,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data, getCurrentSearchParams } from "~/utils/http.server";
+import { data } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,

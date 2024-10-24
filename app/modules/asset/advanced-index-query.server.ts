@@ -8,13 +8,26 @@ import type {
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
-// 1. Filtering
+/**
+ * Generates the SQL WHERE clause for asset filtering
+ * @param organizationId - Organization ID to filter by
+ * @param search - Optional search string
+ * @param filters - Array of filter objects
+ * @param assetIds - Optional array of specific asset IDs to include
+ * @returns Prisma.Sql WHERE clause
+ */
 export function generateWhereClause(
   organizationId: string,
   search: string | null,
-  filters: Filter[]
+  filters: Filter[],
+  assetIds?: string[]
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
+
+  // Add asset IDs filter if provided
+  if (assetIds && assetIds.length > 0) {
+    whereClause = Prisma.sql`${whereClause} AND a.id = ANY(${assetIds}::text[])`;
+  }
 
   if (search) {
     const words = search.trim().split(/\s+/).filter(Boolean);
@@ -26,8 +39,6 @@ export function generateWhereClause(
 
   // Process each filter
   for (const filter of filters) {
-    console.log(filter.type);
-
     switch (filter.type) {
       case "string":
         if (["location", "kit", "category", "qrId"].includes(filter.name)) {
@@ -437,6 +448,9 @@ function addRelationFilter(
  * @returns Modified WHERE clause with array filtering conditions
  */
 function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  /**
+   * NOTE: This currently only works for tags. Will need to be adjusted once we have more arrays to filter by
+   */
   switch (filter.operator) {
     case "contains": {
       // Single tag filtering using the existing join

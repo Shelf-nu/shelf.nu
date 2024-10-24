@@ -1,5 +1,10 @@
+import { AssetIndexMode } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { exportAssetsToCsv } from "~/utils/csv.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  exportAssetsBackupToCsv,
+  exportAssetsFromIndexToCsv,
+} from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
@@ -23,12 +28,27 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     await assertUserCanExportAssets({ organizationId, organizations });
 
-    // @TODO - maybe we need to double check the mode here
+    /** Get the setttings, we need them for a few things */
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+    });
+    const { mode } = settings;
+
     const searchParams = getCurrentSearchParams(request);
-    // if (searchParams.get(""))
+    const assetIds = searchParams.get("assetIds");
+    const isBackupRequest = assetIds === null;
 
     /** Join the rows with a new line */
-    const csvString = await exportAssetsToCsv({ organizationId });
+    const csvString =
+      !isBackupRequest && mode === AssetIndexMode.ADVANCED && assetIds
+        ? await exportAssetsFromIndexToCsv({
+            request,
+            assetIds,
+            organizationId,
+            settings,
+          })
+        : await exportAssetsBackupToCsv({ organizationId });
 
     return new Response(csvString, {
       status: 200,

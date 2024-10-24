@@ -17,6 +17,21 @@ export function AssetIndexPagination() {
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
 
+  function handleScrollToTop() {
+    let target: Element | Window | null = document.querySelector(
+      ".list-table-wrapper"
+    );
+
+    if (!modeIsAdvanced || !target) {
+      target = window;
+    }
+
+    target.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
   return (
     <div
       className={tw(
@@ -27,12 +42,7 @@ export function AssetIndexPagination() {
       <Pagination className="px-4 py-[6px]" />
       <div className="flex items-stretch gap-2 px-4 py-[6px]">
         <Button
-          onClick={() =>
-            window.scrollTo({
-              top: 0,
-              behavior: "smooth",
-            })
-          }
+          onClick={handleScrollToTop}
           variant="secondary"
           title="Scroll to top"
         >

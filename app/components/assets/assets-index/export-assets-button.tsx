@@ -11,9 +11,18 @@ export function ExportAssetsButton() {
   const title = `Export selection ${
     disabled ? "" : allSelected ? "(All)" : `(${selectedAssets.length})`
   }`;
+
+  /** Get the assetIds from the atom and add them to assetIds search param */
+  const assetIds = selectedAssets.map((asset) => asset.id);
+  let url = `/assets/export/assets-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+  if (assetIds.length > 0) {
+    url += `?assetIds=${assetIds.join(",")}`;
+  }
   return (
     <Button
-      to={`/assets?export=true`}
+      to={url}
       variant="secondary"
       download
       reloadDocument
