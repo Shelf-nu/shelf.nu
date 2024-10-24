@@ -2773,10 +2773,10 @@ export async function getAvailableAssetsForBooking(
       });
     }
     return selectedAssets.map((asset) => asset.id);
-  } catch (err) {
+  } catch (cause: ShelfError | any) {
     throw new ShelfError({
-      cause: err,
-      message: "Something went wrong while getting available assets.",
+      cause: cause,
+      message: cause?.message ? cause.message : "Something went wrong while getting available assets.",
       label: "Assets",
     });
   }

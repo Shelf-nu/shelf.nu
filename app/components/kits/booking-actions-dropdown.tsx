@@ -1,9 +1,9 @@
 import { useLoaderData } from "@remix-run/react";
-import { ActionsDropDown } from "~/components/shared/actions-drop-down";
-import type { CustomLink } from "~/components/shared/actions-drop-down";
+import { ActionsDropDown } from "~/components/shared/actions-dropdown";
+import type { CustomLink } from "~/components/shared/actions-dropdown";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 
-export default function BookingActionsDropDown() {
+export default function BookingActionsDropdown() {
   const { kit } = useLoaderData<typeof loader>();
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 

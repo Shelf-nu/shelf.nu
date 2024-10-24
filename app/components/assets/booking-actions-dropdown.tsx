@@ -1,10 +1,10 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import type { CustomLink } from "../shared/actions-drop-down";
-import { ActionsDropDown } from "../shared/actions-drop-down";
+import type { CustomLink } from "../shared/actions-dropdown";
+import { ActionsDropDown } from "../shared/actions-dropdown";
 import { Button } from "../shared/button";
 
-export default function BookingActionsDropDown() {
+export default function BookingActionsDropdown() {
   const { asset } = useLoaderData<typeof loader>();
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
   const assetIsPartOfUnavailableKit = Boolean(

@@ -11,7 +11,7 @@ import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import BookingActionsDropDown from "~/components/assets/booking-actions-dropdown";
+import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -220,7 +220,7 @@ export default function AssetDetailsPage() {
         >
           <ActionsDropdown />
         </When>
-        <BookingActionsDropDown />
+        <BookingActionsDropdown />
       </Header>
       <HorizontalTabs items={items} />
       <div>

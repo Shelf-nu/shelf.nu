@@ -211,10 +211,10 @@ const processBooking = async (
       finalAssetIds,
       bookingInfo: booking,
     };
-  } catch (err) {
+  } catch (cause:any) {
     throw new ShelfError({
-      cause: err,
-      message: "Something went wrong while processing the booking.",
+      cause: cause,
+      message: cause?.message || "Something went wrong while processing the booking.",
       label: "Booking",
     });
   }
