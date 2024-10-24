@@ -79,6 +79,7 @@
     "jotai": "^2.7.1",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
+    "lottie-react": "^2.4.0",
     "luxon": "^3.4.4",
     "mapbox-gl": "^3.1.2",
     "maplibre-gl": "^4.0.0",

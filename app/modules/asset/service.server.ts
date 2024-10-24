@@ -2757,6 +2757,74 @@ export async function bulkMarkAvailability({
     });
   }
 }
+
+export async function relinkQrCode({
+  qrId,
+  assetId,
+  organizationId,
+  userId,
+}: {
+  qrId: Qr["id"];
+  userId: User["id"];
+  assetId: Asset["id"];
+  organizationId: Organization["id"];
+}) {
+  const [qr, user, asset] = await Promise.all([
+    getQr({ id: qrId }),
+    getUserByID(userId),
+    db.asset.findFirst({
+      where: { id: assetId },
+      select: { qrCodes: { select: { id: true } } },
+    }),
+  ]);
+
+  /** User cannot link qr code of other organization */
+  if (qr.organizationId && qr.organizationId !== organizationId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR not valid.",
+      message: "This QR code does not belong to your organization",
+      label: "QR",
+    });
+  }
+
+  if (qr.assetId && qr.assetId !== assetId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+      label: "QR",
+    });
+  }
+
+  const oldQrCode = asset?.qrCodes[0];
+
+  await Promise.all([
+    db.qr.update({
+      where: { id: qr.id },
+      data: { organizationId, userId },
+    }),
+    db.asset.update({
+      where: { id: assetId, organizationId },
+      data: {
+        qrCodes: {
+          set: [],
+          connect: { id: qr.id },
+        },
+      },
+    }),
+    createNote({
+      assetId,
+      userId,
+      type: "UPDATE",
+      content: `**${user.firstName?.trim()}** has changed QR code ${
+        oldQrCode ? `from **${oldQrCode.id}**` : ""
+      } to **${qrId}**`,
+    }),
+  ]);
+}
+
 export async function getAvailableAssetsForBooking(
   assetIds: Asset["id"][]
 ): Promise<string[]> {
@@ -2782,4 +2850,5 @@ export async function getAvailableAssetsForBooking(
       label: "Assets",
     });
   }
-}
+}  
+  
