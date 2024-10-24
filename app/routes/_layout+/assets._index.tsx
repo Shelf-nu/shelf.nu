@@ -74,7 +74,6 @@ export const links: LinksFunction = () => [
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-
   try {
     /** Validate permissions and fetch user */
     const [{ organizationId, organizations, currentOrganization, role }, user] =

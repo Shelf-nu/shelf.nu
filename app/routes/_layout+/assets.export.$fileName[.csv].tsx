@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -22,6 +22,10 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     });
 
     await assertUserCanExportAssets({ organizationId, organizations });
+
+    // @TODO - maybe we need to double check the mode here
+    const searchParams = getCurrentSearchParams(request);
+    // if (searchParams.get(""))
 
     /** Join the rows with a new line */
     const csvString = await exportAssetsToCsv({ organizationId });

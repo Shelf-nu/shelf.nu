@@ -736,9 +736,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       FROM sorted_asset_query aq;
     `;
 
-    console.log(query.sql);
-    console.log(query.values);
-
     const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;

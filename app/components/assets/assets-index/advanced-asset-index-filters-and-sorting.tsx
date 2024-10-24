@@ -118,6 +118,8 @@ function AdvancedFilter() {
     });
   }
 
+  console.log(filters);
+
   const haveFiltersChanged =
     JSON.stringify(initialFilters) !== JSON.stringify(filters);
   return (
@@ -166,6 +168,8 @@ function AdvancedFilter() {
                             const fieldType = getFieldType({
                               column,
                             }) as FilterFieldType;
+                            console.log("column", column);
+                            console.log("fieldType", fieldType);
 
                             const newFilters = [...prev];
                             newFilters[index] = {

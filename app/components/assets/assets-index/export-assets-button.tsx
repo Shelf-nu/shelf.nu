@@ -8,18 +8,23 @@ export function ExportAssetsButton() {
   const disabled = selectedAssets.length === 0;
 
   const allSelected = isSelectingAllItems(selectedAssets);
-
+  const title = `Export selection ${
+    disabled ? "" : allSelected ? "(All)" : `(${selectedAssets.length})`
+  }`;
   return (
     <Button
+      to={`/assets?export=true`}
       variant="secondary"
+      download
+      reloadDocument
+      title={title}
       disabled={
         disabled
           ? { reason: "You must select at least 1 asset to export" }
           : false
       }
     >
-      Export selection{" "}
-      {disabled ? "" : allSelected ? "(All)" : `(${selectedAssets.length})`}
+      {title}
     </Button>
   );
 }

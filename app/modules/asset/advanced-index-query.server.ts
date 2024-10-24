@@ -26,6 +26,8 @@ export function generateWhereClause(
 
   // Process each filter
   for (const filter of filters) {
+    console.log(filter.type);
+
     switch (filter.type) {
       case "string":
         if (["location", "kit", "category", "qrId"].includes(filter.name)) {
@@ -48,6 +50,9 @@ export function generateWhereClause(
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
+        break;
+      case "array":
+        whereClause = addArrayFilter(whereClause, filter);
         break;
       case "customField":
         whereClause = addCustomFieldFilter(whereClause, filter);
@@ -425,6 +430,41 @@ function addRelationFilter(
   }
 }
 
+/**
+ * Handles array type filters (e.g., tags)
+ * @param whereClause - The existing WHERE clause
+ * @param filter - The filter configuration
+ * @returns Modified WHERE clause with array filtering conditions
+ */
+function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  switch (filter.operator) {
+    case "contains": {
+      // Single tag filtering using the existing join
+      return Prisma.sql`${whereClause} AND t.name = ${filter.value}`;
+    }
+    case "containsAll": {
+      // ALL tags must be present
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      return Prisma.sql`${whereClause} AND NOT EXISTS (
+        SELECT unnest(${values}::text[]) AS required_tag
+        EXCEPT
+        SELECT t.name 
+        FROM "_AssetToTag" att2 
+        JOIN "Tag" t2 ON t2.id = att2."B"
+        WHERE att2."A" = a.id
+      )`;
+    }
+    case "containsAny": {
+      // ANY of the tags must be present
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      return Prisma.sql`${whereClause} AND t.name = ANY(${valuesArray}::text[])`;
+    }
+    default:
+      return whereClause;
+  }
+}
+
 // Add this mapping object at the top of your file
 const API_TO_DB_FIELD_MAP: Record<string, string> = {
   valuation: "value",
@@ -496,6 +536,8 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
     case "createdAt":
     case "updatedAt":
       return "date";
+    case "tags":
+      return "array";
     default:
       // For custom fields, you might want to implement a more sophisticated logic
       return "string";

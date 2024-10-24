@@ -11,7 +11,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data } from "~/utils/http.server";
+import { data, getCurrentSearchParams } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -206,8 +206,6 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-
-  /** Parse filters */
 
   /** Parse filters */
   const {
