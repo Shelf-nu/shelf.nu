@@ -16,6 +16,7 @@ export enum PermissionAction {
 }
 export enum PermissionEntity {
   asset = "asset",
+  assetIndexSettings = "assetIndexSettings",
   qr = "qr",
   booking = "booking",
   tag = "tag",
@@ -40,6 +41,7 @@ export const Role2PermissionMap: {
 } = {
   [OrganizationRoles.BASE]: {
     [PermissionEntity.asset]: [PermissionAction.read],
+    [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,
@@ -65,6 +67,7 @@ export const Role2PermissionMap: {
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,

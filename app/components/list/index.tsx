@@ -9,6 +9,7 @@ import {
 } from "~/atoms/list";
 
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -98,6 +99,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   }: ListProps,
   ref
 ) {
+  const { isMd } = useViewportHeight();
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
@@ -126,7 +128,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       ref={ref}
       className={tw(
         "-mx-4 border border-gray-200 bg-white md:mx-0 md:rounded",
-        customPagination && "mb-[50px]",
+        customPagination && isMd && "mb-[34px]",
         modeIsAdvanced ? "flex h-full flex-col" : "overflow-auto",
         className
       )}

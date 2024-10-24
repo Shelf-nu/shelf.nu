@@ -24,7 +24,7 @@ export const Pagination = ({ className }: { className?: string }) => {
   return (
     <div
       className={tw(
-        "flex flex-wrap items-center justify-center gap-3 px-6 pb-4 pt-3",
+        "flex flex-wrap items-center justify-center gap-3 px-1 pb-4 pt-3 md:px-6",
         className
       )}
     >

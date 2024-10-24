@@ -1,4 +1,4 @@
-import type { Tag } from "@prisma/client";
+import { OrganizationRoles, type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -7,7 +7,12 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useFetchers, useLoaderData, useNavigate } from "@remix-run/react";
+import {
+  useFetcher,
+  useFetchers,
+  useLoaderData,
+  useNavigate,
+} from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -41,6 +46,8 @@ import { db } from "~/database/db.server";
 
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useDisabled } from "~/hooks/use-disabled";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   advancedModeLoader,
@@ -49,7 +56,10 @@ import {
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  changeMode,
+  getAssetIndexSettings,
+} from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -106,6 +116,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const settings = await getAssetIndexSettings({ userId, organizationId });
     const mode = settings.mode;
+
+    /** For base and self service users, we dont allow to view the advanced index */
+    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+      await changeMode({
+        userId,
+        organizationId,
+        mode: "SIMPLE",
+      });
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You don't have permission to access the advanced mode. We will automatically switch you back to 'simple' mode. Please reload the page.",
+        label: "Assets",
+        status: 403,
+      });
+    }
 
     return mode === "SIMPLE"
       ? await simpleModeLoader({
@@ -258,6 +285,7 @@ export const AssetsList = ({
   const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexMode();
+  const { isMd } = useViewportHeight();
   const fetchers = useFetchers();
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
@@ -310,25 +338,35 @@ export const AssetsList = ({
       ) : (
         <></>
       )}
-      <AssetIndexFilters disableTeamMemberFilter={disableTeamMemberFilter} />
-      <List
-        title="Assets"
-        ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-        customPagination={<AssetIndexPagination />}
-        /**
-         * Using remix's navigate is the default behaviour, however it can receive also a custom function
-         */
-        navigate={
-          modeIsSimple ? (itemId) => navigate(`/assets/${itemId}`) : undefined
-        }
-        bulkActions={
-          disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
-        }
-        customEmptyStateContent={
-          customEmptyState ? customEmptyState : undefined
-        }
-        headerChildren={headerChildren}
-      />
+      {!isMd && !modeIsSimple ? (
+        <AdvancedModeMobileFallback />
+      ) : (
+        <>
+          <AssetIndexFilters
+            disableTeamMemberFilter={disableTeamMemberFilter}
+          />
+          <List
+            title="Assets"
+            ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+            customPagination={<AssetIndexPagination />}
+            /**
+             * Using remix's navigate is the default behaviour, however it can receive also a custom function
+             */
+            navigate={
+              modeIsSimple
+                ? (itemId) => navigate(`/assets/${itemId}`)
+                : undefined
+            }
+            bulkActions={
+              disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
+            }
+            customEmptyStateContent={
+              customEmptyState ? customEmptyState : undefined
+            }
+            headerChildren={headerChildren}
+          />
+        </>
+      )}
     </div>
   );
 };
@@ -476,3 +514,31 @@ export const ListItemTagsColumn = ({
     </div>
   ) : null;
 };
+
+function AdvancedModeMobileFallback() {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2">
+      <p className="text-center">
+        Advanced mode is currently not available on mobile.
+      </p>
+      <fetcher.Form
+        method="post"
+        action="/api/asset-index-settings"
+        onSubmit={() => {
+          window.scrollTo({
+            top: 0,
+            behavior: "smooth",
+          });
+        }}
+      >
+        <input type="hidden" name="intent" value="changeMode" />
+
+        <Button name="mode" value="SIMPLE" disabled={disabled}>
+          Change to simple mode
+        </Button>
+      </fetcher.Form>
+    </div>
+  );
+}

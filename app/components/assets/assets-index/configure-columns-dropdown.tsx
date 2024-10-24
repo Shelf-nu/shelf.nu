@@ -66,7 +66,12 @@ export function ConfigureColumnsDropdown() {
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
-        <Button variant="secondary" icon="columns" className="text-gray-500">
+        <Button
+          variant="secondary"
+          icon="columns"
+          className="mt-2 text-gray-500 md:mt-0"
+          width="full"
+        >
           Columns
         </Button>
       </PopoverTrigger>

@@ -35,8 +35,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+      entity: PermissionEntity.assetIndexSettings,
+      action: PermissionAction.update,
     });
 
     const formData = await request.clone().formData();
