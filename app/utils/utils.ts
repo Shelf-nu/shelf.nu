@@ -24,6 +24,10 @@ export function groupBy<T>(
   );
 }
 
+export function intersected(arr1: string[], arr2: string[]): boolean {
+  return !!arr1.find((value) => arr2.find((innerValue) => innerValue == value));
+}
+
 /**
  * Merges two types and includes all the keys from both types.
  */

@@ -1,0 +1,3 @@
+dialog {
+  @apply mx-auto h-auto w-[480px] max-w-full;
+}
