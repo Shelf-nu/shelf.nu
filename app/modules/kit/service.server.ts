@@ -1176,10 +1176,12 @@ export async function getAvailableKitAssetForBooking(
       });
     }
     return allAssets.map((asset) => asset.id);
-  } catch (cause:any) {
+  } catch (cause: any) {
     throw new ShelfError({
       cause: cause,
-      message: cause?.message || "Something went wrong while getting available assets.",
+      message:
+        cause?.message ||
+        "Something went wrong while getting available assets.",
       label: "Assets",
     });
   }

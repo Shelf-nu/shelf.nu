@@ -2776,7 +2776,9 @@ export async function getAvailableAssetsForBooking(
   } catch (cause: ShelfError | any) {
     throw new ShelfError({
       cause: cause,
-      message: cause?.message ? cause.message : "Something went wrong while getting available assets.",
+      message: cause?.message
+        ? cause.message
+        : "Something went wrong while getting available assets.",
       label: "Assets",
     });
   }

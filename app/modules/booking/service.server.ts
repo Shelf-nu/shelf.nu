@@ -1551,12 +1551,14 @@ export async function getExistingBookingDetails(bookingId: string) {
         label: "Booking",
       });
     }
-    
+
     return booking;
-  } catch (cause:ShelfError | any) {
+  } catch (cause: ShelfError | any) {
     throw new ShelfError({
       cause,
-      message: cause?.message || "Something went wrong while getting existing booking details.",
+      message:
+        cause?.message ||
+        "Something went wrong while getting existing booking details.",
       additionalData: { bookingId },
       label: "Booking",
     });
