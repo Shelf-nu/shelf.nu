@@ -3,7 +3,6 @@ import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
-import { AnimatePresence, motion } from "framer-motion";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
@@ -68,15 +67,18 @@ export function BookingAssetsColumn() {
    * Represents the visibility of booking assets in the UI.
    * A value of 0 typically means all categories are hidden,
    */
-  const [categoryVisibility, setCategoryVisibility] = useState<number>(0);
+  const [categoryVisibility, setCategoryVisibility] = useState<number>(
+    Object.values(groupedAssetsWithKits).length + assetsWithoutKits.length
+  );
+
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev) => ({
       ...prev,
       [kitId]: !prev[kitId],
     }));
     expandedKits[kitId]
-      ? setCategoryVisibility(categoryVisibility - 1)
-      : setCategoryVisibility(categoryVisibility + 1);
+      ? setCategoryVisibility(categoryVisibility + 1)
+      : setCategoryVisibility(categoryVisibility - 1);
   };
 
   const manageAssetsButtonDisabled = useMemo(
@@ -181,7 +183,10 @@ export function BookingAssetsColumn() {
 
                       return (
                         <React.Fragment key={kit.id}>
-                          <ListItem item={kit} className="bg-gray-50">
+                          <ListItem
+                            item={kit}
+                            className="bg-gray-50 hover:bg-gray-100"
+                          >
                             <Td className="max-w-full">
                               <Button
                                 to={`/kits/${kit.id}`}
@@ -192,7 +197,6 @@ export function BookingAssetsColumn() {
                                   {kit.name}
                                 </div>
                               </Button>
-
                               <p className="text-sm text-gray-600">
                                 {assets.length} assets
                               </p>
@@ -206,11 +210,13 @@ export function BookingAssetsColumn() {
                                 <Button
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
-                                  className="text-center font-bold text-gray-600"
+                                  className="text-center font-bold text-gray-600 hover:text-gray-900"
                                 >
                                   <ChevronDownIcon
                                     className={tw(
-                                      `size-6 ${isExpanded ? "rotate-180" : ""}`
+                                      `size-6 ${
+                                        !isExpanded ? "rotate-180" : ""
+                                      }`
                                     )}
                                   />
                                 </Button>
@@ -221,22 +227,27 @@ export function BookingAssetsColumn() {
                               </div>
                             </Td>
                           </ListItem>
-                            {isExpanded &&
+                          {!isExpanded &&
                             assets.map((asset) => (
-                                <ListItem
-                                motionProps={{ initial: { opacity: 0, y: -10 },
-                                animate: { opacity: 1, y: 0 },
-                                exit: { opacity: 0, y: 10 },
-                                transition: { duration: 0.3, ease: "easeInOut" },
-                                whileHover: { scale: 1.02 },
-                                whileTap: { scale: 0.98 },}} 
-                                key={asset.id} item={asset}>
-                                  <ListAssetContent
-                                    item={asset as AssetWithBooking}
-                                  />
-                                </ListItem>
+                              <ListItem
+                                key={asset.id}
+                                item={asset}
+                                className="hover:bg-gray-100"
+                                motionProps={{
+                                  initial: { opacity: 0, y: -10 },
+                                  animate: { opacity: 1, y: 0 },
+                                  exit: { opacity: 0, y: 10 },
+                                  transition: {
+                                    duration: 0.3,
+                                    ease: "easeInOut",
+                                  },
+                                }}
+                              >
+                                <ListAssetContent
+                                  item={asset as AssetWithBooking}
+                                />
+                              </ListItem>
                             ))}
-
                         </React.Fragment>
                       );
                     })}
