@@ -22,6 +22,7 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
+import { tw } from "~/utils/tw";
 
 export function BookingAssetsColumn() {
   const { booking, items, totalItems } = useLoaderData<{
@@ -64,9 +65,9 @@ export function BookingAssetsColumn() {
 
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
   /**
- * Represents the visibility of booking assets in the UI.
- * A value of 0 typically means all categories are hidden,
- */
+   * Represents the visibility of booking assets in the UI.
+   * A value of 0 typically means all categories are hidden,
+   */
   const [categoryVisibility, setCategoryVisibility] = useState<number>(0);
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev) => ({
@@ -205,14 +206,10 @@ export function BookingAssetsColumn() {
                                 <Button
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
-                                  className="text-center text-gray-600 font-bold"
+                                  className="text-center font-bold text-gray-600"
                                 >
-                                  {isExpanded ? (
-                                    <ChevronUpIcon className="size-6" />
-                                  ) : (
-                                    <ChevronDownIcon className="size-6" />
-                                  )}
-                                </Button>
+                                <ChevronDownIcon className={tw(`size-6 ${isExpanded ? 'rotate-180' : ''}`)} />
+                              </Button>
 
                                 {(!isBase && isDraft) || isReserved ? (
                                   <KitRowActionsDropdown kit={kit} />
