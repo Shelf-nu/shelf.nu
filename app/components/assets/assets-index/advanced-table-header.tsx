@@ -10,7 +10,7 @@ export function AdvancedTableHeader({ columns }: { columns: Column[] }) {
         .map((column) => (
           <Th
             key={column.name}
-            className="whitespace-nowrap"
+            className=" whitespace-nowrap bg-gray-25"
             data-column-name={column.name}
           >
             {parseColumnName(column.name)}
