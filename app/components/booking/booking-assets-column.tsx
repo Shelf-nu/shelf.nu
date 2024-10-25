@@ -62,12 +62,13 @@ export function BookingAssetsColumn() {
   );
 
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
-
+  const [categoryVisibility, setCategoryVisibility] = useState<number>(0);
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev: any) => ({
       ...prev,
       [kitId]: !prev[kitId],
     }));
+    expandedKits[kitId] ? setCategoryVisibility(categoryVisibility-1) : setCategoryVisibility(categoryVisibility+1);
   };
 
   const manageAssetsButtonDisabled = useMemo(
@@ -153,8 +154,8 @@ export function BookingAssetsColumn() {
                 <Table className="">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
-                    <Th> </Th>
-                    <Th>Category</Th>
+                    <Th > </Th>
+                    {categoryVisibility> 0 && <Th>Category</Th>}
                     <Th> </Th>
                   </ListHeader>
                   <tbody>
