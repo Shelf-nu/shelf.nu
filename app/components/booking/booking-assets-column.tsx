@@ -3,6 +3,7 @@ import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { ChevronDownIcon, ChevronUpIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
@@ -21,7 +22,6 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
-import { AnimatePresence, motion } from "framer-motion";
 
 export function BookingAssetsColumn() {
   const { booking, items, totalItems } = useLoaderData<{
@@ -63,9 +63,13 @@ export function BookingAssetsColumn() {
   );
 
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
+  /**
+ * Represents the visibility of booking assets in the UI.
+ * A value of 0 typically means all categories are hidden,
+ */
   const [categoryVisibility, setCategoryVisibility] = useState<number>(0);
   const toggleKitExpansion = (kitId: string) => {
-    setExpandedKits((prev: any) => ({
+    setExpandedKits((prev) => ({
       ...prev,
       [kitId]: !prev[kitId],
     }));
@@ -201,7 +205,7 @@ export function BookingAssetsColumn() {
                                 <Button
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
-                                  className="text-center font-bold"
+                                  className="text-center text-gray-600 font-bold"
                                 >
                                   {isExpanded ? (
                                     <ChevronUpIcon className="size-6" />
@@ -223,11 +227,13 @@ export function BookingAssetsColumn() {
                                   key={asset.id}
                                   initial={{ opacity: 0, y: -20 }}
                                   animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: 20 }} 
+                                  exit={{ opacity: 0, y: 20 }}
                                   transition={{ duration: 0.3 }}
                                 >
                                   <ListItem item={asset}>
-                                    <ListAssetContent item={asset as AssetWithBooking} />
+                                    <ListAssetContent
+                                      item={asset as AssetWithBooking}
+                                    />
                                   </ListItem>
                                 </motion.div>
                               ))}
