@@ -1867,7 +1867,7 @@ export async function createAssetsFromContentImport({
       organizationId,
     });
 
-    const customFields = await createCustomFieldsIfNotExists({
+    const { customFields } = await createCustomFieldsIfNotExists({
       data,
       organizationId,
       userId,
@@ -2150,6 +2150,7 @@ export async function createAssetsFromBackupImport({
             customFields: {
               create: asset.customFields.map((cf) => ({
                 value: cf.value,
+                // @ts-ignore
                 customFieldId: cfIds[cf.customField.name].id,
               })),
             },

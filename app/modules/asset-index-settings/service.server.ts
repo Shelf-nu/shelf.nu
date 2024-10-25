@@ -3,7 +3,7 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
-import type { Column } from "./helpers";
+import type { Column, ColumnLabelKey } from "./helpers";
 import { defaultFields, fixedFields } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -43,7 +43,7 @@ export async function createUserAssetIndexSettings({
 
     const columns = [...defaultFields, ...customFieldsColumns];
 
-    return await _db.assetIndexSettings.create({
+    const settings = await _db.assetIndexSettings.create({
       data: {
         userId,
         organizationId,
@@ -51,6 +51,8 @@ export async function createUserAssetIndexSettings({
         columns,
       },
     });
+
+    return settings;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -75,33 +77,27 @@ export async function getAssetIndexSettings({
       where: { userId, organizationId },
     });
 
-    /** This is a safety shute. If for some reason there are no settings, we create them on the go */
+    /** Create new settings if none exist */
     if (!assetIndexSettings) {
-      const newAssetIndexSettings = await createUserAssetIndexSettings({
+      return await createUserAssetIndexSettings({
         userId,
         organizationId,
       });
-
-      return newAssetIndexSettings;
     }
 
-    /** Makes sure all default fields are available in the columns.  */
-    const updatedAssetIndexSettings = await validateDefaultFieldsColumns({
+    /** Validate and potentially update columns structure */
+    const validatedSettings = await validateColumns({
       userId,
       organizationId,
-      columns: assetIndexSettings?.columns as Column[],
+      columns: assetIndexSettings.columns as Column[],
     });
-
-    /** If the settings were updated, return the new ones */
-    return updatedAssetIndexSettings
-      ? updatedAssetIndexSettings
-      : assetIndexSettings;
+    return validatedSettings || assetIndexSettings;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "Asset Index Settings not found.",
       message:
-        "We couldn't find the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't find the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId },
       label,
     });
@@ -231,10 +227,70 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
   }
 }
 
-/** Makes sure that each default field is present in the columns
- * This is very useful when we start adding more default fields as it will make sure it's present in the columns
+/**
+ * Updates the AssetIndexSettings for all users in an organization when new custom fields are created
+ * @param newCustomFields - The newly created or updated custom fields
+ * @param organizationId - The organization ID
  */
-async function validateDefaultFieldsColumns({
+export async function updateAssetIndexSettingsWithNewCustomFields({
+  newCustomFields,
+  organizationId,
+}: {
+  newCustomFields: CustomField[];
+  organizationId: string;
+}) {
+  try {
+    // Get all asset index settings for the organization
+    const settings = await db.assetIndexSettings.findMany({
+      where: { organizationId },
+    });
+
+    // For each user's settings, update their columns
+    const updates = settings.map((setting) => {
+      const columns = setting.columns as Column[];
+
+      // Get the highest current position
+      const maxPosition = Math.max(...columns.map((col) => col.position));
+
+      // Create new column entries for each new custom field
+      const newColumns: Column[] = newCustomFields.map((field, index) => ({
+        name: `cf_${field.name}`,
+        visible: true,
+        position: maxPosition + 1 + index,
+        cfType: field.type,
+      }));
+
+      // Filter out any existing columns for these custom fields
+      const existingColumns = columns.filter(
+        (col) =>
+          !newCustomFields.some((field) => `cf_${field.name}` === col.name)
+      );
+
+      return db.assetIndexSettings.update({
+        where: { id: setting.id },
+        data: {
+          columns: [...existingColumns, ...newColumns],
+        },
+      });
+    });
+
+    await Promise.all(updates);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update asset index settings with new custom fields",
+      additionalData: { organizationId },
+      label: "Asset Index Settings",
+    });
+  }
+}
+
+/**
+ * Validates both default fields and custom field columns structure
+ * Only queries the database if validation issues are found
+ * @returns Updated settings if changes were needed, null otherwise
+ */
+async function validateColumns({
   userId,
   organizationId,
   columns,
@@ -243,36 +299,101 @@ async function validateDefaultFieldsColumns({
   organizationId: string;
   columns: Column[];
 }) {
-  /** Filter out the custom fields so we can make the check */
-  const withoutCustomFields = columns.filter(
-    (col) => !col.name.startsWith("cf_")
-  );
+  try {
+    let needsUpdate = false;
+    let updatedColumns = [...columns];
 
-  /** Make array of names for easier comparison */
-  const columnsNames = withoutCustomFields.map((col) => col.name);
+    // 1. First validate default fields existence without DB query
+    const defaultFieldsNames = fixedFields.map((field) => field);
+    const existingDefaultFields = updatedColumns
+      .filter((col) => !col.name.startsWith("cf_"))
+      .map((col) => col.name);
 
-  /** Detect missing field names */
-  const missingFieldsNames = fixedFields.filter(
-    (field) => !columnsNames.includes(field)
-  );
+    // Detect missing default fields
+    const missingDefaultFields: ColumnLabelKey[] = defaultFieldsNames.filter(
+      (name) => !existingDefaultFields.includes(name)
+    );
 
-  /** If there are missing names, update the cols and return the new cols */
-  if (missingFieldsNames.length > 0) {
-    /** Get the missing fields from the default fields */
-    const missingFields = missingFieldsNames.map((name) => {
-      const field = defaultFields.find((f) => f.name === name);
-      return field as Column; // WE can assume that the field is present in the defualt fields
+    // If default fields are missing, add them from our static defaults
+    if (missingDefaultFields.length > 0) {
+      const fieldsToAdd = defaultFields.filter((field) =>
+        missingDefaultFields.includes(field.name)
+      );
+      updatedColumns = [...updatedColumns, ...fieldsToAdd];
+      needsUpdate = true;
+    }
+
+    // 2. Validate custom field columns structure
+    const customFieldColumns = updatedColumns.filter((col) =>
+      col.name.startsWith("cf_")
+    );
+
+    const hasInvalidCustomFields = customFieldColumns.some(
+      (col) =>
+        !col.cfType ||
+        typeof col.visible !== "boolean" ||
+        typeof col.position !== "number"
+    );
+
+    // Only query DB if we found invalid custom fields
+    if (hasInvalidCustomFields) {
+      // Fetch custom fields data only when needed
+      const customFields = await db.customField.findMany({
+        where: {
+          organizationId,
+          active: true,
+        },
+        select: {
+          name: true,
+          type: true,
+        },
+      });
+
+      const customFieldsMap = new Map(
+        customFields.map((cf) => [cf.name, cf.type])
+      );
+
+      // Filter out non-custom field columns
+      const regularColumns = updatedColumns.filter(
+        (col) => !col.name.startsWith("cf_")
+      );
+
+      // Rebuild custom field columns with correct structure
+      const validatedCustomFieldColumns = customFieldColumns
+        .filter((col) => {
+          const cfName = col.name.slice(3);
+          return customFieldsMap.has(cfName);
+        })
+        .map((col) => {
+          const cfName = col.name.slice(3);
+          return {
+            ...col,
+            cfType: customFieldsMap.get(cfName),
+            visible: Boolean(col.visible),
+            position: Number(col.position),
+          };
+        });
+
+      updatedColumns = [...regularColumns, ...validatedCustomFieldColumns];
+      needsUpdate = true;
+    }
+
+    // Only update if changes were needed
+    if (needsUpdate) {
+      return await updateColumns({
+        userId,
+        organizationId,
+        columns: updatedColumns,
+      });
+    }
+
+    return null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to validate columns structure",
+      additionalData: { userId, organizationId },
+      label,
     });
-    const newColumns = [...columns, ...missingFields];
-
-    /** Run the update */
-    const updatedSettings = await updateColumns({
-      userId,
-      organizationId,
-      columns: newColumns,
-    });
-    return updatedSettings;
   }
-
-  return null;
 }

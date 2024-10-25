@@ -10,7 +10,10 @@ import {
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
-import { updateAssetIndexSettingsAfterCfUpdate } from "../asset-index-settings/service.server";
+import {
+  updateAssetIndexSettingsAfterCfUpdate,
+  updateAssetIndexSettingsWithNewCustomFields,
+} from "../asset-index-settings/service.server";
 
 const label: ErrorLabel = "Custom fields";
 
@@ -215,9 +218,13 @@ export async function updateCustomField(payload: {
 
 export async function upsertCustomField(
   definitions: CustomFieldDraftPayload[]
-): Promise<Record<string, CustomField>> {
+): Promise<{
+  customFields: Record<string, CustomField>;
+  newOrUpdatedFields: CustomField[];
+}> {
   try {
     const customFields: Record<string, CustomField> = {};
+    const newOrUpdatedFields: CustomField[] = [];
 
     for (const def of definitions) {
       let existingCustomField = await db.customField.findFirst({
@@ -233,6 +240,7 @@ export async function upsertCustomField(
       if (!existingCustomField) {
         const newCustomField = await createCustomField(def);
         customFields[def.name] = newCustomField;
+        newOrUpdatedFields.push(newCustomField);
       } else {
         if (existingCustomField.type !== def.type) {
           throw new ShelfError({
@@ -262,13 +270,22 @@ export async function upsertCustomField(
               options,
             });
             existingCustomField = updatedCustomField;
+            newOrUpdatedFields.push(updatedCustomField);
           }
         }
         customFields[def.name] = existingCustomField;
       }
     }
 
-    return customFields;
+    // Update asset index settings if we have any new or updated fields
+    if (newOrUpdatedFields.length > 0) {
+      void updateAssetIndexSettingsWithNewCustomFields({
+        newCustomFields: newOrUpdatedFields,
+        organizationId: definitions[0].organizationId,
+      });
+    }
+
+    return { customFields, newOrUpdatedFields };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -276,7 +293,7 @@ export async function upsertCustomField(
         ? cause.message
         : "Failed to update or create custom fields. Please try again or contact support.",
       additionalData: { definitions },
-      label,
+      label: "Custom fields",
     });
   }
 }
@@ -289,7 +306,7 @@ export async function createCustomFieldsIfNotExists({
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<Record<string, CustomField>> {
+}) {
   try {
     //{CF header:[all options in csv combined]}
     const optionMap: Record<string, string[]> = {};
