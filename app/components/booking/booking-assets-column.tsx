@@ -150,12 +150,12 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table className=" w-full">
+                <Table className="">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
-                    <Th></Th>
+                    <Th> </Th>
                     <Th>Category</Th>
-                    <Th></Th>
+                    <Th> </Th>
                   </ListHeader>
                   <tbody>
                     {/* List all assets without kit at once */}
@@ -169,7 +169,7 @@ export function BookingAssetsColumn() {
                     {Object.values(groupedAssetsWithKits).map((assets) => {
                       const kit = assets[0].kit as Kit;
                       const isExpanded = expandedKits[kit.id] ?? false;
- 
+
                       return (
                         <React.Fragment key={kit.id}>
                           <ListItem item={kit} className="bg-gray-50">
@@ -195,8 +195,7 @@ export function BookingAssetsColumn() {
                             <Td className="pr-4 text-right align-middle">
                               <div className="flex items-center justify-end gap-5">
                                 <Button
-                                  onClick={() => 
-                                    toggleKitExpansion(kit.id)}
+                                  onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
                                   className="text-center font-bold"
                                 >
