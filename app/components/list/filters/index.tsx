@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import { tw } from "~/utils/tw";
 import { SearchForm } from "./search-form";
 
@@ -24,27 +25,31 @@ export const Filters = ({
   slots?: SlotKeys;
   searchClassName?: string;
   innerWrapperClassName?: string;
-}) => (
-  <div
-    className={tw(
-      "flex items-center justify-between bg-white py-2 md:rounded md:border md:border-gray-200 md:px-6 md:py-5",
-      className
-    )}
-  >
-    <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
-      <div
-        className={tw(
-          "flex w-full flex-col gap-2 md:flex-row md:items-center",
-          innerWrapperClassName
-        )}
-      >
-        {slots?.["left-of-search"] || null}
-        <SearchForm className={searchClassName} />
-        {slots?.["right-of-search"] || null}
+}) => {
+  const { modeIsAdvanced } = useAssetIndexMode();
+  return (
+    <div
+      className={tw(
+        modeIsAdvanced ? "md:p-3" : "md:px-6 md:py-5",
+        "flex items-center justify-between bg-white py-2 md:rounded md:border md:border-gray-200 ",
+        className
+      )}
+    >
+      <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
+        <div
+          className={tw(
+            "flex w-full flex-col gap-2 md:flex-row md:items-center",
+            innerWrapperClassName
+          )}
+        >
+          {slots?.["left-of-search"] || null}
+          <SearchForm className={searchClassName} />
+          {slots?.["right-of-search"] || null}
+        </div>
+        {children ? (
+          <div className="flex flex-1 justify-end">{children}</div>
+        ) : null}
       </div>
-      {children ? (
-        <div className="flex flex-1 justify-end">{children}</div>
-      ) : null}
     </div>
-  </div>
-);
+  );
+};

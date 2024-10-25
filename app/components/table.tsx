@@ -33,7 +33,7 @@ export function Table({
             ? "overflow-auto"
             : "scrollbar-top scrollbar-always-visible"
         )}
-        style={modeIsAdvanced ? { maxHeight: `${vh - 370}px` } : undefined}
+        style={modeIsAdvanced ? { maxHeight: `${vh - 329}px` } : undefined}
       >
         <table className={tw("w-full table-auto border-collapse", className)}>
           {children}

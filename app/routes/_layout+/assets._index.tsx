@@ -1,4 +1,4 @@
-import { OrganizationRoles, type Tag } from "@prisma/client";
+import { type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -73,6 +73,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export type AssetIndexLoaderData = typeof loader;
@@ -323,7 +324,12 @@ export const AssetsList = ({
   );
 
   return (
-    <div className="flex h-full flex-col gap-4 pt-4">
+    <div
+      className={tw(
+        "flex h-full flex-col",
+        modeIsSimple ? "gap-4 pt-4" : "gap-2 pt-2"
+      )}
+    >
       {isSwappingMode ? (
         <motion.div
           initial={{ opacity: 0 }}

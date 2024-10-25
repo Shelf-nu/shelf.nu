@@ -141,7 +141,12 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
-          <div className="flex items-center justify-between border-b p-4 pb-[8px]">
+          <div
+            className={tw(
+              modeIsAdvanced ? "p-3 pb-[5px]" : "p-4 pb-[8px]",
+              "flex items-center justify-between border-b "
+            )}
+          >
             <div>
               <div>
                 <h5 className="text-left capitalize">{title || plural}</h5>
