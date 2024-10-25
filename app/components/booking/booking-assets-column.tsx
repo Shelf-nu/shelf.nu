@@ -21,6 +21,7 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
+import { AnimatePresence, motion } from "framer-motion";
 
 export function BookingAssetsColumn() {
   const { booking, items, totalItems } = useLoaderData<{
@@ -68,7 +69,9 @@ export function BookingAssetsColumn() {
       ...prev,
       [kitId]: !prev[kitId],
     }));
-    expandedKits[kitId] ? setCategoryVisibility(categoryVisibility-1) : setCategoryVisibility(categoryVisibility+1);
+    expandedKits[kitId]
+      ? setCategoryVisibility(categoryVisibility - 1)
+      : setCategoryVisibility(categoryVisibility + 1);
   };
 
   const manageAssetsButtonDisabled = useMemo(
@@ -154,8 +157,8 @@ export function BookingAssetsColumn() {
                 <Table className="">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
-                    <Th > </Th>
-                    {categoryVisibility> 0 && <Th>Category</Th>}
+                    <Th> </Th>
+                    {categoryVisibility > 0 && <Th>Category</Th>}
                     <Th> </Th>
                   </ListHeader>
                   <tbody>
@@ -213,14 +216,23 @@ export function BookingAssetsColumn() {
                               </div>
                             </Td>
                           </ListItem>
-                          {isExpanded &&
-                            assets.map((asset) => (
-                              <ListItem key={asset.id} item={asset}>
-                                <ListAssetContent
-                                  item={asset as AssetWithBooking}
-                                />
-                              </ListItem>
-                            ))}
+                          {isExpanded && (
+                            <AnimatePresence>
+                              {assets.map((asset) => (
+                                <motion.div
+                                  key={asset.id}
+                                  initial={{ opacity: 0, y: -20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: 20 }} 
+                                  transition={{ duration: 0.3 }}
+                                >
+                                  <ListItem item={asset}>
+                                    <ListAssetContent item={asset as AssetWithBooking} />
+                                  </ListItem>
+                                </motion.div>
+                              ))}
+                            </AnimatePresence>
+                          )}
                         </React.Fragment>
                       );
                     })}
