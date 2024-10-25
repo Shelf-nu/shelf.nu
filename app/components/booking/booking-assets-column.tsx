@@ -1,6 +1,7 @@
-import React, { useMemo , useState} from "react";
+import React, { useMemo, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
+import { ChevronDownIcon, ChevronUpIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -20,7 +21,6 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
-import {ChevronDownIcon, ChevronUpIcon} from "@radix-ui/react-icons"
 
 export function BookingAssetsColumn() {
   const { booking, items, totalItems } = useLoaderData<{
@@ -150,12 +150,12 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table className="">
+                <Table className=" w-full">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
                     <Th></Th>
+                    <Th>Category</Th>
                     <Th></Th>
-                    <Th className="text-right">Category</Th>
                   </ListHeader>
                   <tbody>
                     {/* List all assets without kit at once */}
@@ -195,11 +195,16 @@ export function BookingAssetsColumn() {
                             <Td className="pr-4 text-right align-middle">
                               <div className="flex items-center justify-end gap-5">
                                 <Button
-                                  onClick={() => toggleKitExpansion(kit.id)}
+                                  onClick={() => 
+                                    toggleKitExpansion(kit.id)}
                                   variant="link"
                                   className="text-center font-bold"
                                 >
-                                  {isExpanded ? <ChevronUpIcon className="size-6"/> : <ChevronDownIcon className="size-6"/>}
+                                  {isExpanded ? (
+                                    <ChevronUpIcon className="size-6" />
+                                  ) : (
+                                    <ChevronDownIcon className="size-6" />
+                                  )}
                                 </Button>
 
                                 {(!isBase && isDraft) || isReserved ? (
@@ -209,13 +214,13 @@ export function BookingAssetsColumn() {
                             </Td>
                           </ListItem>
                           {isExpanded &&
-                          assets.map((asset) => (
-                            <ListItem key={asset.id} item={asset}>
-                              <ListAssetContent
-                                item={asset as AssetWithBooking}
-                              />
-                            </ListItem>
-                          ))}
+                            assets.map((asset) => (
+                              <ListItem key={asset.id} item={asset}>
+                                <ListAssetContent
+                                  item={asset as AssetWithBooking}
+                                />
+                              </ListItem>
+                            ))}
                         </React.Fragment>
                       );
                     })}
