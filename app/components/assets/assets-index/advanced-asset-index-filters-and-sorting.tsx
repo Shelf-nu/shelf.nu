@@ -51,7 +51,7 @@ export function AdvancedFilteringAndSorting() {
 
 const getTriggerClasses = (open: boolean, activeItems: number) =>
   tw(
-    "text-gray-500",
+    "font-normal text-gray-500",
     open ? "bg-gray-50" : "",
     activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
   );
@@ -231,7 +231,7 @@ function AdvancedFilter() {
             <div>
               <Button
                 variant="secondary"
-                className="text-[14px]"
+                className="text-[14px] font-medium"
                 size="xs"
                 disabled={
                   disabled || availableColumns.length === 0
@@ -263,7 +263,7 @@ function AdvancedFilter() {
 
               <Button
                 variant="secondary"
-                className="text-[14px]"
+                className="text-[14px] font-medium"
                 size="xs"
                 disabled={
                   !haveFiltersChanged || disabled
@@ -435,7 +435,7 @@ function AdvancedSorting() {
 
               <Button
                 variant="secondary"
-                className="text-[14px]"
+                className="text-[14px] font-medium"
                 size="xs"
                 disabled={!haveSortsChanged || disabled}
                 onClick={applySorting}
@@ -502,7 +502,7 @@ function PickAColumnToSortBy({
       <PopoverTrigger asChild>
         <Button
           variant="block-link-gray"
-          className="text-[14px] font-semibold text-gray-600"
+          className="text-[14px] font-normal text-gray-600"
           disabled={
             availableColumns.length === 0
               ? {
@@ -527,7 +527,7 @@ function PickAColumnToSortBy({
             {sortOptions.map((c) => (
               <div
                 key={c.name}
-                className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                className="px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50"
                 onClick={() => addSort(c)}
               >
                 {parseColumnName(c.name)}

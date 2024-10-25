@@ -41,7 +41,7 @@ export function FieldSelector({
       <PopoverTrigger asChild>
         <Button
           variant="secondary"
-          className="w-[150px] justify-start truncate whitespace-nowrap [&_span]:max-w-full [&_span]:truncate"
+          className="w-[150px] justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
         >
           <ChevronRight className="ml-[2px] inline-block rotate-90" />
           <span className="ml-2">{parseColumnName(fieldName)}</span>{" "}
@@ -57,11 +57,13 @@ export function FieldSelector({
           {availableColumns.map((column, index) => (
             <div
               key={column.name + index}
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+              className="px-4 py-2 text-[14px]  text-gray-600 hover:cursor-pointer hover:bg-gray-50"
               onClick={() => setFilter(column.name)}
             >
-              <span>{parseColumnName(column.name)}</span>
-              <span className="ml-2 text-gray-500">
+              <span className="font-medium">
+                {parseColumnName(column.name)}
+              </span>
+              <span className="ml-2 font-normal text-gray-500">
                 {getFieldType({ column, friendlyName: true })}
               </span>
             </div>

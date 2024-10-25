@@ -24,6 +24,7 @@ export function ExportAssetsButton() {
     <Button
       to={url}
       variant="secondary"
+      className="font-medium"
       download
       reloadDocument
       title={title}

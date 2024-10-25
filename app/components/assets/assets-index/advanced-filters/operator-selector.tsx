@@ -18,8 +18,8 @@ function FilterOperatorDisplay({
 }) {
   return (
     <div className="flex items-center gap-2 text-[14px] ">
-      <span className="text-gray-500">{symbol}</span>
-      <span className=" whitespace-nowrap">{text}</span>
+      <span className="font-semibold text-gray-500">{symbol}</span>
+      <span className=" whitespace-nowrap font-normal">{text}</span>
     </div>
   );
 }
@@ -78,7 +78,7 @@ export function OperatorSelector({
         <Button
           variant="secondary"
           title={operatorsMap[operator][1]}
-          className="w-[50px]"
+          className="w-[50px] font-normal"
         >
           {operatorsMap[operator][0]}
         </Button>

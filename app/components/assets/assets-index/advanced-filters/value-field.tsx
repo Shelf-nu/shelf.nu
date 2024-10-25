@@ -262,7 +262,7 @@ function BooleanField({
         <PopoverTrigger asChild>
           <Button
             variant="secondary"
-            className="w-full justify-start truncate whitespace-nowrap [&_span]:max-w-full [&_span]:truncate"
+            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
             <span className="ml-2">{boolValue ? "Yes" : "No"}</span>{" "}
@@ -370,7 +370,7 @@ function EnumField({
       return (
         <div
           key={option}
-          className="flex items-center justify-between px-4 py-3 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+          className="flex items-center justify-between px-4 py-3 text-[14px]  text-gray-600 hover:cursor-pointer hover:bg-gray-50"
           onClick={() => handleOptionClick(option)}
         >
           <span>
@@ -395,7 +395,7 @@ function EnumField({
         <PopoverTrigger asChild>
           <Button
             variant="secondary"
-            className="w-full justify-start truncate whitespace-nowrap [&_span]:max-w-full [&_span]:truncate"
+            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
             <span className="ml-2">{displayValue}</span>{" "}
