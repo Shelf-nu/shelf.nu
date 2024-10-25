@@ -39,6 +39,11 @@ export const ListItem = ({
       navigate ? "cursor-pointer" : "",
       className
     )}
+    /**
+     * Chromium based browsers have a bug since 2014 that is related to
+     * hover effects on table rows while scrolling.
+     *  We add the following styles to fix the issue.
+     */
     style={{
       transform: "translateZ(0)",
       willChange: "transform",
