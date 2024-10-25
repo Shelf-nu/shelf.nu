@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { tw } from "~/utils/tw";
 
 export interface ListItemData {
@@ -10,6 +11,7 @@ export interface ListItemProps {
   children: React.ReactNode;
   navigate?: (id: string, item: ListItemData) => void;
   className?: string;
+  motionProps?: any; // Optional animation props passed to the motion component
 }
 
 export const ListItem = ({
@@ -17,8 +19,9 @@ export const ListItem = ({
   children,
   navigate,
   className,
+  motionProps = {},
 }: ListItemProps) => (
-  <tr
+  <motion.tr
     onClick={(event) => {
       if (navigate) {
         // Check if Ctrl or Cmd key is pressed
@@ -36,17 +39,13 @@ export const ListItem = ({
       navigate ? "cursor-pointer" : "",
       className
     )}
-    /**
-     * Chromium based browsers have a bug since 2014 that is related to
-     * hover effects on table rows while scrolling.
-     *  We add the following styles to fix the issue.
-     */
     style={{
       transform: "translateZ(0)",
       willChange: "transform",
       backgroundAttachment: "initial",
     }}
+    {...motionProps}
   >
     {children}
-  </tr>
+  </motion.tr>
 );

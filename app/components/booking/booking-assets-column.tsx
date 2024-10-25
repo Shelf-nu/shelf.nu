@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
-import { ChevronDownIcon, ChevronUpIcon } from "@radix-ui/react-icons";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { tw } from "~/utils/tw";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -22,7 +23,6 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
-import { tw } from "~/utils/tw";
 
 export function BookingAssetsColumn() {
   const { booking, items, totalItems } = useLoaderData<{
@@ -208,8 +208,12 @@ export function BookingAssetsColumn() {
                                   variant="link"
                                   className="text-center font-bold text-gray-600"
                                 >
-                                <ChevronDownIcon className={tw(`size-6 ${isExpanded ? 'rotate-180' : ''}`)} />
-                              </Button>
+                                  <ChevronDownIcon
+                                    className={tw(
+                                      `size-6 ${isExpanded ? "rotate-180" : ""}`
+                                    )}
+                                  />
+                                </Button>
 
                                 {(!isBase && isDraft) || isReserved ? (
                                   <KitRowActionsDropdown kit={kit} />
@@ -217,25 +221,22 @@ export function BookingAssetsColumn() {
                               </div>
                             </Td>
                           </ListItem>
-                          {isExpanded && (
-                            <AnimatePresence>
-                              {assets.map((asset) => (
-                                <motion.div
-                                  key={asset.id}
-                                  initial={{ opacity: 0, y: -20 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: 20 }}
-                                  transition={{ duration: 0.3 }}
-                                >
-                                  <ListItem item={asset}>
-                                    <ListAssetContent
-                                      item={asset as AssetWithBooking}
-                                    />
-                                  </ListItem>
-                                </motion.div>
-                              ))}
-                            </AnimatePresence>
-                          )}
+                            {isExpanded &&
+                            assets.map((asset) => (
+                                <ListItem
+                                motionProps={{ initial: { opacity: 0, y: -10 },
+                                animate: { opacity: 1, y: 0 },
+                                exit: { opacity: 0, y: 10 },
+                                transition: { duration: 0.3, ease: "easeInOut" },
+                                whileHover: { scale: 1.02 },
+                                whileTap: { scale: 0.98 },}} 
+                                key={asset.id} item={asset}>
+                                  <ListAssetContent
+                                    item={asset as AssetWithBooking}
+                                  />
+                                </ListItem>
+                            ))}
+
                         </React.Fragment>
                       );
                     })}
