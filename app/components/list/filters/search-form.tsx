@@ -21,17 +21,24 @@ export const SearchForm = ({ className }: { className?: string }) => {
 
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
 
+  /**
+   * Clears the search parameter and page parameter from the URL
+   * to ensure we start from the first page of results
+   */
   function clearSearch() {
     setSearchParams((prev) => {
       prev.delete("s");
-
+      prev.delete("page"); // Reset page when clearing search
       return prev;
     });
     if (searchInputRef.current) {
       searchInputRef.current.value = "";
     }
   }
-
+  /**
+   * Handles search input changes with debouncing
+   * Resets page to 1 whenever search query changes
+   */
   const debouncedHandleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
@@ -41,6 +48,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
     } else {
       setSearchParams((prev) => {
         prev.set("s", searchQuery);
+        prev.delete("page"); // Reset to page 1 when search query changes
         return prev;
       });
     }
