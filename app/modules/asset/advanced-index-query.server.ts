@@ -181,7 +181,7 @@ function addCustomFieldOptionFilter(
       return Prisma.sql`${whereClause} AND ${subquery} = ${filter.value}`;
     case "isNot":
       return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
-    case "in": {
+    case "containsAny": {
       let valuesArray;
 
       // Ensure filter.value is an array, and parse it if necessary
@@ -333,20 +333,22 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "status") {
-    // Ensure the filter value is trimmed
+    // For containsAny, convert comma-separated string to array
     let trimmedValue;
-
-    if (Array.isArray(filter.value)) {
-      // If the value is an array, map through and trim only string values
-      trimmedValue = filter.value.map((val) =>
-        typeof val === "string" ? val.trim() : val
-      );
-    } else if (typeof filter.value === "string") {
-      // If it's a single string value, trim it
-      trimmedValue = filter.value.trim();
+    if (filter.operator === "containsAny") {
+      const values = (filter.value as string).split(",").map((v) => v.trim());
+      trimmedValue = `{${values.join(",")}}`;
     } else {
-      // For numbers or any other type, leave as is
-      trimmedValue = filter.value;
+      // For other operators, use existing trimming logic
+      if (Array.isArray(filter.value)) {
+        trimmedValue = filter.value.map((val) =>
+          typeof val === "string" ? val.trim() : val
+        );
+      } else if (typeof filter.value === "string") {
+        trimmedValue = filter.value.trim();
+      } else {
+        trimmedValue = filter.value;
+      }
     }
 
     switch (filter.operator) {
@@ -354,11 +356,16 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return Prisma.sql`${whereClause} AND a.status = ${trimmedValue}::public."AssetStatus"`;
       case "isNot":
         return Prisma.sql`${whereClause} AND a.status != ${trimmedValue}::public."AssetStatus"`;
-      case "in":
+      case "containsAny":
         return Prisma.sql`${whereClause} AND a.status = ANY(${trimmedValue}::public."AssetStatus"[])`;
       default:
         return whereClause;
     }
+  }
+
+  // Handle custody enums by delegating to specialized function
+  if (filter.name === "custody") {
+    return addCustodyFilter(whereClause, filter);
   }
   // Add handling for other enum fields if needed
   return whereClause;
@@ -441,6 +448,92 @@ function addRelationFilter(
   }
 }
 
+/**
+ * Adds custody-specific filtering to the WHERE clause
+ * Handles both direct custody via TeamMember ID and indirect custody via Bookings
+ * @param whereClause - The existing WHERE clause to extend
+ * @param filter - The filter containing custody search criteria
+ * @returns Extended WHERE clause with custody conditions
+ */
+function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND (
+        EXISTS (
+          SELECT 1 FROM "Custody" cu 
+          WHERE cu."assetId" = a.id 
+          AND cu."teamMemberId" = ${filter.value}
+        )
+        OR EXISTS (
+          SELECT 1 FROM "Booking" b 
+          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          WHERE b.status IN ('ONGOING', 'OVERDUE')
+          AND (
+            b."custodianTeamMemberId" = ${filter.value}
+            OR b."custodianUserId" = (
+              SELECT "userId" FROM "TeamMember" tm WHERE tm.id = ${filter.value}
+            )
+          )
+        )
+      )`;
+
+    case "isNot":
+      return Prisma.sql`${whereClause} AND NOT (
+        EXISTS (
+          SELECT 1 FROM "Custody" cu 
+          WHERE cu."assetId" = a.id 
+          AND cu."teamMemberId" = ${filter.value}
+        )
+        OR EXISTS (
+          SELECT 1 FROM "Booking" b 
+          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          WHERE b.status IN ('ONGOING', 'OVERDUE')
+          AND (
+            b."custodianTeamMemberId" = ${filter.value}
+            OR b."custodianUserId" = (
+              SELECT "userId" FROM "TeamMember" tm WHERE tm.id = ${filter.value}
+            )
+          )
+        )
+      )`;
+
+    case "containsAny": {
+      // Split the comma-separated values and clean them
+      const values = (
+        typeof filter.value === "string"
+          ? filter.value.split(",").map((v) => v.trim())
+          : Array.isArray(filter.value)
+          ? filter.value
+          : [filter.value]
+      ).filter(Boolean);
+
+      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+
+      return Prisma.sql`${whereClause} AND (
+        EXISTS (
+          SELECT 1 FROM "Custody" cu 
+          WHERE cu."assetId" = a.id 
+          AND cu."teamMemberId" = ANY(${valuesArray}::text[])
+        )
+        OR EXISTS (
+          SELECT 1 FROM "Booking" b 
+          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          WHERE b.status IN ('ONGOING', 'OVERDUE')
+          AND (
+            b."custodianTeamMemberId" = ANY(${valuesArray}::text[])
+            OR b."custodianUserId" IN (
+              SELECT "userId" FROM "TeamMember" tm 
+              WHERE tm.id = ANY(${valuesArray}::text[])
+            )
+          )
+        )
+      )`;
+    }
+
+    default:
+      return whereClause;
+  }
+}
 /**
  * Handles array type filters (e.g., tags)
  * @param whereClause - The existing WHERE clause
@@ -540,6 +633,7 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
     case "category": // relation
       return "string";
     case "status":
+    case "custody":
       return "enum";
     case "description":
       return "text";

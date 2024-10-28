@@ -26,6 +26,8 @@ import {
 } from "./service.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
+import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
 
 type Org = Prisma.OrganizationGetPayload<{
   select: {
@@ -224,6 +226,7 @@ export async function advancedModeLoader({
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
+    teamMembers,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -239,6 +242,28 @@ export async function advancedModeLoader({
     getActiveCustomFields({
       organizationId,
     }),
+    /** We get all the first 12 team members that are part of the org @TODO - change this to a proper function */
+    await db.teamMember
+      .findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+        },
+        include: { user: true },
+        orderBy: {
+          userId: "asc",
+        },
+        take: 12,
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching team members. Please try again or contact support.",
+          additionalData: { userId, organizationId },
+          label: "Assets",
+        });
+      }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -300,6 +325,7 @@ export async function advancedModeLoader({
       currentOrganization,
       settings,
       customFields,
+      teamMembers,
     }),
     {
       headers,

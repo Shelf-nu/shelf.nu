@@ -30,9 +30,9 @@ export function getFieldType({
     case "category":
     case "location":
     case "kit":
-    case "custody":
       fieldType = "string";
       break;
+    case "custody":
     case "status":
       fieldType = "enum";
       break;

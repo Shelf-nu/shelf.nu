@@ -28,9 +28,12 @@ import When from "../when/when";
 
 type Props = ModelFilterProps & {
   className?: string;
+  triggerWrapperClassName?: string;
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: string;
+  hideLabel?: boolean;
+  hideCounter?: boolean;
   /** Overwrite the default placeholder will will be `Search ${model.name}s` */
   placeholder?: string;
   searchIcon?: IconType;
@@ -50,12 +53,17 @@ type Props = ModelFilterProps & {
    * the user to select all items in the list
    */
   allowSelectAll?: boolean;
+
+  onSelectionChange?: (selectedIds: string[]) => void;
 };
 
 export default function DynamicDropdown({
   className,
+  triggerWrapperClassName,
   style,
   label = "Filter",
+  hideLabel,
+  hideCounter,
   placeholder,
   trigger,
   searchIcon = "search",
@@ -90,12 +98,15 @@ export default function DynamicDropdown({
 
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger
-          className="inline-flex items-center gap-2 text-gray-500"
+          className={tw(
+            "inline-flex items-center gap-2 text-gray-500",
+            triggerWrapperClassName
+          )}
           asChild
         >
           <div>
             {cloneElement(trigger)}
-            <When truthy={selectedItems.length > 0}>
+            <When truthy={selectedItems.length > 0 && !hideCounter}>
               <div className="flex size-6 items-center justify-center rounded-full bg-primary-50 px-2 py-[2px] text-xs font-medium text-primary-700">
                 {selectedItems.length}
               </div>
@@ -111,13 +122,17 @@ export default function DynamicDropdown({
             )}
             style={style}
           >
-            <div className="flex items-center justify-between p-3">
-              <div className="text-xs font-semibold text-gray-700">{label}</div>
+            <div className="flex items-center justify-between ">
+              {!hideLabel && (
+                <div className="p-3 text-xs font-semibold text-gray-700">
+                  {label}
+                </div>
+              )}
               <When truthy={selectedItems.length > 0 && showSearch}>
                 <Button
                   as="button"
                   variant="link"
-                  className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                  className="whitespace-nowrap p-3 text-xs font-normal text-gray-500 hover:text-gray-600"
                   onClick={clearFilters}
                 >
                   Clear filter

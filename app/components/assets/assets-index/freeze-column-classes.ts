@@ -6,15 +6,16 @@ export const freezeColumnClassNames: Record<
   ClassNameValue
 > = {
   // Because sticky elements dont work with border, we use the after pseudo element to create the border
-  checkboxHeader: "sticky left-0 bg-gray-25 z-[10]",
-  checkbox: tw(
-    "sticky left-0 z-10 bg-white"
-    // "after:absolute after:inset-0 after:border-b after:border-gray-200 after:content-['']"
+  checkboxHeader: tw(
+    "sticky left-0 z-10 bg-gray-25",
+    "after:absolute after:inset-0 after:border-b after:border-gray-200 after:content-['']"
   ),
+  checkbox: tw("sticky left-0 z-10 bg-white"),
 
   nameHeader: tw(
     "sticky left-[48px] z-10 bg-gray-25",
-    "before:absolute before:inset-y-0 before:right-0 before:border-r before:content-['']"
+    "before:absolute before:inset-y-0 before:right-0 before:border-r before:content-['']",
+    "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']"
   ),
   name: tw(
     "freeze-shadow sticky left-[48px] z-10 bg-white",

@@ -9,6 +9,7 @@ import {
 import { useLoaderData } from "@remix-run/react";
 import { format, parseISO } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import Input from "~/components/forms/input";
 
 import { CheckIcon, ChevronRight, PlusIcon } from "~/components/icons/library";
@@ -16,6 +17,7 @@ import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
@@ -204,14 +206,13 @@ export function ValueField({
       );
 
     case "enum":
+      // console.log("filter", filter);
       return (
-        <EnumField
-          value={filter.value as string}
+        <ValueEnumField
           fieldName={filter.name}
-          handleChange={(value: string) => {
-            setFilter(value);
-          }}
-          multiSelect={filter.operator === "in"}
+          value={filter.value as string}
+          handleChange={setFilter}
+          multiSelect={filter.operator === "containsAny"}
         />
       );
 
@@ -300,92 +301,57 @@ function BooleanField({
   );
 }
 
-function EnumField({
-  fieldName,
-  value,
-  handleChange,
-  multiSelect = false,
-}: {
-  fieldName: string;
+interface EnumOption {
+  id: string;
+  label: string;
+}
+
+interface EnumFieldProps {
   value: string;
+  options: EnumOption[];
   handleChange: (value: string) => void;
   multiSelect?: boolean;
-}) {
-  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const data = useLoaderData<AssetIndexLoaderData>();
-  const customFields = data?.customFields || [];
-  const isStatusField = fieldName === "status";
+}
 
-  const options = isStatusField
-    ? Object.values(AssetStatus)
-    : customFields.find((field) => field?.name === fieldName.slice(3))
-        ?.options || [];
+/**
+ * Generic enum field component that handles single and multi-select scenarios
+ */
+function EnumField({
+  value,
+  options,
+  handleChange,
+  multiSelect = false,
+}: EnumFieldProps) {
+  console.log("isMultiSelect", multiSelect);
+
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
 
   const displayValue = multiSelect
     ? selectedValues
-        .map((v) =>
-          isStatusField ? userFriendlyAssetStatus(v as AssetStatus) : v
-        )
+        .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
         .join(", ")
     : value === ""
-    ? options[0]
-    : isStatusField
-    ? userFriendlyAssetStatus(value as AssetStatus)
-    : value;
+    ? options[0]?.label
+    : options.find((opt) => opt.id === value)?.label ?? value;
 
-  function handleOptionClick(option: string) {
+  function handleOptionClick(optionId: string) {
     let newValue: string;
-
     if (multiSelect) {
-      const isSelected = selectedValues.includes(option);
+      const isSelected = selectedValues.includes(optionId);
       const updatedValues = isSelected
-        ? selectedValues.filter((val) => val !== option)
-        : [...selectedValues, option];
+        ? selectedValues.filter((val) => val !== optionId)
+        : [...selectedValues, optionId];
       newValue = updatedValues.join(", ");
     } else {
-      newValue = option;
+      newValue = optionId;
     }
-
     handleChange(newValue);
     if (!multiSelect) {
-      setIsPopoverOpen(false); // Close popover for single-select
+      setIsPopoverOpen(false);
     }
-  }
-
-  function Content() {
-    if (options.length === 0) {
-      return (
-        <div className="max-w-[400px] p-4">
-          There are no options defined for this custom field. If you think this
-          is a bug, please report the issue so it can get resolved.
-        </div>
-      );
-    }
-
-    return options.map((option) => {
-      const isSelected = selectedValues.includes(option);
-      return (
-        <div
-          key={option}
-          className="flex items-center justify-between px-4 py-3 text-[14px]  text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-          onClick={() => handleOptionClick(option)}
-        >
-          <span>
-            {isStatusField
-              ? userFriendlyAssetStatus(option as AssetStatus)
-              : option}
-          </span>
-          {multiSelect && isSelected && (
-            <span className="h-auto w-[14px] text-primary">
-              <CheckIcon />
-            </span>
-          )}
-        </div>
-      );
-    });
   }
 
   return (
@@ -398,7 +364,7 @@ function EnumField({
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
-            <span className="ml-2">{displayValue}</span>{" "}
+            <span className="ml-2">{displayValue}</span>
           </Button>
         </PopoverTrigger>
         <PopoverPortal>
@@ -408,7 +374,30 @@ function EnumField({
               "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
           >
-            <Content />
+            {options.length === 0 ? (
+              <div className="max-w-[400px] p-4">
+                No options available. Please contact support if you believe this
+                is an error.
+              </div>
+            ) : (
+              options.map((option) => {
+                const isSelected = selectedValues.includes(option.id);
+                return (
+                  <div
+                    key={option.id}
+                    className="flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                    onClick={() => handleOptionClick(option.id)}
+                  >
+                    <span>{option.label}</span>
+                    {multiSelect && isSelected && (
+                      <span className="h-auto w-[14px] text-primary">
+                        <CheckIcon />
+                      </span>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </PopoverContent>
         </PopoverPortal>
       </Popover>
@@ -416,6 +405,183 @@ function EnumField({
   );
 }
 
+/**
+ * Status-specific enum field that handles asset statuses
+ */
+function StatusEnumField({
+  value,
+  handleChange,
+  multiSelect,
+}: Omit<EnumFieldProps, "options">) {
+  const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
+    id: status,
+    label: userFriendlyAssetStatus(status),
+  }));
+
+  return (
+    <EnumField
+      value={value}
+      options={options}
+      handleChange={handleChange}
+      multiSelect={multiSelect}
+    />
+  );
+}
+
+/**
+ * Custom field-specific enum field that handles custom field options
+ */
+function CustomFieldEnumField({
+  value,
+  handleChange,
+  fieldName,
+  multiSelect,
+}: Omit<EnumFieldProps, "options"> & { fieldName: string }) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+  const customFields = useMemo(
+    () => data?.customFields || [],
+    [data?.customFields]
+  );
+
+  const options: EnumOption[] = useMemo(() => {
+    const field = customFields.find((f) => f?.name === fieldName.slice(3));
+    return (field?.options || []).map((opt) => ({
+      id: opt,
+      label: opt,
+    }));
+  }, [customFields, fieldName]);
+
+  return (
+    <EnumField
+      value={value}
+      options={options}
+      handleChange={handleChange}
+      multiSelect={multiSelect}
+    />
+  );
+}
+
+/**
+ * Custody-specific field component that handles team members and users via DynamicDropdown
+ */
+function CustodyEnumField({
+  value,
+  handleChange,
+  multiSelect,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected TeamMember IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+
+    // If it's a containsAny filter, split the values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  return (
+    <DynamicDropdown
+      trigger={
+        <Button
+          variant="secondary"
+          className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
+        >
+          <ChevronRight className="ml-[2px] inline-block rotate-90" />
+          <span className="ml-2">
+            {selectedIds.length > 0
+              ? selectedIds
+                  .map((id) =>
+                    resolveTeamMemberName({
+                      name:
+                        data.teamMembers.find((tm) => tm.id === id)?.name || "",
+                      user:
+                        data.teamMembers.find((tm) => tm.id === id)?.user ||
+                        null,
+                    })
+                  )
+                  .join(", ")
+              : "Select custodian"}
+          </span>
+        </Button>
+      }
+      triggerWrapperClassName="w-full"
+      className="z-[999999]"
+      model={{
+        name: "teamMember",
+        queryKey: "name",
+        deletedAt: null,
+      }}
+      transformItem={(item) => item}
+      renderItem={(item) => resolveTeamMemberName(item)}
+      label="Filter by custodian"
+      hideLabel
+      hideCounter
+      placeholder="Search team members"
+      initialDataKey="teamMembers"
+      countKey="totalTeamMembers"
+      selectionMode="none" // Important: Keep this to prevent direct URL updates
+      defaultValues={selectedIds} // This ensures checkmarks persist
+      onSelectionChange={(selectedTeamMemberIds) => {
+        if (multiSelect) {
+          handleChange(selectedTeamMemberIds.join(","));
+        } else {
+          handleChange(selectedTeamMemberIds[0] || "");
+        }
+      }}
+    />
+  );
+}
+
+/**
+ * Component that determines which enum field to render based on field name
+ */
+function ValueEnumField({
+  fieldName,
+  value,
+  handleChange,
+  multiSelect,
+}: {
+  fieldName: string;
+  value: string;
+  handleChange: (value: string) => void;
+  multiSelect?: boolean;
+}) {
+  if (fieldName === "status") {
+    return (
+      <StatusEnumField
+        value={value}
+        handleChange={handleChange}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  if (fieldName === "custody") {
+    return (
+      <CustodyEnumField
+        value={value}
+        handleChange={handleChange}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  if (fieldName.startsWith("cf_")) {
+    return (
+      <CustomFieldEnumField
+        value={value}
+        handleChange={handleChange}
+        fieldName={fieldName}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  return null;
+}
 // Define the props for the DateField component
 type DateFieldProps = {
   filter: Filter;
@@ -423,6 +589,7 @@ type DateFieldProps = {
   applyFilters: () => void;
 };
 
+// @TODO - move to a proper location
 function isDateString(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;

@@ -36,6 +36,8 @@ export type ModelFilterProps = {
    * transformItem: (item) => ({ ...item, id: JSON.stringify({ id: item.id, name: item.name }) })
    */
   transformItem?: (item: ModelFilterItem) => ModelFilterItem;
+
+  onSelectionChange?: (selectedIds: string[]) => void;
 };
 
 const GET_ALL_KEY = "getAll";
@@ -47,12 +49,34 @@ export function useModelFilters({
   initialDataKey,
   selectionMode = "append",
   transformItem,
+  onSelectionChange,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedItems, setSelectedItems] = useState<string[]>(
     defaultValues ?? []
+  );
+
+  useEffect(
+    function updateSelectedValuesWhenParamsChange() {
+      if (selectionMode === "none") {
+        // @TODO - fit this, its hardcoded for now.
+        let filteringParams = searchParams.get("custody");
+        if (filteringParams) {
+          // Remove key
+          filteringParams = filteringParams.split(":")[1];
+
+          // Create array of the ids
+          const ids = filteringParams.split(",");
+
+          setSelectedItems(ids);
+        }
+      } else {
+        setSelectedItems(searchParams.getAll(model.name));
+      }
+    },
+    [model.name, searchParams, selectionMode]
   );
 
   const totalItems = initialData[countKey];
@@ -71,43 +95,54 @@ export function useModelFilters({
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
+      if (selectionMode === "none") {
+        const newSelected = selectedItems.includes(value)
+          ? selectedItems.filter((id) => id !== value)
+          : [...selectedItems, value];
+        setSelectedItems(newSelected);
+        onSelectionChange?.(newSelected);
+        return;
+      }
+
       /**
        * If item selection mode is none then values are not added in
        * search params instead they are just updated in state only
        * */
-      if (selectionMode === "none") {
-        setSelectedItems((prev) => [...prev, value]);
-      } else {
-        /** If item is already there in search params then remove it */
-        if (selectedItems.includes(value)) {
-          /** Using Optimistic UI approach */
-          setSelectedItems((prev) => prev.filter((item) => item !== value));
+      /** If item is already there in search params then remove it */
+      if (selectedItems.includes(value)) {
+        /** Using Optimistic UI approach */
+        setSelectedItems((prev) => prev.filter((item) => item !== value));
 
-          setSearchParams((prev) => {
-            prev.delete(model.name, value);
-            return prev;
-          });
-        } else {
-          setSelectedItems((prev) => [...prev, value]);
-          /** Otherwise, add the item in search params */
-          setSearchParams(
-            (prev) => {
-              if (selectionMode === "append") {
-                prev.append(model.name, value);
-              } else {
-                prev.set(model.name, value);
-              }
-              return prev;
-            },
-            {
-              // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
-              preventScrollReset: true,
+        setSearchParams((prev) => {
+          prev.delete(model.name, value);
+          return prev;
+        });
+      } else {
+        setSelectedItems((prev) => [...prev, value]);
+        /** Otherwise, add the item in search params */
+        setSearchParams(
+          (prev) => {
+            if (selectionMode === "append") {
+              prev.append(model.name, value);
+            } else {
+              prev.set(model.name, value);
             }
-          );
-        }
+            return prev;
+          },
+          {
+            // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
+            preventScrollReset: true,
+          }
+        );
       }
     },
-    [selectionMode, selectedItems, setSearchParams, model.name]
+    [
+      selectedItems,
+      onSelectionChange,
+      selectionMode,
+      setSearchParams,
+      model.name,
+    ]
   );
 
   const handleSearchQueryChange = (
@@ -132,13 +167,6 @@ export function useModelFilters({
     }
   };
 
-  useEffect(
-    function updateSelectedValuesWhenParamsChange() {
-      setSelectedItems(searchParams.getAll(model.name));
-    },
-    [model.name, searchParams]
-  );
-
   const resetModelFiltersFetcher = () => {
     setSearchQuery("");
     fetcher.reset();
@@ -153,6 +181,9 @@ export function useModelFilters({
         prev.delete(model.name);
         return prev;
       });
+    }
+    if (onSelectionChange) {
+      onSelectionChange([]);
     }
   };
 

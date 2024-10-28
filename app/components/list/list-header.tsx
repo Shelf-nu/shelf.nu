@@ -44,6 +44,7 @@ export const ListHeader = ({
           <Th
             className={tw(
               "!border-b-0 border-r border-r-transparent text-left font-normal text-gray-600",
+              modeIsAdvanced ? "bg-gray-25" : "",
               bulkActions ? "!pl-0" : "",
 
               modeIsAdvanced && freezeColumn
