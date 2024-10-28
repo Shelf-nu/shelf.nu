@@ -1,11 +1,13 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { tw } from "~/utils/tw";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -59,6 +61,25 @@ export function BookingAssetsColumn() {
     }),
     [items]
   );
+
+  const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
+  /**
+   * Represents the visibility of booking assets in the UI.
+   * A value of 0 typically means all categories are hidden,
+   */
+  const [categoryVisibility, setCategoryVisibility] = useState<number>(
+    Object.values(groupedAssetsWithKits).length + assetsWithoutKits.length
+  );
+
+  const toggleKitExpansion = (kitId: string) => {
+    setExpandedKits((prev) => ({
+      ...prev,
+      [kitId]: !prev[kitId],
+    }));
+    expandedKits[kitId]
+      ? setCategoryVisibility(categoryVisibility + 1)
+      : setCategoryVisibility(categoryVisibility - 1);
+  };
 
   const manageAssetsButtonDisabled = useMemo(
     () =>
@@ -140,11 +161,11 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table className="">
+                <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
                     <Th> </Th>
-                    <Th>Category</Th>
+                    {categoryVisibility > 0 && <Th>Category</Th>}
                     <Th> </Th>
                   </ListHeader>
                   <tbody>
@@ -158,10 +179,14 @@ export function BookingAssetsColumn() {
                     {/* List all the assets which are part of a kit */}
                     {Object.values(groupedAssetsWithKits).map((assets) => {
                       const kit = assets[0].kit as Kit;
+                      const isExpanded = expandedKits[kit.id] ?? false;
 
                       return (
                         <React.Fragment key={kit.id}>
-                          <ListItem item={kit} className="bg-gray-50">
+                          <ListItem
+                            item={kit}
+                            className="pseudo-border-bottom bg-gray-50"
+                          >
                             <Td className="max-w-full">
                               <Button
                                 to={`/kits/${kit.id}`}
@@ -172,7 +197,6 @@ export function BookingAssetsColumn() {
                                   {kit.name}
                                 </div>
                               </Button>
-
                               <p className="text-sm text-gray-600">
                                 {assets.length} assets
                               </p>
@@ -181,20 +205,48 @@ export function BookingAssetsColumn() {
                             <Td> </Td>
                             <Td> </Td>
 
-                            <Td className="pr-4 text-right">
-                              {(!isBase && isDraft) || isReserved ? (
-                                <KitRowActionsDropdown kit={kit} />
-                              ) : null}
+                            <Td className="pr-4 text-right align-middle">
+                              <div className="flex items-center justify-end gap-5">
+                                <Button
+                                  onClick={() => toggleKitExpansion(kit.id)}
+                                  variant="link"
+                                  className="text-center font-bold text-gray-600 hover:text-gray-900"
+                                >
+                                  <ChevronDownIcon
+                                    className={tw(
+                                      `size-6 ${
+                                        !isExpanded ? "rotate-180" : ""
+                                      }`
+                                    )}
+                                  />
+                                </Button>
+
+                                {(!isBase && isDraft) || isReserved ? (
+                                  <KitRowActionsDropdown kit={kit} />
+                                ) : null}
+                              </div>
                             </Td>
                           </ListItem>
-
-                          {assets.map((asset) => (
-                            <ListItem key={asset.id} item={asset}>
-                              <ListAssetContent
-                                item={asset as AssetWithBooking}
-                              />
-                            </ListItem>
-                          ))}
+                          {!isExpanded &&
+                            assets.map((asset) => (
+                              <ListItem
+                                key={asset.id}
+                                item={asset}
+                                motionProps={{
+                                  initial: { opacity: 0, y: -10 },
+                                  animate: { opacity: 1, y: 0 },
+                                  exit: { opacity: 0, y: 10 },
+                                  transition: {
+                                    duration: 0.3,
+                                    ease: "easeInOut",
+                                  },
+                                }}
+                              >
+                                <ListAssetContent
+                                  item={asset as AssetWithBooking}
+                                />
+                              </ListItem>
+                            ))}
                         </React.Fragment>
                       );
                     })}
