@@ -161,7 +161,7 @@ export function BookingAssetsColumn() {
               />
             ) : (
               <>
-                <Table className="">
+                <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
                     <Th>Name</Th>
                     <Th> </Th>
@@ -185,7 +185,7 @@ export function BookingAssetsColumn() {
                         <React.Fragment key={kit.id}>
                           <ListItem
                             item={kit}
-                            className="bg-gray-50 hover:bg-gray-100"
+                            className="pseudo-border-bottom bg-gray-50"
                           >
                             <Td className="max-w-full">
                               <Button
@@ -232,7 +232,6 @@ export function BookingAssetsColumn() {
                               <ListItem
                                 key={asset.id}
                                 item={asset}
-                                className="hover:bg-gray-100"
                                 motionProps={{
                                   initial: { opacity: 0, y: -10 },
                                   animate: { opacity: 1, y: 0 },

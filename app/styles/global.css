@@ -324,3 +324,7 @@ dialog {
 .bulk-tagging-dialog .dialog-body {
   @apply overflow-visible;
 }
+
+.pseudo-border-bottom {
+  @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-[''] hover:bg-gray-100;
+}

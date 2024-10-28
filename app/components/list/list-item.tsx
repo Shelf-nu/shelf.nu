@@ -1,4 +1,5 @@
-import { motion, MotionProps } from "framer-motion";
+import type { MotionProps } from "framer-motion";
+import { motion } from "framer-motion";
 import { tw } from "~/utils/tw";
 
 export interface ListItemData {
