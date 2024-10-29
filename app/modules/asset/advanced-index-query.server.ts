@@ -367,7 +367,132 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "custody") {
     return addCustodyFilter(whereClause, filter);
   }
-  // Add handling for other enum fields if needed
+
+  // Add category handling using asset's categoryId since we're using LEFT JOIN
+  if (filter.name === "category") {
+    switch (filter.operator) {
+      case "is":
+        if (filter.value === "uncategorized") {
+          return Prisma.sql`${whereClause} AND a."categoryId" IS NULL`;
+        }
+        //Reference the category table for name comparison
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Category"
+          WHERE id = a."categoryId" AND id = ${filter.value}
+        )`;
+
+      case "isNot":
+        if (filter.value === "uncategorized") {
+          return Prisma.sql`${whereClause} AND a."categoryId" IS NOT NULL`;
+        }
+        return Prisma.sql`${whereClause} AND (
+          NOT EXISTS (
+            SELECT 1 FROM public."Category"
+            WHERE id = a."categoryId" AND id = ${filter.value}
+          ) OR a."categoryId" IS NULL
+        )`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        if (values.includes("uncategorized")) {
+          // Remove "uncategorized" from the values array
+          const categoryIds = values.filter((v) => v !== "uncategorized");
+
+          if (categoryIds.length === 0) {
+            return Prisma.sql`${whereClause} AND a."categoryId" IS NULL`;
+          }
+
+          const categoryIdsArray = `{${categoryIds.join(",")}}`;
+          return Prisma.sql`${whereClause} AND (
+            a."categoryId" IS NULL 
+            OR EXISTS (
+              SELECT 1 FROM public."Category"
+              WHERE id = a."categoryId" AND id = ANY(${categoryIdsArray}::text[])
+            )
+          )`;
+        }
+
+        const categoryIdsArray = `{${values.join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Category"
+          WHERE id = a."categoryId" AND id = ANY(${categoryIdsArray}::text[])
+        )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
+
+  // Add location handling using asset's categoryId since we're using LEFT JOIN
+  if (filter.name === "location") {
+    switch (filter.operator) {
+      case "is":
+        if (filter.value === "without-location") {
+          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+        }
+        //Reference the Location table for name comparison
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Location"
+          WHERE id = a."locationId" AND id = ${filter.value}
+        )`;
+
+      case "isNot":
+        if (filter.value === "without-location") {
+          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+        }
+        return Prisma.sql`${whereClause} AND (
+          NOT EXISTS (
+            SELECT 1 FROM public."Location"
+            WHERE id = a."locationId" AND id = ${filter.value}
+          ) OR a."locationId" IS NULL
+        )`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        if (values.includes("without-location")) {
+          // Remove "without-location" from the values array
+          const locationIds = values.filter((v) => v !== "without-location");
+
+          if (locationIds.length === 0) {
+            return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+          }
+
+          const locationIdsArray = `{${locationIds.join(",")}}`;
+          return Prisma.sql`${whereClause} AND (
+            a."locationId" IS NULL 
+            OR EXISTS (
+              SELECT 1 FROM public."Location"
+              WHERE id = a."locationId" AND id = ANY(${locationIdsArray}::text[])
+            )
+          )`;
+        }
+
+        const locationIdsArray = `{${values.join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Location"
+          WHERE id = a."locationId" AND id = ANY(${locationIdsArray}::text[])
+        )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
   return whereClause;
 }
 
@@ -376,9 +501,7 @@ function addRelationFilter(
   filter: Filter
 ): Prisma.Sql {
   const relationAliasMap: Record<string, string> = {
-    location: "l",
     kit: "k",
-    category: "c",
     qrId: "q",
   };
 
@@ -458,6 +581,9 @@ function addRelationFilter(
 function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "is":
+      if (filter.value === "without-custody") {
+        return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+      }
       return Prisma.sql`${whereClause} AND (
         EXISTS (
           SELECT 1 FROM "Custody" cu 
@@ -478,6 +604,9 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       )`;
 
     case "isNot":
+      if (filter.value === "without-custody") {
+        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+      }
       return Prisma.sql`${whereClause} AND NOT (
         EXISTS (
           SELECT 1 FROM "Custody" cu 
@@ -498,7 +627,6 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       )`;
 
     case "containsAny": {
-      // Split the comma-separated values and clean them
       const values = (
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
@@ -507,23 +635,53 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           : [filter.value]
       ).filter(Boolean);
 
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      if (values.includes("without-custody")) {
+        // Remove "without-custody" from the values array
+        const custodianIds = values.filter((v) => v !== "without-custody");
 
+        if (custodianIds.length === 0) {
+          return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+        }
+
+        const custodianIdsArray = `{${custodianIds.join(",")}}`;
+        return Prisma.sql`${whereClause} AND (
+          cu.id IS NULL 
+          OR EXISTS (
+            SELECT 1 FROM "Custody" cu 
+            WHERE cu."assetId" = a.id 
+            AND cu."teamMemberId" = ANY(${custodianIdsArray}::text[])
+          )
+          OR EXISTS (
+            SELECT 1 FROM "Booking" b 
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+            AND (
+              b."custodianTeamMemberId" = ANY(${custodianIdsArray}::text[])
+              OR b."custodianUserId" IN (
+                SELECT "userId" FROM "TeamMember" tm 
+                WHERE tm.id = ANY(${custodianIdsArray}::text[])
+              )
+            )
+          )
+        )`;
+      }
+
+      const custodianIdsArray = `{${values.join(",")}}`;
       return Prisma.sql`${whereClause} AND (
         EXISTS (
           SELECT 1 FROM "Custody" cu 
           WHERE cu."assetId" = a.id 
-          AND cu."teamMemberId" = ANY(${valuesArray}::text[])
+          AND cu."teamMemberId" = ANY(${custodianIdsArray}::text[])
         )
         OR EXISTS (
           SELECT 1 FROM "Booking" b 
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
-            b."custodianTeamMemberId" = ANY(${valuesArray}::text[])
+            b."custodianTeamMemberId" = ANY(${custodianIdsArray}::text[])
             OR b."custodianUserId" IN (
               SELECT "userId" FROM "TeamMember" tm 
-              WHERE tm.id = ANY(${valuesArray}::text[])
+              WHERE tm.id = ANY(${custodianIdsArray}::text[])
             )
           )
         )
@@ -628,12 +786,12 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
     case "id":
     case "title":
     case "qrId": // relation
-    case "location": // relation
     case "kit": // relation
-    case "category": // relation
       return "string";
     case "status":
     case "custody":
+    case "category": // relation
+    case "location": // relation
       return "enum";
     case "description":
       return "text";

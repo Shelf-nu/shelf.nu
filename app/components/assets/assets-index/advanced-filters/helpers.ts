@@ -27,13 +27,13 @@ export function getFieldType({
   switch (column.name) {
     case "id":
     case "name":
-    case "category":
-    case "location":
     case "kit":
       fieldType = "string";
       break;
     case "custody":
     case "status":
+    case "category":
+    case "location":
       fieldType = "enum";
       break;
     case "description":

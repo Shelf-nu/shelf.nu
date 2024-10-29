@@ -473,7 +473,6 @@ function CustodyEnumField({
   // Parse the existing value to get selected TeamMember IDs
   const selectedIds = useMemo(() => {
     if (!value) return [];
-
     // If it's a containsAny filter, split the values
     if (multiSelect && typeof value === "string") {
       return value.split(",").map((v) => v.trim());
@@ -495,6 +494,10 @@ function CustodyEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search team members",
+    withoutValueItem: {
+      id: "without-custody",
+      name: "Without custody",
+    },
   };
 
   if (multiSelect) {
@@ -507,8 +510,10 @@ function CustodyEnumField({
             className="w-full justify-start  font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
             <div className="flex items-center justify-between">
-              <span className="ml-2 text-left">
-                {selectedIds.length > 0
+              <span className=" text-left">
+                {value === "without-custody"
+                  ? "Without custody"
+                  : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
                         const teamMember = data.teamMembers.find(
@@ -552,6 +557,210 @@ function CustodyEnumField({
   );
 }
 
+/** Component that handles category selection for both single and multi-select scenarios */
+function CategoryEnumField({
+  value,
+  handleChange,
+  multiSelect,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected Category IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    // Handle multi-select values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "category" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id === "uncategorized" ? "uncategorized" : item.id,
+    }),
+    renderItem: (item: any) => (
+      <div className="flex items-center gap-2">
+        <div
+          className="size-3 rounded-full"
+          style={{ backgroundColor: item.metadata?.color || "#808080" }}
+        />
+        <span>{item.name}</span>
+      </div>
+    ),
+    initialDataKey: "categories",
+    countKey: "totalCategories",
+    label: "Filter by category",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search categories",
+    withoutValueItem: {
+      id: "uncategorized",
+      name: "Uncategorized",
+    },
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-left">
+                {selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        const category = data.categories?.find(
+                          (cat) => cat.id === id
+                        );
+                        return id === "uncategorized"
+                          ? "Uncategorized"
+                          : category?.name || "";
+                      })
+                      .join(", ")
+                  : "Select category"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedCategoryIds) => {
+          handleChange(selectedCategoryIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      placeholder="Select category"
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        handleChange(selectedId);
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Category"
+    />
+  );
+}
+
+/** Component that handles location selection for both single and multi-select scenarios */
+function LocationEnumField({
+  value,
+  handleChange,
+  multiSelect,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected Category IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    // Handle multi-select values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "location" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id === "without-location" ? "without-location" : item.id,
+    }),
+    renderItem: (item: any) => (item.name ? item.name : "Without location"),
+    initialDataKey: "locations",
+    countKey: "totalLocations",
+    label: "Filter by location",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search locations",
+    withoutValueItem: {
+      id: "without-location",
+      name: "Without location",
+    },
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-left">
+                {selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        const location = data.locations?.find(
+                          (loc) => loc.id === id
+                        );
+                        return id === "without-location"
+                          ? "Without location"
+                          : location?.name || "";
+                      })
+                      .join(", ")
+                  : "Select location"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedLocationsIds) => {
+          handleChange(selectedLocationsIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      placeholder="Select location"
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        handleChange(selectedId);
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Location"
+    />
+  );
+}
+
 /**
  * Component that determines which enum field to render based on field name
  */
@@ -569,6 +778,26 @@ function ValueEnumField({
   if (fieldName === "status") {
     return (
       <StatusEnumField
+        value={value}
+        handleChange={handleChange}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  if (fieldName === "category") {
+    return (
+      <CategoryEnumField
+        value={value}
+        handleChange={handleChange}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  if (fieldName === "location") {
+    return (
+      <LocationEnumField
         value={value}
         handleChange={handleChange}
         multiSelect={multiSelect}

@@ -12,7 +12,6 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { ShelfError } from "~/utils/error";
 import { data } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -233,6 +232,10 @@ export async function advancedModeLoader({
     customFields,
     teamMembers,
     totalTeamMembers,
+    categories,
+    totalCategories,
+    locations,
+    totalLocations,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -248,26 +251,29 @@ export async function advancedModeLoader({
     getActiveCustomFields({
       organizationId,
     }),
-    /** We get all the first 12 team members that are part of the org @TODO - change this to a proper function */
-    await db.teamMember
-      .findMany({
-        where: teamMembersWhere,
-        include: { user: true },
-        orderBy: {
-          userId: "asc",
-        },
-        take: 6,
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching team members. Please try again or contact support.",
-          additionalData: { userId, organizationId },
-          label: "Assets",
-        });
-      }),
-    await db.teamMember.count({ where: teamMembersWhere }),
+    /**
+     * @TODO - For both teamMember and Category, we are getting all of them. This works for now but its a performance bottleneck. Should be updated, or moved to deferred data
+     * We get all the first 6 team members that are part of the org  */
+    db.teamMember.findMany({
+      where: teamMembersWhere,
+      include: { user: true },
+      orderBy: {
+        userId: "asc",
+      },
+    }),
+    db.teamMember.count({ where: teamMembersWhere }),
+
+    // Categories
+    db.category.findMany({
+      where: { organizationId },
+    }),
+    db.category.count({ where: { organizationId } }),
+
+    // Locations
+    db.location.findMany({
+      where: { organizationId },
+    }),
+    db.location.count({ where: { organizationId } }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -328,9 +334,14 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+
       customFields,
       teamMembers,
       totalTeamMembers,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
     }),
     {
       headers,
