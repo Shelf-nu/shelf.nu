@@ -207,7 +207,6 @@ export function ValueField({
       );
 
     case "enum":
-      // console.log("filter", filter);
       return (
         <ValueEnumField
           fieldName={filter.name}
@@ -323,8 +322,6 @@ function EnumField({
   handleChange,
   multiSelect = false,
 }: EnumFieldProps) {
-  console.log("isMultiSelect", multiSelect);
-
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   // Convert the value into an array for multi-select mode
