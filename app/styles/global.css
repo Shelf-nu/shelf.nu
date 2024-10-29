@@ -338,3 +338,8 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
     transform: translateY(0);
   }
 }
+
+::target-text {
+  background-color: rebeccapurple;
+  color: white;
+}

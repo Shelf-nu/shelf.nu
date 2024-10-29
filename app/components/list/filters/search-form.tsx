@@ -5,6 +5,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useTextFragment } from "~/hooks/use-text-fragment";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -16,6 +17,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
   const { modeIsAdvanced } = useAssetIndexMode();
+  useTextFragment();
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);

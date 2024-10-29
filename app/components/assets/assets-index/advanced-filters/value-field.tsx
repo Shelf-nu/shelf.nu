@@ -825,7 +825,7 @@ function KitEnumField({
                           : kit?.name || "";
                       })
                       .join(", ")
-                  : "Select location"}
+                  : "Select kit"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
