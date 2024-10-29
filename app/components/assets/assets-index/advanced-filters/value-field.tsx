@@ -10,6 +10,7 @@ import { useLoaderData } from "@remix-run/react";
 import { format, parseISO } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
 
 import { CheckIcon, ChevronRight, PlusIcon } from "~/components/icons/library";
@@ -462,7 +463,8 @@ function CustomFieldEnumField({
 }
 
 /**
- * Custody-specific field component that handles team members and users via DynamicDropdown
+ * Custody-specific field component that handles team members and users
+ * Uses DynamicSelect for single selection and DynamicDropdown for multi-select
  */
 function CustodyEnumField({
   value,
@@ -482,55 +484,73 @@ function CustodyEnumField({
     return [value];
   }, [value, multiSelect]);
 
-  return (
-    <DynamicDropdown
-      trigger={
-        <Button
-          variant="secondary"
-          className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
-        >
-          <ChevronRight className="ml-[2px] inline-block rotate-90" />
-          <span className="ml-2">
-            {selectedIds.length > 0
-              ? selectedIds
-                  .map((id) =>
-                    resolveTeamMemberName({
-                      name:
-                        data.teamMembers.find((tm) => tm.id === id)?.name || "",
-                      user:
-                        data.teamMembers.find((tm) => tm.id === id)?.user ||
-                        null,
-                    })
-                  )
-                  .join(", ")
-              : "Select custodian"}
-          </span>
-        </Button>
-      }
-      triggerWrapperClassName="w-full"
-      className="z-[999999]"
-      model={{
-        name: "teamMember",
-        queryKey: "name",
-        deletedAt: null,
-      }}
-      transformItem={(item) => item}
-      renderItem={(item) => resolveTeamMemberName(item)}
-      label="Filter by custodian"
-      hideLabel
-      hideCounter
-      placeholder="Search team members"
-      initialDataKey="teamMembers"
-      countKey="totalTeamMembers"
-      selectionMode="none" // Important: Keep this to prevent direct URL updates
-      defaultValues={selectedIds} // This ensures checkmarks persist
-      onSelectionChange={(selectedTeamMemberIds) => {
-        if (multiSelect) {
-          handleChange(selectedTeamMemberIds.join(","));
-        } else {
-          handleChange(selectedTeamMemberIds[0] || "");
+  const commonProps = {
+    model: {
+      name: "teamMember" as const,
+      queryKey: "name",
+      deletedAt: null,
+    },
+    transformItem: (item: any) => item,
+    renderItem: (item: any) => resolveTeamMemberName(item),
+    initialDataKey: "teamMembers",
+    countKey: "totalTeamMembers",
+    label: "Filter by custodian",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search team members",
+  };
+
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start  font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span className="ml-2 text-left">
+                {selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        const teamMember = data.teamMembers.find(
+                          (tm) => tm.id === id
+                        );
+                        return resolveTeamMemberName({
+                          name: teamMember?.name || "",
+                        });
+                      })
+                      .join(", ")
+                  : "Select custodian"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
         }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedTeamMemberIds) => {
+          handleChange(selectedTeamMemberIds.join(","));
+        }}
+      />
+    );
+  }
+
+  return (
+    <DynamicSelect
+      {...commonProps}
+      placeholder="Select custodian"
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        handleChange(selectedId);
       }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Custodian"
     />
   );
 }

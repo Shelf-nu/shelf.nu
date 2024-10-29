@@ -4,6 +4,7 @@ import type { AssetIndexSettings, Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
+import { db } from "~/database/db.server";
 import { getClientHint } from "~/utils/client-hints";
 import {
   getAdvancedFiltersFromRequest,
@@ -11,6 +12,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError } from "~/utils/error";
 import { data } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -26,8 +28,6 @@ import {
 } from "./service.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
-import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
 
 type Org = Prisma.OrganizationGetPayload<{
   select: {
@@ -221,12 +221,18 @@ export async function advancedModeLoader({
     return redirect(`/assets?${cookieParams.toString()}`);
   }
 
+  const teamMembersWhere = {
+    organizationId,
+    deletedAt: null,
+  };
+
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
     teamMembers,
+    totalTeamMembers,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -245,15 +251,12 @@ export async function advancedModeLoader({
     /** We get all the first 12 team members that are part of the org @TODO - change this to a proper function */
     await db.teamMember
       .findMany({
-        where: {
-          deletedAt: null,
-          organizationId,
-        },
+        where: teamMembersWhere,
         include: { user: true },
         orderBy: {
           userId: "asc",
         },
-        take: 12,
+        take: 6,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -264,6 +267,7 @@ export async function advancedModeLoader({
           label: "Assets",
         });
       }),
+    await db.teamMember.count({ where: teamMembersWhere }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -326,6 +330,7 @@ export async function advancedModeLoader({
       settings,
       customFields,
       teamMembers,
+      totalTeamMembers,
     }),
     {
       headers,

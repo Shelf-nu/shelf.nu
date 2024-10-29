@@ -195,7 +195,7 @@ export default function DynamicDropdown({
                   key={withoutValueItem?.id}
                   htmlFor={withoutValueItem?.id}
                   className={tw(
-                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                     selectedItems.includes(withoutValueItem?.id ?? "") &&
                       "bg-gray-50"
                   )}
@@ -238,7 +238,7 @@ export default function DynamicDropdown({
                     key={item.id}
                     htmlFor={item.id}
                     className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                       checked && "bg-gray-50"
                     )}
                   >
