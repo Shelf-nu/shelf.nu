@@ -15,6 +15,7 @@ const friendlyFieldTypeNames = {
   array: "List",
 };
 
+// @TODO - lets look into combining this with getFilterFieldType as they are doing kind of the same
 export function getFieldType({
   column,
   friendlyName = false,
@@ -27,13 +28,13 @@ export function getFieldType({
   switch (column.name) {
     case "id":
     case "name":
-    case "kit":
       fieldType = "string";
       break;
     case "custody":
     case "status":
     case "category":
     case "location":
+    case "kit":
       fieldType = "enum";
       break;
     case "description":

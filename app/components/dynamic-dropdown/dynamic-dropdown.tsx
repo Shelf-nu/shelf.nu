@@ -238,11 +238,11 @@ export default function DynamicDropdown({
                     key={item.id}
                     htmlFor={item.id}
                     className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                      "flex  cursor-pointer select-none items-center justify-between  px-6 py-4  text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                       checked && "bg-gray-50"
                     )}
                   >
-                    <span className="pr-2">
+                    <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                       {typeof renderItem === "function"
                         ? renderItem({ ...item, metadata: item })
                         : item.name}

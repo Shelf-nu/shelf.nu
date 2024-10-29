@@ -271,15 +271,15 @@ export default function DynamicSelect({
                       handleItemChange(item.id);
                     }}
                   >
-                    <div>
+                    <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                       {typeof renderItem === "function" ? (
                         renderItem({ ...item, metadata: item })
                       ) : (
-                        <div className="flex items-center truncate text-sm font-medium">
+                        <div className="flex  items-center  text-sm font-medium">
                           {item.name}
                         </div>
                       )}
-                    </div>
+                    </span>
 
                     <When truthy={item.id === selectedValue}>
                       <span className="h-auto w-[18px] text-primary">

@@ -431,7 +431,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     }
   }
 
-  // Add location handling using asset's categoryId since we're using LEFT JOIN
+  // Add location handling using asset's locationId since we're using LEFT JOIN
   if (filter.name === "location") {
     switch (filter.operator) {
       case "is":
@@ -493,6 +493,70 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return whereClause;
     }
   }
+
+  // Add location handling using asset's kitId since we're using LEFT JOIN
+  if (filter.name === "kit") {
+    switch (filter.operator) {
+      case "is":
+        if (filter.value === "without-kit") {
+          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+        }
+        //Reference the Kit table for name comparison
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Kit"
+          WHERE id = a."kitId" AND id = ${filter.value}
+        )`;
+
+      case "isNot":
+        if (filter.value === "without-kit") {
+          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+        }
+        return Prisma.sql`${whereClause} AND (
+          NOT EXISTS (
+            SELECT 1 FROM public."Kit"
+            WHERE id = a."kitId" AND id = ${filter.value}
+          ) OR a."kitId" IS NULL
+        )`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        if (values.includes("without-kit")) {
+          // Remove "without-kit" from the values array
+          const kitIds = values.filter((v) => v !== "without-kit");
+
+          if (kitIds.length === 0) {
+            return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+          }
+
+          const kitIdsArray = `{${kitIds.join(",")}}`;
+          return Prisma.sql`${whereClause} AND (
+            a."kitId" IS NULL 
+            OR EXISTS (
+              SELECT 1 FROM public."Kit"
+              WHERE id = a."kitId" AND id = ANY(${kitIdsArray}::text[])
+            )
+          )`;
+        }
+
+        const kitIdsArray = `{${values.join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."Kit"
+          WHERE id = a."kitId" AND id = ANY(${kitIdsArray}::text[])
+        )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
+
   return whereClause;
 }
 
@@ -786,12 +850,12 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
     case "id":
     case "title":
     case "qrId": // relation
-    case "kit": // relation
       return "string";
     case "status":
     case "custody":
     case "category": // relation
     case "location": // relation
+    case "kit": // relation
       return "enum";
     case "description":
       return "text";

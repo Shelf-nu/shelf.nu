@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Kit } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import {
   Popover,
@@ -761,6 +762,103 @@ function LocationEnumField({
   );
 }
 
+/** Component that handles location selection for both single and multi-select scenarios */
+function KitEnumField({
+  value,
+  handleChange,
+  multiSelect,
+}: Omit<EnumFieldProps, "options">) {
+  // @TODO - this hardcoded type should be fixed to be inferred from the API response
+  const data = useLoaderData<{ kits: Kit[]; totalKits: number }>();
+
+  // Parse the existing value to get selected Category IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    // Handle multi-select values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "kit" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id === "without-kit" ? "without-kit" : item.id,
+    }),
+    renderItem: (item: any) => (item.name ? item.name : "Without kit"),
+    initialDataKey: "kits",
+    countKey: "totalKits",
+    label: "Filter by kit",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search kits",
+    withoutValueItem: {
+      id: "without-kit",
+      name: "Without kit",
+    },
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-left">
+                {selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        const kit = data.kits?.find((kit) => kit.id === id);
+                        return id === "without-kit"
+                          ? "Without kit"
+                          : kit?.name || "";
+                      })
+                      .join(", ")
+                  : "Select location"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedKitsIds) => {
+          handleChange(selectedKitsIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      placeholder="Select kit"
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        handleChange(selectedId);
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Kit"
+    />
+  );
+}
+
 /**
  * Component that determines which enum field to render based on field name
  */
@@ -808,6 +906,16 @@ function ValueEnumField({
   if (fieldName === "custody") {
     return (
       <CustodyEnumField
+        value={value}
+        handleChange={handleChange}
+        multiSelect={multiSelect}
+      />
+    );
+  }
+
+  if (fieldName === "kit") {
+    return (
+      <KitEnumField
         value={value}
         handleChange={handleChange}
         multiSelect={multiSelect}
