@@ -130,10 +130,6 @@ dialog {
   @apply fixed m-0 h-full w-full bg-transparent p-0 md:relative   md:m-auto md:h-auto md:w-[600px]  md:py-8;
 }
 
-.booking-update-existing-wrapper dialog {
-  @apply mx-auto h-auto w-[480px] max-w-full;
-}
-
 .dialog > .scrollable-content::-webkit-scrollbar {
   @apply w-1;
 }
