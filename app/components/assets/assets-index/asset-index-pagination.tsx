@@ -59,6 +59,7 @@ export function AssetIndexPagination() {
             onClick={handleScrollToTop}
             variant="secondary"
             title="Scroll to top"
+            className="h-[34px]"
           >
             <ChevronRight className="chev -rotate-90" />
           </Button>
@@ -85,7 +86,10 @@ export function AssetIndexPagination() {
               <ButtonGroup>
                 <Button
                   variant="secondary"
-                  className={tw(modeIsSimple ? disabledButtonStyles : "")}
+                  className={tw(
+                    "h-[34px]",
+                    modeIsSimple ? disabledButtonStyles : ""
+                  )}
                   name="mode"
                   value="SIMPLE"
                 >
@@ -93,7 +97,10 @@ export function AssetIndexPagination() {
                 </Button>
                 <Button
                   variant="secondary"
-                  className={tw(modeIsAdvanced ? disabledButtonStyles : "")}
+                  className={tw(
+                    "h-[34px]",
+                    modeIsAdvanced ? disabledButtonStyles : ""
+                  )}
                   name="mode"
                   value="ADVANCED"
                 >

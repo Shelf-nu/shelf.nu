@@ -67,6 +67,7 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
+import { markSubstring } from "~/utils/mark-substring";
 import {
   PermissionAction,
   PermissionEntity,
@@ -75,7 +76,6 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
-import { markSubstring } from "~/utils/mark-substring";
 
 export type AssetIndexLoaderData = typeof loader;
 
@@ -245,10 +245,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   return (
     <>
-      <Header>
+      <Header hidePageDescription={modeIsAdvanced}>
         <When
           truthy={userHasPermission({
             roles,

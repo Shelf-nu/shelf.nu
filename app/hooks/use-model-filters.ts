@@ -22,25 +22,50 @@ export type ModelFilterProps = {
   initialDataKey: string;
   /** name of key in loader which passing the total count */
   countKey: string;
-
   model: ModelFilters;
-
   /** If none is passed then values will not be added in query params */
   selectionMode?: "append" | "set" | "none";
-
   /**
-   *
-   * A function to transform an item item on basis of item data
-   *
+   * A function to transform an item on basis of item data
    * @example
    * transformItem: (item) => ({ ...item, id: JSON.stringify({ id: item.id, name: item.name }) })
    */
   transformItem?: (item: ModelFilterItem) => ModelFilterItem;
-
   onSelectionChange?: (selectedIds: string[]) => void;
 };
 
 const GET_ALL_KEY = "getAll";
+
+/**
+ * Determines if all data for the model is loaded
+ */
+function isAllDataLoaded(
+  items: ModelFilterItem[],
+  totalItems: number
+): boolean {
+  return items.length === totalItems && totalItems > 0;
+}
+
+/**
+ * Performs client-side filtering of items
+ */
+function filterItemsLocally(
+  items: ModelFilterItem[],
+  query: string
+): ModelFilterItem[] {
+  const normalizedQuery = query.toLowerCase().trim();
+  if (!normalizedQuery) return items;
+
+  return items.filter(
+    (item) =>
+      item.name.toLowerCase().includes(normalizedQuery) ||
+      Object.values(item.metadata || {}).some(
+        (value) =>
+          typeof value === "string" &&
+          value.toLowerCase().includes(normalizedQuery)
+      )
+  );
+}
 
 export function useModelFilters({
   defaultValues,
@@ -58,18 +83,29 @@ export function useModelFilters({
     defaultValues ?? []
   );
 
+  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
+  const totalItems = initialData[countKey];
+
+  // Track if all data is loaded
+  const hasAllData = useMemo(
+    () =>
+      isAllDataLoaded(
+        transformItemUsingTransformer(
+          initialData[initialDataKey],
+          transformItem
+        ),
+        totalItems
+      ),
+    [initialData, initialDataKey, totalItems, transformItem]
+  );
+
   useEffect(
     function updateSelectedValuesWhenParamsChange() {
       if (selectionMode === "none") {
-        // @TODO - fit this, its hardcoded for now.
         let filteringParams = searchParams.get("custody");
         if (filteringParams) {
-          // Remove key
           filteringParams = filteringParams.split(":")[1];
-
-          // Create array of the ids
           const ids = filteringParams.split(",");
-
           setSelectedItems(ids);
         }
       } else {
@@ -79,19 +115,29 @@ export function useModelFilters({
     [model.name, searchParams, selectionMode]
   );
 
-  const totalItems = initialData[countKey];
-
-  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
-
   const items = useMemo(() => {
-    if (searchQuery && fetcher.data && !fetcher.data.error) {
-      return transformItemUsingTransformer(fetcher.data.filters, transformItem);
-    }
-    return transformItemUsingTransformer(
-      initialData[initialDataKey],
+    const baseItems =
+      searchQuery && fetcher.data && !fetcher.data.error
+        ? fetcher.data.filters
+        : initialData[initialDataKey];
+
+    const transformedItems = transformItemUsingTransformer(
+      baseItems,
       transformItem
     );
-  }, [fetcher.data, initialData, initialDataKey, searchQuery, transformItem]);
+
+    // Use client-side filtering if all data is loaded
+    return hasAllData && searchQuery
+      ? filterItemsLocally(transformedItems, searchQuery)
+      : transformedItems;
+  }, [
+    fetcher.data,
+    initialData,
+    initialDataKey,
+    searchQuery,
+    transformItem,
+    hasAllData,
+  ]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
@@ -104,22 +150,14 @@ export function useModelFilters({
         return;
       }
 
-      /**
-       * If item selection mode is none then values are not added in
-       * search params instead they are just updated in state only
-       * */
-      /** If item is already there in search params then remove it */
       if (selectedItems.includes(value)) {
-        /** Using Optimistic UI approach */
         setSelectedItems((prev) => prev.filter((item) => item !== value));
-
         setSearchParams((prev) => {
           prev.delete(model.name, value);
           return prev;
         });
       } else {
         setSelectedItems((prev) => [...prev, value]);
-        /** Otherwise, add the item in search params */
         setSearchParams(
           (prev) => {
             if (selectionMode === "append") {
@@ -129,10 +167,7 @@ export function useModelFilters({
             }
             return prev;
           },
-          {
-            // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
-            preventScrollReset: true,
-          }
+          { preventScrollReset: true }
         );
       }
     },
@@ -153,17 +188,20 @@ export function useModelFilters({
     } else {
       setSearchQuery(e.currentTarget.value);
 
-      fetcher.submit(
-        {
-          ...model,
-          queryValue: e.currentTarget.value,
-          selectedValues: selectedItems,
-        },
-        {
-          method: "GET",
-          action: "/api/model-filters",
-        }
-      );
+      // Only fetch from server if we don't have all data
+      if (!hasAllData) {
+        fetcher.submit(
+          {
+            ...model,
+            queryValue: e.currentTarget.value,
+            selectedValues: selectedItems,
+          },
+          {
+            method: "GET",
+            action: "/api/model-filters",
+          }
+        );
+      }
     }
   };
 
@@ -189,8 +227,6 @@ export function useModelFilters({
 
   function getAllEntries() {
     const value = model.name;
-
-    /** Remove in case if the value already exists */
     if (searchParams.has(GET_ALL_KEY, value)) {
       setSearchParams((prev) => {
         prev.delete(GET_ALL_KEY, value);
@@ -213,13 +249,11 @@ export function useModelFilters({
 
     setSearchParams((prev) => {
       if (selectionMode === "append") {
-        /** Remove all previously selected items otherwise they will get duplicated */
         prev.delete(model.name);
         items.forEach((i) => prev.append(model.name, i.id));
       } else {
         prev.set(model.name, items[0].id);
       }
-
       return prev;
     });
   }

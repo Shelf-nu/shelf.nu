@@ -91,6 +91,9 @@ function AdvancedFilter() {
         prev.set(filter.name, `${filter.operator}:${filter.value}`);
       });
 
+      // Reset page when applying filters
+      prev.delete("page");
+
       return prev;
     });
   }

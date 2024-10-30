@@ -262,9 +262,11 @@ dialog {
 .fixed-gradient {
   position: absolute;
   top: 8px;
-  right: -1px;
-  bottom: 0;
-  width: 35px;
+  /* 11px is the scrollbar width */
+  right: 11px;
+  /* 11px is the scrollbar height */
+  bottom: 11px;
+  width: 60px;
   background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
   pointer-events: none;
   z-index: 1;
