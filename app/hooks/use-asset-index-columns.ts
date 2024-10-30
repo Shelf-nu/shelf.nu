@@ -3,15 +3,21 @@ import { z } from "zod";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
-const columnSchema = z.object({
-  name: z.string(), // Convert to enum
+/**
+ * Simplified schema for parsing form data during optimistic updates
+ * This is a subset of the full column validation schema from helpers.ts
+ * Used only for transforming form data before the server validates the complete structure
+ */
+const formParsingSchema = z.object({
+  name: z.string(),
   visible: z
     .union([z.boolean(), z.string()])
-    .transform((val) => val === "on" || val === true) // Convert "on" to boolean true
-    .default(false), // if not present in the formData, convert to false. That means the checkbox was unselected
+    .transform((val) => val === "on" || val === true)
+    .default(false),
   position: z.number().or(z.string().transform(Number)),
 });
-const columnsSchema = z.array(columnSchema);
+
+const columnsFormSchema = z.array(formParsingSchema);
 
 const parseColumnsFromFormData = (formData: FormData): Column[] => {
   const columns: Partial<Column>[] = [];
@@ -32,7 +38,7 @@ const parseColumnsFromFormData = (formData: FormData): Column[] => {
   }
 
   // Validate with Zod
-  const validatedColumns = columnsSchema.parse(columns);
+  const validatedColumns = columnsFormSchema.parse(columns);
 
   return validatedColumns as Column[];
 };

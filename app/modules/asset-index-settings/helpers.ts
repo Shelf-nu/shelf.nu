@@ -73,7 +73,10 @@ export const generateColumnsSchema = (customFields: string[]) => {
   // Create a union type of all possible field names
   const nameSchema = z.enum(allFields);
 
-  // Create Zod schema for each column object
+  /**
+   * Schema for validating individual column structure
+   * This is the source of truth for column validation
+   */
   const columnSchema = z.object({
     name: nameSchema,
     visible: z
@@ -84,7 +87,6 @@ export const generateColumnsSchema = (customFields: string[]) => {
     cfType: z.nativeEnum(CustomFieldType).optional(),
   });
 
-  // Return the final schema
   return z.object({
     intent: z.literal("changeColumns"),
     columns: z.array(columnSchema),

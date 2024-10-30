@@ -29,6 +29,8 @@ export function ConfigureColumnsDropdown() {
     (a, b) => a.position - b.position
   );
 
+  console.log("initialColumns", settings.columns);
+
   const [currentColumns, setCurrentColumns] = useState(initialColumns);
 
   useEffect(() => {

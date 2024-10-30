@@ -79,6 +79,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const customFieldsNames = customFields.map(
           (field) => `cf_${field.name}`
         );
+        console.log(customFields);
+
         const columnsSchema = generateColumnsSchema(customFieldsNames);
 
         const parsedData = parseData(formData, columnsSchema);
