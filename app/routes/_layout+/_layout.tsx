@@ -34,12 +34,13 @@ import { canUseBookings } from "~/utils/subscription.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+export type LayoutLoaderResponse = typeof loader;
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    // @TODO - we need to look into doing a select as we dont want to expose all data always
     const user = await getUserByID(userId, {
       roles: true,
       organizations: {
@@ -98,6 +99,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideSupportBanner: cookie.hideSupportBanner,
         minimizedSidebar: cookie.minimizedSidebar,
+        scannerCameraId: cookie.scannerCameraId as string,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */

@@ -49,6 +49,7 @@ import {
   RemoveTagsIcon,
   AvailableIcon,
   UnavailableIcon,
+  ChangeIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -104,7 +105,8 @@ export type IconType =
   | "tool"
   | "rows"
   | "available"
-  | "unavailable";
+  | "unavailable"
+  | "change";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -163,6 +165,7 @@ export const iconsMap: IconsMap = {
   rows: <RowsIcon />,
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
+  change: <ChangeIcon />,
 };
 
 export default iconsMap;
