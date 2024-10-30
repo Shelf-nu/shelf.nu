@@ -190,7 +190,8 @@ export const assertUserCanCreateMoreCustomFields = async ({
     throw new ShelfError({
       cause: null,
       title: "Not allowed",
-      message: "Your user cannot create more custom fields",
+      message:
+        "You have reached your limit of active custom fields. Please upgrade your plan to add more.",
       additionalData: { organizationId },
       label,
       shouldBeCaptured: false,

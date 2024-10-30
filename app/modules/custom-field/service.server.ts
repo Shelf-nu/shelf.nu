@@ -150,10 +150,16 @@ export async function updateCustomField(payload: {
       required,
       active,
       options,
-      categories: {
-        set: categories?.map((category) => ({ id: category })),
-      },
     } satisfies Prisma.CustomFieldUpdateInput;
+    const hasCategories = categories && categories.length > 0;
+
+    Object.assign(data, {
+      categories: {
+        set: hasCategories // if categories are empty, remove all categories
+          ? categories.map((category) => ({ id: category }))
+          : [],
+      },
+    });
 
     return await db.customField.update({
       where: { id },
