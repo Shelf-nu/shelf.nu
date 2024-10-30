@@ -48,8 +48,6 @@ declare global {
       GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
       ADMIN_EMAIL: string;
-      ADMIN_PASSWORD: string;
-      ADMIN_USERNAME: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
     }
@@ -137,12 +135,6 @@ export const SENTRY_DSN = getEnv("SENTRY_DSN", {
 });
 
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
-  isRequired: false,
-});
-export const ADMIN_PASSWORD = getEnv("ADMIN_PASSWORD", {
-  isRequired: false,
-});
-export const ADMIN_USERNAME = getEnv("ADMIN_USERNAME", {
   isRequired: false,
 });
 

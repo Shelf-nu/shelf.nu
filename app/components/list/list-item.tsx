@@ -1,3 +1,5 @@
+import type { MotionProps } from "framer-motion";
+import { motion } from "framer-motion";
 import { tw } from "~/utils/tw";
 
 export interface ListItemData {
@@ -10,6 +12,7 @@ export interface ListItemProps {
   children: React.ReactNode;
   navigate?: (id: string, item: ListItemData) => void;
   className?: string;
+  motionProps?: MotionProps; // Optional animation props passed to the motion component
 }
 
 export const ListItem = ({
@@ -17,8 +20,9 @@ export const ListItem = ({
   children,
   navigate,
   className,
+  motionProps = {},
 }: ListItemProps) => (
-  <tr
+  <motion.tr
     onClick={(event) => {
       if (navigate) {
         // Check if Ctrl or Cmd key is pressed
@@ -46,7 +50,8 @@ export const ListItem = ({
       willChange: "transform",
       backgroundAttachment: "initial",
     }}
+    {...motionProps}
   >
     {children}
-  </tr>
+  </motion.tr>
 );

@@ -54,6 +54,7 @@ import {
   SortIcon,
   AvailableIcon,
   UnavailableIcon,
+  ChangeIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -114,7 +115,8 @@ export type IconType =
   | "filter"
   | "sort"
   | "available"
-  | "unavailable";
+  | "unavailable"
+  | "change";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -178,6 +180,7 @@ export const iconsMap: IconsMap = {
   sort: <SortIcon />,
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
+  change: <ChangeIcon />,
 };
 
 export default iconsMap;

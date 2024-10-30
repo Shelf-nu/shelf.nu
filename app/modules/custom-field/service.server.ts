@@ -185,10 +185,16 @@ export async function updateCustomField(payload: {
       required,
       active,
       options,
-      categories: {
-        set: categories?.map((category) => ({ id: category })),
-      },
     } satisfies Prisma.CustomFieldUpdateInput;
+    const hasCategories = categories && categories.length > 0;
+
+    Object.assign(data, {
+      categories: {
+        set: hasCategories // if categories are empty, remove all categories
+          ? categories.map((category) => ({ id: category }))
+          : [],
+      },
+    });
 
     /** Get the custom field. We need it in order to be able to update the asset index settings */
     const customField = (await db.customField.findFirst({
