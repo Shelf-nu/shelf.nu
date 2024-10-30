@@ -2,13 +2,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
-import styles from "~/components/booking/styles.update-existing.css?url";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { BookingExistIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
-import { getAvailableAssetsForBooking } from "~/modules/asset/service.server";
 
 import {
   getBookings,
@@ -19,6 +17,7 @@ import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
+import styles from "~/styles/layout/custom-modal.css?url";
 import {
   getClientHint,
   getDateTimeFormat,
@@ -33,6 +32,7 @@ import {
   data,
   error,
   getCurrentSearchParams,
+  getParams,
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -44,7 +44,6 @@ import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
 
 const updateBookingSchema = z.object({
-  assetIds: z.array(z.string()).optional(),
   bookingId: z.string().transform((val, ctx) => {
     if (!val && val === "") {
       ctx.addIssue({
@@ -55,24 +54,17 @@ const updateBookingSchema = z.object({
     }
     return val;
   }),
-  indexType: z.string().transform((val, ctx) => {
-    if (!val && val === "") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Invalid operation. Please contact support.",
-      });
-      return z.NEVER;
-    }
-    return val;
-  }),
   kitIds: z.array(z.string()).optional(),
 });
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
-  const searchParams = getCurrentSearchParams(request);
-  const ids = searchParams.getAll("id");
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { kitId } = getParams(params, z.object({ kitId: z.string() }), {
+    additionalData: {
+      userId,
+    },
+  });
   try {
     const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
@@ -82,7 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, search, indexType } = getParamsValues(searchParams);
+    const { page, search } = getParamsValues(searchParams);
     const perPage = 20;
     const { bookings, bookingCount } = await getBookings({
       organizationId,
@@ -148,8 +140,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-        ids: ids.length ? ids : undefined,
-        indexType,
+        ids: kitId ? [kitId] : undefined,
         hints,
       }),
       {
@@ -165,26 +156,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 const processBooking = async (
-  indexType: string,
   bookingId: string,
-  assetIds: string[] | undefined,
   kitIds: string[] | undefined
 ) => {
   try {
     let finalAssetIds: string[] = [];
     let booking;
-    if (indexType === "kits" && kitIds && kitIds.length > 0) {
+    if (kitIds && kitIds.length > 0) {
       const promises = [
         getAvailableKitAssetForBooking(kitIds),
-        getExistingBookingDetails(bookingId),
-      ];
-      const [assetIdsFromKits, bookingDetails] = await Promise.all(promises);
-
-      finalAssetIds = assetIdsFromKits as string[];
-      booking = bookingDetails;
-    } else if (indexType === "assets" && assetIds && assetIds.length > 0) {
-      const promises = [
-        getAvailableAssetsForBooking(assetIds),
         getExistingBookingDetails(bookingId),
       ];
 
@@ -233,23 +213,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
     const formData = await request.formData();
-    const { assetIds, bookingId, indexType, kitIds } = parseData(
-      formData,
-      updateBookingSchema,
-      {
-        additionalData: { userId },
-        message: "Please select a Booking",
-      }
-    );
+    const { kitIds, bookingId } = parseData(formData, updateBookingSchema, {
+      additionalData: { userId },
+      message: "Please select a Booking",
+    });
 
-    if (!assetIds?.length && !bookingId?.length) {
-      redirect(`/bookings/${bookingId}`);
+    if (!kitIds?.length && !bookingId?.length) {
+      throw new ShelfError({
+        cause: null,
+        message: `No kitIds found or booking not found.`,
+        label: "Booking",
+      });
     }
 
     const { finalAssetIds, bookingInfo } = await processBooking(
-      indexType,
       bookingId,
-      assetIds,
       kitIds
     );
 
@@ -260,7 +238,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
       throw new ShelfError({
         cause: null,
-        message: `Booking already contains ${indexType}`,
+        message: `Booking already contains assets`,
         label: "Booking",
       });
     }
@@ -296,16 +274,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-export const handle = {
-  name: "bookings.update-existing",
-};
-
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
 export default function ExistingBooking() {
-  const { ids, indexType, hints } = useLoaderData<typeof loader>();
+  const { ids, hints } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -325,7 +299,7 @@ export default function ExistingBooking() {
 
   return (
     <Form method="post">
-      <div>
+      <div className="modal-content-wrapper">
         <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
           <BookingExistIcon />
         </div>
@@ -336,30 +310,9 @@ export default function ExistingBooking() {
             State.
           </div>
         </div>
-        {indexType === "assets" &&
-          ids?.map((item, i) => (
-            <input
-              key={item}
-              type="hidden"
-              name={`assetIds[${i}]`}
-              value={item}
-            />
-          ))}
-        {indexType === "kits" &&
-          ids?.map((kitId, i) => (
-            <input
-              key={kitId}
-              type="hidden"
-              name={`kitIds[${i}]`}
-              value={kitId}
-            />
-          ))}
-        <input
-          key="indexType"
-          type="hidden"
-          name="indexType"
-          value={indexType}
-        />
+        {ids?.map((item, i) => (
+          <input key={item} type="hidden" name={`kitIds[${i}]`} value={item} />
+        ))}
 
         <div className=" relative z-50 mb-2">
           <DynamicSelect
@@ -420,7 +373,7 @@ export default function ExistingBooking() {
             variant="primary"
             width="full"
             name="intent"
-            type={`Add${indexType}`}
+            type={`Add Assets`}
             disabled={disabled}
           >
             Confirm

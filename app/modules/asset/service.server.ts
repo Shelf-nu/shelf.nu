@@ -2850,5 +2850,4 @@ export async function getAvailableAssetsForBooking(
       label: "Assets",
     });
   }
-}  
-  
+}

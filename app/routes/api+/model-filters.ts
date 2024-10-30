@@ -72,23 +72,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { name, queryKey, queryValue, selectedValues, ...filters } =
       parseData(searchParams, ModelFiltersSchema);
 
-    let where: Record<string, any> = {
+    const where: Record<string, any> = {
       organizationId,
       OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
     };
-
-    const genericKeys = ["deletedAt"];
-
-    const customFilters = {} as Record<string, any>;
-    const genericFilters = {} as Record<string, any>;
-    for (const [key, value] of Object.entries(filters)) {
-      if (!genericKeys.includes(key)) {
-        customFilters[key] = value;
-      } else {
-        genericFilters[key] = value;
-      }
-    }
-
     /**
      * When searching for teamMember, we have to search for
      * - teamMember's name
@@ -107,14 +94,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    if (customFilters) {
-      where = {
-        ...where,
-        ...customFilters,
-      };
-    }
     const queryData = (await db[name].dynamicFindMany({
-      where: { ...where, ...genericFilters },
+      where: { ...where, ...filters },
       include:
         /** We need user's information to resolve teamMember's name */
         name === "teamMember"

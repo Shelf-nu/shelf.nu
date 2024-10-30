@@ -138,7 +138,6 @@ const ConditionalActionsDropdown = ({
                     variant="link"
                     aria-label={link.label}
                     className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                    prefetch="none"
                     width="full"
                     onClick={() => setOpen(false)}
                     disabled={link.disabledReason}

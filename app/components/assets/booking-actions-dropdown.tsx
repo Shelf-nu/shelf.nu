@@ -44,7 +44,7 @@ export default function BookingActionsDropdown() {
       icon: "booking-exist",
       disabled,
       disabledReason: reason,
-      to: `/bookings/update-existing?indexType=assets&id=${asset.id}`,
+      to: `overview/add-to-existing-booking`,
     },
   ] as CustomLink[];
 
