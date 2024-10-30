@@ -102,7 +102,7 @@ It's very important to send this information to your support contact at Shelf to
 
 Do not test the login until you have heard back from the support contact.
 
-## Step 7: Wait for confirmation [#](#step-7-wait-for-confirmation)
+## Step 9: Wait for confirmation [#](#step-9-wait-for-confirmation)
 
 Once you’ve configured the Microsoft Entra app as shown above, make sure you send the required information to your support contact at Shelf.
 
@@ -112,7 +112,7 @@ Wait for confirmation that this information has successfully been added to Shelf
 
 In the meantime, you can continue with the next steps that will show you how to setup your groups and users.
 
-## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
+## Step 10: Create groups and assign users [#](#step-10-create-groups-and-assign-users)
 
 In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping.
 For each workspace you will have to create 3 groups, each one representing a different role in Shelf:
@@ -124,26 +124,26 @@ For each workspace you will have to create 3 groups, each one representing a dif
 > [!NOTE]
 > A user should not be added to more than 1 group within the application as it may cause undesired behaviour.
 
-### Step 8.1: Create groups
+### Step 10.1: Create groups
 
 Navigate to Groups interface within Microsoft Entra and click click _New group_ to create the groups.
 You can give the groups any name you desire.
 
-![step 8.1](../../img/microsoft-entra-step-8-1.png)
+![step 10.1](../../img/microsoft-entra-step-8-1.png)
 
 The example above shows you what settings to use for creating a group. Once you have created the groups you can move to the next step.
 Feel free to already add desired team members to each group.
 
-### Step 8.2: Give access of the groups to the Shelf application
+### Step 10.2: Give access of the groups to the Shelf application
 
 Navigate back to your Shelf enterprise application and go to _Users and Groups_.
 Click _Add user/group_ and select the groups you just created.
 
 Once confirmed you should end up with a setup similar to this:
 
-![Step 8.2](../../img/microsoft-entra-step-8-2.png)
+![Step 10.2](../../img/microsoft-entra-step-8-2.png)
 
-## Step 9: Map Microsoft Entra groups inside Shelf [#](#step-9-map-google-workspace-groups-inside-shelf)
+## Step 11: Map Microsoft Entra groups inside Shelf [#](#step-9-map-google-workspace-groups-inside-shelf)
 
 > [!NOTE]
 > You can only complete this step, once you have received confirmation from your contact person at Shelf that the setup has been completed.
