@@ -75,6 +75,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { markSubstring } from "~/utils/mark-substring";
 
 export type AssetIndexLoaderData = typeof loader;
 
@@ -415,7 +416,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
-                {item.title}
+                {markSubstring(item.title)}
               </span>
               <div>
                 <AssetStatusBadge

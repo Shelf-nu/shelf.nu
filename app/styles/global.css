@@ -340,8 +340,8 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
 }
 
 ::target-text {
-  background-color: rebeccapurple;
-  color: white;
+  background-color: yellow;
+  color: black;
 }
 
 .pseudo-border-bottom {
