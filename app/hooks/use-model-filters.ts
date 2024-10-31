@@ -114,7 +114,6 @@ export function useModelFilters({
     },
     [model.name, searchParams, selectionMode]
   );
-
   const items = useMemo(() => {
     const baseItems =
       searchQuery && fetcher.data && !fetcher.data.error

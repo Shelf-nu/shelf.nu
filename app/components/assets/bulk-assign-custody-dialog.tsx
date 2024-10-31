@@ -21,8 +21,6 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  // @TODO I think this is because of the different types returned by simple and advanced mode. We need a way to manage this
-  // @ts-expect-error
   const { rawTeamMembers } = useLoaderData<typeof loader>();
 
   return (

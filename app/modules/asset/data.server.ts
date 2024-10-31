@@ -12,7 +12,8 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data } from "~/utils/http.server";
+import { data, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -26,6 +27,7 @@ import {
   updateAssetsWithBookingCustodians,
 } from "./service.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
+import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
 type Org = Prisma.OrganizationGetPayload<{
@@ -215,23 +217,24 @@ export async function advancedModeLoader({
     redirectNeeded,
   } = await getAdvancedFiltersFromRequest(request, organizationId);
 
+  const currentFilterParams = new URLSearchParams(filters || "");
+  const searchParams = filters
+    ? currentFilterParams
+    : getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const { teamMemberIds } = paramsValues;
   if (filters && redirectNeeded) {
     const cookieParams = new URLSearchParams(filters);
     return redirect(`/assets?${cookieParams.toString()}`);
   }
-
-  const teamMembersWhere = {
-    organizationId,
-    deletedAt: null,
-  };
 
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
-    teamMembers,
-    totalTeamMembers,
+    teamMembersData,
+
     categories,
     totalCategories,
     locations,
@@ -255,14 +258,14 @@ export async function advancedModeLoader({
       includeAllCategories: true,
     }),
 
-    db.teamMember.findMany({
-      where: teamMembersWhere,
-      include: { user: true },
-      orderBy: {
-        userId: "asc",
-      },
+    // team members/custodian
+    getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: teamMemberIds,
+      getAll: true,
+      isSelfService: false, // we can assume this is false because this view is not allowed for
+      userId,
     }),
-    db.teamMember.count({ where: teamMembersWhere }),
 
     // Categories
     db.category.findMany({
@@ -343,8 +346,7 @@ export async function advancedModeLoader({
       settings,
 
       customFields,
-      teamMembers,
-      totalTeamMembers,
+      ...teamMembersData,
       categories,
       totalCategories,
       locations,
