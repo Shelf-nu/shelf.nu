@@ -252,10 +252,9 @@ export async function advancedModeLoader({
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
       organizationId,
+      includeAllCategories: true,
     }),
-    /**
-     * @TODO - For both teamMember and Category, we are getting all of them. This works for now but its a performance bottleneck. Should be updated, or moved to deferred data
-     * We get all the first 6 team members that are part of the org  */
+
     db.teamMember.findMany({
       where: teamMembersWhere,
       include: { user: true },

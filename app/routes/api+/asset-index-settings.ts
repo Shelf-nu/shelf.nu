@@ -75,11 +75,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const customFields = await getActiveCustomFields({
           organizationId,
+          includeAllCategories: true,
         });
         const customFieldsNames = customFields.map(
           (field) => `cf_${field.name}`
         );
-        console.log(customFields);
 
         const columnsSchema = generateColumnsSchema(customFieldsNames);
 
