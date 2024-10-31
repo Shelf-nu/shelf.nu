@@ -293,26 +293,69 @@ export async function createCustomFieldsIfNotExists({
   }
 }
 
+/**
+ * Retrieves active custom fields for an organization with flexible category filtering
+ *
+ * Usage:
+ * 1. Get ALL active custom fields regardless of category:
+ *    await getActiveCustomFields({ organizationId, includeAllCategories: true })
+ *
+ * 2. Get custom fields for a specific category + uncategorized fields:
+ *    await getActiveCustomFields({ organizationId, category: "categoryId" })
+ *
+ * 3. Get ONLY uncategorized custom fields:
+ *    await getActiveCustomFields({ organizationId })
+ *
+ * @param params.organizationId - The organization ID to fetch custom fields for
+ * @param params.category - Optional category ID to filter by. When provided, returns fields specific to this category AND uncategorized fields
+ * @param params.includeAllCategories - When true, ignores category filtering and returns ALL active custom fields. Takes precedence over category param
+ *
+ * @returns Array of CustomField objects that are active and match the category filtering criteria
+ *
+ * @example
+ * // Get all active custom fields for asset index or similar global contexts
+ * const allCustomFields = await getActiveCustomFields({
+ *   organizationId,
+ *   includeAllCategories: true
+ * });
+ *
+ * @example
+ * // Get custom fields for a specific asset category plus uncategorized fields
+ * const categoryCustomFields = await getActiveCustomFields({
+ *   organizationId,
+ *   category: assetCategoryId
+ * });
+ */
 export async function getActiveCustomFields({
   organizationId,
   category,
+  includeAllCategories = false,
 }: {
   organizationId: string;
   category?: string | null;
+  includeAllCategories?: boolean;
 }) {
   try {
     return await db.customField.findMany({
       where: {
         organizationId,
         active: { equals: true },
-        ...(typeof category === "string"
+        /**
+         * Category filtering logic:
+         * - If includeAllCategories: no category filtering
+         * - If category provided: get fields for that category + uncategorized
+         * - Otherwise: get only uncategorized fields
+         */
+        ...(includeAllCategories
+          ? {} // No category filtering
+          : typeof category === "string"
           ? {
               OR: [
-                { categories: { none: {} } }, // Custom fields with no category
-                { categories: { some: { id: category } } },
+                { categories: { none: {} } }, // Uncategorized fields
+                { categories: { some: { id: category } } }, // Category-specific fields
               ],
             }
-          : { categories: { none: {} } }),
+          : { categories: { none: {} } }), // Only uncategorized fields
       },
     });
   } catch (cause) {
@@ -320,7 +363,7 @@ export async function getActiveCustomFields({
       cause,
       message:
         "Failed to get active custom fields. Please try again or contact support.",
-      additionalData: { organizationId },
+      additionalData: { organizationId, category, includeAllCategories },
       label,
     });
   }
