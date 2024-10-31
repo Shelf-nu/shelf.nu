@@ -941,6 +941,36 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
 };
 
+/**
+ * Generates a PostgreSQL expression for natural sorting of text values
+ * Handles case-insensitive comparison and natural number ordering.
+ * What is natural sorting? https://en.wikipedia.org/wiki/Natural_sort_order
+ * - Ignore case (treat uppercase and lowercase the same) 
+ * - Sort numbers as whole values rather than character-by-character 
+ * - Place purely alphabetic entries before alphanumeric ones
+ 
+ * @param columnRef - The column or expression to sort
+ * @param direction - Sort direction ('asc' or 'desc')
+ * @returns SQL string with normalized sorting expression
+ */
+function getNormalizedSortExpression(
+  columnRef: string,
+  direction: string
+): string {
+  return `
+    LOWER(regexp_replace(${columnRef}, '([0-9]+)', 
+      lpad(regexp_replace(regexp_replace('\\1', '^0+', ''), '^$', '0'), 12, '0')
+    )) ${direction},
+    ${columnRef} ${direction}
+  `.trim();
+}
+
+/**
+ * Enhanced sorting options parser with natural sort support
+ * Handles case-insensitive sorting with natural number ordering
+ * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
+ * @returns Object containing SQL order by clause and custom field sorting info
+ */
 export function parseSortingOptions(sortBy: string[]): {
   orderByClause: string;
   customFieldSortings: CustomFieldSorting[];
@@ -960,19 +990,36 @@ export function parseSortingOptions(sortBy: string[]): {
   for (const field of fields) {
     if (field.name in directAssetFields) {
       const columnName = directAssetFields[field.name as DirectAssetField];
-      orderByParts.push(`"${columnName}" ${field.direction}`);
+
+      // Apply natural sort for text columns
+      if (isTextColumn(field.name)) {
+        orderByParts.push(
+          getNormalizedSortExpression(`"${columnName}"`, field.direction)
+        );
+      } else {
+        // Use regular sorting for non-text columns
+        orderByParts.push(`"${columnName}" ${field.direction}`);
+      }
     } else if (field.name === "qrId") {
-      orderByParts.push(`"qrId" ${field.direction}`);
+      orderByParts.push(getNormalizedSortExpression(`"qrId"`, field.direction));
     } else if (field.name === "kit") {
-      orderByParts.push(`"kitName" ${field.direction}`);
+      orderByParts.push(
+        getNormalizedSortExpression(`"kitName"`, field.direction)
+      );
     } else if (field.name === "category") {
-      orderByParts.push(`"categoryName" ${field.direction}`);
+      orderByParts.push(
+        getNormalizedSortExpression(`"categoryName"`, field.direction)
+      );
     } else if (field.name === "location") {
-      orderByParts.push(`"locationName" ${field.direction}`);
+      orderByParts.push(
+        getNormalizedSortExpression(`"locationName"`, field.direction)
+      );
     } else if (field.name === "custody") {
-      orderByParts.push(`custody->>'name' ${field.direction}`);
+      orderByParts.push(
+        getNormalizedSortExpression(`custody->>'name'`, field.direction)
+      );
     } else if (field.name.startsWith("cf_")) {
-      const customFieldName = field.name.slice(3); // Remove 'cf_' prefix
+      const customFieldName = field.name.slice(3);
       const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
       customFieldSortings.push({
         name: customFieldName,
@@ -980,7 +1027,15 @@ export function parseSortingOptions(sortBy: string[]): {
         alias,
         fieldType: field.fieldType,
       });
-      orderByParts.push(`${alias} ${field.direction}`);
+
+      // Apply sort based on custom field type
+      if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
+        // Direct sort for dates and booleans
+        orderByParts.push(`${alias} ${field.direction}`);
+      } else {
+        // Natural sort for text-based custom fields
+        orderByParts.push(getNormalizedSortExpression(alias, field.direction));
+      }
     } else {
       // eslint-disable-next-line no-console
       console.warn(`Unknown sort field: ${field.name}`);
@@ -991,6 +1046,16 @@ export function parseSortingOptions(sortBy: string[]): {
     orderByParts.length > 0 ? `ORDER BY ${orderByParts.join(", ")}` : "";
 
   return { orderByClause, customFieldSortings };
+}
+
+/**
+ * Helper function to determine if a field should use text-based natural sorting
+ * @param fieldName - Name of the field being sorted
+ * @returns boolean indicating if field should use natural sort
+ */
+function isTextColumn(fieldName: string): boolean {
+  const textColumns: DirectAssetField[] = ["name", "description"];
+  return textColumns.includes(fieldName as DirectAssetField);
 }
 
 export function generateCustomFieldSelect(

@@ -159,12 +159,7 @@ export function AdvancedIndexColumn({
       return <TextColumn value={item[column]} />;
 
     case "status":
-      return (
-        <StatusColumn
-          status={item.status}
-          availableToBook={item.availableToBook}
-        />
-      );
+      return <StatusColumn status={item.status} />;
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -269,16 +264,11 @@ function TextColumn({
   );
 }
 
-function StatusColumn({
-  status,
-  availableToBook,
-}: {
-  status: AssetStatus;
-  availableToBook: boolean;
-}) {
+function StatusColumn({ status }: { status: AssetStatus }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge status={status} availableToBook={availableToBook} />
+      {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
+      <AssetStatusBadge status={status} availableToBook={true} />
     </Td>
   );
 }
