@@ -314,8 +314,6 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  console.log("assets", JSON.stringify(assets, null, 2));
-
   return json(
     data({
       header,
