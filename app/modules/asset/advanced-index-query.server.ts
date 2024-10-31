@@ -1117,8 +1117,11 @@ export const assetQueryFragment = Prisma.sql`
     c.id AS "categoryId",
     c.name AS "categoryName",
     c.color AS "categoryColor",
-    l.name AS "locationName",
-    json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) AS tags,
+    CASE 
+      WHEN l.name IS NOT NULL THEN l.name
+      ELSE NULL
+    END AS "locationName",
+    COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
     COALESCE(
       CASE 
         WHEN cu.id IS NOT NULL THEN

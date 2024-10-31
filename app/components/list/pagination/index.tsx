@@ -6,8 +6,8 @@ import {
 import { Button } from "~/components/shared/button";
 import { usePagination } from "~/hooks/use-pagination";
 import { tw } from "~/utils/tw";
-import PerPageItemsSelect from "./per-page-items-select";
 import type { IndexResponse } from "..";
+import PerPageItemsSelect from "./per-page-items-select";
 
 export const Pagination = ({ className }: { className?: string }) => {
   const { modelName } = useLoaderData<IndexResponse>();

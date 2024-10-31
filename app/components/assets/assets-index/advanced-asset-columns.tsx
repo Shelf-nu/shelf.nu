@@ -180,7 +180,7 @@ export function AdvancedIndexColumn({
       return <CategoryColumn category={item.category} />;
 
     case "tags":
-      return <TagsColumn tags={item.tags ?? []} />;
+      return <TagsColumn tags={item.tags} />;
 
     case "location":
       return (
@@ -328,7 +328,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      <ListItemTagsColumn tags={tags} />
+      {tags.length > 0 && <ListItemTagsColumn tags={tags} />}
     </Td>
   );
 }
