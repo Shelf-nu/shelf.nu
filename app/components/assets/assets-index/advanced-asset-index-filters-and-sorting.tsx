@@ -24,7 +24,7 @@ import { FieldSelector } from "./advanced-filters/field-selector";
 import {
   getAvailableColumns,
   getDefaultValueForFieldType,
-  getFieldType,
+  getUIFieldType,
   useInitialFilters,
 } from "./advanced-filters/helpers";
 import {
@@ -104,7 +104,7 @@ function AdvancedFilter() {
       /** We need to make sure the filter we add is not one that already exists */
 
       const firstColumn = availableColumns[0];
-      const fieldType = getFieldType({
+      const fieldType = getUIFieldType({
         column: firstColumn,
       }) as FilterFieldType;
 
@@ -166,7 +166,7 @@ function AdvancedFilter() {
                             const column = availableColumns.find(
                               (c) => c.name === name
                             ) as Column;
-                            const fieldType = getFieldType({
+                            const fieldType = getUIFieldType({
                               column,
                             }) as FilterFieldType;
 

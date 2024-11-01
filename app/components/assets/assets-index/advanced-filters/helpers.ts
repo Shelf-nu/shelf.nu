@@ -5,7 +5,21 @@ import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
-const friendlyFieldTypeNames = {
+/**
+ * Represents how a field should be displayed and interacted with in the UI
+ */
+export type UIFieldType =
+  | "string"
+  | "text"
+  | "boolean"
+  | "date"
+  | "number"
+  | "enum"
+  | "array";
+/**
+ * Mapping of friendly names for UI display
+ */
+const uiFieldTypeNames: Record<UIFieldType, string> = {
   string: "Single-line text",
   text: "Multi-line text",
   boolean: "Yes/No",
@@ -15,16 +29,24 @@ const friendlyFieldTypeNames = {
   array: "List",
 };
 
-// @TODO - lets look into combining this with getFilterFieldType as they are doing kind of the same
-export function getFieldType({
+/**
+ * Determines how a field should be presented and interacted with in the UI
+ * Used for generating appropriate form controls and filter interfaces
+ *
+ * @param column - Column configuration object
+ * @param friendlyName - Whether to return a user-friendly name instead of the technical type
+ * @returns The UI field type or its friendly name
+ */
+export function getUIFieldType({
   column,
   friendlyName = false,
 }: {
   column: Column;
   friendlyName?: boolean;
-}) {
-  // Handle default fields
-  let fieldType: FilterFieldType;
+}): string {
+  let fieldType: UIFieldType;
+
+  // Determine base field type
   switch (column.name) {
     case "id":
     case "name":
@@ -75,14 +97,12 @@ export function getFieldType({
             fieldType = "string";
         }
       } else {
-        // Default to string if type can't be determined
         fieldType = "string";
       }
   }
 
-  return friendlyName ? friendlyFieldTypeNames[fieldType] : fieldType;
+  return friendlyName ? uiFieldTypeNames[fieldType] : fieldType;
 }
-
 /** Gets the intial filters of the advanced index based on search params
  * @returns intialFilters -{@link Filter, Filter[]}
  */
@@ -99,7 +119,7 @@ export function useInitialFilters(columns: Column[]) {
         name: key,
         operator: operator as FilterOperator,
         value: operator === "between" ? filterValue.split(",") : filterValue, // Split the value if it's a range
-        type: getFieldType({ column }) as FilterFieldType,
+        type: getUIFieldType({ column }) as FilterFieldType,
       });
     }
   });
@@ -132,7 +152,7 @@ export function getDefaultValueForFieldType(
     }
   } else {
     // Handle regular fields
-    switch (getFieldType({ column })) {
+    switch (getUIFieldType({ column })) {
       case "boolean":
         return true;
       case "date":

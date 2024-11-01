@@ -14,7 +14,7 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
-import { getAvailableColumns, getFieldType } from "./helpers";
+import { getAvailableColumns, getUIFieldType } from "./helpers";
 import type { Filter } from "./schema";
 
 export function FieldSelector({
@@ -64,7 +64,7 @@ export function FieldSelector({
                 {parseColumnName(column.name)}
               </span>
               <span className="ml-2 font-normal text-gray-500">
-                {getFieldType({ column, friendlyName: true })}
+                {getUIFieldType({ column, friendlyName: true })}
               </span>
             </div>
           ))}

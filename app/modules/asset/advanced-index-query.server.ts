@@ -2,7 +2,6 @@ import { Prisma, CustomFieldType } from "@prisma/client";
 
 import type {
   Filter,
-  FilterFieldType,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
 import type { CustomFieldSorting } from "./types";
@@ -819,7 +818,7 @@ export function parseFilters(
 
       const filter: Filter = {
         name: dbKey,
-        type: key.startsWith("cf_") ? "customField" : getFilterFieldType(key),
+        type: key.startsWith("cf_") ? "customField" : getQueryFieldType(key),
         operator: operator as FilterOperator,
         value: parseFilterValue(
           key,
@@ -837,11 +836,27 @@ export function parseFilters(
 }
 
 /**
- * Determines the FilterFieldType based on the field name
- * @param fieldName - The name of the field
- * @returns The corresponding FilterFieldType
+ * Represents how a field should be handled in SQL query construction
  */
-function getFilterFieldType(fieldName: string): FilterFieldType {
+export type QueryFieldType =
+  | "string"
+  | "text"
+  | "boolean"
+  | "date"
+  | "number"
+  | "enum"
+  | "array"
+  | "customField";
+
+/**
+ * Determines how a field should be handled in SQL query construction
+ * Used for building WHERE clauses and query conditions
+ *
+ * @param fieldName - Name of the database field
+ * @returns The query field type for SQL generation
+ */
+export function getQueryFieldType(fieldName: string): QueryFieldType {
+  // Custom fields are handled separately in SQL construction
   if (fieldName.startsWith("cf_")) {
     return "customField";
   }
@@ -869,7 +884,6 @@ function getFilterFieldType(fieldName: string): FilterFieldType {
     case "tags":
       return "array";
     default:
-      // For custom fields, you might want to implement a more sophisticated logic
       return "string";
   }
 }
@@ -901,7 +915,7 @@ function parseFilterValue(
     }
   }
 
-  switch (getFilterFieldType(field)) {
+  switch (getQueryFieldType(field)) {
     case "number":
       return operator === "between"
         ? value.split(",").map(Number)
