@@ -252,6 +252,7 @@ export default function DynamicDropdown({
                         id={item.id}
                         type="checkbox"
                         value={item.id}
+                        name={name}
                         className="hidden"
                         checked={checked}
                         onChange={(e) => {
