@@ -123,7 +123,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { freezeColumn },
         });
 
-        // This is a placeholder for the future
         return json(data({ success: true }));
       }
 
@@ -140,7 +139,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { showAssetImage },
         });
 
-        // This is a placeholder for the future
         return json(data({ success: true }));
       }
 
