@@ -33,6 +33,7 @@ import {
 } from "./advanced-filters/operator-selector";
 import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
+import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
 
 export interface Sort {
   name: string;
@@ -78,6 +79,9 @@ function AdvancedFilter() {
   }
 
   function applyFilters() {
+    // Dont do anything if there are validation errors
+    if (!validation.canApplyFilters) return;
+
     setSearchParams((prev) => {
       // Clear existing filter params
       columns.forEach((column) => {
@@ -93,7 +97,6 @@ function AdvancedFilter() {
 
       // Reset page when applying filters
       prev.delete("page");
-
       return prev;
     });
   }
@@ -121,8 +124,10 @@ function AdvancedFilter() {
     });
   }
 
-  const haveFiltersChanged =
-    JSON.stringify(initialFilters) !== JSON.stringify(filters);
+  const { zo, getValidationState, getFieldName, getError } =
+    useFilterFormValidation(filters, initialFilters);
+
+  const validation = getValidationState();
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
@@ -152,80 +157,95 @@ function AdvancedFilter() {
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                {filters.map((filter, index) => (
-                  <div
-                    className="flex w-full items-start gap-1"
-                    key={filter.name + index}
-                  >
-                    <div className="w-[150px] shrink-0">
-                      <FieldSelector
-                        filter={filter}
-                        filters={filters}
-                        setFilter={(name) => {
-                          setFilters((prev) => {
-                            const column = availableColumns.find(
-                              (c) => c.name === name
-                            ) as Column;
-                            const fieldType = getUIFieldType({
-                              column,
-                            }) as FilterFieldType;
-
-                            const newFilters = [...prev];
-                            newFilters[index] = {
-                              ...newFilters[index],
-                              name,
-                              type: fieldType,
-                              operator: operatorsPerType[fieldType][0],
-                              value: getDefaultValueForFieldType(
+                <form
+                  ref={zo.ref}
+                  onKeyDown={(e) => {
+                    /**
+                     * Prevent default behavior of the Enter key.
+                     * The form element is only needed for validations, so we don't want it to submit on Enter.
+                     */
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                    }
+                  }}
+                >
+                  {filters.map((filter, index) => (
+                    <div
+                      className="flex w-full items-start gap-1"
+                      key={filter.name + index}
+                    >
+                      <div className="w-[150px] shrink-0">
+                        <FieldSelector
+                          filter={filter}
+                          filters={filters}
+                          setFilter={(name) => {
+                            setFilters((prev) => {
+                              const column = availableColumns.find(
+                                (c) => c.name === name
+                              ) as Column;
+                              const fieldType = getUIFieldType({
                                 column,
-                                customFields as
-                                  | SerializeFrom<CustomField>[]
-                                  | null
-                              ), // Add default value
-                            };
-                            return newFilters;
-                          });
+                              }) as FilterFieldType;
+
+                              const newFilters = [...prev];
+                              newFilters[index] = {
+                                ...newFilters[index],
+                                name,
+                                type: fieldType,
+                                operator: operatorsPerType[fieldType][0],
+                                value: getDefaultValueForFieldType(
+                                  column,
+                                  customFields as
+                                    | SerializeFrom<CustomField>[]
+                                    | null
+                                ), // Add default value
+                              };
+                              return newFilters;
+                            });
+                          }}
+                        />
+                      </div>
+                      <div className="w-[50px] shrink-0">
+                        <OperatorSelector
+                          filter={filter}
+                          setFilter={(operator) => {
+                            // Update filter operator
+                            setFilters((prev) => {
+                              const newFilters = [...prev];
+                              newFilters[index].operator = operator;
+                              return newFilters;
+                            });
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0 grow">
+                        <ValueField
+                          filter={filter}
+                          setFilter={(value) => {
+                            setFilters((prev) => {
+                              const newFilters = [...prev];
+                              newFilters[index].value = value;
+                              return newFilters;
+                            });
+                          }}
+                          applyFilters={applyFilters}
+                          fieldName={getFieldName(index)}
+                          zormError={getError(index)}
+                        />
+                      </div>
+                      <Button
+                        variant="block-link-gray"
+                        className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
+                        icon="x"
+                        onClick={() => {
+                          setFilters((prev) =>
+                            prev.filter((_, i) => i !== index)
+                          );
                         }}
                       />
                     </div>
-                    <div className="w-[50px] shrink-0">
-                      <OperatorSelector
-                        filter={filter}
-                        setFilter={(operator) => {
-                          // Update filter operator
-                          setFilters((prev) => {
-                            const newFilters = [...prev];
-                            newFilters[index].operator = operator;
-                            return newFilters;
-                          });
-                        }}
-                      />
-                    </div>
-                    <div className="min-w-0 grow">
-                      <ValueField
-                        filter={filter}
-                        setFilter={(value) => {
-                          setFilters((prev) => {
-                            const newFilters = [...prev];
-                            newFilters[index].value = value;
-                            return newFilters;
-                          });
-                        }}
-                        applyFilters={applyFilters}
-                      />
-                    </div>
-                    <Button
-                      variant="block-link-gray"
-                      className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
-                      icon="x"
-                      onClick={() => {
-                        setFilters((prev) =>
-                          prev.filter((_, i) => i !== index)
-                        );
-                      }}
-                    />
-                  </div>
-                ))}
+                  ))}
+                </form>
               </div>
             )}
           </div>
@@ -268,11 +288,7 @@ function AdvancedFilter() {
                 variant="secondary"
                 className="text-[14px] font-medium"
                 size="xs"
-                disabled={
-                  !haveFiltersChanged || disabled
-                    ? { title: "", reason: "No filters to apply" }
-                    : false
-                }
+                disabled={!validation.canApplyFilters || disabled}
                 onClick={applyFilters}
               >
                 Apply filters

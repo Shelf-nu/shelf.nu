@@ -27,6 +27,7 @@ import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type Props = ModelFilterProps & {
+  name?: string;
   className?: string;
   triggerWrapperClassName?: string;
   style?: React.CSSProperties;
@@ -58,6 +59,7 @@ type Props = ModelFilterProps & {
 };
 
 export default function DynamicDropdown({
+  name,
   className,
   triggerWrapperClassName,
   style,

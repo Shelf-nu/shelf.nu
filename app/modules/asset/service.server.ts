@@ -63,6 +63,7 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import { assetIndexFields } from "./fields";
 import {
   assetQueryFragment,
   assetQueryJoins,
@@ -71,8 +72,7 @@ import {
   generateWhereClause,
   parseFilters,
   parseSortingOptions,
-} from "./advanced-index-query.server";
-import { assetIndexFields } from "./fields";
+} from "./query.server";
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,

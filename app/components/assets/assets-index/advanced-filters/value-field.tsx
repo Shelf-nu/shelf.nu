@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Kit } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import {
   Popover,
@@ -9,7 +8,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useLoaderData } from "@remix-run/react";
 import { format, parseISO } from "date-fns";
-import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { toZonedTime } from "date-fns-tz";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
@@ -18,6 +17,7 @@ import { CheckIcon, ChevronRight, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
+import { adjustDateToUTC, isDateString } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import type { Filter } from "./schema";
@@ -27,17 +27,21 @@ export function ValueField({
   filter,
   setFilter,
   applyFilters,
+  fieldName, // From zorm
+  zormError, // From zorm
 }: {
   filter: Filter;
   setFilter: (value: Filter["value"]) => void;
   applyFilters: () => void;
+  fieldName: string;
+  zormError?: string;
 }) {
   const data = useLoaderData<AssetIndexLoaderData>();
   const customFields = useMemo(() => data?.customFields || [], [data]);
   const [localValue, setLocalValue] = useState<[string, string]>(
     Array.isArray(filter.value) ? (filter.value as [string, string]) : ["", ""]
   );
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const validateBetweenFilter = useCallback(() => {
     if (filter.operator === "between") {
       const [start, end] = localValue;
@@ -47,7 +51,7 @@ export function ValueField({
           const endDate = new Date(end);
           if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
             if (startDate > endDate) {
-              setError("Start date must be before or equal to end date");
+              setLocalError("Start date must be before or equal to end date");
               return;
             }
           }
@@ -56,15 +60,25 @@ export function ValueField({
           const endNum = parseFloat(end);
           if (!isNaN(startNum) && !isNaN(endNum)) {
             if (startNum > endNum) {
-              setError("Start value must be less than or equal to end value");
+              setLocalError(
+                "Start value must be less than or equal to end value"
+              );
               return;
             }
           }
         }
       }
     }
-    setError(null);
+    setLocalError(null);
   }, [filter.operator, filter.type, localValue]);
+
+  // Use a combined error that takes both into account
+  const error = useMemo(() => {
+    // If there's a local validation error from validateBetweenFilter, show that
+    if (localError) return localError;
+    // Otherwise show any zorm validation error
+    return zormError;
+  }, [localError, zormError]);
 
   useEffect(() => {
     validateBetweenFilter();
@@ -131,6 +145,10 @@ export function ValueField({
       : "Enter value";
   }
 
+  // Add error display for components that don't support error prop
+  const ErrorDisplay = ({ error }: { error?: string }) =>
+    error ? <div className="mt-1 text-sm text-red-500">{error}</div> : null;
+
   switch (filter.type) {
     case "string":
     case "text":
@@ -142,6 +160,8 @@ export function ValueField({
           onChange={handleChange}
           placeholder={placeholder(filter.operator)}
           onKeyUp={submitOnEnter}
+          error={error}
+          name={fieldName}
         />
       );
 
@@ -157,6 +177,7 @@ export function ValueField({
                 value={localValue[0]}
                 onChange={handleBetweenChange(0)}
                 className="w-1/2"
+                name={`${fieldName}_start`}
                 min={0}
                 onKeyUp={submitOnEnter}
               />
@@ -168,6 +189,7 @@ export function ValueField({
                 onChange={handleBetweenChange(1)}
                 className="w-1/2"
                 min={0}
+                name={`${fieldName}_end`}
                 onKeyUp={submitOnEnter}
               />
             </div>
@@ -186,35 +208,49 @@ export function ValueField({
             placeholder="Enter number"
             min={0}
             onKeyUp={submitOnEnter}
+            error={error}
+            name={fieldName}
           />
         );
       }
 
     case "boolean":
       return (
-        <BooleanField
-          value={filter.value as boolean}
-          handleBooleanChange={handleBooleanChange}
-        />
+        <>
+          <BooleanField
+            value={filter.value as boolean}
+            handleBooleanChange={handleBooleanChange}
+            name={fieldName}
+          />
+          <ErrorDisplay error={error} />
+        </>
       );
 
     case "date":
       return (
-        <DateField
-          filter={filter}
-          setFilter={setFilter}
-          applyFilters={applyFilters}
-        />
+        <>
+          <DateField
+            filter={filter}
+            setFilter={setFilter}
+            applyFilters={applyFilters}
+            name={fieldName}
+          />
+          <ErrorDisplay error={error} />
+        </>
       );
 
     case "enum":
       return (
-        <ValueEnumField
-          fieldName={filter.name}
-          value={filter.value as string}
-          handleChange={setFilter}
-          multiSelect={filter.operator === "containsAny"}
-        />
+        <>
+          <ValueEnumField
+            fieldName={filter.name}
+            value={filter.value as string}
+            handleChange={setFilter}
+            multiSelect={filter.operator === "containsAny"}
+            name={fieldName}
+          />
+          <ErrorDisplay error={error} />
+        </>
       );
 
     case "array":
@@ -227,7 +263,7 @@ export function ValueField({
             Array.isArray(filter.value)
               ? filter.value.join(", ")
               : typeof filter.value === "boolean"
-              ? "yes" // provide a default value for booleans
+              ? "yes"
               : filter.value
           }
           onChange={(e) => {
@@ -238,6 +274,8 @@ export function ValueField({
           }}
           placeholder={placeholder(filter.operator)}
           onKeyUp={submitOnEnter}
+          error={error}
+          name={fieldName}
         />
       );
 
@@ -247,9 +285,11 @@ export function ValueField({
 }
 
 function BooleanField({
+  name,
   value,
   handleBooleanChange,
 }: {
+  name: string;
   value: boolean | string;
   handleBooleanChange: (value: "true" | "false") => void;
 }) {
@@ -259,7 +299,7 @@ function BooleanField({
 
   return (
     <>
-      <input type="hidden" value={String(boolValue)} />
+      <input type="hidden" value={String(boolValue)} name={name} />
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -312,6 +352,7 @@ interface EnumFieldProps {
   options: EnumOption[];
   handleChange: (value: string) => void;
   multiSelect?: boolean;
+  name?: string;
 }
 
 /**
@@ -322,6 +363,7 @@ function EnumField({
   options,
   handleChange,
   multiSelect = false,
+  name,
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
@@ -355,7 +397,11 @@ function EnumField({
 
   return (
     <>
-      <input type="hidden" value={multiSelect ? displayValue : value} />
+      <input
+        type="hidden"
+        value={multiSelect ? displayValue : value}
+        name={name}
+      />
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -411,6 +457,7 @@ function StatusEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options">) {
   const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
     id: status,
@@ -423,6 +470,7 @@ function StatusEnumField({
       options={options}
       handleChange={handleChange}
       multiSelect={multiSelect}
+      name={name}
     />
   );
 }
@@ -435,6 +483,7 @@ function CustomFieldEnumField({
   handleChange,
   fieldName,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options"> & { fieldName: string }) {
   const data = useLoaderData<AssetIndexLoaderData>();
   const customFields = useMemo(
@@ -456,6 +505,7 @@ function CustomFieldEnumField({
       options={options}
       handleChange={handleChange}
       multiSelect={multiSelect}
+      name={name}
     />
   );
 }
@@ -468,6 +518,7 @@ function CustodyEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -505,6 +556,7 @@ function CustodyEnumField({
     return (
       <DynamicDropdown
         {...commonProps}
+        name={name}
         trigger={
           <Button
             variant="secondary"
@@ -545,6 +597,7 @@ function CustodyEnumField({
   return (
     <DynamicSelect
       {...commonProps}
+      fieldName={name}
       placeholder="Select custodian"
       defaultValue={value as string}
       onChange={(selectedId) => {
@@ -563,6 +616,7 @@ function CategoryEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -612,6 +666,7 @@ function CategoryEnumField({
     return (
       <DynamicDropdown
         {...commonProps}
+        name={name}
         trigger={
           <Button
             variant="secondary"
@@ -651,6 +706,7 @@ function CategoryEnumField({
   return (
     <DynamicSelect
       {...commonProps}
+      fieldName={name}
       placeholder="Select category"
       defaultValue={value as string}
       onChange={(selectedId) => {
@@ -669,6 +725,7 @@ function LocationEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -710,6 +767,7 @@ function LocationEnumField({
     return (
       <DynamicDropdown
         {...commonProps}
+        name={name}
         trigger={
           <Button
             variant="secondary"
@@ -749,6 +807,7 @@ function LocationEnumField({
   return (
     <DynamicSelect
       {...commonProps}
+      fieldName={name}
       placeholder="Select location"
       defaultValue={value as string}
       onChange={(selectedId) => {
@@ -767,9 +826,9 @@ function KitEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
 }: Omit<EnumFieldProps, "options">) {
-  // @TODO - this hardcoded type should be fixed to be inferred from the API response
-  const data = useLoaderData<{ kits: Kit[]; totalKits: number }>();
+  const data = useLoaderData<AssetIndexLoaderData>();
 
   // Parse the existing value to get selected Category IDs
   const selectedIds = useMemo(() => {
@@ -809,6 +868,7 @@ function KitEnumField({
     return (
       <DynamicDropdown
         {...commonProps}
+        name={name}
         trigger={
           <Button
             variant="secondary"
@@ -816,7 +876,7 @@ function KitEnumField({
           >
             <div className="flex items-center justify-between">
               <span className="text-left">
-                {selectedIds.length > 0
+                {selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
                         const kit = data.kits?.find((kit) => kit.id === id);
@@ -846,6 +906,7 @@ function KitEnumField({
   return (
     <DynamicSelect
       {...commonProps}
+      fieldName={name}
       placeholder="Select kit"
       defaultValue={value as string}
       onChange={(selectedId) => {
@@ -867,70 +928,99 @@ function ValueEnumField({
   value,
   handleChange,
   multiSelect,
+  name,
+  error,
 }: {
   fieldName: string;
   value: string;
   handleChange: (value: string) => void;
   multiSelect?: boolean;
+  name?: string;
+  error?: string;
 }) {
   if (fieldName === "status") {
     return (
-      <StatusEnumField
-        value={value}
-        handleChange={handleChange}
-        multiSelect={multiSelect}
-      />
+      <>
+        <StatusEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
   if (fieldName === "category") {
     return (
-      <CategoryEnumField
-        value={value}
-        handleChange={handleChange}
-        multiSelect={multiSelect}
-      />
+      <>
+        <CategoryEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
+  // Apply the same pattern to all other enum fields
   if (fieldName === "location") {
     return (
-      <LocationEnumField
-        value={value}
-        handleChange={handleChange}
-        multiSelect={multiSelect}
-      />
+      <>
+        <LocationEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
   if (fieldName === "custody") {
     return (
-      <CustodyEnumField
-        value={value}
-        handleChange={handleChange}
-        multiSelect={multiSelect}
-      />
+      <>
+        <CustodyEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
   if (fieldName === "kit") {
     return (
-      <KitEnumField
-        value={value}
-        handleChange={handleChange}
-        multiSelect={multiSelect}
-      />
+      <>
+        <KitEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
   if (fieldName.startsWith("cf_")) {
     return (
-      <CustomFieldEnumField
-        value={value}
-        handleChange={handleChange}
-        fieldName={fieldName}
-        multiSelect={multiSelect}
-      />
+      <>
+        <CustomFieldEnumField
+          value={value}
+          handleChange={handleChange}
+          fieldName={fieldName}
+          multiSelect={multiSelect}
+          name={name}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
     );
   }
 
@@ -938,34 +1028,33 @@ function ValueEnumField({
 }
 // Define the props for the DateField component
 type DateFieldProps = {
+  name?: string; // Add name prop for zorm
+  error?: string; // Add error prop
   filter: Filter;
   setFilter: (value: Filter["value"]) => void;
   applyFilters: () => void;
 };
 
-// @TODO - move to a proper location
-function isDateString(value: unknown): value is string {
-  if (typeof value !== "string") {
-    return false;
-  }
-  const date = parseISO(value);
-  return !isNaN(date.getTime());
-}
-
-function adjustDateToUTC(dateString: string, timeZone: string): string {
-  const zonedDate = toZonedTime(parseISO(dateString), timeZone);
-  const utcDate = fromZonedTime(zonedDate, timeZone);
-  return format(utcDate, "yyyy-MM-dd");
-}
-
 /**
  * DateField component for handling date-based filters
  * Supports both single date and date range selections
  */
-export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
+export function DateField({
+  name,
+  filter,
+  setFilter,
+  applyFilters,
+  error,
+}: DateFieldProps) {
   const { timeZone } = useHints();
   const [localValue, setLocalValue] = useState<[string, string]>(["", ""]);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  // Combine local and zorm errors
+
+  const combinedError = useMemo(() => {
+    if (localError) return localError;
+    return error;
+  }, [localError, error]);
 
   useEffect(() => {
     function adjustDateToUserTimezone(dateString: string): string {
@@ -1024,12 +1113,12 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
       const startDate = parseISO(start);
       const endDate = parseISO(end);
       if (startDate > endDate) {
-        setError("Start date must be before or equal to end date");
+        setLocalError("Start date must be before or equal to end date");
       } else {
-        setError(null);
+        setLocalError(null);
       }
     } else {
-      setError(null);
+      setLocalError(null);
     }
   }
 
@@ -1057,6 +1146,7 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
             value={localValue[0]}
             onChange={handleDateChange(0)}
             className="w-1/2"
+            name={`${name}_start`}
           />
           <Input
             {...commonInputProps}
@@ -1065,10 +1155,11 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
             value={localValue[1]}
             onChange={handleDateChange(1)}
             className="w-1/2"
+            name={`${name}_end`}
           />
         </div>
-        {error && localValue[0] !== "" && localValue[1] !== "" && (
-          <div className="!mt-0 text-[12px] text-red-500">{error}</div>
+        {combinedError && localValue[0] !== "" && localValue[1] !== "" && (
+          <div className="!mt-0 text-[12px] text-red-500">{combinedError}</div>
         )}
       </div>
     );
@@ -1079,6 +1170,8 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
         value={typeof filter.value === "string" ? filter.value : ""}
         timeZone={timeZone}
         commonInputProps={commonInputProps}
+        error={combinedError}
+        name={name}
       />
     );
   } else {
@@ -1088,6 +1181,8 @@ export function DateField({ filter, setFilter, applyFilters }: DateFieldProps) {
         type="date"
         value={localValue[0]}
         onChange={handleDateChange(0)}
+        error={combinedError}
+        name={name}
       />
     );
   }
@@ -1098,6 +1193,8 @@ function MultiDateInput({
   value,
   timeZone,
   commonInputProps,
+  name,
+  error,
 }: {
   setValue: (value: string) => void;
   value: string;
@@ -1108,6 +1205,8 @@ function MultiDateInput({
     label: string;
     onKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   };
+  name?: string;
+  error?: string;
 }) {
   // Parse initial dates from comma-separated string
   const [dates, setDates] = useState<string[]>(() => {
@@ -1157,6 +1256,7 @@ function MultiDateInput({
             value={date}
             onChange={handleDateChange(index)}
             className="flex-1"
+            name={`${name}_${index}`}
           />
           {dates.length > 1 && (
             <Button
@@ -1168,6 +1268,7 @@ function MultiDateInput({
           )}
         </div>
       ))}
+      {error && <div className="!mt-0 text-[12px] text-red-500">{error}</div>}
       <Button
         variant="block-link"
         className="text-[14px]"

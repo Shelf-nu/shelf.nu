@@ -1,6 +1,6 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Prisma } from "@prisma/client";
+import type { AssetIndexSettings, Kit, Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -190,7 +190,12 @@ export async function simpleModeLoader({
       timeZone,
       currentOrganization,
       settings,
-      customFields: [], // we return an empty array in simple mode for easier to manage types
+      /**
+       * We return an empty array in simple mode for easier to manage types
+       * Those are fields we need in advanced mode and this helps us prevent type issues.
+       * */
+      customFields: [],
+      kits: [] as Kit[],
     }),
     {
       headers,
