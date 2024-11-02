@@ -1257,6 +1257,7 @@ export async function duplicateAsset({
     //irrespective category it has to copy all the custom fields;
     const customFields = await getActiveCustomFields({
       organizationId,
+      includeAllCategories: true,
     });
 
     const payload = {
