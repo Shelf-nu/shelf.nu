@@ -20,14 +20,30 @@ const filterValueSchema = {
     ),
   ]),
   number: z.union([
-    z.number().min(0, "Number is required"),
-    z.array(z.number()).refine(
-      (numbers) => {
-        if (numbers.length !== 2) return true;
-        return numbers[0] <= numbers[1];
-      },
-      { message: "Start value must be less than or equal to end value" }
-    ),
+    // Single number validation
+    z.coerce
+      .number()
+      .min(0, "Number is required")
+      .transform((val) => (Number.isNaN(val) ? undefined : val)),
+
+    // Range (between) validation
+    z
+      .array(z.coerce.number())
+      .length(2, "Range must have two values")
+      .refine(
+        (numbers) => {
+          // Skip validation if any number is NaN
+          if (numbers.some(Number.isNaN)) return true;
+          // Only validate when both numbers are present
+          if (numbers.length === 2) {
+            return numbers[0] <= numbers[1];
+          }
+          return true;
+        },
+        {
+          message: "Start value must be less than or equal to end value",
+        }
+      ),
   ]),
   boolean: z.boolean(),
   array: z.array(z.string()).min(1, "Please select at least one value"),
@@ -67,6 +83,23 @@ export function useFilterFormValidation(
       const schema =
         filterValueSchema[filter.type as keyof typeof filterValueSchema];
       if (!schema) return true; // Skip validation for unsupported types
+
+      // Special handling for number type
+      if (filter.type === "number") {
+        if (filter.operator === "between") {
+          // Validate array of numbers
+          if (!Array.isArray(filter.value)) return false;
+          return !filter.value.some(
+            (v) => v === "" || v === undefined || Number.isNaN(Number(v))
+          );
+        }
+        // Validate single number
+        return (
+          filter.value !== "" &&
+          filter.value !== undefined &&
+          !Number.isNaN(Number(filter.value))
+        );
+      }
 
       schema.parse(filter.value);
       return true;
