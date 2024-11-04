@@ -5,14 +5,13 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { BookingExistIcon } from "~/components/icons/library";
-import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 
 import {
-  getBookings,
   getExistingBookingDetails,
   upsertBooking,
 } from "~/modules/booking/service.server";
+import { loadBookingsData } from "~/modules/booking/utils.server";
 import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -20,7 +19,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import {
   getClientHint,
-  getDateTimeFormat,
   getDateTimeFormatFromHints,
 } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
@@ -28,14 +26,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -61,10 +52,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   const { kitId } = getParams(params, z.object({ kitId: z.string() }), {
-    additionalData: {
-      userId,
-    },
+    additionalData: { userId },
   });
+
   try {
     const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
@@ -73,82 +63,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const searchParams = getCurrentSearchParams(request);
-    const { page, search } = getParamsValues(searchParams);
-    const perPage = 20;
-    const { bookings, bookingCount } = await getBookings({
+    const loaderData = await loadBookingsData({
+      request,
       organizationId,
-      page,
-      perPage,
-      search,
       userId: authSession?.userId,
-      statuses: ["DRAFT", "RESERVED"],
-      ...(isSelfServiceOrBase && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: authSession?.userId,
-      }),
+      isSelfServiceOrBase,
+      ids: kitId ? [kitId] : undefined,
     });
 
-    const header: HeaderData = {
-      title: "Bookings",
-    };
-
-    const modelName = {
-      singular: "booking",
-      plural: "bookings",
-    };
-
-    const totalPages = Math.ceil(bookingCount / perPage);
-
-    const hints = getClientHint(request);
-
-    const items = bookings.map((b) => {
-      if (b.from && b.to) {
-        const from = new Date(b.from);
-        const displayFrom = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(from);
-
-        const to = new Date(b.to);
-        const displayTo = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(to);
-
-        return {
-          ...b,
-          displayFrom: displayFrom.split(","),
-          displayTo: displayTo.split(","),
-          metadata: {
-            ...b,
-            displayFrom: displayFrom.split(","),
-            displayTo: displayTo.split(","),
-          },
-        };
-      }
-      return b;
+    return json(data(loaderData), {
+      headers: [
+        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+      ],
     });
-    return json(
-      data({
-        showModal: true,
-        header,
-        bookings: items,
-        search,
-        page,
-        bookingCount: bookingCount,
-        totalPages,
-        perPage,
-        modelName,
-        ids: kitId ? [kitId] : undefined,
-        hints,
-      }),
-      {
-        headers: [
-          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-        ],
-      }
-    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
