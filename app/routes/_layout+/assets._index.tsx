@@ -358,7 +358,7 @@ export const AssetsList = ({
             ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
             customPagination={<AssetIndexPagination />}
             /**
-             * Using remix's navigate is the default behaviour, however it can receive also a custom function
+             * Using remix's navigate is the default behaviour, however it can also receive a custom function
              */
             navigate={
               modeIsSimple

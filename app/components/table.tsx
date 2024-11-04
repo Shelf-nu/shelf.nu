@@ -24,7 +24,12 @@ export function Table({
         modeIsAdvanced && "flex flex-1 flex-col"
       )}
     >
-      <div className="fixed-gradient"></div>
+      <div
+        className={tw(
+          "fixed-gradient",
+          modeIsAdvanced ? "right-[11px]" : "-right-px"
+        )}
+      ></div>
       <div
         ref={containerRef}
         className={tw(

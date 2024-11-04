@@ -181,6 +181,14 @@ function AdvancedAssetIndexFilters() {
       searchClassName="leading-5"
     >
       <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+        <Button
+          variant="link"
+          target="_blank"
+          to="https://www.shelf.nu/knowledge-base/advanced-asset-index"
+          className="whitespace-nowrap"
+        >
+          Advanced Index - Explained
+        </Button>
         <ConfigureColumnsDropdown />
       </div>
     </Filters>

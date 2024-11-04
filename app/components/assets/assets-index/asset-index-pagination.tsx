@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
-import {
-  AlertIcon,
-  ChevronRight,
-  SwitchIcon,
-} from "~/components/icons/library";
+import { AlertIcon, ChevronRight } from "~/components/icons/library";
 import {
   AlertDialog,
   AlertDialogCancel,
