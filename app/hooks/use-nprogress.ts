@@ -7,16 +7,26 @@ export function useNprogress() {
 
   let fetchers = useFetchers();
 
+  /** Fetchers we dont want to trigger a loading bar */
+  const excludeFetchers = [
+    "asset-index-settings-show-image",
+    "asset-index-settings-freeze-column",
+  ];
+  // Filter out fetchers that have a key from the excludeFetchers array
+  let filteredFetchers = fetchers.filter(
+    (fetcher) => !excludeFetchers.includes(fetcher.key)
+  );
+
   let state = useMemo<"idle" | "loading">(
     function getGlobalState() {
       let states = [
         transition.state,
-        ...fetchers.map((fetcher) => fetcher.state),
+        ...filteredFetchers.map((fetcher) => fetcher.state),
       ];
       if (states.every((state) => state === "idle")) return "idle";
       return "loading";
     },
-    [transition.state, fetchers]
+    [transition.state, filteredFetchers]
   );
 
   useEffect(() => {

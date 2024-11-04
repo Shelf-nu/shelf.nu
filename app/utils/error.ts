@@ -48,6 +48,7 @@ export type FailureReason = {
     | "Admin dashboard"
     | "App layout"
     | "Assets"
+    | "Asset Index Settings"
     | "Auth"
     | "Booking"
     | "Category"

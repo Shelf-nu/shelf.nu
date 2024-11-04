@@ -22,6 +22,7 @@ import {
   defaultUserCategories,
   // defaultUserCategories,
 } from "./service.server";
+import { defaultFields } from "../asset-index-settings/helpers";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -246,6 +247,17 @@ describe(createUserAccountForTesting.name, () => {
                 create: {
                   name: `${undefined} ${undefined} (Owner)`,
                   user: { connect: { id: USER_ID } },
+                },
+              },
+              assetIndexSettings: {
+                create: {
+                  mode: "SIMPLE",
+                  columns: defaultFields,
+                  user: {
+                    connect: {
+                      id: USER_ID,
+                    },
+                  },
                 },
               },
             },

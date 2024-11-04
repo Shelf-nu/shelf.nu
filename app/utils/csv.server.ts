@@ -1,4 +1,8 @@
-import type { Asset } from "@prisma/client";
+import {
+  CustomFieldType,
+  type Asset,
+  type AssetIndexSettings,
+} from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
   unstable_createMemoryUploadHandler,
@@ -6,9 +10,22 @@ import {
 } from "@remix-run/node";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
+import { format } from "date-fns";
 import iconv from "iconv-lite";
-import { fetchAssetsForExport } from "~/modules/asset/service.server";
+import {
+  fetchAssetsForExport,
+  getAdvancedPaginatedAndFilterableAssets,
+} from "~/modules/asset/service.server";
+import type {
+  AdvancedIndexAsset,
+  ShelfAssetCustomFieldValueType,
+} from "~/modules/asset/types";
+import type { Column } from "~/modules/asset-index-settings/helpers";
+import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { isLikeShelfError, ShelfError } from "./error";
+import { ALL_SELECTED_KEY } from "./list";
+import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -91,7 +108,7 @@ export const memoryUploadHandler = unstable_composeUploadHandlers(
   unstable_createMemoryUploadHandler()
 );
 
-export const buildCsvDataFromAssets = ({
+export const buildCsvBackupDataFromAssets = ({
   assets,
   keysToSkip,
 }: {
@@ -164,7 +181,7 @@ const keysToSkip = [
   "mainImageExpiration",
 ];
 
-export async function exportAssetsToCsv({
+export async function exportAssetsBackupToCsv({
   organizationId,
 }: {
   organizationId: string;
@@ -172,7 +189,7 @@ export async function exportAssetsToCsv({
   try {
     const assets = await fetchAssetsForExport({ organizationId });
 
-    const csvData = buildCsvDataFromAssets({
+    const csvData = buildCsvBackupDataFromAssets({
       assets,
       keysToSkip,
     });
@@ -214,3 +231,229 @@ export async function exportAssetsToCsv({
     });
   }
 }
+
+export async function exportAssetsFromIndexToCsv({
+  request,
+  assetIds,
+  organizationId,
+  settings,
+}: {
+  request: Request;
+  assetIds: string;
+  organizationId: string;
+  settings: AssetIndexSettings;
+}) {
+  /** Parse filters */
+  const { filters } = await getAdvancedFiltersFromRequest(
+    request,
+    organizationId
+  );
+
+  /** Make an array of the ids and check if we have to take all */
+  const ids = assetIds.split(",");
+  const takeAll = ids.includes(ALL_SELECTED_KEY);
+
+  const { assets } = await getAdvancedPaginatedAndFilterableAssets({
+    request,
+    organizationId,
+    filters,
+    settings,
+    takeAll,
+    assetIds: takeAll ? undefined : ids,
+  });
+
+  // Pass both assets and columns to the build function
+  const csvData = buildCsvExportDataFromAssets({
+    assets,
+    columns: settings.columns as Column[],
+  });
+
+  // Join rows with CRLF as per CSV spec
+  return csvData.join("\r\n");
+}
+
+/**
+ * Builds CSV export data from assets using the column settings to maintain order
+ * @param assets - Array of assets to export
+ * @param columns - Column settings that define the order and visibility of fields
+ * @returns Array of string arrays representing CSV rows, including headers
+ */
+export const buildCsvExportDataFromAssets = ({
+  assets,
+  columns,
+}: {
+  assets: AdvancedIndexAsset[];
+  columns: Column[];
+}): string[][] => {
+  if (!assets.length) return [];
+
+  // Get visible columns in the correct order
+  const visibleColumns = columns
+    .filter((col) => col.visible)
+    .sort((a, b) => a.position - b.position);
+
+  // Create headers row using column names
+  const headers = visibleColumns.map((col) =>
+    formatValueForCsv(parseColumnName(col.name))
+  );
+
+  // Create data rows
+  const rows = assets.map((asset) =>
+    visibleColumns.map((column) => {
+      // Handle different column types
+      let value: any;
+
+      switch (column.name) {
+        case "id":
+          value = asset.id;
+          break;
+        case "name":
+          value = asset.title;
+          break;
+        case "description":
+          value = asset.description ?? "";
+          break;
+        case "category":
+          value = asset.category?.name ?? "Uncategorized";
+          break;
+        case "location":
+          value = asset.location?.name;
+          break;
+        case "kit":
+          value = asset.kit?.name;
+          break;
+        case "custody":
+          value = asset.custody
+            ? resolveTeamMemberName(asset.custody.custodian)
+            : "";
+          break;
+        case "tags":
+          value = asset.tags?.map((t) => t.name).join(", ") ?? "";
+          break;
+        case "status":
+          value = asset.status;
+          break;
+        case "createdAt":
+          value = asset.createdAt
+            ? new Date(asset.createdAt).toISOString()
+            : "";
+          break;
+        case "valuation":
+          value = asset.valuation;
+          break;
+        case "availableToBook":
+          value = asset.availableToBook ? "Yes" : "No";
+          break;
+        default:
+          // Handle custom fields
+          if (column.name.startsWith("cf_")) {
+            const fieldName = column.name.replace("cf_", "");
+            const customField = asset.customFields?.find(
+              (cf) => cf.customField.name === fieldName
+            );
+
+            if (!customField) {
+              value = "";
+            } else {
+              const fieldValue =
+                customField.value as unknown as ShelfAssetCustomFieldValueType["value"];
+              value = formatCustomFieldForCsv(fieldValue, column.cfType);
+            }
+          }
+      }
+
+      return formatValueForCsv(value);
+    })
+  );
+
+  // Return headers followed by data rows
+  return [headers, ...rows];
+};
+
+/**
+ * Cleans markdown formatting from a text string
+ * @param text - Text containing markdown to clean
+ * @returns Plain text with markdown formatting removed
+ */
+const cleanMarkdownFormatting = (text: string): string =>
+  text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Remove markdown links
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "") // Remove image references
+    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting
+    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets
+    .replace(/\([^)]*\)/g, "") // Remove remaining parentheses
+    .replace(/\r?\n/g, " ") // Replace newlines with spaces
+    .replace(/\s+/g, " ") // Normalize multiple spaces
+    .trim();
+
+/**
+ * Safely formats a value for CSV export by properly escaping and quoting values
+ */
+const formatValueForCsv = (value: any): string => {
+  // Handle null/undefined/empty values
+  if (value === null || value === undefined || value === "") {
+    return '""';
+  }
+
+  // Handle boolean values
+  if (typeof value === "boolean") {
+    return value ? '"Yes"' : '"No"';
+  }
+
+  // Convert to string and trim
+  let stringValue = String(value).trim();
+
+  // If empty after trim, return empty quoted string
+  if (!stringValue) {
+    return '""';
+  }
+
+  // For dates, ensure consistent format
+  if (value instanceof Date) {
+    stringValue = value.toISOString().split("T")[0];
+  }
+
+  // Clean any markdown formatting
+  stringValue = cleanMarkdownFormatting(stringValue);
+
+  // Escape quotes by doubling them
+  stringValue = stringValue.replace(/"/g, '""');
+
+  // Always wrap in quotes
+  return `"${stringValue}"`;
+};
+
+/**
+ * Formats a custom field value specifically for CSV export
+ */
+const formatCustomFieldForCsv = (
+  fieldValue: ShelfAssetCustomFieldValueType["value"],
+  cfType: CustomFieldType | undefined
+): string => {
+  if (!fieldValue || fieldValue.raw === undefined || fieldValue.raw === null) {
+    return "";
+  }
+
+  switch (cfType) {
+    case CustomFieldType.BOOLEAN:
+      if (fieldValue.raw === undefined || fieldValue.raw === null) {
+        return "";
+      }
+      return fieldValue.valueBoolean ? "Yes" : "No";
+
+    case CustomFieldType.MULTILINE_TEXT:
+      const rawText = String(fieldValue.raw || "");
+      return cleanMarkdownFormatting(rawText);
+
+    case CustomFieldType.DATE:
+      if (!fieldValue.valueDate) return "";
+      try {
+        return format(new Date(fieldValue.valueDate), "yyyy-MM-dd");
+      } catch {
+        return String(fieldValue.raw);
+      }
+
+    default:
+      return String(fieldValue.raw || "");
+  }
+};

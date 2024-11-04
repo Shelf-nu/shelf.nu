@@ -4,6 +4,7 @@ import type { Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 
 const label: ErrorLabel = "Organization";
@@ -142,6 +143,18 @@ export async function createOrganization({
         create: {
           name: `${owner.firstName} ${owner.lastName} (Owner)`,
           user: { connect: { id: owner.id } },
+        },
+      },
+
+      assetIndexSettings: {
+        create: {
+          mode: "SIMPLE",
+          columns: defaultFields,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
         },
       },
     } satisfies Prisma.OrganizationCreateInput;

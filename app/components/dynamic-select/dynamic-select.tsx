@@ -25,6 +25,7 @@ import When from "../when/when";
 
 type Props = ModelFilterProps & {
   className?: string;
+  triggerWrapperClassName?: string;
   style?: React.CSSProperties;
   fieldName?: string;
 
@@ -58,6 +59,7 @@ type Props = ModelFilterProps & {
 
 export default function DynamicSelect({
   className,
+  triggerWrapperClassName,
   style,
   fieldName,
   contentLabel,
@@ -160,7 +162,14 @@ export default function DynamicSelect({
         <MobileStyles open={isPopoverOpen} />
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-          <PopoverTrigger disabled={disabled} asChild>
+          <PopoverTrigger
+            disabled={disabled}
+            asChild
+            className={tw(
+              triggerWrapperClassName,
+              "inline-flex w-full items-center gap-2 "
+            )}
+          >
             <button
               className={tw(
                 "w-full",
@@ -175,7 +184,7 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[14px]  hover:cursor-pointer disabled:opacity-50"
               >
                 <span className="truncate whitespace-nowrap pr-2">
                   {triggerValue}
@@ -262,18 +271,20 @@ export default function DynamicSelect({
                       handleItemChange(item.id);
                     }}
                   >
-                    <div>
+                    <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                       {typeof renderItem === "function" ? (
                         renderItem({ ...item, metadata: item })
                       ) : (
-                        <div className="flex items-center truncate text-sm font-medium">
+                        <div className="flex  items-center  text-sm font-medium">
                           {item.name}
                         </div>
                       )}
-                    </div>
+                    </span>
 
                     <When truthy={item.id === selectedValue}>
-                      <CheckIcon className="text-primary" />
+                      <span className="h-auto w-[18px] text-primary">
+                        <CheckIcon />
+                      </span>
                     </When>
                   </div>
                 ))}

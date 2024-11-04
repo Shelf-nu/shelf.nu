@@ -1,9 +1,7 @@
-import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type {
   Category,
   Location,
   Note,
-  Prisma,
   Qr,
   Asset,
   User,
@@ -12,6 +10,13 @@ import type {
   TeamMember,
   Booking,
   Kit,
+  AssetIndexSettings,
+} from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  ErrorCorrection,
+  Prisma,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import type {
@@ -58,7 +63,19 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import { assetIndexFields } from "./fields";
+import {
+  assetQueryFragment,
+  assetQueryJoins,
+  assetReturnFragment,
+  generateCustomFieldSelect,
+  generateWhereClause,
+  parseFilters,
+  parseSortingOptions,
+} from "./query.server";
 import type {
+  AdvancedIndexAsset,
+  AdvancedIndexQueryResult,
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
@@ -68,6 +85,7 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
+import type { Column } from "../asset-index-settings/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -140,6 +158,7 @@ async function getAssetsFromView(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
+  extraInclude?: Prisma.AssetInclude;
 }) {
   let {
     organizationId,
@@ -157,6 +176,7 @@ async function getAssetsFromView(params: {
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     locationIds,
     teamMemberIds,
+    extraInclude,
   } = params;
 
   try {
@@ -361,7 +381,11 @@ async function getAssetsFromView(params: {
     if (hideUnavailable === true && where.asset) {
       where.asset.kit = null;
     }
-
+    const ASSET_INDEX_FIELDS = assetIndexFields({
+      bookingFrom,
+      bookingTo,
+      unavailableBookingStatuses,
+    });
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -371,58 +395,8 @@ async function getAssetsFromView(params: {
         include: {
           asset: {
             include: {
-              kit: true,
-              category: true,
-              tags: true,
-              location: {
-                select: {
-                  name: true,
-                },
-              },
-              custody: {
-                select: {
-                  custodian: {
-                    select: {
-                      name: true,
-                      userId: true,
-                      user: {
-                        select: {
-                          firstName: true,
-                          lastName: true,
-                          profilePicture: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-              ...(bookingTo && bookingFrom
-                ? {
-                    bookings: {
-                      where: {
-                        status: { in: unavailableBookingStatuses },
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
-                      },
-                      take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
-                      select: {
-                        from: true,
-                        to: true,
-                        status: true,
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  }
-                : {}),
+              ...ASSET_INDEX_FIELDS,
+              ...extraInclude,
             },
           },
         },
@@ -467,6 +441,7 @@ async function getAssets(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
+  extraInclude?: Prisma.AssetInclude;
 }) {
   const {
     organizationId,
@@ -484,6 +459,7 @@ async function getAssets(params: {
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     teamMemberIds,
+    extraInclude,
   } = params;
 
   try {
@@ -640,6 +616,7 @@ async function getAssets(params: {
                   name: true,
                   user: {
                     select: {
+                      email: true,
                       firstName: true,
                       lastName: true,
                       profilePicture: true,
@@ -676,6 +653,7 @@ async function getAssets(params: {
                 },
               }
             : {}),
+          ...extraInclude,
         },
         orderBy: { [orderBy]: orderDirection },
       }),
@@ -690,6 +668,110 @@ async function getAssets(params: {
       cause,
       message: "Something went wrong while fetching assets",
       additionalData: { ...params },
+      label,
+    });
+  }
+}
+
+/**
+ * Fetches filtered and paginated assets for advanced asset index view.
+ * @param request - The incoming request
+ * @param organizationId - Organization ID to filter assets by
+ * @param filters - String of filter parameters
+ * @param settings - Asset index settings containing column configuration
+ * @param takeAll - When true, returns all matching assets without pagination
+ * @param assetIds - Optional array of specific asset IDs to filter by
+ * @returns Object containing assets data, pagination info, and search parameters
+ */
+export async function getAdvancedPaginatedAndFilterableAssets({
+  request,
+  organizationId,
+  settings,
+  filters = "",
+  takeAll = false,
+  assetIds,
+}: {
+  request: LoaderFunctionArgs["request"];
+  organizationId: Organization["id"];
+  settings: AssetIndexSettings;
+  filters?: string;
+  takeAll?: boolean;
+  assetIds?: string[];
+}) {
+  const currentFilterParams = new URLSearchParams(filters || "");
+  const searchParams = filters
+    ? currentFilterParams
+    : getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const { page, perPageParam, search } = paramsValues;
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = Math.min(Math.max(perPage, 1), 100);
+    const parsedFilters = parseFilters(filters, settings.columns as Column[]);
+
+    const whereClause = generateWhereClause(
+      organizationId,
+      search,
+      parsedFilters,
+      assetIds
+    );
+    const { orderByClause, customFieldSortings } = parseSortingOptions(
+      searchParams.getAll("sortBy")
+    );
+    const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+    // Modify query to conditionally include LIMIT/OFFSET
+    const paginationClause = takeAll
+      ? Prisma.empty
+      : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
+
+    const query = Prisma.sql`
+      WITH asset_query AS (
+        ${assetQueryFragment}
+        ${customFieldSelect}
+        ${assetQueryJoins}
+        ${whereClause}
+        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+      ), 
+      sorted_asset_query AS (
+        SELECT * FROM asset_query
+        ${Prisma.raw(orderByClause)}
+        ${paginationClause}
+      ),
+      count_query AS (
+        SELECT COUNT(*)::integer AS total_count
+        FROM asset_query
+      )
+      SELECT 
+        (SELECT total_count FROM count_query) AS total_count,
+        ${assetReturnFragment}
+      FROM sorted_asset_query aq;
+    `;
+
+    const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
+    const totalAssets = result[0].total_count;
+    const assets: AdvancedIndexAsset[] = result[0].assets;
+    const totalPages = Math.ceil(totalAssets / take);
+
+    return {
+      search,
+      totalAssets,
+      perPage: take,
+      page,
+      assets,
+      totalPages,
+      cookie,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch paginated and filterable assets",
+      additionalData: {
+        organizationId,
+        paramsValues,
+      },
       label,
     });
   }
@@ -1407,6 +1489,7 @@ export async function getAllEntriesForCreateAndEdit({
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,
+  extraInclude,
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
   excludeSearchFromView = false,
@@ -1510,11 +1593,8 @@ export async function getPaginatedAndFilterableAssets({
     ]);
 
     let getFunction = getAssetsFromView;
-    if (excludeSearchFromView) {
-      getFunction = getAssets;
-    }
 
-    const { assets, totalAssets } = await getFunction({
+    let getParams = {
       organizationId,
       page,
       perPage,
@@ -1530,7 +1610,13 @@ export async function getPaginatedAndFilterableAssets({
       unhideAssetsBookigIds,
       locationIds,
       teamMemberIds,
-    });
+      extraInclude,
+    };
+    if (excludeSearchFromView) {
+      getFunction = getAssets;
+    }
+
+    const { assets, totalAssets } = await getFunction(getParams);
     const totalPages = Math.ceil(totalAssets / perPage);
 
     return {
@@ -1782,7 +1868,7 @@ export async function createAssetsFromContentImport({
       organizationId,
     });
 
-    const customFields = await createCustomFieldsIfNotExists({
+    const { customFields } = await createCustomFieldsIfNotExists({
       data,
       organizationId,
       userId,
@@ -2065,6 +2151,7 @@ export async function createAssetsFromBackupImport({
             customFields: {
               create: asset.customFields.map((cf) => ({
                 value: cf.value,
+                // @ts-ignore
                 customFieldId: cfIds[cf.customField.name].id,
               })),
             },
