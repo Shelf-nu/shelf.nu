@@ -1,5 +1,10 @@
+import { useState } from "react";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
-import { ChevronRight, SwitchIcon } from "~/components/icons/library";
+import {
+  AlertIcon,
+  ChevronRight,
+  SwitchIcon,
+} from "~/components/icons/library";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -24,7 +29,6 @@ import { tw } from "~/utils/tw";
 import { Pagination } from "../../list/pagination";
 import { Button } from "../../shared/button";
 import { ButtonGroup } from "../../shared/button-group";
-import { useState } from "react";
 
 export function AssetIndexPagination() {
   const { roles } = useUserRoleHelper();
@@ -154,8 +158,10 @@ export const SwitchToAdvancedMode = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <div className="mx-auto md:m-0">
-            <span className="flex size-12 items-center justify-center rounded-full bg-yellow-50 p-2 text-yellow-600">
-              <SwitchIcon className="size-6" />
+            <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+              <span className="size-6">
+                <AlertIcon />
+              </span>
             </span>
           </div>
           <AlertDialogTitle>Advanced Mode (Beta)</AlertDialogTitle>
