@@ -35,6 +35,9 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("location"),
   }),
   BasicModelFilters.extend({
+    name: z.literal("kit"),
+  }),
+  BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
   }),

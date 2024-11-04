@@ -37,7 +37,7 @@ export default function BulkActionsDropdown() {
 
   if (!isHydrated) {
     return (
-      <Button variant="secondary" to="#">
+      <Button variant="secondary" to="#" className="font-medium">
         <span className="flex items-center gap-2">
           Actions <ChevronRight className="chev rotate-90" />
         </span>
@@ -147,12 +147,23 @@ function ConditionalDropdown() {
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="actions-dropdown hidden sm:flex"
+          className="actions-dropdown hidden font-medium sm:flex"
           onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
         >
-          <Button type="button" variant="secondary">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={
+              disabled
+                ? {
+                    reason:
+                      "You must select at least 1 asset to perform an action",
+                  }
+                : false
+            }
+          >
             <span className="flex items-center gap-2">Actions</span>
           </Button>
         </DropdownMenuTrigger>

@@ -7,7 +7,8 @@ import {
 } from "@remix-run/react";
 import Cookies from "js-cookie";
 
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { useAssetIndexMode } from "../use-asset-index-mode";
 import { useCurrentOrganization } from "../use-current-organization-id";
 
 /**
@@ -62,6 +63,7 @@ export const useSearchParams = (): [
       }, navigateOptions);
     } else {
       let newParams = nextInit;
+
       // Ensure newParams is an instance of URLSearchParams
       if (!(newParams instanceof URLSearchParams)) {
         newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
@@ -85,7 +87,7 @@ type SetSearchParams = (
  * a URLSearchParams object constructed from the filters, and the organization ID.
  */
 export function useAssetIndexCookieSearchParams() {
-  const assetIndexData = useLoaderData<typeof loader>();
+  const assetIndexData = useLoaderData<AssetIndexLoaderData>();
   const isAssetIndexPage = useIsAssetIndexPage();
 
   if (!assetIndexData || !isAssetIndexPage) {
@@ -173,12 +175,17 @@ export function deleteKeysInSearchParams(
 export function destroyCookieValues(
   organizationId: string,
   keys: string[],
-  cookieSearchParams: URLSearchParams
+  cookieSearchParams: URLSearchParams,
+  modeIsAdvanced: boolean
 ) {
+  const cookieName = modeIsAdvanced
+    ? `${organizationId}_advancedAssetFilter`
+    : `${organizationId}_assetFilter`;
+
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
   });
-  Cookies.set(`${organizationId}_assetFilter`, cookieSearchParams.toString(), {
+  Cookies.set(cookieName, cookieSearchParams.toString(), {
     path: "/assets",
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -197,10 +204,16 @@ export function useClearValueFromParams(...keys: string[]): Function {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
   const isAssetIndexPage = useIsAssetIndexPage();
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   function clearValuesFromParams() {
     if (isAssetIndexPage && currentOrganization) {
-      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
+      destroyCookieValues(
+        currentOrganization.id,
+        keys,
+        cookieSearchParams,
+        modeIsAdvanced
+      );
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -218,6 +231,7 @@ export function useCookieDestroy() {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
   const isAssetIndexPage = useIsAssetIndexPage();
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
@@ -228,7 +242,12 @@ export function useCookieDestroy() {
     // Check if the current page is the asset index page
     if (isAssetIndexPage && currentOrganization && currentOrganization?.id) {
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
-      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
+      destroyCookieValues(
+        currentOrganization.id,
+        keys,
+        cookieSearchParams,
+        modeIsAdvanced
+      );
     }
   }
 

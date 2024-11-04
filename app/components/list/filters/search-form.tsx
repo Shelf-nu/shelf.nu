@@ -4,6 +4,7 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -14,6 +15,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
+  const { modeIsAdvanced } = useAssetIndexMode();
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);
@@ -66,7 +68,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
           defaultValue={search || ""}
           hideLabel
           className="w-full md:w-auto"
-          inputClassName="pr-9"
+          inputClassName={tw(modeIsAdvanced ? "py-2 text-sm" : "", "pr-9")}
           ref={searchInputRef}
           onChange={debouncedHandleChange}
         />

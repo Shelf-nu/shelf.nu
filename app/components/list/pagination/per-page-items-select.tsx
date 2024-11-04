@@ -8,18 +8,25 @@ import {
 } from "~/components/forms/select";
 import { useSearchParams } from "~/hooks/search-params";
 
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 export default function PerPageItemsSelect() {
   const perPageValues = ["20", "50", "100"];
   const [_, setSearchParams] = useSearchParams();
-  const { perPage } = useLoaderData<typeof loader>();
+  const { perPage } = useLoaderData<AssetIndexLoaderData>();
 
   function onValueChange(value: string) {
     setSearchParams((prev) => {
       /** We remove the current page when changing per-page. */
       prev.delete("page");
-      prev.set("per_page", value);
+
+      /** When its the defualt value, we dont add it to the params */
+      if (value === perPageValues[0]) {
+        prev.delete("per_page");
+      } else {
+        prev.set("per_page", value);
+      }
+
       return prev;
     });
   }
@@ -31,7 +38,7 @@ export default function PerPageItemsSelect() {
         defaultValue={perPage.toString()}
         onValueChange={onValueChange}
       >
-        <SelectTrigger className="h-[40px] px-3 py-[8.5px]">
+        <SelectTrigger className="h-[34px] px-3 py-[5.5px] text-[14px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="w-[250px]" position="popper" align="start">

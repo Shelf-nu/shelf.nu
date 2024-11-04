@@ -33,6 +33,7 @@ import {
 import { randomUsernameFromEmail } from "~/utils/user";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import type { UpdateUserPayload } from "./types";
+import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
@@ -485,6 +486,18 @@ export async function createUser(
                       create: {
                         name: `${firstName} ${lastName} (Owner)`,
                         user: { connect: { id: userId } },
+                      },
+                    },
+                    // Creating asset index settings for new users' personal org
+                    assetIndexSettings: {
+                      create: {
+                        mode: "SIMPLE",
+                        columns: defaultFields,
+                        user: {
+                          connect: {
+                            id: userId,
+                          },
+                        },
                       },
                     },
                   },

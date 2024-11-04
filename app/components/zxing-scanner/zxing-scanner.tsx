@@ -13,7 +13,6 @@ import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
-import successfullScanAnimation from "./../../lottie/success-scan.json";
 import {
   Select,
   SelectContent,
@@ -23,6 +22,7 @@ import {
 } from "../forms/select";
 import Icon from "../icons/icon";
 import { Spinner } from "../shared/spinner";
+import successfullScanAnimation from "./../../lottie/success-scan.json";
 
 type ZXingScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;

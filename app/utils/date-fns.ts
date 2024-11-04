@@ -1,3 +1,5 @@
+import { format, parseISO } from "date-fns";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { ClientHint } from "~/modules/booking/types";
 import { getDateTimeFormatFromHints } from "./client-hints";
 
@@ -131,4 +133,62 @@ export function getWeekStartingAndEndingDates(currentDate: Date) {
   const endStr = end.toLocaleDateString(undefined, options);
 
   return [startStr, endStr];
+}
+
+/**
+ * Type guard that checks if a value is a valid date string.
+ * Used to validate and narrow types in TypeScript for date-related operations.
+ *
+ * @param value - Any value that needs to be checked for date string validity
+ * @returns {boolean} True if the value is both a string and can be parsed into a valid date,
+ *                    False if either the value is not a string or cannot be parsed into a valid date
+ *
+ * @example
+ * isDateString("2024-01-01") // returns true
+ * isDateString("invalid-date") // returns false
+ * isDateString(123) // returns false
+ *
+ * @remarks
+ * - Uses date-fns parseISO for date parsing which expects ISO 8601 format
+ * - The function serves as a TypeScript type guard, helping narrow types in conditional blocks
+ * - Returns false for any non-string input, even if it could theoretically represent a date
+ * - Checks both string type and date validity to ensure complete validation
+ */
+export function isDateString(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const date = parseISO(value);
+  return !isNaN(date.getTime());
+}
+
+/**
+ * Converts a date string to UTC while preserving the local date components.
+ * Handles timezone conversions to ensure consistent date storage and display.
+ *
+ * @param dateString - The date string to be converted (expected in ISO 8601 format)
+ * @param timeZone - The source timezone for the conversion (e.g., "America/New_York")
+ * @returns {string} A date string in 'yyyy-MM-dd' format, adjusted to UTC
+ *
+ * @example
+ * adjustDateToUTC("2024-01-01", "America/New_York") // returns the UTC equivalent
+ *
+ * @remarks
+ * - Uses date-fns-tz for timezone operations ensuring accurate conversions
+ * - The returned date maintains the same calendar date in the local timezone
+ * - Returns formatted string without time components to maintain date-only precision
+ * - Assumes input dateString is valid - should be validated before calling this function
+ *
+ * @throws
+ * - May throw if dateString is invalid and cannot be parsed
+ * - May throw if timeZone string is invalid
+ *
+ * @see
+ * - isDateString() for input validation
+ * - date-fns-tz documentation for timezone handling details
+ */
+export function adjustDateToUTC(dateString: string, timeZone: string): string {
+  const zonedDate = toZonedTime(parseISO(dateString), timeZone);
+  const utcDate = fromZonedTime(zonedDate, timeZone);
+  return format(utcDate, "yyyy-MM-dd");
 }

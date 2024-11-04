@@ -57,7 +57,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkActivateCustomFieldSchema
         );
 
-        const newActivatingFields = await db.customField.count({
+        const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId }
             : { id: { in: customFieldIds } },
@@ -66,11 +66,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
         await assertWillExceedCustomFieldLimit({
           organizationId,
           organizations,
-          newActivatingFields,
+          newActivatingFields: newActivatingFields.length,
         });
 
         await bulkActivateOrDeactivateCustomFields({
-          customFieldIds,
+          customFields: newActivatingFields,
           organizationId,
           userId,
           active: true,
@@ -91,9 +91,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
           formData,
           BulkDeactivateCustomFieldSchema
         );
+        const newActivatingFields = await db.customField.findMany({
+          where: customFieldIds.includes(ALL_SELECTED_KEY)
+            ? { organizationId }
+            : { id: { in: customFieldIds } },
+        });
 
         await bulkActivateOrDeactivateCustomFields({
-          customFieldIds,
+          customFields: newActivatingFields,
           organizationId,
           userId,
           active: false,

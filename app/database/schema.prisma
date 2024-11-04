@@ -72,6 +72,9 @@ model User {
   tierId            TierId             @default(free)
   tier              Tier               @relation(fields: [tierId], references: [id])
 
+  // A user can have multiple asset index settings, 1 for each organization
+  assetIndexSettings    AssetIndexSettings[]
+
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
@@ -133,6 +136,49 @@ enum AssetStatus {
   IN_CUSTODY
   CHECKED_OUT
 }
+
+
+model AssetIndexSettings {
+  id String @id @default(cuid())
+
+  // Relationships
+  // This is the user who's settings we are storing
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  // This is the organizationId for which the user is setting the index settings
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+
+  // Settings fields
+  mode AssetIndexMode @default(SIMPLE)
+
+  // Holds the columns that are visible in the index view in json format
+  // Format is {name: string, visible: boolean, position: number}[] where name is the name of the column, visible is whether the column is visible or not and position is the position of the column
+  // The shape of the JSON includes both some fixed entries that will always be present and some dynamic entries for the custom fields
+  // The fixed entries are: id, status, description, valuation, createdAt, category, tags, location, kit, custody
+  columns   Json @default("[ {\"name\": \"id\", \"visible\": true, \"position\": 0}, {\"name\": \"status\", \"visible\": true, \"position\": 1}, {\"name\": \"description\", \"visible\": true, \"position\": 2}, {\"name\": \"valuation\", \"visible\": true, \"position\": 3}, {\"name\": \"createdAt\", \"visible\": true, \"position\": 4}, {\"name\": \"category\", \"visible\": true, \"position\": 5}, {\"name\": \"tags\", \"visible\": true, \"position\": 6}, {\"name\": \"location\", \"visible\": true, \"position\": 7}, {\"name\": \"kit\", \"visible\": true, \"position\": 8}, {\"name\": \"custody\", \"visible\": true, \"position\": 9} ]")
+
+
+  freezeColumn Boolean @default(true)
+  showAssetImage Boolean @default(true)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+
+}
+
+enum AssetIndexMode {
+  SIMPLE
+  ADVANCED
+}
+
+
+
+
 
 model Category {
   id          String  @id @default(cuid())
@@ -404,6 +450,7 @@ model Organization {
   images       Image[]       @relation("owner")
   bookings     Booking[]
   kits         Kit[]
+  assetIndexSettings AssetIndexSettings[]
 }
 
 model UserOrganization {
