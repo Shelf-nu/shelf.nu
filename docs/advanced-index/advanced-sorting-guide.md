@@ -5,6 +5,7 @@ This guide explains how to use the sorting system to organize your assets in a m
 ## Understanding Asset Sorting
 
 ### Basic Sorting Concepts
+
 - Each field can be sorted in ascending (A to Z, 0 to 9) or descending (Z to A, 9 to 0) order
 - You can sort by multiple fields in a specific priority order
 - Sorting is case-insensitive ("Scanner" and "scanner" are treated the same)
@@ -16,6 +17,7 @@ When you sort by a single field, all assets are organized based on that one crit
 ### Examples of Single Field Sorting:
 
 1. **Sort by Name (A to Z)**
+
    - Result: Assets arranged alphabetically
    - Example order:
      1. Anesthesia Machine
@@ -42,6 +44,7 @@ Multi-field sorting is powerful but often misunderstood. Here's how it works:
 ### Example of Multi-Field Sorting:
 
 Let's say you sort by:
+
 1. Category (Primary)
 2. Value (Secondary)
 3. Name (Tertiary)
@@ -68,18 +71,21 @@ Surgical Equipment (Category)
 ## Practical Sorting Strategies
 
 ### For Inventory Management
+
 1. **Location → Category → Name**
    - Groups all equipment by location first
    - Within each location, groups by category
    - Alphabetically orders items within each category
 
 ### For Maintenance Planning
+
 1. **Maintenance Due Date → Category → Location**
    - Shows equipment needing attention soonest
    - Grouped by category for efficient maintenance scheduling
    - Location helps plan maintenance routes
 
 ### For Asset Tracking
+
 1. **Category → Value → Name**
    - Groups similar equipment together
    - Shows highest value items within each category
@@ -88,11 +94,13 @@ Surgical Equipment (Category)
 ## Tips for Effective Sorting
 
 1. **Think Hierarchically**
+
    - Start with your most important grouping
    - Add supporting sorts that make sense within groups
    - Use name as a final sort for easy scanning
 
 2. **Consider Your Task**
+
    - Inventory: Location-based sorting might be most useful
    - Maintenance: Date-based sorting might be priority
    - Auditing: Value-based sorting might be key
@@ -106,6 +114,7 @@ Surgical Equipment (Category)
 Not all fields can be sorted. Here's what you can sort by:
 
 ### Basic Fields
+
 - Name
 - ID
 - Status
@@ -118,6 +127,7 @@ Not all fields can be sorted. Here's what you can sort by:
 - Custody
 
 ### Custom Fields
+
 - Text fields
 - Date fields
 - Number fields
@@ -128,27 +138,33 @@ Note: Multi-line text fields cannot be sorted.
 ## Common Sorting Scenarios
 
 ### Maintenance Planning
+
 ```
 1. Maintenance Due Date (ascending)
 2. Location
 3. Name
 ```
+
 Shows what needs attention first, grouped by location.
 
 ### Inventory Audit
+
 ```
 1. Category
 2. Value (descending)
 3. Name
 ```
+
 Groups similar items together, with highest value items first.
 
 ### Daily Operations
+
 ```
 1. Location
 2. Category
 3. Name
 ```
+
 Organizes items by physical location for easy access.
 
 Remember: You can always reverse the sort direction (ascending/descending) of any field by clicking the toggle switch next to it.
