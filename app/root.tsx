@@ -69,7 +69,7 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
   json(
     data({
       env: getBrowserEnv(),
-      maintenanceMode: true,
+      maintenanceMode: false,
       requestInfo: {
         hints: getClientHint(request),
       },
