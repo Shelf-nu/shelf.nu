@@ -284,7 +284,9 @@ export default function DynamicSelect({
                         handleItemChange(item.id);
                       }}
                     >
-                      <span className="max-w-[350px] truncate whitespace-nowrap pr-2">{value}</span>
+                      <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
+                        {value}
+                      </span>
                       <When truthy={item.id === selectedValue}>
                         <span className="h-auto w-[18px] text-primary">
                           <CheckIcon />

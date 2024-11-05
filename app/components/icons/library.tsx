@@ -1817,7 +1817,6 @@ export const AlertIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-
 export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="24"
@@ -1847,6 +1846,6 @@ export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-     />
+    />
   </svg>
 );
