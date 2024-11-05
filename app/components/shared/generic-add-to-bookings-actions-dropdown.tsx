@@ -37,8 +37,6 @@ const ConditionalActionsDropdown = ({
     setOpen,
   } = useControlledDropdownMenu();
 
-  console.log(links);
-
   return (
     <>
       {open && (
