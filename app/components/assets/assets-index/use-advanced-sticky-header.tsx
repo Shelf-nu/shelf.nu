@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 export function useStickyHeaderPortal() {
   const [isSticky, setIsSticky] = useState(false);
@@ -89,7 +89,7 @@ export const StickyHeader = ({
   };
 }) => {
   const { top, left, width, columnCoords } = coords;
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
   const frozen = useAssetIndexFreezeColumn();
 
   useEffect(() => {

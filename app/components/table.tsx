@@ -1,6 +1,6 @@
 import type { TdHTMLAttributes } from "react";
 import React from "react";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
@@ -14,7 +14,7 @@ export function Table({
 }) {
   const { vh } = useViewportHeight();
   const { containerRef, isOverflowing } = useTableIsOverflowing();
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   return (
     <div
