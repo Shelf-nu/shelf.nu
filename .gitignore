@@ -9,6 +9,8 @@ node_modules
 .env.staging
 .cache
 
+tsconfig.tsbuildinfo
+
 /prisma/data.db
 /prisma/data.db-journal
 

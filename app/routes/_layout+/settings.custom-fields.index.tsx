@@ -9,6 +9,7 @@ import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
@@ -104,6 +105,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
@@ -127,7 +130,7 @@ export default function CustomFieldsIndexPage() {
         </Button>
       </div>
       <List
-        bulkActions={<BulkActionsDropdown />}
+        bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
         ItemComponent={TeamMemberRow}
         headerChildren={
           <>

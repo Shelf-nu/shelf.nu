@@ -12,7 +12,7 @@ import {
 } from "@remix-run/node";
 
 import { useLoaderData } from "@remix-run/react";
-import { ExportButton } from "~/components/assets/export-button";
+import { ExportBackupButton } from "~/components/assets/export-backup-button";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
@@ -240,7 +240,7 @@ export default function GeneralPage() {
           exported with assets because they have unique ids. <br />
           Importing a backup will just create a new QR code for each asset.
         </p>
-        <ExportButton canExportAssets={canExportAssets} />
+        <ExportBackupButton canExportAssets={canExportAssets} />
       </div>
     </div>
   );

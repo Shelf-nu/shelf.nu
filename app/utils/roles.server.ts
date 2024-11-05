@@ -80,7 +80,7 @@ export async function requirePermission({
     userId,
   });
 
-  const role = roles ? roles[0] : undefined;
+  const role = roles ? roles[0] : OrganizationRoles.BASE;
 
   return {
     organizations,

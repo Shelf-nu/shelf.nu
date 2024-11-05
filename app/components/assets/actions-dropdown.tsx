@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
@@ -8,17 +9,31 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserData } from "~/hooks/use-user-data";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
+  const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
+
   const assetCanBeReleased = asset.custody;
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+
+  const { roles, isSelfService } = useUserRoleHelper();
+  const user = useUserData();
 
   const {
     ref: dropdownRef,
@@ -31,6 +46,13 @@ const ConditionalActionsDropdown = () => {
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
+
+  function handleMenuClose() {
+    setOpen(false);
+  }
+
+  const disableReleaseForSelfService =
+    isSelfService && asset.custody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -95,129 +117,172 @@ const ConditionalActionsDropdown = () => {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem
-              className="border-b px-4 py-1 md:p-0"
-              disabled={assetIsCheckedOut && !assetCanBeReleased}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.custody,
+              })}
             >
-              {assetCanBeReleased ? (
+              <DropdownMenuItem
+                className="border-b px-4 py-1 md:p-0"
+                disabled={assetIsCheckedOut && !assetCanBeReleased}
+              >
+                {assetCanBeReleased ? (
+                  <Button
+                    to="overview/release-custody"
+                    role="link"
+                    variant="link"
+                    className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                    width="full"
+                    onClick={handleMenuClose}
+                    disabled={
+                      assetIsPartOfUnavailableKit ||
+                      disableReleaseForSelfService
+                    }
+                  >
+                    <span className="flex items-center gap-1">
+                      <Icon icon="release-custody" /> Release custody
+                    </span>
+                  </Button>
+                ) : (
+                  <Button
+                    to="overview/assign-custody"
+                    role="link"
+                    variant="link"
+                    className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                    width="full"
+                    onClick={handleMenuClose}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon icon="assign-custody" />{" "}
+                      {isSelfService ? "Take" : "Assign"} custody
+                    </span>
+                  </Button>
+                )}
+              </DropdownMenuItem>
+            </When>
+
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.update,
+              })}
+            >
+              <DropdownMenuItem
+                className={tw("px-4 py-1 md:p-0")}
+                disabled={assetIsCheckedOut}
+              >
                 <Button
-                  to="overview/release-custody"
+                  to="overview/update-location"
                   role="link"
                   variant="link"
                   className={tw(
-                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   )}
                   width="full"
-                  onClick={() => setOpen(false)}
-                  disabled={assetIsPartOfUnavailableKit}
+                  onClick={handleMenuClose}
                 >
-                  <span className="flex items-center gap-1">
-                    <Icon icon="release-custody" /> Release custody
+                  <span className="flex items-center gap-2">
+                    <Icon icon="location" /> Update location
                   </span>
                 </Button>
-              ) : (
+              </DropdownMenuItem>
+
+              <DropdownMenuItem className={tw("border-b px-4 py-1 md:p-0")}>
+                <UpdateGpsCoordinatesForm
+                  // Closes the dropdown when the button is clicked
+                  callback={handleMenuClose}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="mb-1.5 border-b px-4 py-1 md:p-0">
                 <Button
-                  to="overview/assign-custody"
+                  role="button"
+                  variant="link"
+                  className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                  onClick={() => {
+                    handleMenuClose();
+                    setIsRelinkQrDialogOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="barcode" />
+                    Relink QR Code
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  to="edit"
                   role="link"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
-                  onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="assign-custody" /> Assign custody
+                    <Icon icon="pen" /> Edit
                   </span>
                 </Button>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={tw("px-4 py-1 md:p-0")}
-              disabled={assetIsCheckedOut}
-            >
-              <Button
-                to="overview/update-location"
-                role="link"
-                variant="link"
-                className={tw(
-                  "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                )}
-                width="full"
-                onClick={() => setOpen(false)}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  to="overview/duplicate"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={handleMenuClose}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="duplicate" /> Duplicate
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+                disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
               >
-                <span className="flex items-center gap-2">
-                  <Icon icon="location" /> Update location
-                </span>
-              </Button>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
-            >
-              <UpdateGpsCoordinatesForm
-                // Closes the dropdown when the button is clicked
-                callback={() => setOpen(false)}
-              />
-            </DropdownMenuItem>
-            <DropdownMenuItem className="px-4 py-1 md:p-0">
-              <Button
-                to="edit"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                width="full"
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon="pen" /> Edit
-                </span>
-              </Button>
-            </DropdownMenuItem>
-            <DropdownMenuItem className="px-4 py-1 md:p-0">
-              <Button
-                to="overview/duplicate"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon="duplicate" /> Duplicate
-                </span>
-              </Button>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
-              disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
-            >
-              <DeleteAsset asset={asset} />
-            </DropdownMenuItem>
-            <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
-              <Button
-                role="button"
-                variant="secondary"
-                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                Close
-              </Button>
-            </DropdownMenuItem>
-            {assetIsCheckedOut ? (
-              <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to the asset being checked out.
-              </div>
-            ) : null}
-            {assetIsPartOfUnavailableKit ? (
-              <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to the asset being part of a kit.
-              </div>
-            ) : null}
+                <DeleteAsset asset={asset} />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
+                <Button
+                  role="button"
+                  variant="secondary"
+                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  width="full"
+                  onClick={handleMenuClose}
+                >
+                  Close
+                </Button>
+              </DropdownMenuItem>
+              {assetIsCheckedOut ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being checked out.
+                </div>
+              ) : null}
+              {assetIsPartOfUnavailableKit ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being part of a
+                  kit.
+                </div>
+              ) : null}
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <When truthy={isRelinkQrDialogOpen}>
+        <RelinkQrCodeDialog
+          open={isRelinkQrDialogOpen}
+          onClose={() => {
+            setIsRelinkQrDialogOpen(false);
+          }}
+        />
+      </When>
     </>
   );
 };

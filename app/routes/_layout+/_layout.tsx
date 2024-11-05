@@ -37,12 +37,13 @@ import { canUseBookings } from "~/utils/subscription.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+export type LayoutLoaderResponse = typeof loader;
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    // @TODO - we need to look into doing a select as we dont want to expose all data always
     const user = await getUserByID(userId, {
       roles: true,
       organizations: {
@@ -105,6 +106,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        scannerCameraId: userPrefsCookie.scannerCameraId,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),

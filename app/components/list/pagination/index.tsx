@@ -6,8 +6,8 @@ import {
 import { Button } from "~/components/shared/button";
 import { usePagination } from "~/hooks/use-pagination";
 import { tw } from "~/utils/tw";
-import PerPageItemsSelect from "./per-page-items-select";
 import type { IndexResponse } from "..";
+import PerPageItemsSelect from "./per-page-items-select";
 
 export const Pagination = ({ className }: { className?: string }) => {
   const { modelName } = useLoaderData<IndexResponse>();
@@ -24,7 +24,7 @@ export const Pagination = ({ className }: { className?: string }) => {
   return (
     <div
       className={tw(
-        "flex flex-wrap items-center justify-center gap-3 px-6 pb-4 pt-3",
+        "flex flex-wrap items-center justify-center gap-3 px-1 pb-4 pt-3 md:px-4",
         className
       )}
     >
@@ -35,7 +35,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(1)}
           disabled={prevDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           )}
         >
           <ChevronLeftDoubleIcon />
@@ -47,13 +47,13 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(page - 1)}
           disabled={prevDisabled}
           className={tw(
-            "h-9 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
+            "h-8 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           )}
         >
           <ChevronRight />
         </Button>
 
-        <div className="flex items-center gap-2 px-2.5 py-[9px] leading-none text-gray-400">
+        <div className="flex items-center gap-2 px-2.5 py-[4px] leading-none text-gray-400">
           <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
             {(page - 1) * perPage + 1} -{" "}
             {perPage * page > totalItems ? totalItems : perPage * page}
@@ -72,7 +72,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(page + 1)}
           disabled={nextDisabled}
           className={tw(
-            "h-9 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
+            "h-8 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           )}
         >
           <ChevronRight />
@@ -84,7 +84,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(totalPages)}
           disabled={nextDisabled}
           className={tw(
-            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
+            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           )}
         >
           <ChevronLeftDoubleIcon />

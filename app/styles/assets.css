@@ -1,3 +1,10 @@
 .select-trigger span span {
   @apply text-gray-500;
 }
+
+/** Sticky table classes */
+
+/** Make a th column sticky */
+.sticky-column {
+  @apply absolute bg-white !h-[53px] !border-b-0;
+}

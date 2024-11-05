@@ -1,33 +1,38 @@
-import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
-import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import { type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import {
+  useFetcher,
+  useFetchers,
+  useLoaderData,
+  useNavigate,
+} from "@remix-run/react";
+import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+// eslint-disable-next-line import/no-cycle
+import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
+import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
+import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
+// eslint-disable-next-line import/no-cycle
+import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
-import { StatusFilter } from "~/components/booking/status-filter";
-import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight, KitIcon } from "~/components/icons/library";
+import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
-import type { HeaderData } from "~/components/layout/header/types";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
-import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Filters } from "~/components/list/filters";
-import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
-import { Image } from "~/components/shared/image";
+import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {
   Tooltip,
@@ -38,40 +43,41 @@ import {
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import {
-  useClearValueFromParams,
-  useSearchParamHasValue,
-} from "~/hooks/search-params";
+
+import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useDisabled } from "~/hooks/use-disabled";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
-  bulkDeleteAssets,
-  getPaginatedAndFilterableAssets,
-  updateAssetsWithBookingCustodians,
-} from "~/modules/asset/service.server";
+  advancedModeLoader,
+  simpleModeLoader,
+} from "~/modules/asset/data.server";
+import { bulkDeleteAssets } from "~/modules/asset/service.server";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import {
+  changeMode,
+  getAssetIndexSettings,
+} from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import {
-  userPrefs,
-  getFiltersFromRequest,
-  setCookie,
-} from "~/utils/cookies.server";
+
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { isPersonalOrg } from "~/utils/organization";
+import { markSubstring } from "~/utils/mark-substring";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+
+export type AssetIndexLoaderData = typeof loader;
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
@@ -80,8 +86,8 @@ export const links: LinksFunction = () => [
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-
   try {
+    /** Validate permissions and fetch user */
     const [{ organizationId, organizations, currentOrganization, role }, user] =
       await Promise.all([
         requirePermission({
@@ -109,117 +115,48 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
-    const {
-      filters,
-      serializedCookie: filtersCookie,
-      redirectNeeded,
-    } = await getFiltersFromRequest(request, organizationId);
 
-    if (filters && redirectNeeded) {
-      const cookieParams = new URLSearchParams(filters);
-      return redirect(`/assets?${cookieParams.toString()}`);
-    }
-    let [
-      tierLimit,
-      {
-        search,
-        totalAssets,
-        perPage,
-        page,
-        categories,
-        tags,
-        assets,
-        totalPages,
-        cookie,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        teamMembers,
-        totalTeamMembers,
-        rawTeamMembers,
-      },
-    ] = await Promise.all([
-      getOrganizationTierLimit({
-        organizationId,
-        organizations,
-      }),
-      getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        filters,
-      }),
-    ]);
+    const settings = await getAssetIndexSettings({ userId, organizationId });
+    const mode = settings.mode;
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      /**
-       * For self service users we dont return the assets that are not available to book
-       */
-      assets = assets.filter((a) => a.availableToBook);
+    /** For base and self service users, we dont allow to view the advanced index */
+    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+      await changeMode({
+        userId,
+        organizationId,
+        mode: "SIMPLE",
+      });
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You don't have permission to access the advanced mode. We will automatically switch you back to 'simple' mode. Please reload the page.",
+        label: "Assets",
+        status: 403,
+      });
     }
 
-    assets = await updateAssetsWithBookingCustodians(assets);
-
-    const header: HeaderData = {
-      title: isPersonalOrg(currentOrganization)
-        ? user?.firstName
-          ? `${user.firstName}'s inventory`
-          : `Your inventory`
-        : currentOrganization?.name
-        ? `${currentOrganization?.name}'s inventory`
-        : "Your inventory",
-    };
-
-    const modelName = {
-      singular: "asset",
-      plural: "assets",
-    };
-
-    const userPrefsCookie = await userPrefs.serialize(cookie);
-    const headers = [
-      setCookie(userPrefsCookie),
-      ...(filtersCookie ? [setCookie(filtersCookie)] : []),
-    ];
-    return json(
-      data({
-        header,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        canImportAssets:
-          canImportAssets(tierLimit) &&
-          (await hasPermission({
-            organizationId,
-            userId,
-            roles: role ? [role] : [],
-            entity: PermissionEntity.asset,
-            action: PermissionAction.import,
-          })),
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        teamMembers,
-        totalTeamMembers,
-        rawTeamMembers,
-        filters,
-        organizationId,
-      }),
-      {
-        headers,
-      }
-    );
+    return mode === "SIMPLE"
+      ? await simpleModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        })
+      : await advancedModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -308,10 +245,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   return (
     <>
-      <Header>
+      <Header hidePageDescription={modeIsAdvanced}>
         <When
           truthy={userHasPermission({
             roles,
@@ -348,194 +286,100 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
 }) => {
   const navigate = useNavigate();
+  // We use the hook because it handles optimistic UI
+  const { modeIsSimple } = useAssetIndexViewState();
+  const { isMd } = useViewportHeight();
+  const fetchers = useFetchers();
+  /** Find the fetcher used for toggling between asset index modes */
+  const modeFetcher = fetchers.find(
+    (fetcher) => fetcher.key === "asset-index-settings-mode"
+  );
+
+  // const isSwappingMode = modeFetcher?.state === "loading";
+  const isSwappingMode = modeFetcher?.formData;
+
+  const columns = useAssetIndexColumns();
+  const { roles, isBase } = useUserRoleHelper();
+
   const searchParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
     searchParams.push("teamMember");
   }
-  const hasFiltersToClear = useSearchParamHasValue(...searchParams);
-  const clearFilters = useClearValueFromParams(...searchParams);
-  const { roles } = useUserRoleHelper();
+
+  const headerChildren = modeIsSimple ? (
+    <>
+      <Th>Category</Th>
+      <Th>Tags</Th>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.custody,
+          action: PermissionAction.read,
+        })}
+      >
+        <Th>Custodian</Th>
+      </When>
+      <Th>Location</Th>
+    </>
+  ) : (
+    <AdvancedTableHeader columns={columns} />
+  );
 
   return (
-    <ListContentWrapper>
-      <Filters
-        slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          "right-of-search": <SortBy />,
-        }}
-      >
-        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-          {hasFiltersToClear ? (
-            <div className="hidden gap-6 md:flex">
-              <Button
-                as="button"
-                onClick={clearFilters}
-                variant="link"
-                className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
-                type="button"
-              >
-                Clear all filters
-              </Button>
-              <div className="text-gray-500"> | </div>
-            </div>
-          ) : null}
-
-          <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Categories{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "category", queryKey: "name" }}
-              label="Filter by category"
-              placeholder="Search categories"
-              initialDataKey="categories"
-              countKey="totalCategories"
-              withoutValueItem={{
-                id: "uncategorized",
-                name: "Uncategorized",
-              }}
-            />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "tag", queryKey: "name" }}
-              label="Filter by tag"
-              initialDataKey="tags"
-              countKey="totalTags"
-              withoutValueItem={{
-                id: "untagged",
-                name: "Without tag",
-              }}
-            />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Locations{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "location", queryKey: "name" }}
-              label="Filter by location"
-              initialDataKey="locations"
-              countKey="totalLocations"
-              withoutValueItem={{
-                id: "without-location",
-                name: "Without location",
-              }}
-              renderItem={({ metadata }) => (
-                <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
-                  />
-                  <div>{metadata.name}</div>
-                </div>
-              )}
-            />
-            <When
-              truthy={
-                userHasPermission({
-                  roles,
-                  entity: PermissionEntity.custody,
-                  action: PermissionAction.read,
-                }) && !disableTeamMemberFilter
-              }
-            >
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Custodian{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{
-                  name: "teamMember",
-                  queryKey: "name",
-                  deletedAt: null,
-                }}
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
-                renderItem={(item) => resolveTeamMemberName(item)}
-                label="Filter by custodian"
-                placeholder="Search team members"
-                initialDataKey="teamMembers"
-                countKey="totalTeamMembers"
-                withoutValueItem={{
-                  id: "without-custody",
-                  name: "Without custody",
-                }}
-              />
-            </When>
-          </div>
-        </div>
-      </Filters>
-      <List
-        title="Assets"
-        ItemComponent={ListAssetContent}
-        /**
-         * Using remix's navigate is the default behaviour, however it can receive also a custom function
-         */
-        navigate={(itemId) => navigate(`/assets/${itemId}`)}
-        bulkActions={disableBulkActions ? undefined : <BulkActionsDropdown />}
-        customEmptyStateContent={
-          customEmptyState ? customEmptyState : undefined
-        }
-        headerChildren={
-          <>
-            <Th>Category</Th>
-            <Th>Tags</Th>
-            <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
-              })}
-            >
-              <Th>Custodian</Th>
-            </When>
-            <Th>Location</Th>
-          </>
-        }
-      />
-    </ListContentWrapper>
+    <div
+      className={tw(
+        "flex h-full flex-col",
+        modeIsSimple ? "gap-4 pt-4" : "gap-2 pt-2"
+      )}
+    >
+      {isSwappingMode ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ delay: 0.2 }}
+          className="absolute inset-[3px] z-[11] flex flex-col items-center border border-gray-200 bg-gray-25/95 pt-[200px]"
+        >
+          <Spinner />
+          <p className="mt-2">Changing mode...</p>
+        </motion.div>
+      ) : (
+        <></>
+      )}
+      {!isMd && !modeIsSimple ? (
+        <AdvancedModeMobileFallback />
+      ) : (
+        <>
+          <AssetIndexFilters
+            disableTeamMemberFilter={disableTeamMemberFilter}
+          />
+          <List
+            title="Assets"
+            ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+            customPagination={<AssetIndexPagination />}
+            /**
+             * Using remix's navigate is the default behaviour, however it can also receive a custom function
+             */
+            navigate={
+              modeIsSimple
+                ? (itemId) => navigate(`/assets/${itemId}`)
+                : undefined
+            }
+            bulkActions={
+              disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
+            }
+            customEmptyStateContent={
+              customEmptyState ? customEmptyState : undefined
+            }
+            headerChildren={headerChildren}
+          />
+        </>
+      )}
+    </div>
   );
 };
 
-const ListAssetContent = ({
-  item,
-}: {
-  item: Asset & {
-    kit: Kit;
-    category?: Category;
-    tags?: Tag[];
-    custody: Custody & {
-      custodian: {
-        name: string;
-        user?: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-          email: string | null;
-        };
-      };
-    };
-    location: {
-      name: string;
-    };
-  };
-}) => {
+const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
   const { category, tags, custody, location, kit } = item;
   const { roles } = useUserRoleHelper();
   return (
@@ -573,7 +417,7 @@ const ListAssetContent = ({
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
-                {item.title}
+                {markSubstring(item.title)}
               </span>
               <div>
                 <AssetStatusBadge
@@ -652,7 +496,11 @@ const ListAssetContent = ({
   );
 };
 
-export const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
+export const ListItemTagsColumn = ({
+  tags,
+}: {
+  tags: Pick<Tag, "id" | "name">[] | undefined;
+}) => {
   const visibleTags = tags?.slice(0, 2);
   const remainingTags = tags?.slice(2);
 
@@ -674,3 +522,31 @@ export const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
+
+function AdvancedModeMobileFallback() {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2">
+      <p className="text-center">
+        Advanced mode is currently not available on mobile.
+      </p>
+      <fetcher.Form
+        method="post"
+        action="/api/asset-index-settings"
+        onSubmit={() => {
+          window.scrollTo({
+            top: 0,
+            behavior: "smooth",
+          });
+        }}
+      >
+        <input type="hidden" name="intent" value="changeMode" />
+
+        <Button name="mode" value="SIMPLE" disabled={disabled}>
+          Change to simple mode
+        </Button>
+      </fetcher.Form>
+    </div>
+  );
+}

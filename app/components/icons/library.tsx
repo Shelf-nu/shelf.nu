@@ -112,8 +112,9 @@ export function SettingsIcon(props: SVGProps<SVGSVGElement>) {
 export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      width={20}
-      height={20}
+      width={"100%"}
+      height={"100%"}
+      viewBox="0 0 20 20"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
@@ -325,8 +326,9 @@ export function CheckIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width={18}
-      height={13}
+      width={"100%"}
+      height={"100%"}
+      viewBox="0 0 18 13"
       fill="none"
       {...props}
     >
@@ -1585,7 +1587,7 @@ export const AssetLabel = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
+export const NoPermissionsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     fill="none"
@@ -1639,6 +1641,82 @@ export const InstallIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ColumnsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 16 16"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.25}
+      d="M6 2v12m4-12v12M5.2 2h5.6c1.12 0 1.68 0 2.108.218a2 2 0 0 1 .874.874C14 3.52 14 4.08 14 5.2v5.6c0 1.12 0 1.68-.218 2.108a2 2 0 0 1-.874.874C12.48 14 11.92 14 10.8 14H5.2c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C2 12.48 2 11.92 2 10.8V5.2c0-1.12 0-1.68.218-2.108a2 2 0 0 1 .874-.874C3.52 2 4.08 2 5.2 2Z"
+    />
+  </svg>
+);
+
+export const HandleIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 8 12"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.25}
+      d="M6.333 2.001a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM6.333 6.668a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM6.333 11.335a.667.667 0 1 0 0-1.334.667.667 0 0 0 0 1.334ZM1.667 2.001a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM1.667 6.668a.667.667 0 1 0 0-1.333.667.667 0 0 0 0 1.333ZM1.667 11.335a.667.667 0 1 0 0-1.334.667.667 0 0 0 0 1.334Z"
+    />
+  </svg>
+);
+
+export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 16 16"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="M11.333 6.667V5.333a3.333 3.333 0 0 0-6.667 0v1.334m3.334 3V11m-2.133 3h4.266c1.12 0 1.68 0 2.108-.218a2 2 0 0 0 .874-.874c.218-.428.218-.988.218-2.108v-.933c0-1.12 0-1.68-.218-2.108a2 2 0 0 0-.874-.874c-.428-.218-.988-.218-2.108-.218H5.867c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.875.874c-.217.428-.217.988-.217 2.108v.933c0 1.12 0 1.68.217 2.108a2 2 0 0 0 .875.874c.427.218.987.218 2.108.218Z"
+    />
+  </svg>
+);
+
+export const ImageIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 24 24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M16.2 21H6.931c-.605 0-.908 0-1.049-.12a.5.5 0 0 1-.173-.42c.014-.183.228-.397.657-.826l8.503-8.503c.396-.396.594-.594.822-.668a1 1 0 0 1 .618 0c.228.074.426.272.822.668L21 15v1.2M16.2 21c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C21 18.72 21 17.88 21 16.2M16.2 21H7.8c-1.68 0-2.52 0-3.162-.327a3 3 0 0 1-1.311-1.311C3 18.72 3 17.88 3 16.2V7.8c0-1.68 0-2.52.327-3.162a3 3 0 0 1 1.311-1.311C5.28 3 6.12 3 7.8 3h8.4c1.68 0 2.52 0 3.162.327a3 3 0 0 1 1.311 1.311C21 5.28 21 6.12 21 7.8v8.4M10.5 8.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"
+    />
+  </svg>
+);
+
 export const UnavailableIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="20"
@@ -1665,6 +1743,43 @@ export const UnavailableIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const SortIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 16 16"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.25}
+      d="M14 8H6m8-4H6m8 8H6M3.333 8A.667.667 0 1 1 2 8a.667.667 0 0 1 1.333 0Zm0-4A.667.667 0 1 1 2 4a.667.667 0 0 1 1.333 0Zm0 8A.667.667 0 1 1 2 12a.667.667 0 0 1 1.333 0Z"
+    />
+  </svg>
+);
+
+export const FilterIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={"100%"}
+    height={"100%"}
+    viewBox="0 0 16 16"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.25}
+      d="M4 8h8M2 4h12m-8 8h4"
+    />
+  </svg>
+);
 export const AvailableIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="24"
@@ -1680,6 +1795,43 @@ export const AvailableIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const ChangeIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M1 15h16m0 0-4-4m4 4-4 4m4-14H1m0 0 4-4M1 5l4 4"
+    />
+  </svg>
+);
+
+export const AlertIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    width={"100%"}
+    height={"100%"}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M12 9v4m0 4h.01M10.615 3.892 2.39 18.098c-.456.788-.684 1.182-.65 1.506a1 1 0 0 0 .406.705c.263.191.718.191 1.629.191h16.45c.91 0 1.365 0 1.628-.191a1 1 0 0 0 .407-.705c.034-.324-.195-.718-.65-1.506L13.383 3.892c-.454-.785-.681-1.178-.978-1.31a1 1 0 0 0-.813 0c-.296.132-.523.525-.978 1.31Z"
     />
   </svg>
 );

@@ -8,7 +8,8 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -18,8 +19,10 @@ import { ListHeader } from "./list-header";
 import type { ListItemData } from "./list-item";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
+import { ExportAssetsButton } from "../assets/assets-index/export-assets-button";
 import { Button } from "../shared/button";
 import { Table } from "../table";
+import When from "../when/when";
 
 export interface IndexResponse {
   header: {
@@ -73,6 +76,9 @@ export type ListProps = {
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
   bulkActions?: React.ReactElement;
+
+  /** Optionally recieve an element for custom pagination */
+  customPagination?: React.ReactElement;
 };
 
 /**
@@ -89,21 +95,22 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     customEmptyStateContent,
     emptyStateClassName,
     bulkActions,
+    customPagination,
   }: ListProps,
   ref
 ) {
+  const { isMd } = useViewportHeight();
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
-  const totalIncomingItems = items.length;
+  const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
 
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
-
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
@@ -120,7 +127,9 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     <div
       ref={ref}
       className={tw(
-        "-mx-4  overflow-auto border border-gray-200  bg-white md:mx-0 md:rounded",
+        "-mx-4 border border-gray-200 bg-white md:mx-0 md:rounded",
+        customPagination && isMd && "mb-[34px]",
+        modeIsAdvanced ? "flex h-full flex-col" : "overflow-auto",
         className
       )}
     >
@@ -132,7 +141,12 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
-          <div className="flex items-center justify-between border-b p-4 pb-[8px]">
+          <div
+            className={tw(
+              modeIsAdvanced ? "p-3 pb-[5px]" : "p-4 pb-[8px]",
+              "flex items-center justify-between border-b "
+            )}
+          >
             <div>
               <div>
                 <h5 className="text-left capitalize">{title || plural}</h5>
@@ -195,17 +209,20 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 </div>
               </div>
             </div>
-            {!isBaseOrSelfService ? <div>{bulkActions}</div> : null}
+            <div className="flex items-center gap-2">
+              <When truthy={modeIsAdvanced}>
+                <ExportAssetsButton />
+              </When>
+              <When truthy={!!bulkActions}>
+                <div>{bulkActions}</div>
+              </When>
+            </div>
           </div>
-
           <Table
-            className={tw(
-              "list",
-              bulkActions && !isBaseOrSelfService && "list-with-bulk-actions"
-            )}
+            className={tw("list", bulkActions && "list-with-bulk-actions")}
           >
             <ListHeader
-              bulkActions={!isBaseOrSelfService ? bulkActions : undefined}
+              bulkActions={bulkActions}
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
@@ -216,17 +233,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   key={`${item.id}-${i}`}
                   navigate={navigate}
                 >
-                  {bulkActions && !isBaseOrSelfService ? (
-                    <BulkListItemCheckbox item={item} />
-                  ) : null}
+                  {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
                   <ItemComponent item={item} />
                 </ListItem>
               ))}
             </tbody>
           </Table>
-          <Pagination />
+          {!customPagination && <Pagination />}
         </>
       )}
+      {/*  Always render it, even if no items in list. */}
+      {customPagination && customPagination}
     </div>
   );
 });

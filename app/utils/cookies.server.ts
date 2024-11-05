@@ -88,6 +88,7 @@ export async function initializePerPageCookieOnLayout(request: Request) {
   return cookie;
 }
 
+/** ASSET FILTER COOKIE - SIMPLE MODE */
 export const createAssetFilterCookie = (orgId: string) =>
   createCookie(`${orgId}_assetFilter`, {
     path: "/assets",
@@ -120,8 +121,40 @@ export async function getFiltersFromRequest(
   return { filters };
 }
 
-/** HIDE PWA INSTALL PROMPT COOKIE */
+/** ASSET FILTER COOKIE - ADVANCED MODE */
+export const createAdvancedAssetFilterCookie = (orgId: string) =>
+  createCookie(`${orgId}_advancedAssetFilter`, {
+    path: "/assets",
+    sameSite: "lax",
+    secrets: [process.env.SESSION_SECRET],
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 24 * 365, // 1 year
+  });
 
+export async function getAdvancedFiltersFromRequest(
+  request: Request,
+  organizationId: string
+) {
+  let filters = getCurrentSearchParams(request).toString();
+  const cookieHeader = request.headers.get("Cookie");
+
+  const assetFilterCookie = createAdvancedAssetFilterCookie(organizationId);
+  if (filters) {
+    // Override the cookie with query params
+    // Serialize the new filters into the cookie
+    const serializedCookie = await assetFilterCookie.serialize(filters);
+
+    return { filters, serializedCookie };
+  } else if (cookieHeader) {
+    // Use existing cookie filter
+    filters = (await assetFilterCookie.parse(cookieHeader)) || {};
+    filters = new URLSearchParams(filters).toString();
+    return { filters, redirectNeeded: !!filters };
+  }
+  return { filters };
+}
+
+/** HIDE PWA INSTALL PROMPT COOKIE */
 export const installPwaPromptCookie = createCookie("hide-pwa-install-prompt", {
   maxAge: 60 * 60 * 24 * 14, // two weeks
 });

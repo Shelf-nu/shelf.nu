@@ -1,13 +1,17 @@
 import { useMemo } from "react";
 import {
   useLoaderData,
-  useLocation,
   // eslint-disable-next-line no-restricted-imports
   useSearchParams as remixUseSearchParams,
 } from "@remix-run/react";
 import Cookies from "js-cookie";
 
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+
+import {
+  useAssetIndexViewState,
+  useIsAssetIndexPage,
+} from "../use-asset-index-view-state";
 import { useCurrentOrganization } from "../use-current-organization-id";
 
 /**
@@ -62,6 +66,7 @@ export const useSearchParams = (): [
       }, navigateOptions);
     } else {
       let newParams = nextInit;
+
       // Ensure newParams is an instance of URLSearchParams
       if (!(newParams instanceof URLSearchParams)) {
         newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
@@ -85,7 +90,7 @@ type SetSearchParams = (
  * a URLSearchParams object constructed from the filters, and the organization ID.
  */
 export function useAssetIndexCookieSearchParams() {
-  const assetIndexData = useLoaderData<typeof loader>();
+  const assetIndexData = useLoaderData<AssetIndexLoaderData>();
   const isAssetIndexPage = useIsAssetIndexPage();
 
   if (!assetIndexData || !isAssetIndexPage) {
@@ -99,15 +104,6 @@ export function useAssetIndexCookieSearchParams() {
 
   return cookieSearchParams;
 }
-
-/**
- * Checks if the current page is the asset index page.
- * @returns {boolean} - True if the current page is the asset index page, otherwise false.
- */
-export const useIsAssetIndexPage = (): boolean => {
-  const location = useLocation();
-  return location.pathname === "/assets";
-};
 
 /**
  * Returns a boolean indicating whether any of the specified keys have values
@@ -173,12 +169,17 @@ export function deleteKeysInSearchParams(
 export function destroyCookieValues(
   organizationId: string,
   keys: string[],
-  cookieSearchParams: URLSearchParams
+  cookieSearchParams: URLSearchParams,
+  modeIsAdvanced: boolean
 ) {
+  const cookieName = modeIsAdvanced
+    ? `${organizationId}_advancedAssetFilter`
+    : `${organizationId}_assetFilter`;
+
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
   });
-  Cookies.set(`${organizationId}_assetFilter`, cookieSearchParams.toString(), {
+  Cookies.set(cookieName, cookieSearchParams.toString(), {
     path: "/assets",
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -196,11 +197,20 @@ export function useClearValueFromParams(...keys: string[]): Function {
   const [, setSearchParams] = useSearchParams();
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
-  const isAssetIndexPage = useIsAssetIndexPage();
+  const { isAssetIndexPage, modeIsAdvanced } = useAssetIndexViewState();
 
   function clearValuesFromParams() {
-    if (isAssetIndexPage && currentOrganization) {
-      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
+    if (
+      isAssetIndexPage &&
+      currentOrganization &&
+      modeIsAdvanced !== null // Can be null if the view is not the asset index
+    ) {
+      destroyCookieValues(
+        currentOrganization.id,
+        keys,
+        cookieSearchParams,
+        modeIsAdvanced
+      );
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -217,7 +227,7 @@ export function useClearValueFromParams(...keys: string[]): Function {
 export function useCookieDestroy() {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
-  const isAssetIndexPage = useIsAssetIndexPage();
+  const { isAssetIndexPage, modeIsAdvanced } = useAssetIndexViewState();
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
@@ -226,9 +236,19 @@ export function useCookieDestroy() {
    */
   function _destroyCookieValues(keys: string[]) {
     // Check if the current page is the asset index page
-    if (isAssetIndexPage && currentOrganization && currentOrganization?.id) {
+    if (
+      isAssetIndexPage &&
+      currentOrganization &&
+      currentOrganization?.id &&
+      modeIsAdvanced !== null // Can be null if the view is not the asset index
+    ) {
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
-      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
+      destroyCookieValues(
+        currentOrganization.id,
+        keys,
+        cookieSearchParams,
+        modeIsAdvanced
+      );
     }
   }
 

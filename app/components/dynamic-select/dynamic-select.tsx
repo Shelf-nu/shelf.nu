@@ -25,6 +25,7 @@ import When from "../when/when";
 
 type Props = ModelFilterProps & {
   className?: string;
+  triggerWrapperClassName?: string;
   style?: React.CSSProperties;
   fieldName?: string;
 
@@ -53,10 +54,12 @@ type Props = ModelFilterProps & {
    * Allow item to unselect on clicking again
    */
   allowClear?: boolean;
+  hidden?: boolean;
 };
 
 export default function DynamicSelect({
   className,
+  triggerWrapperClassName,
   style,
   fieldName,
   contentLabel,
@@ -76,6 +79,7 @@ export default function DynamicSelect({
   onChange = null,
   allowClear,
   selectionMode = "none",
+  hidden = false,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -135,6 +139,17 @@ export default function DynamicSelect({
       : selectedItem.name
     : placeholder;
 
+  if (hidden) {
+    return (
+      <input
+        key={`${selectedValue}-${defaultValue}`}
+        type="hidden"
+        value={selectedValue}
+        name={fieldName ?? model.name}
+      />
+    );
+  }
+
   return (
     <>
       <div className="relative w-full">
@@ -147,8 +162,20 @@ export default function DynamicSelect({
         <MobileStyles open={isPopoverOpen} />
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-          <PopoverTrigger disabled={disabled} asChild>
-            <div>
+          <PopoverTrigger
+            disabled={disabled}
+            asChild
+            className={tw(
+              triggerWrapperClassName,
+              "inline-flex w-full items-center gap-2 "
+            )}
+          >
+            <button
+              className={tw(
+                "w-full",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+            >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
                   {label}
@@ -157,14 +184,14 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[14px]  hover:cursor-pointer disabled:opacity-50"
               >
                 <span className="truncate whitespace-nowrap pr-2">
                   {triggerValue}
                 </span>
                 <ChevronDownIcon />
               </div>
-            </div>
+            </button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent
@@ -244,18 +271,20 @@ export default function DynamicSelect({
                       handleItemChange(item.id);
                     }}
                   >
-                    <div>
+                    <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                       {typeof renderItem === "function" ? (
                         renderItem({ ...item, metadata: item })
                       ) : (
-                        <div className="flex items-center truncate text-sm font-medium">
+                        <div className="flex  items-center  text-sm font-medium">
                           {item.name}
                         </div>
                       )}
-                    </div>
+                    </span>
 
                     <When truthy={item.id === selectedValue}>
-                      <CheckIcon className="text-primary" />
+                      <span className="h-auto w-[18px] text-primary">
+                        <CheckIcon />
+                      </span>
                     </When>
                   </div>
                 ))}

@@ -50,8 +50,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
           parseData(
             await request.formData(),
             z.object({
-              firstName: z.string().min(1),
-              lastName: z.string().min(1),
+              firstName: z.string().min(1, "First name is required"),
+              lastName: z.string().min(1, "Last name is required"),
               groups: stringToJSONSchema.pipe(
                 z
                   .array(z.string())

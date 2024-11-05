@@ -7,9 +7,13 @@ import {
   isLikeShelfError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
-import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import type { Column } from "../asset-index-settings/helpers";
+import {
+  updateAssetIndexSettingsAfterCfUpdate,
+  updateAssetIndexSettingsWithNewCustomFields,
+} from "../asset-index-settings/service.server";
 
 const label: ErrorLabel = "Custom fields";
 
@@ -25,29 +29,60 @@ export async function createCustomField({
   categories = [],
 }: CustomFieldDraftPayload) {
   try {
-    return await db.customField.create({
-      data: {
-        name,
-        helpText,
-        type,
-        required,
-        active,
-        options,
-        organization: {
-          connect: {
-            id: organizationId,
+    const [customField, assetIndexSettingsEntries] = await Promise.all([
+      db.customField.create({
+        data: {
+          name,
+          helpText,
+          type,
+          required,
+          active,
+          options,
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+          createdBy: {
+            connect: {
+              id: userId,
+            },
+          },
+          categories: {
+            connect: categories.map((category) => ({ id: category })),
           },
         },
-        createdBy: {
-          connect: {
-            id: userId,
-          },
-        },
-        categories: {
-          connect: categories.map((category) => ({ id: category })),
-        },
-      },
-    });
+      }),
+      db.assetIndexSettings.findMany({
+        where: { organizationId },
+      }),
+    ]);
+
+    /** We need to add it to the advanced index settings for each entry belonging to this organization */
+    if (customField.active) {
+      await Promise.all(
+        assetIndexSettingsEntries.map(async (entry) => {
+          const columns = Array.from(entry.columns as Prisma.JsonArray);
+          const prevHighestPosition = (columns as Column[]).reduce(
+            (acc, col) => (col.position > acc ? col.position : acc),
+            0
+          );
+
+          columns.push({
+            name: `cf_${customField.name}`,
+            visible: true,
+            position: prevHighestPosition + 1,
+          });
+
+          await db.assetIndexSettings.update({
+            where: { id: entry.id, organizationId },
+            data: { columns },
+          });
+        })
+      );
+    }
+
+    return customField;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Custom field", {
       additionalData: { userId, organizationId },
@@ -150,15 +185,34 @@ export async function updateCustomField(payload: {
       required,
       active,
       options,
-      categories: {
-        set: categories?.map((category) => ({ id: category })),
-      },
     } satisfies Prisma.CustomFieldUpdateInput;
+    const hasCategories = categories && categories.length > 0;
 
-    return await db.customField.update({
+    Object.assign(data, {
+      categories: {
+        set: hasCategories // if categories are empty, remove all categories
+          ? categories.map((category) => ({ id: category }))
+          : [],
+      },
+    });
+
+    /** Get the custom field. We need it in order to be able to update the asset index settings */
+    const customField = (await db.customField.findFirst({
+      where: { id },
+    })) as CustomField;
+
+    const updatedField = await db.customField.update({
       where: { id },
       data: data,
     });
+
+    /** Updates the Asset */
+    await updateAssetIndexSettingsAfterCfUpdate({
+      oldField: customField,
+      newField: updatedField,
+    });
+
+    return updatedField;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Custom field", {
       additionalData: {
@@ -170,9 +224,13 @@ export async function updateCustomField(payload: {
 
 export async function upsertCustomField(
   definitions: CustomFieldDraftPayload[]
-): Promise<Record<string, CustomField>> {
+): Promise<{
+  customFields: Record<string, CustomField>;
+  newOrUpdatedFields: CustomField[];
+}> {
   try {
     const customFields: Record<string, CustomField> = {};
+    const newOrUpdatedFields: CustomField[] = [];
 
     for (const def of definitions) {
       let existingCustomField = await db.customField.findFirst({
@@ -188,6 +246,7 @@ export async function upsertCustomField(
       if (!existingCustomField) {
         const newCustomField = await createCustomField(def);
         customFields[def.name] = newCustomField;
+        newOrUpdatedFields.push(newCustomField);
       } else {
         if (existingCustomField.type !== def.type) {
           throw new ShelfError({
@@ -217,13 +276,22 @@ export async function upsertCustomField(
               options,
             });
             existingCustomField = updatedCustomField;
+            newOrUpdatedFields.push(updatedCustomField);
           }
         }
         customFields[def.name] = existingCustomField;
       }
     }
 
-    return customFields;
+    // Update asset index settings if we have any new or updated fields
+    if (newOrUpdatedFields.length > 0) {
+      void updateAssetIndexSettingsWithNewCustomFields({
+        newCustomFields: newOrUpdatedFields,
+        organizationId: definitions[0].organizationId,
+      });
+    }
+
+    return { customFields, newOrUpdatedFields };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -231,7 +299,7 @@ export async function upsertCustomField(
         ? cause.message
         : "Failed to update or create custom fields. Please try again or contact support.",
       additionalData: { definitions },
-      label,
+      label: "Custom fields",
     });
   }
 }
@@ -244,7 +312,7 @@ export async function createCustomFieldsIfNotExists({
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<Record<string, CustomField>> {
+}) {
   try {
     //{CF header:[all options in csv combined]}
     const optionMap: Record<string, string[]> = {};
@@ -287,26 +355,69 @@ export async function createCustomFieldsIfNotExists({
   }
 }
 
+/**
+ * Retrieves active custom fields for an organization with flexible category filtering
+ *
+ * Usage:
+ * 1. Get ALL active custom fields regardless of category:
+ *    await getActiveCustomFields({ organizationId, includeAllCategories: true })
+ *
+ * 2. Get custom fields for a specific category + uncategorized fields:
+ *    await getActiveCustomFields({ organizationId, category: "categoryId" })
+ *
+ * 3. Get ONLY uncategorized custom fields:
+ *    await getActiveCustomFields({ organizationId })
+ *
+ * @param params.organizationId - The organization ID to fetch custom fields for
+ * @param params.category - Optional category ID to filter by. When provided, returns fields specific to this category AND uncategorized fields
+ * @param params.includeAllCategories - When true, ignores category filtering and returns ALL active custom fields. Takes precedence over category param
+ *
+ * @returns Array of CustomField objects that are active and match the category filtering criteria
+ *
+ * @example
+ * // Get all active custom fields for asset index or similar global contexts
+ * const allCustomFields = await getActiveCustomFields({
+ *   organizationId,
+ *   includeAllCategories: true
+ * });
+ *
+ * @example
+ * // Get custom fields for a specific asset category plus uncategorized fields
+ * const categoryCustomFields = await getActiveCustomFields({
+ *   organizationId,
+ *   category: assetCategoryId
+ * });
+ */
 export async function getActiveCustomFields({
   organizationId,
   category,
+  includeAllCategories = false,
 }: {
   organizationId: string;
   category?: string | null;
+  includeAllCategories?: boolean;
 }) {
   try {
     return await db.customField.findMany({
       where: {
         organizationId,
         active: { equals: true },
-        ...(typeof category === "string"
+        /**
+         * Category filtering logic:
+         * - If includeAllCategories: no category filtering
+         * - If category provided: get fields for that category + uncategorized
+         * - Otherwise: get only uncategorized fields
+         */
+        ...(includeAllCategories
+          ? {} // No category filtering
+          : typeof category === "string"
           ? {
               OR: [
-                { categories: { none: {} } }, // Custom fields with no category
-                { categories: { some: { id: category } } },
+                { categories: { none: {} } }, // Uncategorized fields
+                { categories: { some: { id: category } } }, // Category-specific fields
               ],
             }
-          : { categories: { none: {} } }),
+          : { categories: { none: {} } }), // Only uncategorized fields
       },
     });
   } catch (cause) {
@@ -314,7 +425,7 @@ export async function getActiveCustomFields({
       cause,
       message:
         "Failed to get active custom fields. Please try again or contact support.",
-      additionalData: { organizationId },
+      additionalData: { organizationId, category, includeAllCategories },
       label,
     });
   }
@@ -341,28 +452,77 @@ export async function countActiveCustomFields({
 }
 
 export async function bulkActivateOrDeactivateCustomFields({
-  customFieldIds,
+  customFields,
   organizationId,
   userId,
   active,
 }: {
-  customFieldIds: CustomField["id"][];
+  customFields: CustomField[];
   organizationId: CustomField["organizationId"];
   userId: CustomField["userId"];
   active: boolean;
 }) {
   try {
-    return await db.customField.updateMany({
-      where: customFieldIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
-        : { id: { in: customFieldIds } },
+    const customFieldsIds = customFields.map((field) => field.id);
+
+    const updatedFields = await db.customField.updateMany({
+      where: { id: { in: customFieldsIds } },
       data: { active },
     });
+
+    /** Get the asset index settings for the organization */
+    const settings = await db.assetIndexSettings.findMany({
+      where: { organizationId },
+    });
+
+    /** Update the asset index settings for each entry */
+    const updates = settings.map((entry) => {
+      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+
+      customFields.forEach((field) => {
+        const oldField = field;
+        const newField = { ...field, active };
+        const cfIndex = columns.findIndex(
+          (col) => col?.name === `cf_${oldField.name}`
+        );
+        if (newField.active) {
+          /** Field is missing so we add it */
+          if (cfIndex === -1) {
+            const prevHighestPosition = columns.reduce(
+              (acc, col) => (col.position > acc ? col.position : acc),
+              0
+            );
+            columns.push({
+              name: `cf_${newField.name}`,
+              visible: true,
+              position: prevHighestPosition + 1,
+            });
+          } else {
+            columns[cfIndex] = {
+              name: `cf_${newField.name}`,
+              visible: columns[cfIndex].visible,
+              position: columns[cfIndex].position,
+            };
+          }
+        } else {
+          columns.splice(cfIndex, 1);
+        }
+      });
+
+      return db.assetIndexSettings.update({
+        where: { id: entry.id, organizationId },
+        data: { columns },
+      });
+    });
+
+    await Promise.all(updates.filter(Boolean));
+
+    return updatedFields;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk activating custom fields.",
-      additionalData: { customFieldIds, organizationId, userId },
+      additionalData: { customFields, organizationId, userId },
       label,
     });
   }
