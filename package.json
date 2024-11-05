@@ -44,6 +44,7 @@
     "@fullcalendar/daygrid": "^6.1.11",
     "@fullcalendar/list": "^6.1.11",
     "@fullcalendar/react": "^6.1.11",
+    "@fullcalendar/timegrid": "^6.1.15",
     "@markdoc/markdoc": "^0.4.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "@prisma/client": "^5.9.1",

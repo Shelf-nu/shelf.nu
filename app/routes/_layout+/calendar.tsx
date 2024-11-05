@@ -5,6 +5,7 @@ import type {
 } from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import FullCalendar from "@fullcalendar/react";
 import type { BookingStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
@@ -127,6 +128,9 @@ export default function Calendar() {
   const [calendarSubtitle, setCalendarSubtitle] = useState(
     isMd ? undefined : `${startingDay} - ${endingDay}`
   );
+  const [calendarView, setCalendarView] = useState(
+    isMd ? "dayGridMonth" : "listWeek"
+  );
 
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
@@ -199,6 +203,12 @@ export default function Calendar() {
     }
   };
 
+  const handleViewChange = (view: string) => {
+    setCalendarView(view);
+    const calendarApi = calendarRef.current?.getApi();
+    calendarApi?.changeView(view);
+  };
+
   return (
     <>
       <Header hidePageDescription={true} />
@@ -217,27 +227,41 @@ export default function Calendar() {
             <div ref={ripple} className="mr-3 flex justify-center">
               <Spinner />
             </div>
+            <div className="mr-4">
+              <ButtonGroup>
+                <Button
+                  variant="secondary"
+                  className="border-r p-[0.75em] text-gray-500"
+                  onClick={() => handleNavigation("prev")}
+                >
+                  <ChevronLeftIcon />
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
+                  onClick={() => handleNavigation("today")}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="p-[0.75em] text-gray-500"
+                  onClick={() => handleNavigation("next")}
+                >
+                  <ChevronRightIcon />
+                </Button>
+              </ButtonGroup>
+            </div>
+            
             <ButtonGroup>
-              <Button
-                variant="secondary"
-                className="border-r p-[0.75em] text-gray-500"
-                onClick={() => handleNavigation("prev")}
-              >
-                <ChevronLeftIcon />
+              <Button variant="secondary" onClick={() => handleViewChange("dayGridMonth")}>
+                Month
               </Button>
-              <Button
-                variant="secondary"
-                className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
-                onClick={() => handleNavigation("today")}
-              >
-                Today
+              <Button variant="secondary" onClick={() => handleViewChange("timeGridWeek")}>
+                Week
               </Button>
-              <Button
-                variant="secondary"
-                className="p-[0.75em] text-gray-500"
-                onClick={() => handleNavigation("next")}
-              >
-                <ChevronRightIcon />
+              <Button variant="secondary" onClick={() => handleViewChange("timeGridDay")}>
+                Day
               </Button>
             </ButtonGroup>
           </div>
@@ -246,8 +270,8 @@ export default function Calendar() {
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin]}
-              initialView={isMd ? "dayGridMonth" : "listWeek"}
+              plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
+              initialView={calendarView}
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
