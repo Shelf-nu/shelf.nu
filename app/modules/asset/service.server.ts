@@ -2913,12 +2913,12 @@ export async function relinkQrCode({
   ]);
 }
 
-export async function getAvailableAssetsForBooking(
+export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][]
 ): Promise<string[]> {
   try {
     const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds }, status: "AVAILABLE" },
+      where: { id: { in: assetIds } },
       select: { status: true, id: true, kit: true },
     });
     if (selectedAssets.some((asset) => asset.kit)) {

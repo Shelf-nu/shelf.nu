@@ -1,17 +1,13 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import type { CustomLink } from "../shared/actions-dropdown";
-import { ActionsDropDown } from "../shared/actions-dropdown";
 import { Button } from "../shared/button";
+import type { BookLink } from "../shared/generic-add-to-bookings-actions-dropdown";
+import { GenericBookActionsDropdown } from "../shared/generic-add-to-bookings-actions-dropdown";
 
 export default function BookingActionsDropdown() {
   const { asset } = useLoaderData<typeof loader>();
-  const assetIsCheckedOut = asset.status === "CHECKED_OUT";
-  const assetIsPartOfUnavailableKit = Boolean(
-    asset.kit && asset.kit.status !== "AVAILABLE"
-  );
 
-  const reason = asset.kit
+  const disabled = asset.kit
     ? {
         reason: (
           <>
@@ -25,8 +21,7 @@ export default function BookingActionsDropdown() {
         ),
       }
     : false;
-  const disabled =
-    assetIsCheckedOut || assetIsPartOfUnavailableKit || asset.kit;
+
   const links = [
     {
       indexType: "asset",
@@ -34,7 +29,6 @@ export default function BookingActionsDropdown() {
       disabled,
       label: "Create new booking",
       icon: "bookings",
-      disabledReason: reason,
       to: `/bookings/new?assetId=${asset.id}`,
     },
     {
@@ -43,19 +37,13 @@ export default function BookingActionsDropdown() {
       label: "Add to existing booking",
       icon: "booking-exist",
       disabled,
-      disabledReason: reason,
       to: `overview/add-to-existing-booking`,
     },
-  ] as CustomLink[];
+  ] as BookLink[];
 
   return (
     <div className="actions-dropdown flex">
-      <ActionsDropDown
-        links={links}
-        key={"asset"}
-        label={"Book Asset"}
-        disabledReason={reason}
-      />
+      <GenericBookActionsDropdown links={links} key={"asset"} label={"Book"} />
     </div>
   );
 }

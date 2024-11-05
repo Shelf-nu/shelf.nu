@@ -6,7 +6,7 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { BookingExistIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { getAvailableAssetsForBooking } from "~/modules/asset/service.server";
+import { getAvailableAssetsIdsForBooking } from "~/modules/asset/service.server";
 
 import {
   getExistingBookingDetails,
@@ -91,7 +91,7 @@ const processBooking = async (
     let booking;
     if (assetIds && assetIds.length > 0) {
       const promises = [
-        getAvailableAssetsForBooking(assetIds),
+        getAvailableAssetsIdsForBooking(assetIds),
         getExistingBookingDetails(bookingId),
       ];
 
@@ -128,7 +128,7 @@ const processBooking = async (
   }
 };
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -165,7 +165,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
       throw new ShelfError({
         cause: null,
-        message: `Booking already contains assets`,
+        message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
         label: "Booking",
       });
     }
@@ -194,7 +194,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/bookings/${bookingId}`);
+    return redirect(`/assets/${params.assetId}/overview`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -285,7 +285,9 @@ export default function ExistingBooking() {
             }
           />
           <div className="mt-2 text-gray-500">
-            Only Draft and Reserved Bookings Shown
+            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
+            <span className="font-medium text-gray-600">Reserved</span> bookings
+            Shown
           </div>
         </div>
         {actionData?.error && (

@@ -43,7 +43,6 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
-    // status: z.union([z.string(), z.array(z.string())]).optional(),
   }),
 ]);
 

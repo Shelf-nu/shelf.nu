@@ -1,6 +1,7 @@
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { useHydrated } from "remix-utils/use-hydrated";
 import Icon from "~/components/icons/icon";
+import type { ButtonProps } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -9,39 +10,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import type { IconType } from "~/components/shared/icons-map";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";
+import type { IconType } from "./icons-map";
+import When from "../when/when";
 
-export interface CustomLink {
-  role?: string;
-  variant?: string;
-  label: string;
-  to: string;
-  indexType: string;
-  id: string;
-  disabled?: boolean;
-  icon: IconType;
-  testId: string;
-  disabledReason?:
-    | boolean
-    | {
-        title?: string;
-        reason: React.ReactNode | string;
-      }
-    | undefined;
+export interface BookLink extends ButtonProps {
+  indexType: "kit" | "asset";
 }
 
 const ConditionalActionsDropdown = ({
   links,
-  disabledReason,
   label,
   key,
 }: {
-  links: CustomLink[];
-  disabledReason?:
-    | boolean
-    | { title?: string; reason: React.ReactNode | string };
+  links: ButtonProps[];
+
   label: string;
   key: string;
 }) => {
@@ -52,6 +36,8 @@ const ConditionalActionsDropdown = ({
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+
+  console.log(links);
 
   return (
     <>
@@ -78,7 +64,6 @@ const ConditionalActionsDropdown = ({
           <Button
             variant="primary"
             data-test-id={`${key}bookActionsButton`}
-            disabled={disabledReason}
             icon="bookings"
           >
             <span className="flex items-center gap-2">
@@ -96,7 +81,6 @@ const ConditionalActionsDropdown = ({
             setOpen(true);
           }}
           icon="bookings"
-          disabled={disabledReason}
         >
           <span className="flex items-center gap-2">
             {label} <ChevronRightIcon className="chev" />
@@ -126,12 +110,8 @@ const ConditionalActionsDropdown = ({
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             {links &&
-              links.map((link: CustomLink) => (
-                <DropdownMenuItem
-                  key={link.label}
-                  className={tw("px-4 py-1 md:p-0")}
-                  disabled={!!link.disabled}
-                >
+              links.map((link) => (
+                <DropdownMenuItem key={link.label} asChild>
                   <Button
                     to={link.to}
                     role="link"
@@ -140,10 +120,13 @@ const ConditionalActionsDropdown = ({
                     className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={link.disabledReason}
+                    disabled={link.disabled}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon={link.icon} /> {link.label}
+                      <When truthy={!!link.icon}>
+                        <Icon icon={link.icon as IconType} />
+                      </When>
+                      {link.label}
                     </span>
                   </Button>
                 </DropdownMenuItem>
@@ -165,17 +148,15 @@ const ConditionalActionsDropdown = ({
     </>
   );
 };
-
-export const ActionsDropDown = ({
+/**
+ * This is the generic component that is used both on kit and asset page to show the dropdown for Book actions
+ */
+export const GenericBookActionsDropdown = ({
   links,
-  disabledReason,
   label,
   key,
 }: {
-  links: CustomLink[];
-  disabledReason?:
-    | boolean
-    | { title?: string; reason: React.ReactNode | string };
+  links: BookLink[];
   label: string;
   key: string;
 }) => {
@@ -197,12 +178,7 @@ export const ActionsDropDown = ({
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalActionsDropdown
-        links={links}
-        label={label}
-        key={key}
-        disabledReason={disabledReason}
-      />
+      <ConditionalActionsDropdown links={links} label={label} key={key} />
     </div>
   );
 };

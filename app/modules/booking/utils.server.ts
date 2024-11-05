@@ -4,6 +4,7 @@ import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
 import type { ResponsePayload } from "~/utils/http.server";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+// eslint-disable-next-line import/no-cycle
 import { getBookings } from "./service.server";
 
 export function getBookingWhereInput({

@@ -1167,14 +1167,6 @@ export async function getAvailableKitAssetForBooking(
 
     const allAssets = selectedKits.flatMap((kit) => kit.assets);
 
-    if (allAssets.some((asset) => asset.status === "CHECKED_OUT")) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "One or more assets are already checked out in the kit, so they cannot be added to the booking.",
-        label: "Booking",
-      });
-    }
     return allAssets.map((asset) => asset.id);
   } catch (cause: any) {
     throw new ShelfError({

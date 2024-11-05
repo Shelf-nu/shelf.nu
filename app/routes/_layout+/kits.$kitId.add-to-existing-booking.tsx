@@ -101,7 +101,7 @@ const processBooking = async (
     } else {
       throw new ShelfError({
         cause: null,
-        message: "Invalid operation. Please contact support.",
+        message: "Invalid operation.",
         label: "Booking",
       });
     }
@@ -128,7 +128,7 @@ const processBooking = async (
   }
 };
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -165,7 +165,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
       throw new ShelfError({
         cause: null,
-        message: `Booking already contains assets`,
+        message: `The booking you have selected already contains the kit you are trying to add. Please select a different booking.`,
         label: "Booking",
       });
     }
@@ -194,7 +194,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/bookings/${bookingId}`);
+    return redirect(`/kits/${params.kitId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -246,8 +246,6 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // we can achieve it using this also. currently it is accepting only one status value.
-              // status: ['DRAFT', 'RESERVED']
             }}
             fieldName="bookingId"
             contentLabel=" Existing Bookings"
@@ -280,7 +278,9 @@ export default function ExistingBooking() {
             }
           />
           <div className="mt-2 text-gray-500">
-            Only Draft and Reserved Bookings Shown
+            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
+            <span className="font-medium text-gray-600">Reserved</span> bookings
+            Shown
           </div>
         </div>
         {actionData?.error && (

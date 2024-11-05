@@ -28,6 +28,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
+// eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
