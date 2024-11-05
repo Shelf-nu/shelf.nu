@@ -7,7 +7,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useFetcher } from "@remix-run/react";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
@@ -32,7 +32,7 @@ export const ListHeader = ({
   bulkActions,
   className,
 }: ListHeaderProps) => {
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();
   const { originalHeaderRef } = useStickyHeaderPortal();
 

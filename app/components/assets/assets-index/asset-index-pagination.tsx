@@ -12,7 +12,8 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import When from "~/components/when/when";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
@@ -34,7 +35,7 @@ export function AssetIndexPagination() {
   const fetcher = useFetcher({ key: "asset-index-settings-mode" });
   const { isMd } = useViewportHeight();
 
-  const { modeIsSimple, modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
 

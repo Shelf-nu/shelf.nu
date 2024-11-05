@@ -45,7 +45,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -245,7 +245,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   return (
     <>
@@ -287,7 +287,7 @@ export const AssetsList = ({
 }) => {
   const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
-  const { modeIsSimple } = useAssetIndexMode();
+  const { modeIsSimple } = useAssetIndexViewState();
   const { isMd } = useViewportHeight();
   const fetchers = useFetchers();
   /** Find the fetcher used for toggling between asset index modes */
