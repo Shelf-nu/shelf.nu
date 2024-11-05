@@ -1,12 +1,12 @@
 import { useRef } from "react";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { loader } from "~/routes/_layout+/_layout";
-import { usePwaManager } from "~/utils/pwa-manager";
+import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
+import { useIsChrome, usePwaManager } from "~/utils/pwa-manager";
 import { Button } from "../shared/button";
 
 export function InstallPwaPromptModal() {
-  const { hideInstallPwaPrompt } = useLoaderData<typeof loader>();
+  const { hideInstallPwaPrompt } = useLoaderData<LayoutLoaderResponse>();
   const fetcher = useFetcher();
   let optimisticHideInstallPwaPrompt = hideInstallPwaPrompt;
   if (fetcher.formData) {
@@ -16,6 +16,8 @@ export function InstallPwaPromptModal() {
   const hidePwaPromptForm = useRef<HTMLFormElement | null>(null);
 
   const { promptInstall } = usePwaManager();
+  const isChrome = useIsChrome();
+
   return optimisticHideInstallPwaPrompt ? null : (
     <AnimatePresence>
       <motion.div
@@ -29,16 +31,6 @@ export function InstallPwaPromptModal() {
             open={true}
           >
             <div className="relative z-10  rounded-xl bg-white p-4 shadow-lg">
-              <video
-                height="200"
-                playsInline
-                autoPlay
-                loop
-                muted
-                className="mb-6 rounded-lg"
-              >
-                <source src="/static/videos/celebration.mp4" type="video/mp4" />
-              </video>
               <div className="mb-8 text-center">
                 <h4 className="mb-1 text-[18px] font-semibold">
                   Install shelf for mobile
@@ -47,7 +39,46 @@ export function InstallPwaPromptModal() {
                   Always available access to shelf, with all features you have
                   on desktop.
                 </p>
+                {isChrome ? null : (
+                  <>
+                    <ol className="mb-8 mt-2 pt-2">
+                      <li>
+                        1. Click the <strong>share icon</strong>
+                      </li>
+                      <li>
+                        2. Click <strong>"Add to Home Screen"</strong>
+                      </li>
+                      <li>3. Enjoy Shelf on your mobile device</li>
+                    </ol>
+
+                    <video
+                      height="200"
+                      loop
+                      autoPlay
+                      muted
+                      playsInline
+                      className="mb-6 rounded-lg"
+                    >
+                      <source
+                        src="/static/videos/add-to-home-screen.mp4"
+                        type="video/mp4"
+                      />
+                    </video>
+                  </>
+                )}
+                <p>
+                  Read the full{" "}
+                  <Button
+                    to="https://www.shelf.nu/knowledge-base/shelf-mobile-app"
+                    variant="link"
+                    target="_blank"
+                    className="mt-4"
+                  >
+                    guide
+                  </Button>
+                </p>
               </div>
+
               {promptInstall && (
                 <Button
                   width="full"

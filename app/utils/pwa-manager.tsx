@@ -12,6 +12,8 @@ import {
   type ReactElement,
   createContext,
   useContext,
+  useEffect,
+  useState,
   useSyncExternalStore,
 } from "react";
 
@@ -98,4 +100,26 @@ export const PwaManagerProvider = ({
       {children}
     </PwaManagerContext.Provider>
   );
+};
+
+export const useIsChrome = () => {
+  const [isChrome, setIsChrome] = useState(false);
+
+  useEffect(() => {
+    const checkChrome = () => {
+      // Check for Chrome browser
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      const isChromium =
+        userAgent.includes("chrome") || userAgent.includes("chromium");
+      const isEdge = userAgent.includes("edg");
+      const isOpera = userAgent.includes("opr");
+
+      // Return true only for Chrome (not Edge, Opera, or other Chromium-based browsers)
+      setIsChrome(isChromium && !isEdge && !isOpera);
+    };
+
+    checkChrome();
+  }, []);
+
+  return isChrome;
 };
