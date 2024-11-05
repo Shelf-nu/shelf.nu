@@ -7,8 +7,8 @@ import {
 } from "@radix-ui/react-popover";
 import { useFetcher } from "@remix-run/react";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
 import BulkListHeader from "./bulk-actions/bulk-list-header";
