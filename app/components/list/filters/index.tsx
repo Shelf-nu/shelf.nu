@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
 import { SearchForm } from "./search-form";
 
@@ -26,7 +26,7 @@ export const Filters = ({
   searchClassName?: string;
   innerWrapperClassName?: string;
 }) => {
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
   return (
     <div
       className={tw(

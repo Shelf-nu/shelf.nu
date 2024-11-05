@@ -9,7 +9,7 @@ import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
 import type { IndexResponse } from "..";
 
@@ -17,7 +17,7 @@ export default function BulkListHeader({
   ...rest
 }: {} & React.ThHTMLAttributes<HTMLTableCellElement>) {
   const { items } = useLoaderData<IndexResponse>();
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);

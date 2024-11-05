@@ -4,7 +4,7 @@ import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Td } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 // import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
@@ -19,7 +19,7 @@ export default function BulkListItemCheckbox({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
   const freezeColumn = useAssetIndexFreezeColumn();
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   const checked = !!selectedBulkItems.find((i) => i.id === item.id);
 

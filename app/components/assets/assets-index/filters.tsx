@@ -11,7 +11,7 @@ import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/search-params";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,
@@ -37,7 +37,7 @@ export function AssetIndexFilters({
   const clearFilters = useClearValueFromParams(...searchParams);
   const { roles } = useUserRoleHelper();
 
-  const { modeIsSimple, modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 
   if (modeIsSimple) {
     return (
