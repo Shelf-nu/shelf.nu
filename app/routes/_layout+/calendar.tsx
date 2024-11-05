@@ -5,8 +5,8 @@ import type {
 } from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
-import timeGridPlugin from "@fullcalendar/timegrid";
 import FullCalendar from "@fullcalendar/react";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import type { BookingStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
@@ -252,15 +252,24 @@ export default function Calendar() {
                 </Button>
               </ButtonGroup>
             </div>
-            
+
             <ButtonGroup>
-              <Button variant="secondary" onClick={() => handleViewChange("dayGridMonth")}>
+              <Button
+                variant="secondary"
+                onClick={() => handleViewChange("dayGridMonth")}
+              >
                 Month
               </Button>
-              <Button variant="secondary" onClick={() => handleViewChange("timeGridWeek")}>
+              <Button
+                variant="secondary"
+                onClick={() => handleViewChange("timeGridWeek")}
+              >
                 Week
               </Button>
-              <Button variant="secondary" onClick={() => handleViewChange("timeGridDay")}>
+              <Button
+                variant="secondary"
+                onClick={() => handleViewChange("timeGridDay")}
+              >
                 Day
               </Button>
             </ButtonGroup>
