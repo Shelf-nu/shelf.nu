@@ -59,11 +59,7 @@ const ConditionalActionsDropdown = ({
           onClick={() => setOpen(true)}
           asChild
         >
-          <Button
-            variant="primary"
-            data-test-id={`${key}bookActionsButton`}
-            icon="bookings"
-          >
+          <Button variant="primary" data-test-id={`${key}bookActionsButton`}>
             <span className="flex items-center gap-2">
               {label} <ChevronRightIcon className="chev" />
             </span>

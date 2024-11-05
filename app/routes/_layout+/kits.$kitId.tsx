@@ -351,8 +351,6 @@ export default function KitDetails() {
   const kitBookings =
     kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
 
-  const noAssets = !kit.assets.length;
-
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
