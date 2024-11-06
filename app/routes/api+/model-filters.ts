@@ -41,6 +41,9 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
   }),
+  BasicModelFilters.extend({
+    name: z.literal("booking"),
+  }),
 ]);
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
@@ -75,7 +78,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
     };
-
     /**
      * When searching for teamMember, we have to search for
      * - teamMember's name

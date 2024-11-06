@@ -1156,3 +1156,25 @@ export async function updateKitQrCode({
     });
   }
 }
+export async function getAvailableKitAssetForBooking(
+  kitIds: Kit["id"][]
+): Promise<string[]> {
+  try {
+    const selectedKits = await db.kit.findMany({
+      where: { id: { in: kitIds } },
+      select: { assets: { select: { id: true, status: true } } },
+    });
+
+    const allAssets = selectedKits.flatMap((kit) => kit.assets);
+
+    return allAssets.map((asset) => asset.id);
+  } catch (cause: any) {
+    throw new ShelfError({
+      cause: cause,
+      message:
+        cause?.message ||
+        "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
+}

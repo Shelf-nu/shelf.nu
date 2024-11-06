@@ -55,6 +55,7 @@ import {
   AvailableIcon,
   UnavailableIcon,
   ChangeIcon,
+  BookingExistIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -116,7 +117,8 @@ export type IconType =
   | "sort"
   | "available"
   | "unavailable"
-  | "change";
+  | "change"
+  | "booking-exist";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -181,6 +183,7 @@ export const iconsMap: IconsMap = {
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
+  "booking-exist": <BookingExistIcon />,
 };
 
 export default iconsMap;

@@ -260,35 +260,41 @@ export default function DynamicSelect({
                     modelName={model.name}
                   />
                 )}
-                {itemsToRender.map((item) => (
-                  <div
-                    key={item.id}
-                    className={tw(
-                      "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                      item.id === selectedValue && "bg-gray-100"
-                    )}
-                    onClick={() => {
-                      handleItemChange(item.id);
-                    }}
-                  >
-                    <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
-                      {typeof renderItem === "function" ? (
-                        renderItem({ ...item, metadata: item })
-                      ) : (
-                        <div className="flex  items-center  text-sm font-medium">
-                          {item.name}
-                        </div>
+                {itemsToRender.map((item) => {
+                  //making sure only showinng the option if it as some value.
+                  const value =
+                    typeof renderItem === "function" ? (
+                      renderItem({ ...item, metadata: item })
+                    ) : (
+                      <div className="flex items-center truncate text-sm font-medium">
+                        {item.name}
+                      </div>
+                    );
+                  if (!value) {
+                    return null;
+                  }
+                  return (
+                    <div
+                      key={item.id}
+                      className={tw(
+                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                        item.id === selectedValue && "bg-gray-100"
                       )}
-                    </span>
-
-                    <When truthy={item.id === selectedValue}>
-                      <span className="h-auto w-[18px] text-primary">
-                        <CheckIcon />
+                      onClick={() => {
+                        handleItemChange(item.id);
+                      }}
+                    >
+                      <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
+                        {value}
                       </span>
-                    </When>
-                  </div>
-                ))}
-
+                      <When truthy={item.id === selectedValue}>
+                        <span className="h-auto w-[18px] text-primary">
+                          <CheckIcon />
+                        </span>
+                      </When>
+                    </div>
+                  );
+                })}
                 {items.length < totalItems && searchQuery === "" && (
                   <button
                     type="button"
