@@ -47,6 +47,7 @@ import {
   ToolIcon,
   AddTagsIcon,
   RemoveTagsIcon,
+  InstallIcon,
   ColumnsIcon,
   LockIcon,
   ImageIcon,
@@ -110,6 +111,7 @@ export type IconType =
   | "scan"
   | "tool"
   | "rows"
+  | "install"
   | "columns"
   | "no-permissions"
   | "image"
@@ -175,6 +177,7 @@ export const iconsMap: IconsMap = {
   scan: <ScanIcon />,
   tool: <ToolIcon />,
   rows: <RowsIcon />,
+  install: <InstallIcon />,
   columns: <ColumnsIcon />,
   lock: <LockIcon />,
   image: <ImageIcon />,
