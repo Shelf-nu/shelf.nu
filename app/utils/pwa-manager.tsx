@@ -12,8 +12,6 @@ import {
   type ReactElement,
   createContext,
   useContext,
-  useEffect,
-  useState,
   useSyncExternalStore,
 } from "react";
 
@@ -63,20 +61,26 @@ export const usePwaManager = () => {
 };
 
 let promptInstallStore: PwaManager["promptInstall"] = null;
+let subscribers = new Set<() => void>();
+
+// Initialize the event listener immediately
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (event: Event) => {
+    event.preventDefault();
+    if (!promptInstallStore) {
+      promptInstallStore = (event as BeforeInstallPromptEvent).prompt.bind(
+        event
+      );
+      // Notify all subscribers when we get the prompt
+      subscribers.forEach((callback) => callback());
+    }
+  });
+}
 
 function subscribeToBeforeInstallPromptEvent(callback: () => void) {
-  function saveInstallPrompt(event: Event) {
-    event.preventDefault();
-
-    promptInstallStore = (event as BeforeInstallPromptEvent).prompt.bind(event);
-
-    callback();
-  }
-
-  window.addEventListener("beforeinstallprompt", saveInstallPrompt);
-
+  subscribers.add(callback);
   return () => {
-    window.removeEventListener("beforeinstallprompt", saveInstallPrompt);
+    subscribers.delete(callback);
   };
 }
 
@@ -100,26 +104,4 @@ export const PwaManagerProvider = ({
       {children}
     </PwaManagerContext.Provider>
   );
-};
-
-export const useIsChrome = () => {
-  const [isChrome, setIsChrome] = useState(false);
-
-  useEffect(() => {
-    const checkChrome = () => {
-      // Check for Chrome browser
-      const userAgent = window.navigator.userAgent.toLowerCase();
-      const isChromium =
-        userAgent.includes("chrome") || userAgent.includes("chromium");
-      const isEdge = userAgent.includes("edg");
-      const isOpera = userAgent.includes("opr");
-
-      // Return true only for Chrome (not Edge, Opera, or other Chromium-based browsers)
-      setIsChrome(isChromium && !isEdge && !isOpera);
-    };
-
-    checkChrome();
-  }, []);
-
-  return isChrome;
 };

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
-import { useIsChrome, usePwaManager } from "~/utils/pwa-manager";
+import { usePwaManager } from "~/utils/pwa-manager";
 import { Button } from "../shared/button";
 
 export function InstallPwaPromptModal() {
@@ -16,7 +16,6 @@ export function InstallPwaPromptModal() {
   const hidePwaPromptForm = useRef<HTMLFormElement | null>(null);
 
   const { promptInstall } = usePwaManager();
-  const isChrome = useIsChrome();
 
   return optimisticHideInstallPwaPrompt ? null : (
     <AnimatePresence>
@@ -37,9 +36,15 @@ export function InstallPwaPromptModal() {
                 </h4>
                 <p className="text-gray-600">
                   Always available access to shelf, with all features you have
-                  on desktop.
+                  on desktop.{" "}
+                  {promptInstall && (
+                    <>
+                      Use the <strong>install button below</strong> to add shelf
+                      to your device.
+                    </>
+                  )}
                 </p>
-                {isChrome ? null : (
+                {promptInstall ? null : (
                   <>
                     <ol className="mb-8 mt-2 pt-2">
                       <li>
@@ -67,7 +72,7 @@ export function InstallPwaPromptModal() {
                   </>
                 )}
                 <p>
-                  Read the full{" "}
+                  For more information, read the full{" "}
                   <Button
                     to="https://www.shelf.nu/knowledge-base/shelf-mobile-app"
                     variant="link"
