@@ -20,7 +20,8 @@ export default function BookingActionsDropdown() {
 
   const disabledTrigger = someAssetIsNotAvailable
     ? {
-        reason: "Some assets in this kit are not available for bookings.",
+        reason:
+          "Some assets in this kit have been marked as unavailable for bookings.",
       }
     : false;
   const links = [
