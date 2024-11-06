@@ -6,6 +6,7 @@ import { GenericBookActionsDropdown } from "../shared/generic-add-to-bookings-ac
 
 export default function BookingActionsDropdown() {
   const { asset } = useLoaderData<typeof loader>();
+  const { availableToBook } = asset;
 
   const disabled = asset.kit
     ? {
@@ -21,6 +22,12 @@ export default function BookingActionsDropdown() {
         ),
       }
     : false;
+
+  const disabledTrigger = availableToBook
+    ? false
+    : {
+        reason: "This asset is not available to for bookings.",
+      };
 
   const links = [
     {
@@ -43,7 +50,12 @@ export default function BookingActionsDropdown() {
 
   return (
     <div className="actions-dropdown flex">
-      <GenericBookActionsDropdown links={links} key={"asset"} label={"Book"} />
+      <GenericBookActionsDropdown
+        links={links}
+        key={"asset"}
+        label={"Book"}
+        disabledTrigger={disabledTrigger}
+      />
     </div>
   );
 }

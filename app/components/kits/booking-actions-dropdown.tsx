@@ -7,11 +7,20 @@ export default function BookingActionsDropdown() {
   const { kit } = useLoaderData<typeof loader>();
 
   const noAssets = kit.assets.length === 0;
+  const someAssetIsNotAvailable = kit.assets.some(
+    (asset) => asset.availableToBook
+  );
 
   const disabled = noAssets
     ? {
         reason:
           "Kit has no assets. Please add some assets to be able to book this kit.",
+      }
+    : false;
+
+  const disabledTrigger = someAssetIsNotAvailable
+    ? {
+        reason: "Some assets in this kit are not available for bookings.",
       }
     : false;
   const links = [
@@ -35,7 +44,12 @@ export default function BookingActionsDropdown() {
 
   return (
     <div className="actions-dropdown flex">
-      <GenericBookActionsDropdown links={links} key={"Kit"} label={"Book"} />
+      <GenericBookActionsDropdown
+        links={links}
+        key={"kit"}
+        label={"Book"}
+        disabledTrigger={disabledTrigger}
+      />
     </div>
   );
 }

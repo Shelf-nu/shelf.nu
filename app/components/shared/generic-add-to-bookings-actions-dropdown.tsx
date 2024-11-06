@@ -1,7 +1,7 @@
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { useHydrated } from "remix-utils/use-hydrated";
 import Icon from "~/components/icons/icon";
-import type { ButtonProps } from "~/components/shared/button";
+import type { ButtonProps, DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -15,19 +15,21 @@ import { tw } from "~/utils/tw";
 import type { IconType } from "./icons-map";
 import When from "../when/when";
 
+type IndexType = "kit" | "asset";
+
 export interface BookLink extends ButtonProps {
-  indexType: "kit" | "asset";
+  indexType: IndexType;
 }
 
 const ConditionalActionsDropdown = ({
   links,
   label,
-  key,
+  disabledTrigger,
 }: {
   links: ButtonProps[];
 
   label: string;
-  key: string;
+  disabledTrigger?: DisabledProp;
 }) => {
   const {
     ref: dropdownRef,
@@ -59,7 +61,7 @@ const ConditionalActionsDropdown = ({
           onClick={() => setOpen(true)}
           asChild
         >
-          <Button variant="primary" data-test-id={`${key}bookActionsButton`}>
+          <Button variant="primary" disabled={disabledTrigger}>
             <span className="flex items-center gap-2">
               {label} <ChevronRightIcon className="chev" />
             </span>
@@ -69,7 +71,6 @@ const ConditionalActionsDropdown = ({
         {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="primary"
-          data-test-id={`${key}bookActionsButton`}
           className="asset-actions sm:hidden"
           onClick={() => {
             setOpen(true);
@@ -148,22 +149,17 @@ const ConditionalActionsDropdown = ({
 export const GenericBookActionsDropdown = ({
   links,
   label,
-  key,
+  disabledTrigger,
 }: {
   links: BookLink[];
   label: string;
-  key: string;
+  disabledTrigger?: DisabledProp;
 }) => {
   const isHydrated = useHydrated();
 
   if (!isHydrated)
     return (
-      <Button
-        variant="primary"
-        to="#"
-        data-test-id={`${key}bookActionsButton`}
-        icon="bookings"
-      >
+      <Button variant="primary" to="#" icon="bookings">
         <div className="flex items-center gap-2">
           <span>{label}</span> <ChevronRightIcon className="chev rotate-90" />
         </div>
@@ -172,7 +168,11 @@ export const GenericBookActionsDropdown = ({
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalActionsDropdown links={links} label={label} key={key} />
+      <ConditionalActionsDropdown
+        links={links}
+        label={label}
+        disabledTrigger={disabledTrigger}
+      />
     </div>
   );
 };
