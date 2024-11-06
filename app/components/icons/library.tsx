@@ -1835,3 +1835,36 @@ export const AlertIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M5.5 2.5H7V0.5H9V2.5H15V0.5H17V2.5H18.5C21 2.5 22.5 3.61984 22.5 5V20C22.5 21.3802 21 22.5 18.5 22.5H5.5C3 22.5 1.5 21.3802 1.5 20V5C1.5 3.61984 3 2.5 5.5 2.5Z"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M2 8H22"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M9 14L11 16L15 12"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);

@@ -52,7 +52,6 @@ Now you need to add the Service provider details. Insert the details from the ta
 | ACS URL     | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/acs`      |
 | Entity ID   | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata` |
 | Relay State | `https://app.shelf.nu/oauthcallback`                                 |
-| Name ID     | _Basic Information > Primary email_                                  |
 
 ## Step 7: Configure attribute mapping [#](#step-7-configure-attribute-mapping)
 

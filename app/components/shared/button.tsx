@@ -7,6 +7,17 @@ import type { IconType } from "./icons-map";
 import Icon from "../icons/icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
+/**
+ * Type for the disabled prop
+ * We export it as its being used in other places as well
+ */
+export type DisabledProp =
+  | boolean
+  | {
+      title?: string;
+      reason: React.ReactNode | string;
+    };
+
 export interface ButtonProps {
   as?: React.ComponentType<any> | string;
   className?: string;
@@ -15,12 +26,8 @@ export interface ButtonProps {
   size?: "xs" | "sm" | "md";
   icon?: IconType;
   /** Disabled can be a boolean  */
-  disabled?:
-    | boolean
-    | {
-        title?: string;
-        reason: React.ReactNode | string;
-      };
+  disabled?: DisabledProp;
+
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
   title?: string;

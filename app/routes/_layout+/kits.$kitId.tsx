@@ -14,6 +14,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
+import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -350,8 +351,6 @@ export default function KitDetails() {
   const kitBookings =
     kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
 
-  const noAssets = !kit.assets.length;
-
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
@@ -386,29 +385,7 @@ export default function KitDetails() {
         >
           <ActionsDropdown />
         </When>
-
-        <Button
-          to={`/bookings/new?${kit.assets
-            .map((a) => `assetId=${a.id}`)
-            .join("&")}`}
-          role="link"
-          aria-label="new booking"
-          data-test-id="createNewBooking"
-          prefetch="none"
-          disabled={
-            kitHasUnavailableAssets || !kitIsAvailable || noAssets
-              ? {
-                  reason: noAssets
-                    ? "Kit has no assets. Please add some assets to be able to book this kit."
-                    : kitHasUnavailableAssets
-                    ? "Some of the assets inside the kit are not available for bookings"
-                    : "Kit is not available for bookings",
-                }
-              : false
-          }
-        >
-          Book
-        </Button>
+        <BookingActionsDropdown />
       </Header>
 
       <ContextualModal />

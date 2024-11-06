@@ -28,6 +28,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
+// eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
@@ -1533,6 +1534,34 @@ export async function addScannedAssetsToBooking({
       message,
       additionalData: { assetIds, bookingId, organizationId },
       label,
+    });
+  }
+}
+
+export async function getExistingBookingDetails(bookingId: string) {
+  try {
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { id: true, status: true, assets: { select: { id: true } } },
+    });
+
+    if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking is not in Draft or Reserved status.",
+        label: "Booking",
+      });
+    }
+
+    return booking;
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause,
+      message:
+        cause?.message ||
+        "Something went wrong while getting existing booking details.",
+      additionalData: { bookingId },
+      label: "Booking",
     });
   }
 }
