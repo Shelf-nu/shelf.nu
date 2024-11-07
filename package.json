@@ -137,7 +137,7 @@
     "@types/react-dom": "^18.2.19",
     "@types/ua-parser-js": "^0.7.39",
     "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/coverage-v8": "^1.4.0",
+    "@vitest/coverage-v8": "^2.1.4",
     "autoprefixer": "^10.4.19",
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.3.0",
@@ -164,7 +164,7 @@
     "vite": "^5.4.6",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
-    "vitest": "^1.4.0"
+    "vitest": "^2.1.4"
   },
   "engines": {
     "node": ">=20"
