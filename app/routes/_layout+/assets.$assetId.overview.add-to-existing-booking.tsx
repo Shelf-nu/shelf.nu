@@ -143,6 +143,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { assetIds, bookingId } = parseData(formData, updateBookingSchema, {
       additionalData: { userId },
       message: "Please select a Booking",
+      shouldBeCaptured: false,
     });
 
     if (!assetIds?.length && !bookingId?.length) {

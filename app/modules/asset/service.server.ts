@@ -136,13 +136,6 @@ const unavailableBookingStatuses = [
   BookingStatus.OVERDUE,
 ];
 
-// Enhanced type safety for the query result
-type AssetSearchResult = {
-  asset: AssetsFromViewItem | null;
-} & {
-  [K in keyof AssetsFromViewItem]: AssetsFromViewItem[K];
-};
-
 /**
  * Fetches assets from AssetSearchView
  * This is used to have a more advanced search however its less performant
