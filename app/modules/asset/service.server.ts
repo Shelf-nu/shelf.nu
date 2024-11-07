@@ -1576,7 +1576,6 @@ export async function getPaginatedAndFilterableAssets({
     locationIds,
     teamMemberIds,
   } = paramsValues;
-  console.log("perPageParam", perPageParam);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
