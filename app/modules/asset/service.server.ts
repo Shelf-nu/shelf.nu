@@ -76,6 +76,7 @@ import {
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,
+  AssetsFromViewItem,
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
@@ -135,6 +136,13 @@ const unavailableBookingStatuses = [
   BookingStatus.OVERDUE,
 ];
 
+// Enhanced type safety for the query result
+type AssetSearchResult = {
+  asset: AssetsFromViewItem | null;
+} & {
+  [K in keyof AssetsFromViewItem]: AssetsFromViewItem[K];
+};
+
 /**
  * Fetches assets from AssetSearchView
  * This is used to have a more advanced search however its less performant
@@ -185,7 +193,11 @@ async function getAssetsFromView(params: {
 
     /** Default value of where. Takes the assets belonging to current user */
     let where: Prisma.AssetSearchViewWhereInput = {
-      asset: { organizationId },
+      asset: {
+        organizationId,
+        // Ensure asset exists
+        id: { not: undefined },
+      },
     };
 
     /** If the search string exists, add it to the where object */
@@ -407,7 +419,31 @@ async function getAssetsFromView(params: {
       db.assetSearchView.count({ where }),
     ]);
 
-    return { assets: assetSearch.map((a) => a.asset), totalAssets };
+    // Filter out null assets while logging errors for monitoring
+    const validAssets = assetSearch.filter((result) => {
+      if (!result.asset) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message: "Found AssetSearchView record without associated asset",
+            label: "Assets",
+            additionalData: {
+              searchViewRecord: result,
+              organizationId,
+              query: "getAssetsFromView",
+              where,
+            },
+          })
+        );
+        return false;
+      }
+      return true;
+    });
+
+    return {
+      assets: validAssets.map((result) => result.asset),
+      totalAssets: totalAssets,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
