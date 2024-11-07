@@ -76,7 +76,6 @@ import {
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,
-  AssetsFromViewItem,
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
