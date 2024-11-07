@@ -21,19 +21,8 @@ export default defineConfig({
     //   key: "./server/dev/key.pem",
     //   cert: "./server/dev/cert.pem",
     // },
-    // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
-    warmup: {
-      clientFiles: [
-        "./app/entry.client.tsx",
-        "./app/root.tsx",
-        "./app/routes/**/*",
-      ],
-    },
   },
-  // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
-  optimizeDeps: {
-    include: ["./app/routes/**/*"],
-  },
+
   build: {
     target: "ES2022",
     assetsDir: `file-assets`,
@@ -68,7 +57,9 @@ export default defineConfig({
 
     remix({
       ignoredRouteFiles: ["**/.*"],
-
+      future: {
+        unstable_optimizeDeps: true,
+      },
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },
