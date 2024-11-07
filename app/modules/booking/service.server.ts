@@ -160,7 +160,7 @@ export async function upsertBooking(
       | "custodianTeamMemberId"
       | "custodianUserId"
       | "description"
-    > & { assetIds: Asset["id"][] }
+    > & { assetIds: Asset["id"][]; isExpired: boolean }
   >,
   hints: ClientHint,
   isBaseOrSelfService: boolean = false
@@ -311,14 +311,13 @@ export async function upsertBooking(
         });
 
       if (
+        // Check the intent to checkout via the status
+        (booking.isExpired && booking.status === BookingStatus.ONGOING) ||
         booking.status === BookingStatus.ONGOING ||
         (res.status === BookingStatus.ONGOING && booking.assetIds?.length)
       ) {
-        //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
-        //no need to worry about overdue as the previous state is always ongoing
         newAssetStatus = AssetStatus.CHECKED_OUT;
 
-        // If booking has some kits, then make them checked out
         if (hasKits) {
           newKitStatus = AssetStatus.CHECKED_OUT;
         }
@@ -338,7 +337,11 @@ export async function upsertBooking(
         );
       }
 
-      if (res.from && booking.status === BookingStatus.RESERVED) {
+      if (
+        res.from &&
+        booking.status === BookingStatus.RESERVED &&
+        !booking.isExpired //Only schedule if the booking is not already
+      ) {
         promises.push(cancelScheduler(res));
         const when = new Date(res.from);
         when.setHours(when.getHours() - 1); //1hour before send checkout reminder

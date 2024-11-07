@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 import { useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { DateTime } from "luxon";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -169,9 +171,21 @@ export function BookingForm({
     action: PermissionAction.checkout,
   });
 
+  /** Checks if this booking is already exipred */
+  const isExpired = useMemo(() => {
+    if (!endDate) return false;
+    const end = DateTime.fromISO(endDate);
+    const now = DateTime.now();
+    return end < now;
+  }, [endDate]);
+
+  console.log("isExpired", isExpired);
   return (
     <div>
       <Form ref={zo.ref} method="post">
+        {/* Hidden input for expired state. Helps is know what status we should set on the server, when the booking is getting checked out */}
+        {isExpired && <input type="hidden" name="isExpired" value="true" />}
+
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
