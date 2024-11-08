@@ -49,10 +49,10 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   closeOnSelect?: boolean;
   excludeItems?: string[];
-  onChange?: ((value: string) => void) | null;
-  /**
+  /** Allow undefined for deselection cases */
+  onChange?: ((value: string | undefined) => void) | null /**
    * Allow item to unselect on clicking again
-   */
+   */;
   allowClear?: boolean;
   hidden?: boolean;
 };
@@ -110,14 +110,16 @@ export default function DynamicSelect({
   );
 
   function handleItemChange(id: string) {
-    if (allowClear && selectedValue === id) {
-      setSelectedValue(undefined);
-    } else {
-      setSelectedValue(id);
-      handleSelectItemChange(id);
-    }
+    const isDeselecting = allowClear && selectedValue === id;
 
-    onChange && onChange(id);
+    // Update local state
+    setSelectedValue(isDeselecting ? undefined : id);
+
+    // Always update URL params and parent state
+    handleSelectItemChange(id);
+
+    // Notify parent with the new value
+    onChange?.(isDeselecting ? undefined : id);
 
     if (closeOnSelect) {
       setIsPopoverOpen(false);

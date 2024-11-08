@@ -263,7 +263,7 @@ export const AssetForm = ({
             countKey="totalCategories"
             closeOnSelect
             selectionMode="set"
-            allowClear
+            allowClear={true}
             extraContent={
               <Button
                 to="/categories/new"
@@ -319,6 +319,7 @@ export const AssetForm = ({
           />
           <DynamicSelect
             disabled={disabled}
+            selectionMode="set"
             fieldName="newLocationId"
             defaultValue={location || undefined}
             model={{ name: "location", queryKey: "name" }}

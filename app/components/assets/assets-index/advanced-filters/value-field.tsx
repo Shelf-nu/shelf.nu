@@ -601,7 +601,9 @@ function CustodyEnumField({
       placeholder="Select custodian"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -710,7 +712,9 @@ function CategoryEnumField({
       placeholder="Select category"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -811,7 +815,9 @@ function LocationEnumField({
       placeholder="Select location"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -910,7 +916,9 @@ function KitEnumField({
       placeholder="Select kit"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
