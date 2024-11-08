@@ -1,4 +1,4 @@
-import { useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import {
 } from "~/components/shared/tooltip";
 import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -19,9 +20,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import { ActionsDropdown } from "./actions-dropdown";
-import CustodianUserSelect from "../custody/custodian-user-select";
 import { Form } from "../custom-form";
+import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -133,6 +135,7 @@ export function BookingForm({
   description,
 }: BookingFormData) {
   const navigation = useNavigation();
+  const { rawTeamMembers } = useLoaderData<typeof loader>();
 
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
@@ -168,6 +171,11 @@ export function BookingForm({
     entity: PermissionEntity.booking,
     action: PermissionAction.checkout,
   });
+
+  /** This is used when we have selfSErvice or Base as we are setting the default */
+  const defaultTeamMember = rawTeamMembers?.find(
+    (m) => m.userId === custodianUserId
+  );
 
   return (
     <div>
@@ -360,15 +368,40 @@ export function BookingForm({
                 <label className="mb-2.5 block font-medium text-gray-700">
                   <span className="required-input-label">Custodian</span>
                 </label>
-                <CustodianUserSelect
-                  defaultUserId={custodianUserId}
-                  disabled={inputFieldIsDisabled}
-                  className={
-                    isBaseOrSelfService
-                      ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
-                      : ""
+                {/* @TODO showAll is not working currently */}
+                <DynamicSelect
+                  defaultValue={
+                    defaultTeamMember
+                      ? JSON.stringify({
+                          id: defaultTeamMember?.id,
+                          name: defaultTeamMember?.name,
+                        })
+                      : undefined
                   }
-                  showEmail
+                  disabled={
+                    disabled || isBaseOrSelfService || inputFieldIsDisabled
+                  }
+                  model={{
+                    name: "teamMember",
+                    queryKey: "name",
+                    deletedAt: null,
+                  }}
+                  fieldName="custodian"
+                  contentLabel="Team members"
+                  initialDataKey="rawTeamMembers"
+                  countKey="totalTeamMembers"
+                  placeholder="Select a team member"
+                  allowClear
+                  closeOnSelect
+                  transformItem={(item) => ({
+                    ...item,
+                    id: JSON.stringify({
+                      id: item.id,
+                      //If there is a user, we use its name, otherwise we use the name of the team member
+                      name: resolveTeamMemberName(item),
+                    }),
+                  })}
+                  renderItem={(item) => resolveTeamMemberName(item, true)}
                 />
 
                 {zo.errors.custodian()?.message ? (
