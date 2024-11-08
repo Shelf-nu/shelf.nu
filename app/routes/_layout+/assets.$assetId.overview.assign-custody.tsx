@@ -8,6 +8,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
@@ -16,6 +17,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -35,7 +37,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
-import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -152,17 +153,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { custodian } = parseData(
       await request.formData(),
-      z.object({
-        custodian: stringToJSONSchema.pipe(
-          z.object({
-            id: z.string(),
-            name: z.string(),
-          })
-        ),
-      }),
+      AssignCustodySchema,
       {
         additionalData: { userId, assetId },
-        message: "Please select a custodian",
+        message: "Please select a team member",
         shouldBeCaptured: false,
       }
     );
@@ -262,12 +256,13 @@ export default function Custody() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-
+  const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
+  const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
   return (
     <>
-      <Form method="post">
+      <Form method="post" ref={zo.ref}>
         <div className="modal-content-wrapper">
           <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
             <UserIcon />
@@ -315,10 +310,8 @@ export default function Custody() {
               renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           </div>
-          {actionData?.error ? (
-            <div className="-mt-8 mb-8 text-sm text-error-500">
-              {actionData.error.message}
-            </div>
+          {error ? (
+            <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
           ) : null}
 
           {hasBookings ? (
