@@ -174,6 +174,7 @@ export async function upsertBooking(
       custodianUserId,
       id,
       description,
+      isExpired,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -311,13 +312,14 @@ export async function upsertBooking(
         });
 
       if (
-        // Check the intent to checkout via the status
-        (booking.isExpired && booking.status === BookingStatus.ONGOING) ||
+        // For both regular checkouts (ONGOING) and expired checkouts (OVERDUE)
+        ((booking.status === BookingStatus.ONGOING ||
+          booking.status === BookingStatus.OVERDUE) &&
+          isExpired) ||
         booking.status === BookingStatus.ONGOING ||
         (res.status === BookingStatus.ONGOING && booking.assetIds?.length)
       ) {
         newAssetStatus = AssetStatus.CHECKED_OUT;
-
         if (hasKits) {
           newKitStatus = AssetStatus.CHECKED_OUT;
         }
@@ -488,7 +490,7 @@ export async function upsertBooking(
       data: data as Prisma.BookingCreateInput,
       include: { ...commonInclude, organization: true },
     });
-    if (res.from && booking.status === BookingStatus.RESERVED) {
+    if (res.from && booking.status === BookingStatus.RESERVED && !isExpired) {
       await cancelScheduler(res);
       const when = new Date(res.from);
       when.setHours(when.getHours() - 1); //1hour before send checkout reminder

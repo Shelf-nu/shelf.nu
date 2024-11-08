@@ -179,7 +179,6 @@ export function BookingForm({
     return end < now;
   }, [endDate]);
 
-  console.log("isExpired", isExpired);
   return (
     <div>
       <Form ref={zo.ref} method="post">

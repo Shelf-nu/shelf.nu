@@ -382,6 +382,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ...(status && {
             status,
           }),
+          // Make sure to pass isExpired when checking out
+          ...(intent === "checkOut" && { isExpired }),
         });
         // Update and save the booking
         const booking = await upsertBooking(
