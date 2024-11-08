@@ -138,6 +138,10 @@ export function useModelFilters({
     hasAllData,
   ]);
 
+  /**
+   * Handles selection/deselection of items and updates URL params according to selectionMode
+   * @param value - The value being selected/deselected
+   */
   const handleSelectItemChange = useCallback(
     (value: string) => {
       if (selectionMode === "none") {
@@ -149,18 +153,15 @@ export function useModelFilters({
         return;
       }
 
-      if (selectedItems.includes(value)) {
-        setSelectedItems((prev) => prev.filter((item) => item !== value));
-        setSearchParams((prev) => {
-          prev.delete(model.name, value);
-          return prev;
-        });
-      } else {
-        setSelectedItems((prev) => [...prev, value]);
+      const isDeselecting = selectedItems.includes(value);
+
+      if (selectionMode === "set") {
+        // In set mode, we either set a new value or remove it completely
+        setSelectedItems(isDeselecting ? [] : [value]);
         setSearchParams(
           (prev) => {
-            if (selectionMode === "append") {
-              prev.append(model.name, value);
+            if (isDeselecting) {
+              prev.delete(model.name);
             } else {
               prev.set(model.name, value);
             }
@@ -168,6 +169,28 @@ export function useModelFilters({
           },
           { preventScrollReset: true }
         );
+      } else if (selectionMode === "append") {
+        // In append mode, we maintain multiple values
+        setSelectedItems((prev) =>
+          isDeselecting
+            ? prev.filter((item) => item !== value)
+            : [...prev, value]
+        );
+        setSearchParams(
+          (prev) => {
+            if (isDeselecting) {
+              prev.delete(model.name, value);
+            } else {
+              prev.append(model.name, value);
+            }
+            return prev;
+          },
+          { preventScrollReset: true }
+        );
+      }
+
+      if (onSelectionChange) {
+        onSelectionChange(isDeselecting ? [] : [value]);
       }
     },
     [

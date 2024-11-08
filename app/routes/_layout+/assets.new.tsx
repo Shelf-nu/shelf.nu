@@ -224,11 +224,14 @@ export default function NewAssetPage() {
   const title = useAtomValue(dynamicTitleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
+
+  // Get category from URL params or use the default passed prop
+  const categoryFromUrl = searchParams.get("category");
   return (
     <>
       <Header title={title ? title : "Untitled Asset"} />
       <div>
-        <AssetForm qrId={qrId} />
+        <AssetForm qrId={qrId} category={categoryFromUrl || undefined} />
       </div>
     </>
   );
