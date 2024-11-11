@@ -3,18 +3,16 @@ import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { createCustodianSchema } from "~/modules/custody/schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
-import { stringToJSONSchema } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
 export const BulkAssignKitCustodySchema = z.object({
   kitIds: z.array(z.string()).min(1),
-  custodian: stringToJSONSchema.pipe(
-    z.object({ id: z.string(), name: z.string() })
-  ),
+  custodian: createCustodianSchema(),
 });
 
 export default function BulkAssignCustodyDialog() {

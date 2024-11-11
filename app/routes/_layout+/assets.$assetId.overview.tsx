@@ -224,7 +224,9 @@ export default function AssetOverview() {
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0
-      ? asset.customFields.filter((f) => f.value)
+      ? asset.customFields
+          .filter((f) => f.value)
+          .sort((a, b) => a.customField.name.localeCompare(b.customField.name))
       : [];
 
   const location = asset && asset.location;
