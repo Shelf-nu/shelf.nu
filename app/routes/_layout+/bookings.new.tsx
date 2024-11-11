@@ -8,6 +8,7 @@ import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 
 import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -63,7 +64,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       getAll:
         searchParams.has("getAll") &&
-        searchParams.get("getAll") === "teamMember",
+        hasGetAllValue(searchParams, "teamMember"),
       isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
       userId,
     });

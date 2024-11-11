@@ -294,3 +294,19 @@ export function useModelFilters({
     handleSelectAll,
   };
 }
+
+/**
+ * Checks if a specific value exists in the getAll parameter(s)
+ * @param searchParams - URLSearchParams to check
+ * @param value - Value to look for in getAll parameters
+ * @returns boolean indicating if the value exists in any getAll parameter
+ */
+export function hasGetAllValue(
+  searchParams: URLSearchParams,
+  value: string
+): boolean {
+  // Get all values for the getAll parameter
+  const getAllValues = searchParams.getAll("getAll");
+  // Check if the specific value exists in any of the getAll parameters
+  return getAllValues.includes(value);
+}

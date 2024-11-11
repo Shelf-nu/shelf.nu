@@ -1,6 +1,7 @@
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
+import { cleanParamsForCookie } from "~/hooks/search-params";
 import { getCurrentSearchParams } from "./http.server";
 
 // find cookie by name from request headers
@@ -107,18 +108,27 @@ export async function getFiltersFromRequest(
 
   const assetFilterCookie = createAssetFilterCookie(organizationId);
   if (filters) {
-    // Override the cookie with query params
-    // Serialize the new filters into the cookie
-    const serializedCookie = await assetFilterCookie.serialize(filters);
+    // Clean filters before storing in cookie
+    const cleanedFilters = cleanParamsForCookie(filters);
+    // Only serialize to cookie if we have filters after cleaning
+    const serializedCookie = cleanedFilters
+      ? await assetFilterCookie.serialize(cleanedFilters)
+      : null;
 
+    // Return original filters for URL but cleaned cookie
     return { filters, serializedCookie };
   } else if (cookieHeader) {
-    // Use existing cookie filter
+    // Use existing cookie filter but clean it
     filters = (await assetFilterCookie.parse(cookieHeader)) || {};
-    filters = new URLSearchParams(filters).toString();
-    return { filters, redirectNeeded: !!filters };
+    const cleanedFilters = cleanParamsForCookie(filters);
+
+    // Only redirect if we have filters after cleaning
+    return {
+      filters: cleanedFilters,
+      redirectNeeded: !!cleanedFilters,
+    };
   }
-  return { filters };
+  return { filters: "" };
 }
 
 /** ASSET FILTER COOKIE - ADVANCED MODE */
@@ -140,16 +150,25 @@ export async function getAdvancedFiltersFromRequest(
 
   const assetFilterCookie = createAdvancedAssetFilterCookie(organizationId);
   if (filters) {
-    // Override the cookie with query params
-    // Serialize the new filters into the cookie
-    const serializedCookie = await assetFilterCookie.serialize(filters);
+    // Clean filters before storing in cookie
+    const cleanedFilters = cleanParamsForCookie(filters);
+    // Only serialize to cookie if we have filters after cleaning
+    const serializedCookie = cleanedFilters
+      ? await assetFilterCookie.serialize(cleanedFilters)
+      : null;
 
+    // Return original filters for URL but cleaned cookie
     return { filters, serializedCookie };
   } else if (cookieHeader) {
-    // Use existing cookie filter
+    // Use existing cookie filter but clean it
     filters = (await assetFilterCookie.parse(cookieHeader)) || {};
-    filters = new URLSearchParams(filters).toString();
-    return { filters, redirectNeeded: !!filters };
+    const cleanedFilters = cleanParamsForCookie(filters);
+
+    // Only redirect if we have filters after cleaning
+    return {
+      filters: cleanedFilters,
+      redirectNeeded: !!cleanedFilters,
+    };
   }
   return { filters };
 }

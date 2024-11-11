@@ -368,7 +368,6 @@ export function BookingForm({
                 <label className="mb-2.5 block font-medium text-gray-700">
                   <span className="required-input-label">Custodian</span>
                 </label>
-                {/* @TODO showAll is not working currently */}
                 <DynamicSelect
                   defaultValue={
                     defaultTeamMember

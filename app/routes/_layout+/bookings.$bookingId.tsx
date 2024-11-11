@@ -17,6 +17,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   createNotesForBookingUpdate,
   deleteBooking,
@@ -117,7 +118,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           getAll:
             searchParams.has("getAll") &&
-            searchParams.get("getAll") === "teamMember",
+            hasGetAllValue(searchParams, "teamMember"),
           selectedTeamMembers: booking.custodianTeamMemberId
             ? [booking.custodianTeamMemberId]
             : [],

@@ -168,6 +168,7 @@ function AdvancedFilter() {
                       e.preventDefault();
                     }
                   }}
+                  className="flex flex-col gap-2"
                 >
                   {filters.map((filter, index) => (
                     <div

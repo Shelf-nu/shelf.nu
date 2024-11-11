@@ -240,6 +240,15 @@ export async function getTeamMemberForCustodianFilter({
         }),
         db.teamMember.findMany({
           where: { organizationId, id: { in: selectedTeamMembers } },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
         }),
         db.teamMember.count({ where: { organizationId, deletedAt: null } }),
       ]);
@@ -247,7 +256,21 @@ export async function getTeamMemberForCustodianFilter({
     const allTeamMembers = [
       ...teamMembersSelected,
       ...teamMemberExcludedSelected,
-    ];
+    ].sort((a, b) => {
+      // First sort by whether they have a userId
+      if (a.userId && !b.userId) return -1;
+      if (!a.userId && b.userId) return 1;
+
+      // Then sort alphabetically by name
+      const aName = a?.user
+        ? `${a.user.firstName} ${a.user.lastName}`.toLowerCase()
+        : a.name.toLowerCase();
+      const bName = b.user
+        ? `${b.user.firstName} ${b.user.lastName}`.toLowerCase()
+        : b.name.toLowerCase();
+
+      return aName.localeCompare(bName);
+    });
 
     /**
      * If teamMember has a user associated then we have to use that user's id
