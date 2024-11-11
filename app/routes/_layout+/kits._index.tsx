@@ -184,7 +184,7 @@ export default function KitsIndexPage() {
                 ...item,
                 id: item.metadata?.userId ? item.metadata.userId : item.id,
               })}
-              renderItem={(item) => resolveTeamMemberName(item)}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           )}
         </Filters>

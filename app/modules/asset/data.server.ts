@@ -5,6 +5,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getClientHint } from "~/utils/client-hints";
 import {
   getAdvancedFiltersFromRequest,
@@ -267,7 +268,9 @@ export async function advancedModeLoader({
     getTeamMemberForCustodianFilter({
       organizationId,
       selectedTeamMembers: teamMemberIds,
-      getAll: true,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
       isSelfService: false, // we can assume this is false because this view is not allowed for
       userId,
     }),
@@ -275,18 +278,30 @@ export async function advancedModeLoader({
     // Categories
     db.category.findMany({
       where: { organizationId },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "category")
+          ? undefined
+          : 12,
     }),
     db.category.count({ where: { organizationId } }),
 
     // Locations
     db.location.findMany({
       where: { organizationId },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "location")
+          ? undefined
+          : 12,
     }),
     db.location.count({ where: { organizationId } }),
 
     // Kits
     db.kit.findMany({
       where: { organizationId },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "kit")
+          ? undefined
+          : 12,
     }),
     db.kit.count({ where: { organizationId } }),
   ]);

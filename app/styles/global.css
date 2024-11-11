@@ -40,10 +40,6 @@ h5 {
   @apply text-text-sm;
 }
 
-label span {
-  @apply capitalize;
-}
-
 p {
   @apply font-normal;
 }

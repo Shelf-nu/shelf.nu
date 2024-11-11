@@ -21,8 +21,17 @@ export default defineConfig({
     //   key: "./server/dev/key.pem",
     //   cert: "./server/dev/cert.pem",
     // },
+    warmup: {
+      clientFiles: [
+        "./app/entry.client.tsx",
+        "./app/root.tsx",
+        "./app/routes/**/*",
+      ],
+    },
   },
-
+  optimizeDeps: {
+    include: ["./app/routes/**/*"],
+  },
   build: {
     target: "ES2022",
     assetsDir: `file-assets`,
@@ -58,7 +67,7 @@ export default defineConfig({
     remix({
       ignoredRouteFiles: ["**/.*"],
       future: {
-        unstable_optimizeDeps: true,
+        // unstable_optimizeDeps: true,
       },
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
