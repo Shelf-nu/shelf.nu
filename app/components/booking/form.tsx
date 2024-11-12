@@ -118,7 +118,7 @@ type BookingFormData = {
   name?: string;
   startDate?: string;
   endDate?: string;
-  custodianUserId?: string; // This is a stringified value for custodianUser
+  custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
@@ -130,7 +130,7 @@ export function BookingForm({
   name,
   startDate,
   endDate,
-  custodianUserId,
+  custodianRef,
   bookingStatus,
   bookingFlags,
   assetIds,
@@ -181,12 +181,11 @@ export function BookingForm({
     const now = DateTime.now();
     return end < now;
   }, [endDate]);
-    
+
   /** This is used when we have selfSErvice or Base as we are setting the default */
   const defaultTeamMember = rawTeamMembers?.find(
-    (m) => m.userId === custodianUserId
+    (m) => m.userId === custodianRef || m.id === custodianRef
   );
-
 
   return (
     <div>
