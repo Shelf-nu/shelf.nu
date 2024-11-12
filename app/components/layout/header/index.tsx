@@ -57,7 +57,9 @@ export default function Header({
       )}
       {!hidePageDescription && (
         <div className={`flex items-center border-b border-gray-200 px-4 py-3`}>
-          {slots?.["left-of-title"] || null}
+          {slots?.["left-of-title"] ? (
+            <div className="relative">{slots["left-of-title"]}</div>
+          ) : null}
           <div>
             <div className="flex items-center gap-2">
               <Heading as="h2" className="break-all text-[20px] font-semibold">

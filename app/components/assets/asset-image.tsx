@@ -32,10 +32,10 @@ export const AssetImage = ({
     mainImage ||
     updatedAssetMainImage ||
     "/static/images/asset-placeholder.jpg";
-  // const [isLoading, setIsLoading] = useState(true);
-  // const handleImageLoad = () => {
-  //   setIsLoading(false);
-  // };
+  const [isLoading, setIsLoading] = useState(true);
+  const handleImageLoad = () => {
+    setIsLoading(false);
+  };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
@@ -67,9 +67,7 @@ export const AssetImage = ({
   return (
     <>
       <>
-        {/* className="relative inline-block"> */}{" "}
-        {/* Wrapper that doesn't affect layout */}
-        {/* {isLoading && (
+        {isLoading && (
           <div
             className={tw(
               "absolute inset-0 bg-gray-100",
@@ -78,7 +76,7 @@ export const AssetImage = ({
             )}
             style={{ animation: "pulse 2s infinite" }} // CSS fallback
           />
-        )} */}
+        )}
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
           src={url}
@@ -88,7 +86,7 @@ export const AssetImage = ({
             className
           )}
           alt={alt}
-          // onLoad={handleImageLoad}
+          onLoad={handleImageLoad}
           loading="lazy"
           decoding="async"
           {...rest}
