@@ -47,7 +47,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     const { intent } = parseData(
       await request.clone().formData(),
       z.object({
-        intent: z.enum(["backup", "content"]),
+        intent: z.enum(["content"]),
       })
     );
 
@@ -59,27 +59,17 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         message: "CSV file is empty",
         additionalData: { intent },
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
-    switch (intent) {
-      case "backup": {
-        throw new ShelfError({
-          cause: null,
-          message: "This feature is not available for you",
-          label: "Assets",
-        });
-      }
-      case "content": {
-        const contentData = extractCSVDataFromContentImport(csvData);
-        await createAssetsFromContentImport({
-          data: contentData,
-          userId,
-          organizationId,
-        });
-        return json(data(null));
-      }
-    }
+    const contentData = extractCSVDataFromContentImport(csvData);
+    await createAssetsFromContentImport({
+      data: contentData,
+      userId,
+      organizationId,
+    });
+    return json(data(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
