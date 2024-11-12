@@ -818,6 +818,7 @@ export async function createAsset({
   customFieldsValues,
   organizationId,
   valuation,
+  availableToBook = true,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -829,6 +830,7 @@ export async function createAsset({
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   organizationId: Organization["id"];
+  availableToBook?: Asset["availableToBook"];
 }) {
   try {
     /** User connection data */
@@ -880,6 +882,7 @@ export async function createAsset({
       qrCodes,
       valuation,
       organization,
+      availableToBook,
     };
 
     /** If a categoryId is passed, link the category to the asset. */
@@ -1940,6 +1943,7 @@ export async function createAssetsFromContentImport({
             : undefined,
         valuation: asset.valuation ? +asset.valuation : null,
         customFieldsValues,
+        availableToBook: asset?.bookable !== "no",
       });
     }
   } catch (cause) {

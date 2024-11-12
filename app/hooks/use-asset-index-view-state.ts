@@ -6,9 +6,14 @@ export function useAssetIndexViewState() {
   const data = useLoaderData<AssetIndexLoaderData>();
 
   if (!isAssetIndexPage) {
+    /**
+     * If we are not on the asset index, we always set the mode to simple,
+     * because the asset list component could be used on other routes.
+     * This makes sure it has the correct default mode.
+     */
     return {
       mode: null,
-      modeIsSimple: false,
+      modeIsSimple: true,
       modeIsAdvanced: false,
       settings: null,
       isAssetIndexPage: false,

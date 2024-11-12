@@ -246,6 +246,7 @@ export default {
         "tremor-default": "0.5rem",
         "tremor-full": "9999px",
       },
+
       keyframes: {
         "accordion-down": {
           from: { height: "0" },
@@ -269,6 +270,10 @@ export default {
           from: { transform: "translateX(var(--radix-toast-swipe-end-x))" },
           to: { transform: "translateX(calc(100% + var(--viewport-padding)))" },
         },
+        pulse: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
       },
     },
     container: {
@@ -281,6 +286,7 @@ export default {
       hide: "hide 100ms ease-in",
       slideIn: "slideIn 150ms cubic-bezier(0.16, 1, 0.3, 1)",
       swipeOut: "swipeOut 100ms ease-out",
+      pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
     },
     aspectRatio: {
       auto: "auto",

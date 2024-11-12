@@ -53,6 +53,7 @@ export interface CreateAssetFromContentImportPayload
   tags: string[];
   location?: string;
   custodian?: string;
+  bookable?: "yes" | "no";
 }
 export interface CreateAssetFromBackupImportPayload
   extends Record<string, any> {
