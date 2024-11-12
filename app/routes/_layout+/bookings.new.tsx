@@ -188,7 +188,7 @@ export default function NewBooking() {
     useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianUserId = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
+  const custodianRef = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
 
   return (
     <div className="booking-inner-wrapper">
@@ -205,7 +205,7 @@ export default function NewBooking() {
           startDate={startDate}
           endDate={endDate}
           assetIds={assetIds}
-          custodianUserId={custodianUserId}
+          custodianRef={custodianRef}
         />
       </div>
     </div>

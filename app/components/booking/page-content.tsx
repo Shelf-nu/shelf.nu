@@ -37,7 +37,7 @@ export function BookingPageContent() {
               ? dateForDateTimeInputValue(new Date(booking.to))
               : undefined
           }
-          custodianUserId={custodianUser?.id}
+          custodianRef={custodianUser?.id}
           bookingStatus={bookingStatus}
         />
       </div>
