@@ -141,16 +141,18 @@ export const ImportContent = () => (
       free to get in touch with support and we can provide those for you.
     </div>
 
-    <h4 className="mt-2">Extra considerations</h4>
-    <ul className="list-inside list-disc">
-      <li>
-        The first row of the sheet will be ignored. Use it to describe the
-        columns as in the example sheet.
-      </li>
-      <li>
-        If any of the data in the file is invalid, the whole import will fail
-      </li>
-    </ul>
+    <div>
+      <h4 className="mt-2">Extra considerations</h4>
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          The first row of the sheet will be ignored. Use it to describe the
+          columns as in the example sheet.
+        </li>
+        <li>
+          If any of the data in the file is invalid, the whole import will fail
+        </li>
+      </ul>
+    </div>
     <FileForm intent={"content"} />
   </>
 );
