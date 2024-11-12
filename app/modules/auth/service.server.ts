@@ -167,6 +167,7 @@ export async function signInWithSSO(domain: string) {
       message,
       label,
       shouldBeCaptured,
+      additionalData: { domain },
     });
   }
 }
