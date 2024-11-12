@@ -371,7 +371,7 @@ export async function bulkDeleteLocations({
       const locationWithImages = locations.filter(
         (location) => !!location.imageId
       );
-      await db.image.deleteMany({
+      await tx.image.deleteMany({
         where: {
           id: {
             in: locationWithImages.map((location) => {
