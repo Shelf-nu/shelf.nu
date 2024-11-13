@@ -34,7 +34,6 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-import { validateNonSSOSignup } from "~/utils/sso.server";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
@@ -69,8 +68,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           await request.formData(),
           LoginFormSchema
         );
-        // Use existing validation function
-        await validateNonSSOSignup(email);
 
         const authSession = await signInWithEmail(email, password);
 

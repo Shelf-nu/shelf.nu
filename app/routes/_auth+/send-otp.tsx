@@ -18,8 +18,10 @@ export async function action({ request }: ActionFunctionArgs) {
           SendOtpSchema
         );
 
-        // Use existing validation function
-        await validateNonSSOSignup(email);
+        // Only validate SSO for signup attempts
+        if (mode === "signup" || mode === "confirm_signup") {
+          await validateNonSSOSignup(email);
+        }
 
         await sendOTP(email);
 
