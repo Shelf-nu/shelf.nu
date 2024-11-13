@@ -1,3 +1,4 @@
+import type { Organization } from "@prisma/client";
 import type { AuthSession } from "server/session";
 import { db } from "~/database/db.server";
 import {
@@ -102,6 +103,118 @@ export async function resolveUserAndOrgForSsoCallback({
         domain: authSession.email.split("@")[1],
       },
       label: "Auth",
+    });
+  }
+}
+
+interface SSODomainConfig {
+  id: string;
+  ssoProviderId: string;
+  domain: string;
+}
+
+interface DomainCheckResult {
+  isConfiguredForSSO: boolean; // Domain exists in auth.sso_domains
+  linkedOrganization: Organization | null; // Organization that uses this SSO provider
+  ssoProviderId: string | null; // The SSO provider ID if domain is configured
+}
+
+/**
+ * Fetches all domains configured for SSO in the auth schema
+ * Uses raw query to access auth schema tables
+ */
+export async function getConfiguredSSODomains(): Promise<SSODomainConfig[]> {
+  try {
+    const domains = await db.$queryRaw<SSODomainConfig[]>`
+      SELECT 
+        id::text,
+        sso_provider_id::text as "ssoProviderId",
+        domain
+      FROM auth.sso_domains
+    `;
+
+    return domains;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch SSO domain configurations",
+      label: "SSO",
+    });
+  }
+}
+
+/**
+ * Checks domain's SSO status and organization linkage
+ * @param email - Email to check domain for
+ */
+export async function checkDomainSSOStatus(
+  email: string
+): Promise<DomainCheckResult> {
+  try {
+    const domain = email.split("@")[1].toLowerCase();
+
+    // First check if domain is configured in auth.sso_domains
+    const ssoConfig = await db.$queryRaw<{ ssoProviderId: string }[]>`
+      SELECT sso_provider_id::text as "ssoProviderId"
+      FROM auth.sso_domains
+      WHERE lower(domain) = ${domain}
+      LIMIT 1
+    `;
+
+    if (ssoConfig.length === 0) {
+      return {
+        isConfiguredForSSO: false,
+        linkedOrganization: null,
+        ssoProviderId: null,
+      };
+    }
+
+    // If domain is configured for SSO, check if any org uses this SSO provider
+    const ssoProviderId = ssoConfig[0].ssoProviderId;
+    const linkedOrg = await db.organization.findFirst({
+      where: {
+        ssoDetails: {
+          domain,
+        },
+      },
+      include: {
+        ssoDetails: true,
+      },
+    });
+
+    return {
+      isConfiguredForSSO: true,
+      linkedOrganization: linkedOrg,
+      ssoProviderId,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to check domain SSO status",
+      additionalData: { email },
+      label: "SSO",
+    });
+  }
+}
+
+/**
+ * Checks if a user with given email exists and uses SSO
+ * @param email - Email to check
+ */
+export async function doesSSOUserExist(email: string): Promise<boolean> {
+  try {
+    const user = await db.user.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { sso: true },
+    });
+
+    return user?.sso || false;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to check SSO user existence",
+      additionalData: { email },
+      label: "SSO",
     });
   }
 }

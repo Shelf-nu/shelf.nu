@@ -11,11 +11,48 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
+import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
 const label: ErrorLabel = "Invite";
+
+/**
+ * Validates invite based on SSO configuration
+ * @throws ShelfError with appropriate message if invite is not allowed
+ */
+async function validateInvite(email: string): Promise<void> {
+  const domainStatus = await checkDomainSSOStatus(email);
+
+  // Case 1: Domain not configured for SSO - allow normal invite
+  if (!domainStatus.isConfiguredForSSO) {
+    return;
+  }
+
+  // Case 2: Domain configured for SSO and linked to org (SCIM) - never allow invites
+  if (domainStatus.linkedOrganization) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This email domain uses SCIM SSO. Users are managed automatically through your identity provider.",
+      label: "Invite",
+      status: 400,
+    });
+  }
+
+  // Case 3: Domain configured for SSO but not linked (Pure SSO)
+  const ssoUserExists = await doesSSOUserExist(email);
+  if (!ssoUserExists) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
+      label: "Invite",
+      status: 400,
+    });
+  }
+}
 
 //can be used in ui when user enters email so that we can tell invitee is already invited
 export async function getExistingActiveInvite({
@@ -46,6 +83,7 @@ export async function getExistingActiveInvite({
     });
   }
 }
+
 export async function createInvite(
   payload: Pick<
     Invite,
@@ -67,6 +105,9 @@ export async function createInvite(
   } = payload;
 
   try {
+    // Add SSO validation before proceeding with invite
+    await validateInvite(inviteeEmail);
+
     const existingUser = await db.user.findFirst({
       where: {
         email: inviteeEmail,
@@ -209,13 +250,14 @@ export async function createInvite(
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong with creating your invite. Please try again. If the problem persists, please contact support",
+        cause instanceof ShelfError
+          ? cause.message
+          : "Something went wrong with creating your invite. Please try again. If the problem persists, please contact support",
       additionalData: { payload },
       label,
     });
   }
 }
-
 //when user clicks on accept/reject route action will validate the jwt if its valid it will call this
 export async function updateInviteStatus({
   id,

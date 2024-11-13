@@ -1,4 +1,4 @@
-import type { Organization, SsoDetails, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -283,8 +283,6 @@ export async function createUserFromSSO(
     });
   }
 }
-
-type OrganizationWithSsoDetails = Organization & { ssoDetails: SsoDetails };
 
 /**
  * Updates an existing SSO user on subsequent logins.
