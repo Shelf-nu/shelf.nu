@@ -218,3 +218,22 @@ export async function doesSSOUserExist(email: string): Promise<boolean> {
     });
   }
 }
+
+/**
+ * Validates if signup is allowed for an email based on SSO configuration
+ * @throws ShelfError if signup is not allowed due to SSO configuration
+ */
+export async function validateNonSSOSignup(email: string): Promise<void> {
+  const domainStatus = await checkDomainSSOStatus(email);
+
+  if (domainStatus.isConfiguredForSSO) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This email domain uses SSO authentication. Please sign in using your organization's SSO provider.",
+      label: "Auth",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
