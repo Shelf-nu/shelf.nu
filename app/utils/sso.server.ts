@@ -28,8 +28,8 @@ import { ShelfError } from "./error";
  * - [x] User tries to reset password for a user that is only SSO
  * - [x] User tries to use normal login for a user that is only SSO - we Dont actually need to check that because SSO users will not have a password they know. As long as we dont allow them to change pwd it should be fine.
  *
- * New cases for Pure SSO:
- * - [ ] User signs up with SSO from a domain that has no org configured - should create user with personal workspace only
+ * New cases for Pure SSO: @TODO test this!!!
+ * - [x] User signs up with SSO from a domain that has no org configured - should create user with personal workspace only
  * - [ ] User signs up with SSO from domain that has org with SCIM - should create user with personal workspace and add to org based on groups
  * - [ ] User signs up with SSO from domain that has org without SCIM - should create user with personal workspace only
  * - [ ] User with SSO gets invited to a workspace - should be able to accept invite

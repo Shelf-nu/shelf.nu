@@ -24,6 +24,7 @@ import type { ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
@@ -284,6 +285,100 @@ export async function createUserFromSSO(
   }
 }
 
+interface UserOrgTransition {
+  userId: string;
+  organizationId: string;
+  previousRoles: OrganizationRoles[];
+  newRole: OrganizationRoles | null;
+  transitionType: "ROLE_CHANGE" | "ACCESS_REVOKED" | "ACCESS_GRANTED";
+}
+
+/**
+ * Handles the transition of user access when org switches from invite-based to SCIM-based
+ * @returns Object containing transition details for logging/notification
+ */
+async function handleSCIMTransition(
+  userId: string,
+  organization: Organization,
+  currentRoles: OrganizationRoles[],
+  desiredRole: OrganizationRoles | null
+): Promise<UserOrgTransition> {
+  const transition: UserOrgTransition = {
+    userId,
+    organizationId: organization.id,
+    previousRoles: currentRoles,
+    newRole: desiredRole,
+    transitionType:
+      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+  };
+
+  try {
+    if (!desiredRole) {
+      // User has no valid SCIM groups, revoke access
+      await db.userOrganization.delete({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+      });
+
+      transition.transitionType = "ACCESS_REVOKED";
+
+      Logger.info({
+        message: "Revoked user access due to SCIM group changes",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+        },
+      });
+    } else {
+      // Update to SCIM-based role
+      await db.userOrganization.update({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+        data: {
+          roles: {
+            set: [desiredRole],
+          },
+        },
+      });
+
+      transition.transitionType = "ROLE_CHANGE";
+
+      Logger.info({
+        message: "Updated user role based on SCIM groups",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+          newRole: desiredRole,
+        },
+      });
+    }
+
+    return transition;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to handle SCIM transition",
+      additionalData: {
+        userId,
+        organizationId: organization.id,
+        currentRoles,
+        desiredRole,
+      },
+      label: "SSO",
+    });
+  }
+}
+
 /**
  * Updates an existing SSO user on subsequent logins.
  * Handles both Pure SSO and SCIM SSO scenarios:
@@ -312,50 +407,35 @@ export async function updateUserFromSSO(
     lastName: string;
     groups: string[];
   }
-) {
+): Promise<{
+  user: User;
+  org: Organization | null;
+  transitions: UserOrgTransition[];
+}> {
   const { email, userId } = authSession;
   const { firstName, lastName, groups } = userData;
-  const { firstName: oldFirstName, lastName: oldLastName } = existingUser;
   const domain = email.split("@")[1];
+  const transitions: UserOrgTransition[] = [];
 
   try {
     let user = existingUser;
 
-    /** If either the first or last name are different, update them */
-    if (oldFirstName !== firstName || oldLastName !== lastName) {
-      user = await updateUser(
-        {
-          id: userId,
-          firstName,
-          lastName,
-        },
-        {
-          ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-        }
-      );
+    // Update user profile if needed
+    if (user.firstName !== firstName || user.lastName !== lastName) {
+      user = await db.user.update({
+        where: { id: userId },
+        data: { firstName, lastName },
+        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+      });
     }
 
-    const existingUserOrganizations = existingUser.userOrganizations;
-
-    /**
-     * Find all organizations that use this domain for SSO
-     * For Pure SSO users or domains without configured orgs,
-     * this will return an empty array which is fine
-     */
     const domainOrganizations = await getOrganizationsBySsoDomain(domain);
+    const existingUserOrganizations = user.userOrganizations;
 
-    // If no organizations use this domain or no groups provided,
-    // just return the updated user - this is the Pure SSO case
-    if (domainOrganizations.length === 0 || !groups?.length) {
-      return { user, org: null };
-    }
-
-    /** Process SCIM organization access if any orgs have group mappings */
     for (const org of domainOrganizations) {
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
 
-      // Check if this organization uses SCIM
       const hasGroupMappings = !!(
         ssoDetails.adminGroupId ||
         ssoDetails.baseUserGroupId ||
@@ -363,58 +443,25 @@ export async function updateUserFromSSO(
       );
 
       if (hasGroupMappings) {
-        // Get the desired role based on current group membership
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
-
-        // Check if user currently has access to this org
         const existingOrgAccess = existingUserOrganizations.find(
           (uo) => uo.organization.id === org.id
         );
 
         if (existingOrgAccess) {
-          // User already has access to this org
-          const currentRole = existingOrgAccess.roles[0];
-
-          if (!desiredRole) {
-            // User lost all group access, revoke org access
-            await revokeAccessToOrganization({
-              userId: user.id,
-              organizationId: org.id,
-            });
-          } else if (currentRole !== desiredRole) {
-            // Update role if it changed
-            await db.userOrganization.update({
-              where: {
-                userId_organizationId: {
-                  userId: user.id,
-                  organizationId: org.id,
-                },
-              },
-              data: {
-                roles: {
-                  set: [desiredRole],
-                },
-              },
-            });
-          }
-        } else if (desiredRole) {
-          // User gained access to this org
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [desiredRole],
-          });
-
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
+          // Handle transition for existing access
+          const transition = await handleSCIMTransition(
             userId,
-          });
+            org,
+            existingOrgAccess.roles,
+            desiredRole
+          );
+          transitions.push(transition);
         }
       }
     }
 
-    // Find first org with SCIM access (if any) for redirect purposes
+    // Return first org with SCIM access for redirect
     const firstScimOrg = domainOrganizations.find(
       (org) =>
         org.ssoDetails &&
@@ -426,19 +473,19 @@ export async function updateUserFromSSO(
     return {
       user,
       org: firstScimOrg || null,
+      transitions,
     };
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : `Failed to update SSO user: ${email}`,
+      message: `Failed to update SSO user: ${email}`,
       additionalData: {
         email,
         userId,
         domain,
+        transitions,
       },
-      label,
+      label: "SSO",
     });
   }
 }

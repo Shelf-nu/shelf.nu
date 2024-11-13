@@ -19,10 +19,15 @@ import { createUserOrAttachOrg } from "../user/service.server";
 const label: ErrorLabel = "Invite";
 
 /**
- * Validates invite based on SSO configuration
+ * Validates invite based on SSO configuration, considering target organization
+ * @param email - Email of the user being invited
+ * @param organizationId - ID of the organization the user is being invited to
  * @throws ShelfError with appropriate message if invite is not allowed
  */
-async function validateInvite(email: string): Promise<void> {
+async function validateInvite(
+  email: string,
+  organizationId: string
+): Promise<void> {
   const domainStatus = await checkDomainSSOStatus(email);
 
   // Case 1: Domain not configured for SSO - allow normal invite
@@ -30,27 +35,30 @@ async function validateInvite(email: string): Promise<void> {
     return;
   }
 
-  // Case 2: Domain configured for SSO and linked to org (SCIM) - never allow invites
-  if (domainStatus.linkedOrganization) {
+  // Case 2: Check if the target organization is the one with SCIM
+  if (domainStatus.linkedOrganization?.id === organizationId) {
     throw new ShelfError({
       cause: null,
       message:
-        "This email domain uses SCIM SSO. Users are managed automatically through your identity provider.",
+        "This email domain uses SCIM SSO for this workspace. Users are managed automatically through your identity provider.",
       label: "Invite",
       status: 400,
     });
   }
 
-  // Case 3: Domain configured for SSO but not linked (Pure SSO)
-  const ssoUserExists = await doesSSOUserExist(email);
-  if (!ssoUserExists) {
-    throw new ShelfError({
-      cause: null,
-      message:
-        "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
-      label: "Invite",
-      status: 400,
-    });
+  // Case 3: Domain configured for SSO but not linked to THIS org (Pure SSO)
+  // Only check if user exists if inviting to a non-SCIM org
+  if (domainStatus.isConfiguredForSSO) {
+    const ssoUserExists = await doesSSOUserExist(email);
+    if (!ssoUserExists) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
+        label: "Invite",
+        status: 400,
+      });
+    }
   }
 }
 
@@ -106,7 +114,7 @@ export async function createInvite(
 
   try {
     // Add SSO validation before proceeding with invite
-    await validateInvite(inviteeEmail);
+    await validateInvite(inviteeEmail, organizationId);
 
     const existingUser = await db.user.findFirst({
       where: {
