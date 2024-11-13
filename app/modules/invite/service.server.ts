@@ -35,7 +35,7 @@ async function validateInvite(
     return;
   }
 
-  // Case 2: Check if the target organization is the one with SCIM
+  // Case 2: Check if the target organization is the one with SCIM. If it is, don't allow invite as the user needs to be managed via the IDP
   if (domainStatus.linkedOrganization?.id === organizationId) {
     throw new ShelfError({
       cause: null,
@@ -47,7 +47,6 @@ async function validateInvite(
   }
 
   // Case 3: Domain configured for SSO but not linked to THIS org (Pure SSO)
-  // Only check if user exists if inviting to a non-SCIM org
   if (domainStatus.isConfiguredForSSO) {
     const ssoUserExists = await doesSSOUserExist(email);
     if (!ssoUserExists) {

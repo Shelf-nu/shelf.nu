@@ -21,13 +21,28 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
-import { stringToJSONSchema } from "~/utils/zod";
 
+/**
+ * Schema for handling OAuth callback data with improved groups handling
+ * Ensures groups are always an array or empty array, regardless of input format
+ */
 const CallbackSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
-  // Groups are now optional since they're only needed for SCIM SSO
-  groups: stringToJSONSchema.pipe(z.array(z.string()).optional().default([])),
+  // Transform groups to either parse JSON string array or return empty array
+  groups: z
+    .union([
+      z.string().transform((str) => {
+        try {
+          const parsed = JSON.parse(str);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }),
+      z.array(z.string()),
+    ])
+    .default([]),
   refreshToken: z.string().min(1),
   redirectTo: z.string().optional(),
 });
@@ -147,8 +162,8 @@ export default function LoginCallback() {
           user?.user_metadata?.custom_claims.lastName || ""
         );
 
-        const groups = user?.user_metadata?.custom_claims.groups || [];
-        formData.append("groups", JSON.stringify(groups));
+        const groups = user?.user_metadata?.custom_claims.groups;
+        formData.append("groups", JSON.stringify(groups || []));
 
         fetcher.submit(formData, { method: "post" });
       }
