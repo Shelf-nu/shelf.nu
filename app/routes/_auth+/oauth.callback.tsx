@@ -21,7 +21,31 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
-import { stringToJSONSchema } from "~/utils/zod";
+
+/**
+ * Schema for handling OAuth callback data with improved groups handling
+ * Ensures groups are always an array or empty array, regardless of input format
+ */
+const CallbackSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  // Transform groups to either parse JSON string array or return empty array
+  groups: z
+    .union([
+      z.string().transform((str) => {
+        try {
+          const parsed = JSON.parse(str);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }),
+      z.array(z.string()),
+    ])
+    .default([]),
+  refreshToken: z.string().min(1),
+  redirectTo: z.string().optional(),
+});
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { disableSSO } = config;
@@ -47,33 +71,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
     switch (method) {
       case "POST": {
         const { refreshToken, redirectTo, firstName, lastName, groups } =
-          parseData(
-            await request.formData(),
-            z.object({
-              firstName: z.string().min(1, "First name is required"),
-              lastName: z.string().min(1, "Last name is required"),
-              groups: stringToJSONSchema.pipe(
-                z
-                  .array(z.string())
-                  .nonempty(
-                    "User doesn't belong to any group. Groups are required for assigning the correct workspaces and permissions."
-                  )
-              ),
-              refreshToken: z.string().min(1),
-              redirectTo: z.string().optional(),
-            })
-          );
+          parseData(await request.formData(), CallbackSchema);
 
         // We should not trust what is sent from the client
         // https://github.com/rphlmr/supa-fly-stack/issues/45
         const authSession = await refreshAccessToken(refreshToken);
 
         /**
-         * This resolves the correct org we should redirec the user to
+         * This resolves the correct org we should redirect the user to
          * Also it handles:
          * - Creating a new user if the user doesn't exist
          * - Throwing an error if the user is already connected to an email account
-         * - Linking the user to the correct org
+         * - Linking the user to the correct org if SCIM is configured
          */
         const { org } = await resolveUserAndOrgForSsoCallback({
           authSession,
@@ -81,9 +90,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           lastName,
           groups,
         });
+
         // Set the auth session and redirect to the assets page
         context.setSession(authSession);
 
+        // If org exists (SCIM SSO case), redirect to that org
+        // Otherwise (Pure SSO case), redirect to personal workspace
         return redirect(
           safeRedirect(redirectTo || "/assets"),
           org?.id
@@ -150,8 +162,8 @@ export default function LoginCallback() {
           user?.user_metadata?.custom_claims.lastName || ""
         );
 
-        const groups = user?.user_metadata?.custom_claims.groups || [];
-        formData.append("groups", JSON.stringify(groups));
+        const groups = user?.user_metadata?.custom_claims.groups;
+        formData.append("groups", JSON.stringify(groups || []));
 
         fetcher.submit(formData, { method: "post" });
       }
