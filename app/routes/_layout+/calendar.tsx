@@ -79,16 +79,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    if (isPersonalOrg(currentOrganization)) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not allowed",
-        message:
-          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
 
     const header = {
       title: `Calendar`,
@@ -131,7 +121,8 @@ export default function Calendar() {
   const [calendarView, setCalendarView] = useState(
     isMd ? "dayGridMonth" : "listWeek"
   );
-
+  const disabledButtonStyles =
+    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
 
@@ -147,7 +138,7 @@ export default function Calendar() {
     updateTitle();
   };
 
-  const updateTitle = () => {
+  const updateTitle = (viewMode = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
       const currentDate = calendarApi.getDate();
@@ -155,11 +146,30 @@ export default function Calendar() {
         month: "long",
       });
       const currentYear = currentDate.getFullYear();
-      const [startingDay, endingDay] =
-        getWeekStartingAndEndingDates(currentDate);
 
-      setCalendarTitle(`${currentMonth} ${currentYear}`);
-      setCalendarSubtitle(`${startingDay} - ${endingDay}`);
+      let mainTitle = `${currentMonth} ${currentYear}`;
+      let subtitle = "";
+
+      if (viewMode === "timeGridWeek") {
+        const [startingDay, endingDay] =
+          getWeekStartingAndEndingDates(currentDate);
+        mainTitle = `${currentMonth} ${currentYear}`;
+        subtitle = `Week ${startingDay} - ${endingDay}`;
+      } else if (viewMode === "timeGridDay") {
+        const formattedDate = currentDate.toLocaleDateString("default", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        });
+        const weekday = currentDate.toLocaleDateString("default", {
+          weekday: "long",
+        });
+        mainTitle = formattedDate;
+        subtitle = weekday;
+      }
+
+      setCalendarTitle(mainTitle);
+      setCalendarSubtitle(subtitle);
     }
   };
 
@@ -207,6 +217,13 @@ export default function Calendar() {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
     calendarApi?.changeView(view);
+    if (view === "dayGridMonth") {
+      updateTitle("dayGridMonth");
+    } else if (view === "timeGridWeek") {
+      updateTitle("timeGridWeek");
+    } else if (view === "timeGridDay") {
+      updateTitle("timeGridDay");
+    }
   };
 
   return (
@@ -257,18 +274,33 @@ export default function Calendar() {
               <Button
                 variant="secondary"
                 onClick={() => handleViewChange("dayGridMonth")}
+                className={tw(
+                  calendarView === "dayGridMonth"
+                    ? `${disabledButtonStyles}`
+                    : ""
+                )}
               >
                 Month
               </Button>
               <Button
                 variant="secondary"
                 onClick={() => handleViewChange("timeGridWeek")}
+                className={tw(
+                  calendarView === "timeGridWeek"
+                    ? `${disabledButtonStyles}`
+                    : ""
+                )}
               >
                 Week
               </Button>
               <Button
                 variant="secondary"
                 onClick={() => handleViewChange("timeGridDay")}
+                className={tw(
+                  calendarView === "timeGridDay"
+                    ? `${disabledButtonStyles}`
+                    : ""
+                )}
               >
                 Day
               </Button>
