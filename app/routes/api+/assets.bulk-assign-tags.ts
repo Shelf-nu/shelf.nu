@@ -35,15 +35,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    // Validate form data using combined schema
     const { assetIds, tags, currentSearchParams } = parseData(
       formData,
-      BulkAssignTagsSchema.and(CurrentSearchParamsSchema)
+      BulkAssignTagsSchema.and(CurrentSearchParamsSchema),
+      {
+        message: "Invalid tag assignment data provided",
+        additionalData: { userId, organizationId },
+      }
     );
 
     await bulkAssignAssetTags({
       userId,
       assetIds,
-      tagsIds: tags?.split(","),
+      tagsIds: tags,
       organizationId,
       currentSearchParams,
       remove,

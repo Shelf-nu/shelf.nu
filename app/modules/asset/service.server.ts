@@ -2833,9 +2833,13 @@ export async function bulkAssignAssetTags({
 
     return true;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk updating category.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while bulk updating tags.",
       additionalData: { userId, assetIds, organizationId, tagsIds },
       label,
     });

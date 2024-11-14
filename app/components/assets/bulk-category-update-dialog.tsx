@@ -24,13 +24,13 @@ export default function BulkCategoryUpdateDialog() {
             <DynamicSelect
               disabled={disabled}
               model={{ name: "category", queryKey: "name" }}
-              label="Filter by category"
-              placeholder="Search categories"
+              placeholder="Uncategorized"
               initialDataKey="categories"
               countKey="totalCategories"
               fieldName="category"
               contentLabel="Categories"
               closeOnSelect
+              allowClear
             />
             {zo.errors.category()?.message ? (
               <p className="text-sm text-error-500">
