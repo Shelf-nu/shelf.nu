@@ -90,7 +90,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         shouldBeCaptured: false,
       });
     }
-    
+
     const header = {
       title: `Calendar`,
     };
@@ -334,7 +334,7 @@ export default function Calendar() {
               }}
               slotEventOverlap={false}
               dayMaxEvents={3}
-              dayMaxEventRows={4}   
+              dayMaxEventRows={4}
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
