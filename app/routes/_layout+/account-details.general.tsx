@@ -11,12 +11,20 @@ import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import {
+  ChangeEmailForm,
+  createChangeEmailSchema,
+} from "~/components/user/change-email";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
 
 import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
+import {
+  getSupabaseAdmin,
+  supabaseClient,
+} from "~/integrations/supabase/client";
 import { sendResetPasswordLink } from "~/modules/auth/service.server";
 import {
   updateProfilePicture,
@@ -28,13 +36,13 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
-export const UpdateFormSchema = z.object({
+const UpdateFormSchema = z.object({
   email: z
     .string()
     .email("Please enter a valid email.")
@@ -59,11 +67,15 @@ const Actions = z.discriminatedUnion("intent", [
     email: z.string(),
     reason: z.string(),
   }),
+  z.object({
+    intent: z.literal("changeEmail"),
+    email: z.string(),
+  }),
 ]);
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId, email } = authSession;
 
   try {
     const { intent, ...payload } = parseData(
@@ -135,6 +147,48 @@ export async function action({ context, request }: ActionFunctionArgs) {
             "Your request has been sent to the admin and will be processed within 24 hours. You will receive an email confirmation.",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      case "changeEmail": {
+        // Validate the payload using our schema
+        const { email: newEmail } = parseData(
+          await request.clone().formData(),
+          createChangeEmailSchema(email),
+          {
+            additionalData: { userId },
+          }
+        );
+
+        // generate an email change link to be sent to the new email address
+        const { data: linkData, error: linkError } =
+          await getSupabaseAdmin().auth.admin.generateLink({
+            type: "email_change_new",
+            email,
+            newEmail,
+          });
+
+        console.log("linkError", linkError);
+
+        if (linkError) {
+          throw new ShelfError({
+            cause: linkError,
+            message: "Failed to update email",
+            additionalData: { userId, newEmail },
+            label: "Auth",
+          });
+        }
+        console.log("updateData", linkData);
+
+        // @TODO
+        // Send an email to the new email address with the link
+
+        sendNotification({
+          title: "Email update initiated",
+          message: "Please check your email for a confirmation link",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
         });
 
         return json(data({ success: true }));
@@ -243,6 +297,7 @@ export default function UserPage() {
               UpdateFormSchema.shape.email._def.schema
             )}
           />
+          <ChangeEmailForm currentEmail={user?.email} />
         </FormRow>
 
         <FormRow
