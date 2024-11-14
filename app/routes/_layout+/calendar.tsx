@@ -80,6 +80,17 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       action: PermissionAction.read,
     });
 
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+    
     const header = {
       title: `Calendar`,
     };
@@ -321,7 +332,9 @@ export default function Calendar() {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              dayMaxEvents={4}
+              slotEventOverlap={false}
+              dayMaxEvents={3}
+              dayMaxEventRows={4}   
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}

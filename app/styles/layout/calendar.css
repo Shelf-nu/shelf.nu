@@ -8,6 +8,15 @@
 .fc {
   @apply bg-white;
 }
+.fc-event {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fc-timeGridDay-view .fc-event-container {
+  min-height: 30px;
+}
 
 .fc-event-time {
   @apply font-normal !important;
