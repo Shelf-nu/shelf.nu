@@ -93,6 +93,7 @@ export const RequestDeleteUser = () => {
               </AlertDialogCancel>
 
               <input type="hidden" name="email" value={user?.email} />
+              <input type="hidden" name="type" value="deleteUser" />
 
               <Button
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
