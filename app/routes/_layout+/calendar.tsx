@@ -228,7 +228,7 @@ export default function Calendar() {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
     calendarApi?.changeView(view);
-    updateTitle(view)
+    updateTitle(view);
   };
 
   return (
@@ -275,41 +275,43 @@ export default function Calendar() {
               </ButtonGroup>
             </div>
 
-            {isMd ? <ButtonGroup>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("dayGridMonth")}
-                className={tw(
-                  calendarView === "dayGridMonth"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Month
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("timeGridWeek")}
-                className={tw(
-                  calendarView === "timeGridWeek"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Week
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("timeGridDay")}
-                className={tw(
-                  calendarView === "timeGridDay"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Day
-              </Button>
-            </ButtonGroup> : null}
+            {isMd ? (
+              <ButtonGroup>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("dayGridMonth")}
+                  className={tw(
+                    calendarView === "dayGridMonth"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Month
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("timeGridWeek")}
+                  className={tw(
+                    calendarView === "timeGridWeek"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Week
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("timeGridDay")}
+                  className={tw(
+                    calendarView === "timeGridDay"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Day
+                </Button>
+              </ButtonGroup>
+            ) : null}
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
