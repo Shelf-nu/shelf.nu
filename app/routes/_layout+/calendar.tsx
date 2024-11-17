@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type {
   EventContentArg,
   EventHoveringArg,
@@ -80,16 +80,16 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       action: PermissionAction.read,
     });
 
-    if (isPersonalOrg(currentOrganization)) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not allowed",
-        message:
-          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
+    // if (isPersonalOrg(currentOrganization)) {
+    //   throw new ShelfError({
+    //     cause: null,
+    //     title: "Not allowed",
+    //     message:
+    //       "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+    //     label: "Booking",
+    //     shouldBeCaptured: false,
+    //   });
+    // }
 
     const header = {
       title: `Calendar`,
@@ -220,7 +220,7 @@ export default function Calendar() {
   const handleWindowResize = () => {
     const calendar = calendarRef?.current?.getApi();
     if (calendar) {
-      calendar.changeView(isMd ? "dayGridMonth" : "listWeek");
+      calendar.changeView(isMd ? calendarView : "listWeek");
     }
   };
 
@@ -228,13 +228,7 @@ export default function Calendar() {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
     calendarApi?.changeView(view);
-    if (view === "dayGridMonth") {
-      updateTitle("dayGridMonth");
-    } else if (view === "timeGridWeek") {
-      updateTitle("timeGridWeek");
-    } else if (view === "timeGridDay") {
-      updateTitle("timeGridDay");
-    }
+    updateTitle(view)
   };
 
   return (
@@ -281,7 +275,7 @@ export default function Calendar() {
               </ButtonGroup>
             </div>
 
-            <ButtonGroup>
+            {isMd ? <ButtonGroup>
               <Button
                 variant="secondary"
                 onClick={() => handleViewChange("dayGridMonth")}
@@ -315,7 +309,7 @@ export default function Calendar() {
               >
                 Day
               </Button>
-            </ButtonGroup>
+            </ButtonGroup> : null}
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
