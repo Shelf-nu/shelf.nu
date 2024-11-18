@@ -208,6 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           createChangeEmailSchema(email),
           {
             additionalData: { userId },
+            message: "Invalid email address",
           }
         );
 
@@ -236,12 +237,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await sendEmail({
           to: newEmail,
           subject: "Confirm your new email address", // @TODO update the email content
-          text: `Your one-time password (OTP) for email change is: ${linkData.properties.email_otp}\n\nThis code will expire in 1 hour.`,
+          text: `Your verification code for email change is: ${linkData.properties.email_otp}\n\nThis code will expire in 1 hour.`,
         });
 
         sendNotification({
           title: "Email update initiated",
-          message: "Please check your email for a confirmation OTP",
+          message: "Please check your email for a confirmation code",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

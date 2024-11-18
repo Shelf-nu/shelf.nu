@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Form, useActionData } from "@remix-run/react";
+import { useCallback, useEffect, useState } from "react";
+import { Form, useActionData, useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -41,8 +41,18 @@ const OTPVerificationSchema = z.object({
     .max(6, "Code must be 6 digits"),
 });
 
+interface FormState {
+  isAwaitingOtp: boolean;
+  newEmail: string | null;
+}
+
 export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
   const [open, setOpen] = useState(false);
+  const [formState, setFormState] = useState<FormState>({
+    isAwaitingOtp: false,
+    newEmail: null,
+  });
+
   const emailZo = useZorm(
     "ChangeEmailForm",
     createChangeEmailSchema(currentEmail)
@@ -51,53 +61,51 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
 
-  const handleCloseDialog = () => {
+  // Handle closing dialog and resetting state
+  const handleCloseDialog = useCallback(() => {
     setOpen(false);
-  };
+    setFormState({ isAwaitingOtp: false, newEmail: null });
+  }, []);
 
-  const isAwaitingOtp = useMemo(
-    () => actionData && "awaitingOtp" in actionData && actionData?.awaitingOtp,
-    [actionData]
-  );
-
-  const emailChanged = useMemo(
-    () =>
-      actionData && "emailChanged" in actionData && actionData?.emailChanged,
-    [actionData]
-  );
-
-  const newEmail = useMemo(
-    () => actionData && "newEmail" in actionData && actionData?.newEmail,
-    [actionData]
-  );
-
-  /** When the email is finally changed, close the dialog */
+  // Update form state based on action data
   useEffect(() => {
-    if (emailChanged) {
-      handleCloseDialog();
+    if (actionData) {
+      if ("awaitingOtp" in actionData && actionData.awaitingOtp) {
+        setFormState({
+          isAwaitingOtp: true,
+          newEmail: "newEmail" in actionData ? actionData.newEmail : null,
+        });
+      }
+
+      if ("emailChanged" in actionData && actionData.emailChanged) {
+        handleCloseDialog();
+      }
+
+      // Keep OTP form open if there's an error during verification
+      if (actionData.error && formState.isAwaitingOtp) {
+        setFormState((prev) => ({ ...prev, isAwaitingOtp: true }));
+      }
     }
-  }, [emailChanged]);
+  }, [actionData, formState.isAwaitingOtp, handleCloseDialog]);
 
-  /** In case the schema parsing throws errors on the server */
-  const serverValidationError = useMemo(() => {
-    if (!actionData) return null;
-
-    if (
-      actionData.error?.additionalData?.validationErrors &&
-      typeof actionData.error.additionalData.validationErrors === "object"
-    ) {
-      const validationErrors = actionData.error.additionalData
-        .validationErrors as { email?: { message: string } };
-      return validationErrors.email?.message || null;
-    }
-
-    return null;
-  }, [actionData]);
-
-  const err =
-    serverValidationError || actionData?.error?.message
-      ? `${actionData?.error?.title} ${actionData?.error?.message}`
+  // Handle server-side validation errors
+  const serverError =
+    (actionData?.error?.additionalData?.validationErrors &&
+      typeof actionData?.error?.additionalData?.validationErrors === "object" &&
+      "email" in actionData?.error?.additionalData?.validationErrors &&
+      actionData?.error?.additionalData?.validationErrors?.email?.message) ||
+    actionData?.error?.message
+      ? `${actionData.error.title || ""} ${actionData.error.message}`
       : null;
+
+  const isOtpInvalidError =
+    actionData?.error?.message === "Invalid or expired verification code";
+
+  useEffect(() => {
+    if (isOtpInvalidError && otpZo.form) {
+      otpZo.form.reset();
+    }
+  }, [isOtpInvalidError, otpZo.form]);
 
   return (
     <div className="absolute right-1 top-3">
@@ -108,10 +116,9 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
         type="button"
         className="text-gray-500 hover:text-gray-700"
       >
-        <span>
-          <PenIcon className=" size-4" />
-        </span>
+        <PenIcon className="size-4" />
       </Button>
+
       <DialogPortal>
         <Dialog
           open={open}
@@ -119,46 +126,47 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
           title={
             <div>
               <h4 className="font-medium">
-                {isAwaitingOtp ? "Verify Email Change" : "Change Email Address"}
+                {formState.isAwaitingOtp
+                  ? "Verify Email Change"
+                  : "Change Email Address"}
               </h4>
               <p className="text-sm text-gray-500">
-                {isAwaitingOtp && newEmail
-                  ? `Enter the verification code sent to ${newEmail}`
+                {formState.isAwaitingOtp
+                  ? `Enter the verification code sent to ${formState.newEmail}`
                   : `Current email: ${currentEmail}`}
               </p>
             </div>
           }
         >
-          {!isAwaitingOtp ? (
-            <Form method="post" ref={emailZo.ref}>
+          {!formState.isAwaitingOtp ? (
+            <Form method="post" ref={emailZo.ref} key="email-form">
               <div className="flex flex-col gap-2 px-6 pb-4">
                 <input type="hidden" name="type" value="initiateEmailChange" />
 
-                <div>
-                  <Input
-                    name={emailZo.fields.email()}
-                    type="email"
-                    placeholder="john@doe.com"
-                    disabled={disabled}
-                    className="w-full"
-                    label="New email address"
-                    error={emailZo.errors.email()?.message}
-                  />
-                </div>
+                <Input
+                  name={emailZo.fields.email()}
+                  type="email"
+                  placeholder="john@doe.com"
+                  disabled={disabled}
+                  className="w-full"
+                  autoFocus
+                  label="New email address"
+                  error={emailZo.errors.email()?.message}
+                />
 
-                <div>
-                  <Input
-                    name={emailZo.fields.confirmEmail()}
-                    type="email"
-                    placeholder="john@doe.com"
-                    disabled={disabled}
-                    className="w-full"
-                    label="Confirm new email"
-                    error={emailZo.errors.confirmEmail()?.message}
-                  />
-                </div>
+                <Input
+                  name={emailZo.fields.confirmEmail()}
+                  type="email"
+                  placeholder="john@doe.com"
+                  disabled={disabled}
+                  className="w-full"
+                  label="Confirm new email"
+                  error={emailZo.errors.confirmEmail()?.message}
+                />
 
-                {err && <div className="text-error-500">{err}</div>}
+                {serverError && (
+                  <div className="text-error-500">{serverError}</div>
+                )}
 
                 <div className="flex justify-end gap-2">
                   <Button
@@ -181,28 +189,32 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
               </div>
             </Form>
           ) : (
-            <Form method="post" ref={otpZo.ref} reloadDocument>
+            <Form method="post" ref={otpZo.ref} key={"otp-form"}>
               <div className="flex flex-col gap-2 px-6 pb-4">
                 <input type="hidden" name="type" value="verifyEmailChange" />
-                <input type="hidden" name="email" value={newEmail || ""} />
+                <input
+                  type="hidden"
+                  name="email"
+                  value={formState.newEmail || ""}
+                />
 
-                <div>
-                  <Input
-                    name={otpZo.fields.otp()}
-                    type="text"
-                    placeholder="Enter 6-digit code"
-                    disabled={disabled}
-                    className="w-full"
-                    defaultValue={""}
-                    label="Verification code"
-                    maxLength={6}
-                    error={
-                      otpZo.errors.otp()?.message || actionData?.error?.message
-                    }
-                  />
-                </div>
+                <Input
+                  name={otpZo.fields.otp()}
+                  type="text"
+                  placeholder="Enter 6-digit code"
+                  disabled={disabled}
+                  className="w-full"
+                  label="Verification code"
+                  maxLength={6}
+                  defaultValue=""
+                  autoFocus
+                  error={
+                    otpZo.errors.otp()?.message || actionData?.error?.message
+                  }
+                />
 
                 <div className="flex justify-end gap-2">
+                  <ResendCodeForm disabled={disabled} formState={formState} />
                   <Button
                     type="button"
                     onClick={handleCloseDialog}
@@ -228,3 +240,36 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
     </div>
   );
 };
+
+function ResendCodeForm({
+  disabled,
+  formState,
+}: {
+  disabled: boolean;
+  formState: FormState;
+}) {
+  /** We need to use fetcher because this is placed within the other form. This just makes it easier to send the data */
+  const fetcher = useFetcher({ key: "resendOtp" });
+  const localDisabled = useDisabled(fetcher);
+  return formState.newEmail ? (
+    <Button
+      variant="block-link-gray"
+      type="button"
+      className="inline w-auto shrink"
+      width="auto"
+      disabled={disabled || localDisabled}
+      onClick={() => {
+        const formData = new FormData();
+        formData.append("type", "initiateEmailChange");
+        formData.append("intent", "initiateEmailChange");
+        formData.append("email", formState.newEmail || "");
+        formData.append("confirmEmail", formState.newEmail || "");
+        fetcher.submit(formData, {
+          method: "POST",
+        });
+      }}
+    >
+      {localDisabled ? "Sending code..." : "Resend code"}
+    </Button>
+  ) : null;
+}
