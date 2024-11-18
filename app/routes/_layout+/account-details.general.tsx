@@ -251,6 +251,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data({
             awaitingOtp: true,
             newEmail, // We'll need this to show which email we're waiting for verification
+            success: true,
           })
         );
       }

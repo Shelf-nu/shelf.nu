@@ -73,7 +73,8 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
       if ("awaitingOtp" in actionData && actionData.awaitingOtp) {
         setFormState({
           isAwaitingOtp: true,
-          newEmail: "newEmail" in actionData ? actionData.newEmail : null,
+          newEmail:
+            "newEmail" in actionData ? (actionData.newEmail as string) : null,
         });
       }
 
