@@ -36,7 +36,7 @@ export default function BookingActionsDropdown() {
       disabled,
       label: "Create new booking",
       icon: "bookings",
-      to: `/bookings/new?assetId=${asset.id}`,
+      to: "overview/create-new-booking",
     },
     {
       indexType: "asset",
