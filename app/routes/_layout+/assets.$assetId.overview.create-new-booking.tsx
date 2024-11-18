@@ -1,7 +1,12 @@
 import { ActionFunctionArgs, json, LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -11,8 +16,11 @@ import { requirePermission } from "~/utils/roles.server";
 import NewBooking from "./bookings.new";
 import { z } from "zod";
 import { action as newBookingAction } from "~/routes/_layout+/bookings.new";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const searchParams = getCurrentSearchParams(request);
   const authSession = context.getSession();
   const { userId } = authSession;
   const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
@@ -40,17 +48,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        deletedAt: null,
-        organizationId,
-      },
-      include: { user: true },
-      orderBy: { userId: "asc" },
+    const teamMembersData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
+      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      userId,
     });
 
     const selfServiceOrBaseUser = isSelfServiceOrBase
-      ? teamMembers.find((member) => member.userId === authSession.userId)
+      ? teamMembersData.teamMembers.find(
+          (member) => member.userId === authSession.userId
+        )
       : undefined;
 
     if (isSelfServiceOrBase && !selfServiceOrBaseUser) {
@@ -67,7 +77,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         showModal: true,
         isSelfServiceOrBase,
         selfServiceOrBaseUser,
-        teamMembers,
+        ...teamMembersData,
         assetIds: [assetId],
       })
     );
