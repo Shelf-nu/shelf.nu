@@ -139,6 +139,7 @@ export function AdvancedIndexColumn({
                     alt: item.title,
                   }}
                   className="size-10 rounded-[4px] border object-cover"
+                  withPreview={!!item.mainImage}
                 />
               ) : null}
 

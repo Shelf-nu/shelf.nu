@@ -14,6 +14,37 @@ import {
 } from "../use-asset-index-view-state";
 import { useCurrentOrganization } from "../use-current-organization-id";
 
+export const SEARCH_PARAMS_KEYS_TO_EXCLUDE = [
+  "page",
+  "scanId",
+  "redirectTo",
+  "getAll",
+] as const;
+type ExcludedKeys = (typeof SEARCH_PARAMS_KEYS_TO_EXCLUDE)[number];
+
+/**
+ * Helper function to check if a key should be excluded from cookie storage
+ * @param key - The search parameter key to check
+ * @returns boolean indicating if the key should be excluded from cookie storage
+ */
+export function shouldExcludeFromCookie(key: string): key is ExcludedKeys {
+  return SEARCH_PARAMS_KEYS_TO_EXCLUDE.includes(key as ExcludedKeys);
+}
+
+/**
+ * Clean URLSearchParams from any excluded keys that shouldn't be stored in cookies
+ * @param params - URLSearchParams or string to clean
+ * @returns Cleaned params string
+ */
+export function cleanParamsForCookie(params: URLSearchParams | string): string {
+  const searchParams =
+    params instanceof URLSearchParams ? params : new URLSearchParams(params);
+  SEARCH_PARAMS_KEYS_TO_EXCLUDE.forEach((key) => {
+    searchParams.delete(key);
+  });
+  return searchParams.toString();
+}
+
 /**
  * Get the types from the ReturnType of the original useSearchParams hook
  */
@@ -36,6 +67,7 @@ export const useSearchParams = (): [
   if (!isAssetIndexPage || !currentOrganization) {
     return [searchParams, setSearchParams];
   }
+
   const customSetSearchParams: (
     nextInit: Parameters<SetSearchParamsType>[0],
     navigateOptions?: Parameters<SetSearchParamsType>[1]
@@ -49,6 +81,7 @@ export const useSearchParams = (): [
           removedKeys.push(key);
         }
       });
+
       if (removedKeys.length > 0) {
         destroyCookieValues(removedKeys);
       }
@@ -59,17 +92,16 @@ export const useSearchParams = (): [
         let newParams = nextInit(prev);
         // Ensure newParams is an instance of URLSearchParams
         if (!(newParams instanceof URLSearchParams)) {
-          newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
+          newParams = new URLSearchParams(newParams as any);
         }
         checkAndDestroyCookies(newParams);
         return newParams;
       }, navigateOptions);
     } else {
       let newParams = nextInit;
-
       // Ensure newParams is an instance of URLSearchParams
       if (!(newParams instanceof URLSearchParams)) {
-        newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
+        newParams = new URLSearchParams(newParams as any);
       }
       checkAndDestroyCookies(newParams);
       setSearchParams(newParams, navigateOptions);
@@ -98,8 +130,9 @@ export function useAssetIndexCookieSearchParams() {
   }
 
   const { filters } = assetIndexData;
+  // Ensure we're passing a string to URLSearchParams constructor
   const cookieSearchParams = new URLSearchParams(
-    isAssetIndexPage && filters && filters !== "" ? filters : ""
+    isAssetIndexPage && filters && filters !== "" ? filters.toString() : ""
   );
 
   return cookieSearchParams;
@@ -176,9 +209,17 @@ export function destroyCookieValues(
     ? `${organizationId}_advancedAssetFilter`
     : `${organizationId}_assetFilter`;
 
+  // Always remove excluded keys and the specifically requested keys
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
   });
+
+  // Ensure all excluded keys are removed
+  SEARCH_PARAMS_KEYS_TO_EXCLUDE.forEach((key) => {
+    cookieSearchParams.delete(key);
+  });
+
+  // Set the cleaned cookie
   Cookies.set(cookieName, cookieSearchParams.toString(), {
     path: "/assets",
     sameSite: "lax",

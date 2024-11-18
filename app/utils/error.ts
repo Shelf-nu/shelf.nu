@@ -81,6 +81,7 @@ export type FailureReason = {
     | "Tier"
     | "User"
     | "Scanner"
+    | "SSO"
     | "Kit"
     | "Note"
     // Other kinds of errors

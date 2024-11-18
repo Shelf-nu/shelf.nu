@@ -6,9 +6,7 @@ import { Button } from "../shared/button";
 
 export const BulkLocationUpdateSchema = z.object({
   assetIds: z.array(z.string()).min(1),
-  newLocationId: z
-    .string({ required_error: "Location is required!" })
-    .min(1, "Location is required!"),
+  newLocationId: z.string({ required_error: "Please select a location" }),
 });
 
 export default function BulkLocationUpdateDialog() {

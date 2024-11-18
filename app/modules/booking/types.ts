@@ -14,11 +14,6 @@ export interface ClientHint {
   locale: string;
 }
 
-export interface SchedulerDataDeprecated {
-  id: string;
-  hints: ClientHint;
-}
-
 export interface SchedulerData {
   id: string;
   hints: ClientHint;

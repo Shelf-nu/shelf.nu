@@ -1,5 +1,7 @@
-import { useNavigation } from "@remix-run/react";
+import { useMemo } from "react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { DateTime } from "luxon";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -11,6 +13,7 @@ import {
 } from "~/components/shared/tooltip";
 import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -19,9 +22,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import { ActionsDropdown } from "./actions-dropdown";
-import CustodianUserSelect from "../custody/custodian-user-select";
 import { Form } from "../custom-form";
+import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -114,7 +118,7 @@ type BookingFormData = {
   name?: string;
   startDate?: string;
   endDate?: string;
-  custodianUserId?: string; // This is a stringified value for custodianUser
+  custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
@@ -126,13 +130,14 @@ export function BookingForm({
   name,
   startDate,
   endDate,
-  custodianUserId,
+  custodianRef,
   bookingStatus,
   bookingFlags,
   assetIds,
   description,
 }: BookingFormData) {
   const navigation = useNavigation();
+  const { rawTeamMembers } = useLoaderData<typeof loader>();
 
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
@@ -169,9 +174,25 @@ export function BookingForm({
     action: PermissionAction.checkout,
   });
 
+  /** Checks if this booking is already exipred */
+  const isExpired = useMemo(() => {
+    if (!endDate) return false;
+    const end = DateTime.fromISO(endDate);
+    const now = DateTime.now();
+    return end < now;
+  }, [endDate]);
+
+  /** This is used when we have selfSErvice or Base as we are setting the default */
+  const defaultTeamMember = rawTeamMembers?.find(
+    (m) => m.userId === custodianRef || m.id === custodianRef
+  );
+
   return (
     <div>
       <Form ref={zo.ref} method="post">
+        {/* Hidden input for expired state. Helps is know what status we should set on the server, when the booking is getting checked out */}
+        {isExpired && <input type="hidden" name="isExpired" value="true" />}
+
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
@@ -360,15 +381,39 @@ export function BookingForm({
                 <label className="mb-2.5 block font-medium text-gray-700">
                   <span className="required-input-label">Custodian</span>
                 </label>
-                <CustodianUserSelect
-                  defaultUserId={custodianUserId}
-                  disabled={inputFieldIsDisabled}
-                  className={
-                    isBaseOrSelfService
-                      ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
-                      : ""
+                <DynamicSelect
+                  defaultValue={
+                    defaultTeamMember
+                      ? JSON.stringify({
+                          id: defaultTeamMember?.id,
+                          name: defaultTeamMember?.name,
+                        })
+                      : undefined
                   }
-                  showEmail
+                  disabled={
+                    disabled || isBaseOrSelfService || inputFieldIsDisabled
+                  }
+                  model={{
+                    name: "teamMember",
+                    queryKey: "name",
+                    deletedAt: null,
+                  }}
+                  fieldName="custodian"
+                  contentLabel="Team members"
+                  initialDataKey="rawTeamMembers"
+                  countKey="totalTeamMembers"
+                  placeholder="Select a team member"
+                  allowClear
+                  closeOnSelect
+                  transformItem={(item) => ({
+                    ...item,
+                    id: JSON.stringify({
+                      id: item.id,
+                      //If there is a user, we use its name, otherwise we use the name of the team member
+                      name: resolveTeamMemberName(item),
+                    }),
+                  })}
+                  renderItem={(item) => resolveTeamMemberName(item, true)}
                 />
 
                 {zo.errors.custodian()?.message ? (

@@ -48,6 +48,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
 export type ModelFilters = z.infer<typeof ModelFiltersSchema>;
+export type ModelFiltersLoader = typeof loader;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

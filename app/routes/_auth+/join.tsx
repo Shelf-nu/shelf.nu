@@ -23,6 +23,7 @@ import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
+import { validateNonSSOSignup } from "~/utils/sso.server";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
@@ -88,6 +89,8 @@ export async function action({ request }: ActionFunctionArgs) {
           await request.formData(),
           JoinFormSchema
         );
+        // Block signup if domain uses SSO
+        await validateNonSSOSignup(email);
 
         const existingUser = await findUserByEmail(email);
 

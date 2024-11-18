@@ -17,6 +17,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   createNotesForBookingUpdate,
   deleteBooking,
@@ -28,6 +29,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -107,77 +109,77 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, assets, totalAssets, bookingFlags] = await Promise.all([
-      /**
-       * We need to fetch the team members to be able to display them in the custodian dropdown.
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
+    const [teamMembersData, assets, totalAssets, bookingFlags] =
+      await Promise.all([
+        /**
+         * We need to fetch the team members to be able to display them in the custodian dropdown.
+         */
+        getTeamMemberForCustodianFilter({
           organizationId,
-        },
-        include: {
-          user: true,
-        },
-        orderBy: {
-          userId: "asc",
-        },
-      }),
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          selectedTeamMembers: booking.custodianTeamMemberId
+            ? [booking.custodianTeamMemberId]
+            : [],
+          isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+          userId,
+        }),
 
-      /**
-       * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-       * That way we know if the asset is available or not because we can see if they are booked for the same period
-       */
-      db.asset.findMany({
-        where: {
-          id: {
-            in: booking?.assets.map((a) => a.id) || [],
-          },
-        },
-        skip,
-        take,
-        include: {
-          category: true,
-          custody: true,
-          kit: true,
-          bookings: {
-            where: {
-              // id: { not: booking.id },
-              ...(booking.from && booking.to
-                ? {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                    OR: [
-                      {
-                        from: { lte: booking.to },
-                        to: { gte: booking.from },
-                      },
-                      {
-                        from: { gte: booking.from },
-                        to: { lte: booking.to },
-                      },
-                    ],
-                  }
-                : {}),
+        /**
+         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
+         * That way we know if the asset is available or not because we can see if they are booked for the same period
+         */
+        db.asset.findMany({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
             },
           },
-        },
-      }),
-      /** Count assets them */
-      db.asset.count({
-        where: {
-          id: {
-            in: booking?.assets.map((a) => a.id) || [],
+          skip,
+          take,
+          include: {
+            category: true,
+            custody: true,
+            kit: true,
+            bookings: {
+              where: {
+                // id: { not: booking.id },
+                ...(booking.from && booking.to
+                  ? {
+                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
           },
-        },
-      }),
-      /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
-      getBookingFlags({
-        id: booking.id,
-        assetIds: booking.assets.map((a) => a.id),
-        from: booking.from,
-        to: booking.to,
-      }),
-    ]);
+        }),
+        /** Count assets them */
+        db.asset.count({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
+            },
+          },
+        }),
+        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+        getBookingFlags({
+          id: booking.id,
+          assetIds: booking.assets.map((a) => a.id),
+          from: booking.from,
+          to: booking.to,
+        }),
+      ]);
 
     /** We replace the assets ids in the booking object with the assets fetched in the separate request.
      * This is useful for more consistent data in the front-end */
@@ -202,7 +204,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalItems: totalAssets,
         perPage,
         totalPages: totalAssets / perPage,
-        teamMembers,
+        ...teamMembersData,
         bookingFlags,
       }),
       {
@@ -301,6 +303,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           checkOut: BookingStatus.ONGOING,
           checkIn: BookingStatus.COMPLETE,
         };
+        // Parse the isExpired field
+        const { isExpired } = parseData(
+          formData,
+          z.object({
+            isExpired: z
+              .string()
+              .optional()
+              .transform((val) => val === "true"),
+          })
+        );
+        // Modify status if expired during checkout
+        const status =
+          intent === "checkOut" && isExpired
+            ? BookingStatus.OVERDUE
+            : intentToStatusMap[intent];
+
         let upsertBookingData = {
           organizationId,
           id,
@@ -363,9 +381,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // Add the status if it exists
         Object.assign(upsertBookingData, {
-          ...(intentToStatusMap[intent] && {
-            status: intentToStatusMap[intent],
+          ...(status && {
+            status,
           }),
+          // Make sure to pass isExpired when checking out
+          ...(intent === "checkOut" && { isExpired }),
         });
         // Update and save the booking
         const booking = await upsertBooking(

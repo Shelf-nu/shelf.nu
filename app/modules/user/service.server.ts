@@ -1,4 +1,4 @@
-import type { Organization, SsoDetails, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -24,6 +24,7 @@ import type { ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
@@ -186,6 +187,26 @@ export async function createUserOrAttachOrg({
   }
 }
 
+/**
+ * Creates a new user from SSO authentication or handles subsequent logins.
+ *
+ * This function handles two SSO scenarios:
+ * 1. Pure SSO: User authenticates via SSO but their workspace access is managed manually through invites
+ * 2. SCIM SSO: User authenticates via SSO and their workspace access is managed through IDP group mappings
+ *
+ * All SSO users get a personal workspace and can be invited to other workspaces manually,
+ * even if no organizations are configured to use their email domain.
+ *
+ * @param authSession - The authentication session from Supabase containing user ID and email
+ * @param userData - User data received from the SSO provider
+ * @param userData.firstName - User's first name from SSO provider
+ * @param userData.lastName - User's last name from SSO provider
+ * @param userData.groups - Array of group IDs the user belongs to in the IDP
+ *
+ * @returns Object containing the created/updated user and their first organization (if any)
+ * @throws ShelfError if user creation/update fails
+ */
+
 export async function createUserFromSSO(
   authSession: AuthSession,
   userData: {
@@ -196,10 +217,11 @@ export async function createUserFromSSO(
 ) {
   try {
     const { email, userId } = authSession;
+
     const { firstName, lastName, groups } = userData;
     const domain = email.split("@")[1];
 
-    // When we are inviting normal users to the org, we create a teamMember so we need to handle it in this case as well
+    // Create user with personal workspace - all users get this now
     const user = await createUser({
       email,
       firstName,
@@ -209,62 +231,171 @@ export async function createUserFromSSO(
       isSSO: true,
     });
 
+    // Find organizations that use this email domain for SSO
     const organizations = await getOrganizationsBySsoDomain(domain);
 
-    for (let org of organizations) {
-      const { ssoDetails } = org;
-      if (!ssoDetails) {
-        throw new ShelfError({
-          cause: null,
-          title: "Organization doesnt have SSO",
-          message:
-            "It looks like the organization you're trying to log in to doesn't have SSO enabled.",
-          additionalData: { org, domain },
-          label,
-        });
-      }
-      const role = getRoleFromGroupId(ssoDetails, groups);
-      if (role) {
-        // Attach the user to the org with the correct role
-        await createUserOrgAssociation(db, {
-          userId: user.id,
-          organizationIds: [org.id], // org.id instead of orgIds
-          roles: [role], // role instead of roles
-        });
+    // No organizations using this domain is perfectly valid for Pure SSO
+    // User can still log in and will be able to access workspaces through invites
+    if (organizations.length > 0) {
+      // Process SCIM access for organizations that have group mappings
+      for (const org of organizations) {
+        const { ssoDetails } = org;
+        if (!ssoDetails) continue;
+
+        // Check if this organization uses SCIM (has group mappings)
+        const hasGroupMappings = !!(
+          ssoDetails.adminGroupId ||
+          ssoDetails.baseUserGroupId ||
+          ssoDetails.selfServiceGroupId
+        );
+
+        if (hasGroupMappings) {
+          const role = getRoleFromGroupId(ssoDetails, groups);
+          if (role) {
+            await createUserOrgAssociation(db, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [role],
+            });
+
+            await createTeamMember({
+              name: `${firstName} ${lastName}`,
+              organizationId: org.id,
+              userId,
+            });
+          }
+        }
       }
     }
 
-    /** Create teamMember for each organization */
-    await db.teamMember.createMany({
-      data: organizations.map((org) => ({
-        name: `${firstName} ${lastName}`,
-        organizationId: org.id,
-        userId,
-      })),
-    });
-
-    return { user, org: organizations[0] };
-  } catch (cause) {
+    // Return the user and org (if any SCIM orgs exist)
+    // For pure SSO with no org mappings, org will be null
+    return { user, org: organizations[0] || null };
+  } catch (cause: any) {
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : `There was an issue with creating/attaching user with email: ${authSession.email}`,
-      additionalData: { email: authSession.email, userId: authSession.userId },
-      label,
+      message: `Failed to create SSO user: ${cause.message}`,
+      additionalData: {
+        email: authSession.email,
+        userId: authSession.userId,
+        domain: authSession.email.split("@")[1],
+      },
+      label: "Auth",
     });
   }
 }
 
-type OrganizationWithSsoDetails = Organization & { ssoDetails: SsoDetails };
+interface UserOrgTransition {
+  userId: string;
+  organizationId: string;
+  previousRoles: OrganizationRoles[];
+  newRole: OrganizationRoles | null;
+  transitionType: "ROLE_CHANGE" | "ACCESS_REVOKED" | "ACCESS_GRANTED";
+}
 
 /**
- * Compares the existing user with the sso claims returned on login and update is correctly.
- * Cases we need to handle:
- * 1. Name changes
- * 2. Removing user from orgs
- * 3. Adding user to orgs
- * 4. Changing user role in orgs
+ * Handles the transition of user access when org switches from invite-based to SCIM-based
+ * @returns Object containing transition details for logging/notification
+ */
+async function handleSCIMTransition(
+  userId: string,
+  organization: Organization,
+  currentRoles: OrganizationRoles[],
+  desiredRole: OrganizationRoles | null
+): Promise<UserOrgTransition> {
+  const transition: UserOrgTransition = {
+    userId,
+    organizationId: organization.id,
+    previousRoles: currentRoles,
+    newRole: desiredRole,
+    transitionType:
+      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+  };
+
+  try {
+    if (!desiredRole) {
+      // User has no valid SCIM groups, revoke access
+      await db.userOrganization.delete({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+      });
+
+      transition.transitionType = "ACCESS_REVOKED";
+
+      Logger.info({
+        message: "Revoked user access due to SCIM group changes",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+        },
+      });
+    } else {
+      // Update to SCIM-based role
+      await db.userOrganization.update({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+        data: {
+          roles: {
+            set: [desiredRole],
+          },
+        },
+      });
+
+      transition.transitionType = "ROLE_CHANGE";
+
+      Logger.info({
+        message: "Updated user role based on SCIM groups",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+          newRole: desiredRole,
+        },
+      });
+    }
+
+    return transition;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to handle SCIM transition",
+      additionalData: {
+        userId,
+        organizationId: organization.id,
+        currentRoles,
+        desiredRole,
+      },
+      label: "SSO",
+    });
+  }
+}
+
+/**
+ * Updates an existing SSO user on subsequent logins.
+ * Handles both Pure SSO and SCIM SSO scenarios:
+ *
+ * For Pure SSO users:
+ * - Updates their name if changed in IDP
+ * - Maintains their personal workspace and manual workspace invites
+ *
+ * For SCIM SSO users:
+ * - Updates their name if changed in IDP
+ * - Updates their workspace access based on current IDP group membership
+ * - Maintains their personal workspace regardless of group membership
+ *
+ * @param authSession - The authentication session from Supabase
+ * @param existingUser - The existing user record from our database
+ * @param userData - Updated user data from SSO provider
+ * @returns Object containing updated user and org (if any SCIM orgs exist)
  */
 export async function updateUserFromSSO(
   authSession: AuthSession,
@@ -276,145 +407,85 @@ export async function updateUserFromSSO(
     lastName: string;
     groups: string[];
   }
-) {
-  try {
-    const { email, userId } = authSession;
-    const { firstName, lastName, groups } = userData;
-    const { firstName: oldFirstName, lastName: oldLastName } = existingUser;
-    const domain = email.split("@")[1];
-    /** Those are the organizations linked to the SSO domain */
-    const domainOrganizations = (await getOrganizationsBySsoDomain(
-      domain
-    )) as OrganizationWithSsoDetails[];
+): Promise<{
+  user: User;
+  org: Organization | null;
+  transitions: UserOrgTransition[];
+}> {
+  const { email, userId } = authSession;
+  const { firstName, lastName, groups } = userData;
+  const domain = email.split("@")[1];
+  const transitions: UserOrgTransition[] = [];
 
+  try {
     let user = existingUser;
 
-    /** If either the first or last name are different, update them */
-    if (oldFirstName !== firstName || oldLastName !== lastName) {
-      user = await updateUser(
-        {
-          id: userId,
-          firstName,
-          lastName,
-        },
-        {
-          ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-        }
-      );
+    // Update user profile if needed
+    if (user.firstName !== firstName || user.lastName !== lastName) {
+      user = await db.user.update({
+        where: { id: userId },
+        data: { firstName, lastName },
+        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+      });
     }
 
-    const existingUserOrganizations = existingUser.userOrganizations;
+    const domainOrganizations = await getOrganizationsBySsoDomain(domain);
+    const existingUserOrganizations = user.userOrganizations;
 
-    /**
-     * Compare the domainOrganizations with the groups the user is trying to log in to
-     * by checking the ssoDetails
-     * The desired organizations is an array or organization that the user should belong to
-     */
-    const desiredOrganizations = domainOrganizations.filter((org) => {
+    for (const org of domainOrganizations) {
       const { ssoDetails } = org;
+      if (!ssoDetails) continue;
 
-      return (
-        /** If the sso details are present, we can safely assume that the ids are both strings */
-        groups.includes(ssoDetails.adminGroupId as string) ||
-        groups.includes(ssoDetails.selfServiceGroupId as string)
+      const hasGroupMappings = !!(
+        ssoDetails.adminGroupId ||
+        ssoDetails.baseUserGroupId ||
+        ssoDetails.selfServiceGroupId
       );
-    });
-    const desiredOrganizationsIds = desiredOrganizations.map((org) => org.id);
 
-    /**
-     * Iterate over the user's existing organizations
-     * 1. If the user still belongs to org, double check the roles
-     * 2. If the user doesnt belong to the org, revoke their access
-     * */
-    for (const existingUserOrganization of existingUserOrganizations) {
-      const { id } = existingUserOrganization.organization;
-      // Check if the user still belongs to the organization
-      if (desiredOrganizationsIds.includes(id)) {
-        // The user still belongs to the organization
-        // Here we need to check if the role is still the same and update it if it's not
-        const ssoDetails = (
-          existingUserOrganization.organization as OrganizationWithSsoDetails
-        ).ssoDetails; // Its safe to assume that the ssoDetails are present
+      if (hasGroupMappings) {
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
-        const currentRole = existingUserOrganization.roles[0];
+        const existingOrgAccess = existingUserOrganizations.find(
+          (uo) => uo.organization.id === org.id
+        );
 
-        if (currentRole !== desiredRole) {
-          // Update the role
-          await db.userOrganization
-            .update({
-              where: {
-                userId_organizationId: {
-                  userId: user.id,
-                  organizationId: id,
-                },
-              },
-              data: {
-                roles: {
-                  set: [desiredRole],
-                },
-              },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user organization",
-                additionalData: { userId: user.id, organizationId: id },
-                label,
-              });
-            });
+        if (existingOrgAccess) {
+          // Handle transition for existing access
+          const transition = await handleSCIMTransition(
+            userId,
+            org,
+            existingOrgAccess.roles,
+            desiredRole
+          );
+          transitions.push(transition);
         }
-      } else {
-        // The user no longer belongs to the organization
-        // Remove the user from the organization
-        await revokeAccessToOrganization({
-          userId: user.id,
-          organizationId: id,
-        });
       }
     }
 
-    // Check if there are any new organizations that the user belongs to
-    for (const desiredOrg of desiredOrganizations) {
-      if (
-        !existingUser.userOrganizations.some(
-          (organization) => organization.organization.id === desiredOrg.id
-        )
-      ) {
-        const { ssoDetails } = desiredOrg;
+    // Return first org with SCIM access for redirect
+    const firstScimOrg = domainOrganizations.find(
+      (org) =>
+        org.ssoDetails &&
+        (org.ssoDetails.adminGroupId ||
+          org.ssoDetails.baseUserGroupId ||
+          org.ssoDetails.selfServiceGroupId)
+    );
 
-        // Get the correct role based on the id
-        const role = getRoleFromGroupId(ssoDetails, groups);
-        // Add the user to the organization
-        await createUserOrgAssociation(db, {
-          userId: user.id,
-          organizationIds: [desiredOrg.id], // org.id instead of orgIds
-          roles: [role], // role instead of roles
-        });
-
-        /**
-         * Create the team member
-         *
-         * NOTE: There is a case where there could already been a team member created for the user in the past,
-         * however, we cannot be sure if the name is still the same and if its the same real life person
-         * so we create a new team meber for the user
-         */
-        await createTeamMember({
-          name: `${firstName} ${lastName}`,
-          organizationId: desiredOrg.id,
-          userId,
-        });
-      }
-    }
-
-    return { user, org: desiredOrganizations[0] };
+    return {
+      user,
+      org: firstScimOrg || null,
+      transitions,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : `There was an issue with creating/attaching user with email: ${authSession.email}`,
-      additionalData: { email: authSession.email, userId: authSession.userId },
-      label,
+      message: `Failed to update SSO user: ${email}`,
+      additionalData: {
+        email,
+        userId,
+        domain,
+        transitions,
+      },
+      label: "SSO",
     });
   }
 }
@@ -445,10 +516,9 @@ export async function createUser(
   } = payload;
 
   /**
-   * We only create a personal org for non-SSO users
-   * and if the signup is not disabled
+   * We only create a personal org if the signup is not disabled
    * */
-  const shouldCreatePersonalOrg = !isSSO && !config.disableSignup;
+  const shouldCreatePersonalOrg = !config.disableSignup;
 
   try {
     return await db.$transaction(
