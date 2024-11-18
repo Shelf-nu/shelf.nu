@@ -30,6 +30,10 @@
   @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] border-x-0 !important;
 }
 
+.fc-timegrid-event-harness>a{
+  max-height: 100% !important;
+}
+
 .fc-prev-button {
   @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-white text-gray-600 !important;
 }

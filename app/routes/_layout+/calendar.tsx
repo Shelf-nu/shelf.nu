@@ -80,16 +80,16 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       action: PermissionAction.read,
     });
 
-    // if (isPersonalOrg(currentOrganization)) {
-    //   throw new ShelfError({
-    //     cause: null,
-    //     title: "Not allowed",
-    //     message:
-    //       "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
-    //     label: "Booking",
-    //     shouldBeCaptured: false,
-    //   });
-    // }
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
 
     const header = {
       title: `Calendar`,
@@ -320,6 +320,8 @@ export default function Calendar() {
               ref={calendarRef}
               plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
               initialView={calendarView}
+              expandRows={true}
+              height="auto"
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
@@ -341,7 +343,6 @@ export default function Calendar() {
                 minute: "2-digit",
                 meridiem: "short",
               }}
-              height="auto"
               loading={toggleSpinner}
             />
           )}
