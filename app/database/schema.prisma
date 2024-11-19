@@ -603,30 +603,32 @@ enum Currency {
   USD // United States Dollar
   EUR // Euro
   GBP // British Pound Sterling
-  JPY // Japanese Yen
+
+  AED // United Arab Emirates Dirham
   AUD // Australian Dollar
+  BRL // Brazilian Real
   CAD // Canadian Dollar
   CHF // Swiss Franc
   CNY // Chinese Yuan
   CZK // Czech Koruna
   DKK // Danish Krone
-  INR // Indian Rupee
-  IDR // Indonesian Rupiah
-  ZAR // South African Rand
-  BRL // Brazilian Real
-  LKR // Sri Lankan Rupee
-  MYR // Malaysian Ringgit
-  MXN // Mexican Peso
-  SGD // Singapore Dollar
-  NZD // New Zealand Dollar
-  SEK // Swedish Krona
-  NOK // Norwegian Krone
-  KRW // South Korean Won
-  RUB // Russian Ruble
   HKD // Hong Kong Dollar
-  SAR // Saudi Riyal
-  AED // United Arab Emirates Dirham
+  IDR // Indonesian Rupiah
+  INR // Indian Rupee
+  JPY // Japanese Yen
+  KRW // South Korean Won
+  LKR // Sri Lankan Rupee
+  MXN // Mexican Peso
+  MYR // Malaysian Ringgit
+  NOK // Norwegian Krone
+  NZD // New Zealand Dollar
+  PHP // Philippine Peso
   PLN // Polish Zloty
+  RUB // Russian Ruble
+  SAR // Saudi Riyal
+  SEK // Swedish Krona
+  SGD // Singapore Dollar
+  ZAR // South African Rand
 }
 
 enum InviteStatuses {
