@@ -134,7 +134,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
         title: "Asset not found",
         message: "",
         additionalData: {
-          model: "asset",
+          type: "asset-from-other-org",
           assetOrganization: userOrganizations.find(
             (org) => org.organizationId === asset.organizationId
           ),
