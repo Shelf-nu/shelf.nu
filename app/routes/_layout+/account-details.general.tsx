@@ -18,6 +18,10 @@ import {
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
+import {
+  changeEmailAddressHtmlEmail,
+  changeEmailAddressTextEmail,
+} from "~/emails/change-user-email-address";
 
 import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
@@ -201,7 +205,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (payload.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
 
-        await getUserByID(userId);
+        const user = await getUserByID(userId);
         // Validate the payload using our schema
         const { email: newEmail } = parseData(
           await request.clone().formData(),
@@ -236,8 +240,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Send email with OTP using our email service
         await sendEmail({
           to: newEmail,
-          subject: "Confirm your new email address", // @TODO update the email content
-          text: `Your verification code for email change is: ${linkData.properties.email_otp}\n\nThis code will expire in 1 hour.`,
+          subject: `🔐 Shelf verification code: ${linkData.properties.email_otp}`,
+          text: changeEmailAddressTextEmail({
+            otp: linkData.properties.email_otp,
+            user,
+          }),
+          html: changeEmailAddressHtmlEmail(
+            linkData.properties.email_otp,
+            user
+          ),
         });
 
         sendNotification({
