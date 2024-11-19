@@ -55,7 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -65,6 +65,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const asset = await getAsset({
       id,
       organizationId,
+      userOrganizations,
       include: {
         custody: { include: { custodian: true } },
         kit: true,

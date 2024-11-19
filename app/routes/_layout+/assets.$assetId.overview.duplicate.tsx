@@ -33,14 +33,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
     });
 
-    const asset = await getAsset({ id: assetId, organizationId });
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+    });
 
     return json(
       data({
@@ -75,7 +79,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -85,6 +89,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const asset = await getAsset({
       id: assetId,
       organizationId,
+      userOrganizations,
       include: {
         custody: { include: { custodian: true } },
         tags: true,
