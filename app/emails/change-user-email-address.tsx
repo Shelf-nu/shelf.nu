@@ -16,6 +16,7 @@ export const changeEmailAddressTextEmail = ({
 
 Your verification code for email change is: ${otp}
 
+Don't share this OTP with anyone. Our customer service team will never ask you for your password, OTP, credit card, or banking info.
 This code will expire in 1 hour. If you have not requested this change, please ignore the email and contact support immediately.
 
 Kind regards,
@@ -49,6 +50,10 @@ function ChangeEmailAddressHtmlEmailTemplate({
           <h2>
             <b>{otp}</b>
           </h2>
+          <Text style={{ ...styles.p }}>
+            Don't share this OTP with anyone. Our customer service team will
+            never ask you for your password, OTP, credit card, or banking info.
+          </Text>
           <Text style={{ ...styles.p }}>
             This code will expire in 1 hour. If you have not requested this
             change, please ignore the email and contact support immediately.

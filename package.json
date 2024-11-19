@@ -61,7 +61,6 @@
     "@sentry/remix": "^8.33.1",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
-    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.43.4",
     "@tremor/react": "^3.14.0",
     "@zxing/library": "^0.20.0",

@@ -742,7 +742,7 @@ export async function updateUserEmail({
           email: currentEmail,
         });
 
-        // @TODO unique email constraint error handling
+        // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
         throw new ShelfError({
           cause,
           message: "Failed to update email in shelf",
@@ -750,8 +750,6 @@ export async function updateUserEmail({
           label,
         });
       });
-
-    // @TODO we have to see if we have to update the current session's email + kill all other sessions
 
     return updatedUser;
   } catch (cause) {
