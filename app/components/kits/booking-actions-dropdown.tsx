@@ -24,6 +24,7 @@ export default function BookingActionsDropdown() {
           "Some assets in this kit have been marked as unavailable for bookings.",
       }
     : false;
+
   const links = [
     {
       indexType: "kit",
@@ -31,7 +32,7 @@ export default function BookingActionsDropdown() {
       disabled,
       label: "Create new booking",
       icon: "bookings",
-      to: `/bookings/new?${kit.assets.map((a) => `assetId=${a.id}`).join("&")}`,
+      to: "create-new-booking",
     },
     {
       indexType: "kit",

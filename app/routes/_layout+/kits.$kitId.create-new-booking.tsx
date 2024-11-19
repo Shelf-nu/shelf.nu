@@ -1,4 +1,8 @@
 import { ActionFunctionArgs, json, LoaderFunctionArgs } from "@remix-run/node";
+import { z } from "zod";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { getKit } from "~/modules/kit/service.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   data,
@@ -11,18 +15,16 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
-import NewBooking from "./bookings.new";
-import { z } from "zod";
 import { action as newBookingAction } from "~/routes/_layout+/bookings.new";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
-import { hasGetAllValue } from "~/hooks/use-model-filters";
+import NewBooking from "./bookings.new";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
   const authSession = context.getSession();
-  const { userId } = authSession;
-  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+  const userId = authSession.userId;
+
+  const { kitId } = getParams(params, z.object({ kitId: z.string() }), {
     additionalData: { userId },
   });
 
@@ -45,6 +47,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    const kit = await getKit({
+      id: kitId,
+      organizationId,
+      extraInclude: { assets: true },
+    });
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */
     const teamMembersData = await getTeamMemberForCustodianFilter({
@@ -77,11 +85,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         isSelfServiceOrBase,
         selfServiceOrBaseUser,
         ...teamMembersData,
-        assetIds: [assetId],
+        assetIds: kit.assets.map((a) => a.id),
       })
     );
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, assetId });
+    const reason = makeShelfError(cause, { userId, kitId });
     throw json(error(reason), { status: reason.status });
   }
 }
@@ -90,6 +98,6 @@ export async function action(args: ActionFunctionArgs) {
   return newBookingAction(args);
 }
 
-export default function NewBookingWithAsset() {
+export default function NewBookingWithKit() {
   return <NewBooking />;
 }
