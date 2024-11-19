@@ -2,6 +2,8 @@ import { useLocation, useRouteError } from "@remix-run/react";
 
 import { isRouteError } from "~/utils/http";
 import { Button } from "../shared/button";
+import { parseSpecialErrorData } from "./utils";
+import SpecialErrorHandler from "./special-error-handler";
 
 export const ErrorContent = () => {
   const loc = useLocation();
@@ -16,6 +18,11 @@ export const ErrorContent = () => {
     message = response.data.error.message;
     title = response.data.error.title || "Oops, something went wrong";
     traceId = response.data.error.traceId;
+  }
+
+  const specialError = parseSpecialErrorData(response);
+  if (specialError.success) {
+    return <SpecialErrorHandler additionalData={specialError.additionalData} />;
   }
 
   // Creating a string with <br/> tags for line breaks
