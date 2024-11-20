@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import colors from "tailwindcss/colors";
 
 export default {
   content: [
@@ -91,6 +92,7 @@ export default {
       colors: {
         white: "#ffffff",
         black: "#000000",
+        muted: colors.gray[200],
         gray: {
           25: "#FCFCFD",
           50: "#F9FAFB",
