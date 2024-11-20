@@ -1,8 +1,9 @@
 import { tw } from "~/utils/tw";
 import { SpecialErrorAdditionalData } from "./utils";
-import { useMemo } from "react";
 import { ErrorIcon } from ".";
 import { Button } from "../shared/button";
+import { useFetcher } from "@remix-run/react";
+import { isFormProcessing } from "~/utils/form";
 
 export type SpecialErrorHandlerProps = {
   className?: string;
@@ -15,31 +16,8 @@ export default function SpecialErrorHandler({
   style,
   additionalData,
 }: SpecialErrorHandlerProps) {
-  const content = useMemo(() => {
-    switch (additionalData.type) {
-      case "asset-from-other-org": {
-        return (
-          <div className="w-full md:max-w-screen-sm">
-            <h2 className="mb-2">Asset belongs to other workspace.</h2>
-            <p className="mb-4">
-              The asset you are trying to view belongs to a different workspace
-              you are part of. Would you like to switch to workspace{" "}
-              <span className="font-bold">
-                "{additionalData.assetOrganization.organization.name}"
-              </span>{" "}
-              to view the asset?
-            </p>
-
-            <Button>Switch workspace</Button>
-          </div>
-        );
-      }
-
-      default: {
-        return null;
-      }
-    }
-  }, []);
+  const fetcher = useFetcher();
+  const disabled = isFormProcessing(fetcher.state);
 
   return (
     <div
@@ -50,7 +28,37 @@ export default function SpecialErrorHandler({
         <span className="mb-5 size-[56px] text-primary">
           <ErrorIcon />
         </span>
-        {content}
+        <div className="w-full md:max-w-screen-sm">
+          <h2 className="mb-2">
+            <span className="capitalize">{additionalData.model}</span> belongs
+            to other workspace.
+          </h2>
+          <p className="mb-4">
+            The {additionalData.model} you are trying to view belongs to a
+            different workspace you are part of. Would you like to switch to
+            workspace{" "}
+            <span className="font-bold">
+              "{additionalData.organization.organization.name}"
+            </span>{" "}
+            to view the {additionalData.model}?
+          </p>
+          <fetcher.Form
+            action="/api/user/change-current-organization"
+            method="POST"
+          >
+            <input
+              type="hidden"
+              name="organizationId"
+              value={additionalData.organization.organization.id}
+            />
+            <input
+              type="hidden"
+              name="redirectTo"
+              value={`/${additionalData.model}/${additionalData.id}/overview`}
+            />
+            <Button disabled={disabled}>Switch workspace</Button>
+          </fetcher.Form>
+        </div>
       </div>
     </div>
   );

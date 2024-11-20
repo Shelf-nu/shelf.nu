@@ -106,11 +106,11 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   include,
 }: Pick<Asset, "id"> & {
   organizationId: Asset["organizationId"];
-  userOrganizations: Pick<UserOrganization, "organizationId">[];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
   include?: T;
 }): Promise<AssetWithInclude<T>> {
   try {
-    const otherOrganizationIds = userOrganizations.map(
+    const otherOrganizationIds = userOrganizations?.map(
       (org) => org.organizationId
     );
 
@@ -118,7 +118,9 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       where: {
         OR: [
           { id, organizationId },
-          { id, organizationId: { in: otherOrganizationIds } },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
         ],
       },
       include: { ...include },
@@ -126,16 +128,17 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
 
     /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
     if (
+      userOrganizations?.length &&
       asset.organizationId !== organizationId &&
-      otherOrganizationIds.includes(asset.organizationId)
+      otherOrganizationIds?.includes(asset.organizationId)
     ) {
       throw new ShelfError({
         cause: null,
         title: "Asset not found",
         message: "",
         additionalData: {
-          type: "asset-from-other-org",
-          assetOrganization: userOrganizations.find(
+          model: "assets",
+          organization: userOrganizations.find(
             (org) => org.organizationId === asset.organizationId
           ),
         },
@@ -153,7 +156,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       additionalData: {
         id,
         organizationId,
-        ...(cause instanceof ShelfError ? cause.additionalData : {}),
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
       },
       label,
       shouldBeCaptured: !isNotFoundError(cause),
