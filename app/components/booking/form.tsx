@@ -488,7 +488,7 @@ export function BookingForm({
               ) : null}
               <Button
                 className="mb-3 whitespace-nowrap"
-                icon="rows"
+                icon={assetIds ? undefined : "rows"}
                 value="create"
                 name="intent"
                 disabled={disabled}
