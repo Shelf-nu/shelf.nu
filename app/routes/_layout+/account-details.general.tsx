@@ -46,6 +46,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
+import { getConfiguredSSODomains } from "~/utils/sso.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 const UpdateFormSchema = z.object({
@@ -205,14 +206,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (payload.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
 
+        const ssoDomains = await getConfiguredSSODomains();
         const user = await getUserByID(userId);
         // Validate the payload using our schema
         const { email: newEmail } = parseData(
           await request.clone().formData(),
-          createChangeEmailSchema(email),
+          createChangeEmailSchema(
+            email,
+            ssoDomains.map((d) => d.domain)
+          ),
           {
             additionalData: { userId },
-            message: "Invalid email address",
           }
         );
 
