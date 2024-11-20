@@ -8,6 +8,7 @@ import Input from "../forms/input";
 import { PenIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { useUserData } from "~/hooks/use-user-data";
 
 // Email change validation schema with current email check
 export const createChangeEmailSchema = (
@@ -72,6 +73,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
   const otpZo = useZorm("OTPVerificationForm", OTPVerificationSchema);
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
+  const user = useUserData();
 
   // Handle closing dialog and resetting state
   const handleCloseDialog = useCallback(() => {
@@ -115,7 +117,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
     }
   }, [isOtpInvalidError, otpZo.form]);
 
-  return (
+  return !user?.sso ? (
     <div className="absolute right-1 top-3">
       <Button
         variant="block-link-gray"
@@ -126,143 +128,137 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
       >
         <PenIcon className="size-4" />
       </Button>
-      {open ? (
-        <DialogPortal>
-          <Dialog
-            open={open}
-            onClose={handleCloseDialog}
-            title={
-              <div>
-                <h4 className="font-medium">
-                  {formState.isAwaitingOtp
-                    ? "Verify Email Change"
-                    : "Change Email Address"}
-                </h4>
-                <p className="text-sm text-gray-500">
-                  {formState.isAwaitingOtp
-                    ? `Enter the verification code sent to ${formState.newEmail}`
-                    : `Current email: ${currentEmail}`}
-                </p>
-              </div>
-            }
-          >
-            {!formState.isAwaitingOtp ? (
-              <Form method="post" ref={emailZo.ref} key="email-form">
-                <div className="flex flex-col gap-2 px-6 pb-4">
-                  <input
-                    type="hidden"
-                    name="type"
+      <DialogPortal>
+        <Dialog
+          open={open}
+          onClose={handleCloseDialog}
+          title={
+            <div>
+              <h4 className="font-medium">
+                {formState.isAwaitingOtp
+                  ? "Verify Email Change"
+                  : "Change Email Address"}
+              </h4>
+              <p className="text-sm text-gray-500">
+                {formState.isAwaitingOtp
+                  ? `Enter the verification code sent to ${formState.newEmail}`
+                  : `Current email: ${currentEmail}`}
+              </p>
+            </div>
+          }
+        >
+          {!formState.isAwaitingOtp ? (
+            <Form method="post" ref={emailZo.ref} key="email-form">
+              <div className="flex flex-col gap-2 px-6 pb-4">
+                <input type="hidden" name="type" value="initiateEmailChange" />
+
+                <Input
+                  name={emailZo.fields.email()}
+                  type="email"
+                  placeholder="john@doe.com"
+                  disabled={disabled}
+                  className="w-full"
+                  autoFocus
+                  label="New email address"
+                  error={emailZo.errors.email()?.message}
+                />
+
+                <Input
+                  name={emailZo.fields.confirmEmail()}
+                  type="email"
+                  placeholder="john@doe.com"
+                  disabled={disabled}
+                  className="w-full"
+                  label="Confirm new email"
+                  error={emailZo.errors.confirmEmail()?.message}
+                />
+
+                {/* Validation errors */}
+                {actionData?.error?.additionalData?.validationErrors &&
+                typeof actionData?.error?.additionalData?.validationErrors ===
+                  "object" ? (
+                  Object.values(
+                    actionData?.error?.additionalData?.validationErrors
+                  ).map((error) => (
+                    <div key={error.message} className="text-error-500">
+                      {error.message}
+                    </div>
+                  ))
+                ) : serverError ? ( // Other server errors
+                  <div className="text-error-500">{serverError}</div>
+                ) : null}
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleCloseDialog}
+                    disabled={disabled}
+                    variant="secondary"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={disabled}
+                    name="intent"
                     value="initiateEmailChange"
-                  />
-
-                  <Input
-                    name={emailZo.fields.email()}
-                    type="email"
-                    placeholder="john@doe.com"
-                    disabled={disabled}
-                    className="w-full"
-                    autoFocus
-                    label="New email address"
-                    error={emailZo.errors.email()?.message}
-                  />
-
-                  <Input
-                    name={emailZo.fields.confirmEmail()}
-                    type="email"
-                    placeholder="john@doe.com"
-                    disabled={disabled}
-                    className="w-full"
-                    label="Confirm new email"
-                    error={emailZo.errors.confirmEmail()?.message}
-                  />
-
-                  {/* Validation errors */}
-                  {actionData?.error?.additionalData?.validationErrors &&
-                  typeof actionData?.error?.additionalData?.validationErrors ===
-                    "object" ? (
-                    Object.values(
-                      actionData?.error?.additionalData?.validationErrors
-                    ).map((error) => (
-                      <div key={error.message} className="text-error-500">
-                        {error.message}
-                      </div>
-                    ))
-                  ) : serverError ? ( // Other server errors
-                    <div className="text-error-500">{serverError}</div>
-                  ) : null}
-
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      onClick={handleCloseDialog}
-                      disabled={disabled}
-                      variant="secondary"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={disabled}
-                      name="intent"
-                      value="initiateEmailChange"
-                    >
-                      {disabled ? "Updating..." : "Update email"}
-                    </Button>
-                  </div>
+                  >
+                    {disabled ? "Updating..." : "Update email"}
+                  </Button>
                 </div>
-              </Form>
-            ) : (
-              <Form method="post" ref={otpZo.ref} key={"otp-form"}>
-                <div className="flex flex-col gap-2 px-6 pb-4">
-                  <input type="hidden" name="type" value="verifyEmailChange" />
-                  <input
-                    type="hidden"
-                    name="email"
-                    value={formState.newEmail || ""}
-                  />
+              </div>
+            </Form>
+          ) : (
+            <Form method="post" ref={otpZo.ref} key={"otp-form"}>
+              <div className="flex flex-col gap-2 px-6 pb-4">
+                <input type="hidden" name="type" value="verifyEmailChange" />
+                <input
+                  type="hidden"
+                  name="email"
+                  value={formState.newEmail || ""}
+                />
 
-                  <Input
-                    name={otpZo.fields.otp()}
-                    type="text"
-                    placeholder="Enter 6-digit code"
+                <Input
+                  name={otpZo.fields.otp()}
+                  type="text"
+                  placeholder="Enter 6-digit code"
+                  disabled={disabled}
+                  className="w-full"
+                  label="Verification code"
+                  maxLength={6}
+                  defaultValue=""
+                  autoFocus
+                  error={
+                    otpZo.errors.otp()?.message || actionData?.error?.message
+                  }
+                />
+
+                <div className="flex justify-end gap-2">
+                  <ResendCodeForm disabled={disabled} formState={formState} />
+                  <Button
+                    type="button"
+                    onClick={handleCloseDialog}
                     disabled={disabled}
-                    className="w-full"
-                    label="Verification code"
-                    maxLength={6}
-                    defaultValue=""
-                    autoFocus
-                    error={
-                      otpZo.errors.otp()?.message || actionData?.error?.message
-                    }
-                  />
-
-                  <div className="flex justify-end gap-2">
-                    <ResendCodeForm disabled={disabled} formState={formState} />
-                    <Button
-                      type="button"
-                      onClick={handleCloseDialog}
-                      disabled={disabled}
-                      variant="secondary"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={disabled}
-                      name="intent"
-                      value="verifyEmailChange"
-                    >
-                      {disabled ? "Verifying..." : "Verify"}
-                    </Button>
-                  </div>
+                    variant="secondary"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={disabled}
+                    name="intent"
+                    value="verifyEmailChange"
+                  >
+                    {disabled ? "Verifying..." : "Verify"}
+                  </Button>
                 </div>
-              </Form>
-            )}
-          </Dialog>
-        </DialogPortal>
-      ) : null}
+              </div>
+            </Form>
+          )}
+        </Dialog>
+      </DialogPortal>
     </div>
-  );
+  ) : null;
 };
 
 function ResendCodeForm({
