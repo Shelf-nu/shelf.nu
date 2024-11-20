@@ -1,14 +1,19 @@
 import { useLoaderData } from "@remix-run/react";
 import type { BookLink } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
 import { GenericBookActionsDropdown } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
+import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
+import { isPersonalOrg } from "~/utils/organization";
 
 export default function BookingActionsDropdown() {
   const { kit } = useLoaderData<typeof loader>();
+  const organization = useCurrentOrganization();
+
+  if (isPersonalOrg(organization)) return null;
 
   const noAssets = kit.assets.length === 0;
   const someAssetIsNotAvailable = kit.assets.some(
-    (asset) => asset.availableToBook
+    (asset) => !asset.availableToBook
   );
 
   const disabled = noAssets
