@@ -1,6 +1,7 @@
 import { ShelfTypography } from "~/components/icons/library";
 import { config } from "~/config/shelf.config";
 import { tw } from "~/utils/tw";
+import When from "../when/when";
 
 /**
  * Logo shown in the sidebar
@@ -33,9 +34,11 @@ export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
         alt="Shelf Logo"
         className="mx-1.5 inline h-[32px]"
       />
-      <span className="logo-text transition duration-150 ease-linear">
-        <ShelfTypography />
-      </span>
+      <When truthy={!minimized}>
+        <span className="logo-text transition duration-150 ease-linear">
+          <ShelfTypography />
+        </span>
+      </When>
     </>
   );
 };
