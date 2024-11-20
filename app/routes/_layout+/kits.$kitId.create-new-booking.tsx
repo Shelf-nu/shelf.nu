@@ -1,8 +1,12 @@
-import { ActionFunctionArgs, json, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { z } from "zod";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getKit } from "~/modules/kit/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import NewBooking, {
+  action as newBookingAction,
+} from "~/routes/_layout+/bookings.new";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   data,
@@ -15,8 +19,6 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { action as newBookingAction } from "~/routes/_layout+/bookings.new";
-import NewBooking from "./bookings.new";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
