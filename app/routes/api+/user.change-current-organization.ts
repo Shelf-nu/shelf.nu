@@ -10,14 +10,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = parseData(
+    const { organizationId, redirectTo } = parseData(
       await request.formData(),
       z.object({
         organizationId: z.string(),
+        redirectTo: z.string().optional(),
       })
     );
 
-    return redirect("/", {
+    return redirect(redirectTo ?? "/", {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
