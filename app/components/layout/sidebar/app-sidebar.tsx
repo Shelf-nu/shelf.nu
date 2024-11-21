@@ -7,6 +7,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "./sidebar";
+import OrganizationSelector from "./organization-selector";
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
 
@@ -19,6 +20,8 @@ export default function AppSidebar(props: AppSidebarProps) {
         <div className="flex items-center mt-2 mb-2">
           <ShelfSidebarLogo minimized={state === "collapsed"} />
         </div>
+
+        <OrganizationSelector />
       </SidebarHeader>
 
       <SidebarContent>This is content of sidebar</SidebarContent>

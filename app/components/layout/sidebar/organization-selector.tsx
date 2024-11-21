@@ -6,7 +6,12 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./sidebar";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "./sidebar";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useIsMobile } from "~/hooks/use-mobile";
 import { useFetcher, useLoaderData } from "@remix-run/react";
@@ -16,9 +21,12 @@ import { Image } from "~/components/shared/image";
 import { Button } from "~/components/shared/button";
 import invariant from "tiny-invariant";
 import { isFormProcessing } from "~/utils/form";
+import When from "~/components/when/when";
 
 export default function OrganizationSelector() {
   const isMobile = useIsMobile();
+  const { open } = useSidebar();
+
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
 
@@ -50,7 +58,7 @@ export default function OrganizationSelector() {
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=closed]:justify-center w-full h-full"
             >
               {currentOrganization.type === "PERSONAL" ? (
                 <ProfilePicture width="w-6" height="h-6" />
@@ -58,16 +66,21 @@ export default function OrganizationSelector() {
                 <Image
                   imageId={currentOrganization.imageId}
                   alt="img"
-                  className="size-6 rounded-[2px] object-cover"
+                  className="size-8 rounded-sm object-cover"
                   updatedAt={currentOrganization.updatedAt}
                 />
               )}
-              <div className="flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">
-                  {currentOrganization.name}
-                </span>
-              </div>
-              <ChevronDownIcon className="ml-auto" />
+
+              <When truthy={open}>
+                <>
+                  <div className="flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold">
+                      {currentOrganization.name}
+                    </span>
+                  </div>
+                  <ChevronDownIcon className="ml-auto" />
+                </>
+              </When>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
 
