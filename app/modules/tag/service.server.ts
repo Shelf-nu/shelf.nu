@@ -5,6 +5,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
+import { trim } from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
@@ -73,7 +74,7 @@ export async function createTag({
   try {
     return await db.tag.create({
       data: {
-        name,
+        name: trim(name),
         description,
         user: {
           connect: {
