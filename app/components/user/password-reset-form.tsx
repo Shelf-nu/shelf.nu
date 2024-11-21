@@ -22,6 +22,8 @@ export default function PasswordResetForm({ userEmail }: Props) {
             Use the link to send yourself a password reset email. You will be
             logged out 3 seconds after clicking the link.
           </p>
+          <input type="hidden" name="type" value="resetPassword" />
+
           <Button
             type="submit"
             disabled={isProcessing}
