@@ -114,9 +114,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 </Button>
               </li>
             ) : (
-              <li key={item.title}>
-                
-              </li>
+              <li key={item.title}></li>
             )
           )}
         </ul>
