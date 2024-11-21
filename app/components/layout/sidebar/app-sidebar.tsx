@@ -33,7 +33,7 @@ export default function AppSidebar(props: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarNav items={bottomMenuItems} />
+        <SidebarNav className="p-0" items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>
       <SidebarRail />
