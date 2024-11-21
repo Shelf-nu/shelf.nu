@@ -13,9 +13,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "~/components/shared/collapsible";
-import { NavLink } from "@remix-run/react";
+import { matchRoutes, NavLink, useMatch, useMatches } from "@remix-run/react";
 import { NavItem, useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
 import Icon from "~/components/icons/icon";
+import { tw } from "~/utils/tw";
 
 type SidebarNavProps = {
   className?: string;
@@ -28,6 +29,13 @@ export default function SidebarNav({
   style,
   items,
 }: SidebarNavProps) {
+  const matches = useMatches();
+
+  function isRouteActive(route: string) {
+    const matchesRoutes = matches.map((match) => match.pathname);
+    return matchesRoutes.some((matchRoute) => matchRoute.includes(route));
+  }
+
   return (
     <SidebarGroup className={className} style={style}>
       <SidebarMenu>
@@ -49,16 +57,27 @@ export default function SidebarNav({
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <SidebarMenuSub>
-                      {item.children.map((child) => (
-                        <SidebarMenuSubItem key={child.title}>
-                          <SidebarMenuSubButton asChild>
-                            <NavLink to={child.to} target={child.target}>
-                              <Icon size="xs" icon={child.icon} />
-                              <span>{child.title}</span>
-                            </NavLink>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
+                      {item.children.map((child) => {
+                        const isChildActive = isRouteActive(child.to);
+
+                        return (
+                          <SidebarMenuSubItem key={child.title}>
+                            <SidebarMenuSubButton asChild>
+                              <NavLink
+                                to={child.to}
+                                target={child.target}
+                                className={tw(
+                                  isChildActive &&
+                                    "text-primary-500 bg-primary-25"
+                                )}
+                              >
+                                <Icon size="xs" icon={child.icon} />
+                                <span>{child.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        );
+                      })}
                     </SidebarMenuSub>
                   </CollapsibleContent>
                 </SidebarMenuItem>
@@ -66,10 +85,16 @@ export default function SidebarNav({
             );
           }
 
+          const isActive = isRouteActive(item.to);
+
           return (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton asChild tooltip={item.title}>
-                <NavLink to={item.to} target={item.target}>
+                <NavLink
+                  to={item.to}
+                  target={item.target}
+                  className={tw(isActive && "text-primary-500 bg-primary-25")}
+                >
                   <Icon size="xs" icon={item.icon} />
                   <span>{item.title}</span>
                 </NavLink>
