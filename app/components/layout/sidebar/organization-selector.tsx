@@ -22,8 +22,11 @@ import { Button } from "~/components/shared/button";
 import invariant from "tiny-invariant";
 import { isFormProcessing } from "~/utils/form";
 import When from "~/components/when/when";
+import { useState } from "react";
 
 export default function OrganizationSelector() {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   const { open, isMobile } = useSidebar();
 
   const { organizations, currentOrganizationId } =
@@ -50,10 +53,14 @@ export default function OrganizationSelector() {
     });
   }
 
+  function closeDropdown() {
+    setIsDropdownOpen(false);
+  }
+
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               size="lg"
@@ -109,6 +116,7 @@ export default function OrganizationSelector() {
               icon="settings"
               variant="link"
               className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none  hover:bg-gray-50 hover:text-gray-800 "
+              onClick={closeDropdown}
             >
               Manage workspaces
             </Button>

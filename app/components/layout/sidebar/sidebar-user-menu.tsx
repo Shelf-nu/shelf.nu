@@ -19,15 +19,21 @@ import { ChevronRight, QuestionsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { CrispButton } from "~/components/marketing/crisp";
 import { Form } from "~/components/custom-form";
+import { useState } from "react";
 
 export default function SidebarUserMenu() {
   const { user } = useLoaderData<typeof loader>();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const { isMobile } = useSidebar();
+
+  function closeDropdown() {
+    setIsDropdownOpen(false);
+  }
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
@@ -75,7 +81,7 @@ export default function SidebarUserMenu() {
                 role="link"
                 variant="link"
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                width="full"
+                onClick={closeDropdown}
               >
                 Account Details
               </Button>
