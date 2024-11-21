@@ -115,26 +115,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               </li>
             ) : (
               <li key={item.title}>
-                <NavLink
-                  className={({ isActive }) =>
-                    tw(
-                      "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
-                      isActive ? "active bg-primary-50 text-primary-600" : "",
-                      workspaceSwitching ? "pointer-events-none" : ""
-                    )
-                  }
-                  to={item.to}
-                  data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
-                  onClick={toggleMobileNav}
-                  title={item.title}
-                >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
-                    {item.icon}
-                  </i>
-                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                    {item.title}
-                  </span>
-                </NavLink>
+                
               </li>
             )
           )}

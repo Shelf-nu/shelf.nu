@@ -9,6 +9,7 @@ import {
 } from "./sidebar";
 import OrganizationSelector from "./organization-selector";
 import SidebarUserMenu from "./sidebar-user-menu";
+import SidebarNav from "./sidebar-nav";
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
 
@@ -25,7 +26,9 @@ export default function AppSidebar(props: AppSidebarProps) {
         <OrganizationSelector />
       </SidebarHeader>
 
-      <SidebarContent>This is content of sidebar</SidebarContent>
+      <SidebarContent>
+        <SidebarNav />
+      </SidebarContent>
 
       <SidebarFooter>
         <SidebarUserMenu />
