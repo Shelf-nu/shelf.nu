@@ -15,3 +15,4 @@ README.md
 .vscode
 .editorconfig
 .idea
+/test/lab_equipment_2000.csv

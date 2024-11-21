@@ -32,6 +32,7 @@ test-results/
 /playwright-report/*
 desktop-app/shelf-installer
 desktop-app/portable
+/test/lab_equipment_2000.csv
 
 .npmrc
 
