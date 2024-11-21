@@ -227,7 +227,7 @@ export async function updateTag({
         organizationId,
       },
       data: {
-        name,
+        name:trim(name),
         description,
       },
     });
