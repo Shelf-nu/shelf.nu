@@ -11,16 +11,30 @@ import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import {
+  ChangeEmailForm,
+  createChangeEmailSchema,
+} from "~/components/user/change-email";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
+import {
+  changeEmailAddressHtmlEmail,
+  changeEmailAddressTextEmail,
+} from "~/emails/change-user-email-address";
 
 import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
-import { sendResetPasswordLink } from "~/modules/auth/service.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
+  refreshAccessToken,
+  sendResetPasswordLink,
+} from "~/modules/auth/service.server";
+import {
+  getUserByID,
   updateProfilePicture,
   updateUser,
+  updateUserEmail,
 } from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -28,13 +42,14 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
+import { getConfiguredSSODomains } from "~/utils/sso.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
-export const UpdateFormSchema = z.object({
+const UpdateFormSchema = z.object({
   email: z
     .string()
     .email("Please enter a valid email.")
@@ -46,29 +61,66 @@ export const UpdateFormSchema = z.object({
   lastName: z.string().optional(),
 });
 
-const Actions = z.discriminatedUnion("intent", [
-  z.object({
-    intent: z.enum(["resetPassword"]),
+// First we define our intent schema
+const IntentSchema = z.object({
+  intent: z.enum([
+    "resetPassword",
+    "updateUser",
+    "deleteUser",
+    "initiateEmailChange",
+    "verifyEmailChange",
+  ]),
+});
+
+// Then we define schemas for each intent type
+const ActionSchemas = {
+  resetPassword: z.object({
+    type: z.literal("resetPassword"),
     email: z.string(),
   }),
-  UpdateFormSchema.extend({
-    intent: z.literal("updateUser"),
+
+  updateUser: UpdateFormSchema.extend({
+    type: z.literal("updateUser"),
   }),
-  z.object({
-    intent: z.literal("deleteUser"),
+
+  deleteUser: z.object({
+    type: z.literal("deleteUser"),
     email: z.string(),
     reason: z.string(),
   }),
-]);
+
+  initiateEmailChange: z.object({
+    type: z.literal("initiateEmailChange"),
+    email: z.string().email(),
+  }),
+
+  verifyEmailChange: z.object({
+    email: z.string().email(),
+    type: z.literal("verifyEmailChange"),
+    otp: z.string().min(6).max(6),
+  }),
+} as const;
+
+// Helper function to get schema
+function getActionSchema(intent: z.infer<typeof IntentSchema>["intent"]) {
+  return ActionSchemas[intent].extend({ intent: z.literal(intent) });
+}
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId, email } = authSession;
 
   try {
-    const { intent, ...payload } = parseData(
+    // First parse just the intent
+    const { intent } = parseData(
       await request.clone().formData(),
-      Actions,
+      IntentSchema
+    );
+
+    // Then parse the full payload with the correct schema
+    const payload = parseData(
+      await request.clone().formData(),
+      getActionSchema(intent),
       {
         additionalData: { userId },
       }
@@ -76,6 +128,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "resetPassword": {
+        if (payload.type !== "resetPassword")
+          throw new Error("Invalid payload type");
         const { email } = payload;
 
         await sendResetPasswordLink(email);
@@ -88,9 +142,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/login");
       }
       case "updateUser": {
+        if (payload.type !== "updateUser")
+          throw new Error("Invalid payload type");
         /** Create the payload if the client side validation works */
+
         const updateUserPayload: UpdateUserPayload = {
-          ...payload,
+          email: payload.email,
+          username: payload.username,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
           id: userId,
         };
 
@@ -112,6 +172,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
       case "deleteUser": {
+        if (payload.type !== "deleteUser")
+          throw new Error("Invalid payload type");
+
         let reason = "No reason provided";
         if ("reason" in payload && payload.reason) {
           reason = payload?.reason;
@@ -138,6 +201,123 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return json(data({ success: true }));
+      }
+      case "initiateEmailChange": {
+        if (payload.type !== "initiateEmailChange")
+          throw new Error("Invalid payload type");
+
+        const ssoDomains = await getConfiguredSSODomains();
+        const user = await getUserByID(userId);
+        // Validate the payload using our schema
+        const { email: newEmail } = parseData(
+          await request.clone().formData(),
+          createChangeEmailSchema(
+            email,
+            ssoDomains.map((d) => d.domain)
+          ),
+          {
+            additionalData: { userId },
+          }
+        );
+
+        // Generate email change link/OTP
+        const { data: linkData, error: generateError } =
+          await getSupabaseAdmin().auth.admin.generateLink({
+            type: "email_change_new",
+            email: email,
+            newEmail: newEmail,
+          });
+
+        if (generateError) {
+          const emailExists = generateError.code === "email_exists";
+          throw new ShelfError({
+            cause: generateError,
+            ...(emailExists && { title: "Email is already taken." }),
+            message: emailExists
+              ? "Please choose a different email address which is not already in use."
+              : "Failed to initiate email change",
+            additionalData: { userId, newEmail },
+            label: "Auth",
+          });
+        }
+
+        // Send email with OTP using our email service
+        await sendEmail({
+          to: newEmail,
+          subject: `🔐 Shelf verification code: ${linkData.properties.email_otp}`,
+          text: changeEmailAddressTextEmail({
+            otp: linkData.properties.email_otp,
+            user,
+          }),
+          html: changeEmailAddressHtmlEmail(
+            linkData.properties.email_otp,
+            user
+          ),
+        });
+
+        sendNotification({
+          title: "Email update initiated",
+          message: "Please check your email for a confirmation code",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(
+          data({
+            awaitingOtp: true,
+            newEmail, // We'll need this to show which email we're waiting for verification
+            success: true,
+          })
+        );
+      }
+      case "verifyEmailChange": {
+        if (payload.type !== "verifyEmailChange")
+          throw new Error("Invalid payload type");
+
+        const { otp, email: newEmail } = payload;
+
+        /** Just to make sure the user exists */
+        await getUserByID(userId);
+
+        // Attempt to verify the OTP
+        const { error: verifyError } = await getSupabaseAdmin().auth.verifyOtp({
+          email: newEmail,
+          token: otp,
+          type: "email_change",
+        });
+
+        if (verifyError) {
+          throw new ShelfError({
+            cause: verifyError,
+            message: "Invalid or expired verification code",
+            additionalData: { userId },
+            label: "Auth",
+          });
+        }
+
+        /** Update the user's email */
+        await updateUserEmail({ userId, currentEmail: email, newEmail });
+
+        /** Refresh the session so it has the up-to-date email */
+        const { refreshToken } = authSession;
+        const newSession = await refreshAccessToken(refreshToken);
+        context.setSession(newSession);
+        /** Destroy all other sessions */
+        await getSupabaseAdmin().auth.admin.signOut(
+          newSession.accessToken,
+          "others"
+        );
+
+        sendNotification({
+          title: "Email updated",
+          message: "Your email has been successfully updated",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(
+          data({ success: true, awaitingOtp: false, emailChanged: true })
+        );
       }
       default: {
         checkExhaustiveSwitch(intent);
@@ -175,6 +355,7 @@ export default function UserPage() {
       ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
+
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
       <div className=" mb-6">
@@ -217,6 +398,7 @@ export default function UserPage() {
 
         <FormRow
           rowLabel="Email address"
+          className="relative"
           required={zodFieldIsRequired(
             UpdateFormSchema.shape.email._def.schema
           )}
@@ -225,7 +407,7 @@ export default function UserPage() {
           <input
             type="hidden"
             name={zo.fields.email()}
-            defaultValue={user?.email}
+            value={user?.email}
             className="hidden w-full"
           />
           {/* Just previews the email address */}
@@ -235,7 +417,7 @@ export default function UserPage() {
             hideLabel={true}
             placeholder="zaans@huisje.com"
             type="text"
-            defaultValue={user?.email}
+            value={user?.email}
             className="w-full"
             disabled={true}
             title="To change your email address, please contact support."
@@ -243,6 +425,7 @@ export default function UserPage() {
               UpdateFormSchema.shape.email._def.schema
             )}
           />
+          <ChangeEmailForm currentEmail={user?.email} />
         </FormRow>
 
         <FormRow
@@ -289,6 +472,7 @@ export default function UserPage() {
         </FormRow>
 
         <div className="mt-4 text-right">
+          <input type="hidden" name="type" value="updateUser" />
           <Button
             disabled={disabled}
             type="submit"
