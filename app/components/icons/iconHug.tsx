@@ -2,7 +2,7 @@ import { tw } from "~/utils/tw";
 
 interface Props {
   /** Size of the hug. Defualt is sm */
-  size: "sm" | "md" | "lg" | "xl" | "2xl";
+  size: "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
   children: JSX.Element | JSX.Element[];
 
@@ -16,6 +16,8 @@ interface Props {
 const sizeClasses: {
   [key in Props["size"]]: string;
 } = {
+  /** 16 */
+  xs: "w-4 h-4",
   /** 32px */
   sm: "w-5 h-5",
   /** 40px */

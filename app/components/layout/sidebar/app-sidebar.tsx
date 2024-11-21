@@ -10,11 +10,13 @@ import {
 import OrganizationSelector from "./organization-selector";
 import SidebarUserMenu from "./sidebar-user-menu";
 import SidebarNav from "./sidebar-nav";
+import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
 
 export default function AppSidebar(props: AppSidebarProps) {
   const { state } = useSidebar();
+  const { topMenuItems, bottomMenuItems } = useSidebarNavItems();
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -27,10 +29,11 @@ export default function AppSidebar(props: AppSidebarProps) {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarNav />
+        <SidebarNav items={topMenuItems} />
       </SidebarContent>
 
       <SidebarFooter>
+        <SidebarNav items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>
       <SidebarRail />

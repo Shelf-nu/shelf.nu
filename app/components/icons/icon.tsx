@@ -6,9 +6,10 @@ import iconsMap from "../shared/icons-map";
 export interface IconProps {
   icon: IconType;
   disableWrap?: true;
+  size?: React.ComponentProps<typeof IconHug>["size"];
 }
 const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon(
-  { icon, disableWrap }: IconProps,
+  { icon, disableWrap, size = "sm" }: IconProps,
   _ref
 ) {
   return (
@@ -16,7 +17,7 @@ const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon(
     (disableWrap ? (
       <div>{iconsMap[icon]}</div>
     ) : (
-      <IconHug size="sm">{iconsMap[icon]}</IconHug>
+      <IconHug size={size}>{iconsMap[icon]}</IconHug>
     ))
   );
 });
