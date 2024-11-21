@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { useIsMobile } from "~/hooks/use-mobile";
-import { ArrowLeftIcon, SwitchIcon } from "~/components/icons/library";
+import { SwitchIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
 import Input from "~/components/forms/input";
@@ -277,14 +277,14 @@ const SidebarTrigger = forwardRef<
       data-sidebar="trigger"
       variant="secondary"
       size="sm"
-      className={tw("h-7 w-7 border-none", className)}
+      className={tw("border-none p-0", className)}
       onClick={(event: any) => {
         onClick?.(event);
         toggleSidebar();
       }}
       {...props}
     >
-      <SwitchIcon />
+      <SwitchIcon className="size-[18px] mt-1 text-gray-500" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );

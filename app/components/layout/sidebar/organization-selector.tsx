@@ -13,7 +13,6 @@ import {
   useSidebar,
 } from "./sidebar";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useIsMobile } from "~/hooks/use-mobile";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/_layout";
 import ProfilePicture from "~/components/user/profile-picture";
@@ -22,7 +21,9 @@ import { Button } from "~/components/shared/button";
 import invariant from "tiny-invariant";
 import { isFormProcessing } from "~/utils/form";
 import When from "~/components/when/when";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSetAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 
 export default function OrganizationSelector() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -34,6 +35,8 @@ export default function OrganizationSelector() {
 
   const fetcher = useFetcher();
   const isSwitchingOrg = isFormProcessing(fetcher.state);
+
+  const setWorkspaceSwitching = useSetAtom(switchingWorkspaceAtom);
 
   const currentOrganization = organizations.find(
     (org) => org.id === currentOrganizationId
@@ -56,6 +59,13 @@ export default function OrganizationSelector() {
   function closeDropdown() {
     setIsDropdownOpen(false);
   }
+
+  useEffect(
+    function setSwitchingWorkspaceAfterFetch() {
+      setWorkspaceSwitching(isSwitchingOrg);
+    },
+    [isFormProcessing, setWorkspaceSwitching]
+  );
 
   return (
     <SidebarMenu>
