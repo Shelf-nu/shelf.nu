@@ -24,8 +24,7 @@ import { isFormProcessing } from "~/utils/form";
 import When from "~/components/when/when";
 
 export default function OrganizationSelector() {
-  const isMobile = useIsMobile();
-  const { open } = useSidebar();
+  const { open, isMobile } = useSidebar();
 
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
