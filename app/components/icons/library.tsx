@@ -436,8 +436,9 @@ export function XIcon(props: SVGProps<SVGSVGElement>) {
 
 export const AssetsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width={20}
-    height={22}
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     {...props}
@@ -854,8 +855,9 @@ export const WriteIcon = (props: SVGProps<SVGSVGElement>) => (
 export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    width={20}
-    height={23}
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
     fill="none"
     {...props}
   >
@@ -923,9 +925,9 @@ export const RemoveTagsIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width="18"
-    height="22"
-    viewBox="0 0 18 22"
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     {...props}
