@@ -1,5 +1,6 @@
 import { useMatches } from "@remix-run/react";
 import { Breadcrumb } from "./breadcrumb";
+import { SidebarTrigger } from "../sidebar/sidebar";
 
 // Define an interface that extends RouteHandle with the 'breadcrumb' property
 interface HandleWithBreadcrumb {
@@ -15,14 +16,17 @@ export function Breadcrumbs() {
   );
 
   return (
-    <div className="breadcrumbs">
-      {breadcrumbs.map((match, index) => (
-        <Breadcrumb
-          key={index}
-          match={match}
-          isLastItem={index === breadcrumbs.length - 1}
-        />
-      ))}
+    <div className="flex items-center gap-2.5">
+      <SidebarTrigger />
+      <div className="breadcrumbs">
+        {breadcrumbs.map((match, index) => (
+          <Breadcrumb
+            key={index}
+            match={match}
+            isLastItem={index === breadcrumbs.length - 1}
+          />
+        ))}
+      </div>
     </div>
   );
 }

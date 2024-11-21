@@ -12,11 +12,8 @@ import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
   SidebarProvider,
-  SidebarTrigger,
 } from "~/components/layout/sidebar/sidebar";
-import Sidebar from "~/components/layout/sidebar/sidebar-old";
 import { useCrisp } from "~/components/marketing/crisp";
-import { Separator } from "~/components/shared/separator";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
@@ -152,31 +149,22 @@ export default function App() {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="bg-gray-25 flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-            Breadcrumb can go here
-          </div>
-        </header>
-        <main className="flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-          <div className="flex h-full flex-1 flex-col">
-            {disabledTeamOrg ? (
-              <NoSubscription />
-            ) : workspaceSwitching ? (
-              <div className="flex size-full flex-col items-center justify-center text-center">
-                <Spinner />
-                <p className="mt-2">Activating workspace...</p>
-              </div>
-            ) : (
-              <Outlet />
-            )}
-          </div>
+        <div className="flex-1 bg-gray-25 px-4 pb-6">
+          {disabledTeamOrg ? (
+            <NoSubscription />
+          ) : workspaceSwitching ? (
+            <div className="flex size-full flex-col items-center justify-center text-center">
+              <Spinner />
+              <p className="mt-2">Activating workspace...</p>
+            </div>
+          ) : (
+            <Outlet />
+          )}
           <Toaster />
           <ClientOnly fallback={null}>
             {renderInstallPwaPromptOnMobile}
           </ClientOnly>
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );
