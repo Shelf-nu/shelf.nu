@@ -48,7 +48,12 @@ describe("tag service", () => {
         id: USER_ID,
         name: "test_tag",
       });
-      expectTagToBeUpdated({ name: "test_tag", description: "my test tag", organizationId: ORGANIZATION_ID, id: USER_ID });
+      expectTagToBeUpdated({
+        name: "test_tag",
+        description: "my test tag",
+        organizationId: ORGANIZATION_ID,
+        id: USER_ID,
+      });
     });
 
     it("should trim tag name on update", async () => {
@@ -58,7 +63,12 @@ describe("tag service", () => {
         id: USER_ID,
         name: " test_tag ",
       });
-      expectTagToBeUpdated({ name: "test_tag", description: "my test tag", organizationId: ORGANIZATION_ID, id: USER_ID });
+      expectTagToBeUpdated({
+        name: "test_tag",
+        description: "my test tag",
+        organizationId: ORGANIZATION_ID,
+        id: USER_ID,
+      });
     });
   });
 });
@@ -96,8 +106,8 @@ function expectTagToBeUpdated({
 }: {
   name: string;
   description: string;
-  id:string;
-  organizationId:string;
+  id: string;
+  organizationId: string;
 }): void {
   expect(db.tag.update).toHaveBeenCalledWith({
     where: {
