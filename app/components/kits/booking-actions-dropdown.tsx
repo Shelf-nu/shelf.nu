@@ -37,7 +37,7 @@ export default function BookingActionsDropdown() {
       disabled,
       label: "Create new booking",
       icon: "bookings",
-      to: `/bookings/new?${kit.assets.map((a) => `assetId=${a.id}`).join("&")}`,
+      to: "create-new-booking",
     },
     {
       indexType: "kit",
