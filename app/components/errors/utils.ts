@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { isRouteError } from "~/utils/http";
 
-export const specialErrorAdditionalData = z.object({
-  model: z.enum(["assets"]),
+export const error404AdditionalData = z.object({
+  model: z.enum(["asset"]),
   id: z.string(),
+  redirectTo: z.string().optional(),
   organization: z.object({
     organization: z.object({
       id: z.string(),
@@ -12,27 +13,25 @@ export const specialErrorAdditionalData = z.object({
   }),
 });
 
-export type SpecialErrorAdditionalData = z.infer<
-  typeof specialErrorAdditionalData
->;
+export type Error404AdditionalData = z.infer<typeof error404AdditionalData>;
 
-export function parseSpecialErrorData(response: unknown):
-  | { success: false; additionalData: null }
+export function parse404ErrorData(response: unknown):
+  | { isError404: false; additionalData: null }
   | {
-      success: true;
-      additionalData: SpecialErrorAdditionalData;
+      isError404: true;
+      additionalData: Error404AdditionalData;
     } {
   if (!isRouteError(response)) {
-    return { success: false, additionalData: null };
+    return { isError404: false, additionalData: null };
   }
 
-  const parsedDataResponse = specialErrorAdditionalData.safeParse(
+  const parsedDataResponse = error404AdditionalData.safeParse(
     response.data.error.additionalData
   );
 
   if (!parsedDataResponse.success) {
-    return { success: false, additionalData: null };
+    return { isError404: false, additionalData: null };
   }
 
-  return { success: true, additionalData: parsedDataResponse.data };
+  return { isError404: true, additionalData: parsedDataResponse.data };
 }

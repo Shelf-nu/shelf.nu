@@ -1,21 +1,21 @@
 import { tw } from "~/utils/tw";
-import { SpecialErrorAdditionalData } from "./utils";
+import { Error404AdditionalData } from "./utils";
 import { ErrorIcon } from ".";
 import { Button } from "../shared/button";
 import { useFetcher } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
 
-export type SpecialErrorHandlerProps = {
+export type Error404HandlerProps = {
   className?: string;
   style?: React.CSSProperties;
-  additionalData: SpecialErrorAdditionalData;
+  additionalData: Error404AdditionalData;
 };
 
-export default function SpecialErrorHandler({
+export default function Error404Handler({
   className,
   style,
   additionalData,
-}: SpecialErrorHandlerProps) {
+}: Error404HandlerProps) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
 
@@ -25,13 +25,10 @@ export default function SpecialErrorHandler({
       style={style}
     >
       <div className="flex flex-col items-center text-center">
-        <span className="mb-5 size-[56px] text-primary">
-          <ErrorIcon />
-        </span>
         <div className="w-full md:max-w-screen-sm">
           <h2 className="mb-2">
             <span className="capitalize">{additionalData.model}</span> belongs
-            to other workspace.
+            to another workspace.
           </h2>
           <p className="mb-4">
             The {additionalData.model} you are trying to view belongs to a
@@ -54,7 +51,7 @@ export default function SpecialErrorHandler({
             <input
               type="hidden"
               name="redirectTo"
-              value={`/${additionalData.model}/${additionalData.id}/overview`}
+              value={additionalData.redirectTo}
             />
             <Button disabled={disabled}>Switch workspace</Button>
           </fetcher.Form>
