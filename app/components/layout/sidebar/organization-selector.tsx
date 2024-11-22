@@ -74,7 +74,7 @@ export default function OrganizationSelector() {
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=closed]:justify-center w-full h-full"
+              className="border data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground justify-center w-full h-full"
             >
               {currentOrganization.type === "PERSONAL" ? (
                 <ProfilePicture width="w-6" height="h-6" />
@@ -101,7 +101,7 @@ export default function OrganizationSelector() {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
@@ -109,7 +109,7 @@ export default function OrganizationSelector() {
             {organizations.map((organization, index) => (
               <DropdownMenuItem
                 key={organization.id}
-                className="gap-2 p-2"
+                className="gap-2 p-2 rounded-sm"
                 onClick={() => {
                   if (organization.id !== currentOrganizationId) {
                     handleSwitchOrganization(organization.id);

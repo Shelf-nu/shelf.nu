@@ -37,7 +37,7 @@ export default function SidebarUserMenu() {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="border data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <ProfilePicture
                 width="w-8"
@@ -53,7 +53,7 @@ export default function SidebarUserMenu() {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
             side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={4}

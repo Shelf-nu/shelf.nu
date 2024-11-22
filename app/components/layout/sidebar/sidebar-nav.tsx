@@ -67,11 +67,16 @@ export default function SidebarNav({
                                 to={child.to}
                                 target={child.target}
                                 className={tw(
+                                  "font-medium",
                                   isChildActive &&
                                     "text-primary-500 bg-primary-25"
                                 )}
                               >
-                                <Icon size="xs" icon={child.icon} />
+                                <Icon
+                                  size="xs"
+                                  icon={child.icon}
+                                  className="text-gray-500"
+                                />
                                 <span>{child.title}</span>
                               </NavLink>
                             </SidebarMenuSubButton>
@@ -93,7 +98,10 @@ export default function SidebarNav({
                 <NavLink
                   to={item.to}
                   target={item.target}
-                  className={tw(isActive && "text-primary-500 bg-primary-25")}
+                  className={tw(
+                    "font-medium",
+                    isActive && "text-primary-500 bg-primary-25"
+                  )}
                 >
                   <Icon size="xs" icon={item.icon} />
                   <span>{item.title}</span>
