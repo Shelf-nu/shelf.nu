@@ -103,10 +103,12 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   id,
   organizationId,
   userOrganizations,
+  request,
   include,
 }: Pick<Asset, "id"> & {
   organizationId: Asset["organizationId"];
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
   include?: T;
 }): Promise<AssetWithInclude<T>> {
   try {
@@ -132,17 +134,24 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       asset.organizationId !== organizationId &&
       otherOrganizationIds?.includes(asset.organizationId)
     ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? new URL(request.url).pathname
+          : undefined;
+
       throw new ShelfError({
         cause: null,
         title: "Asset not found",
         message: "",
         additionalData: {
-          model: "assets",
+          model: "asset",
           organization: userOrganizations.find(
             (org) => org.organizationId === asset.organizationId
           ),
+          redirectTo,
         },
         label,
+        status: 404,
       });
     }
 
