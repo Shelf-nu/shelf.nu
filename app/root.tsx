@@ -34,6 +34,7 @@ import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
+import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -41,11 +42,7 @@ export interface RootData {
 }
 
 export const handle = {
-  breadcrumb: () => (
-    <Link to="/" title="Home" id="homeCrumb">
-      <HomeIcon className="inline" />
-    </Link>
-  ),
+  breadcrumb: () => <SidebarTrigger />,
 };
 
 export const links: LinksFunction = () => [

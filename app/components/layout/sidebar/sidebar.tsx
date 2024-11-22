@@ -284,7 +284,7 @@ const SidebarTrigger = forwardRef<
       }}
       {...props}
     >
-      <SwitchIcon className="size-[18px] mt-1 text-gray-500" />
+      <SwitchIcon className="size-4 text-gray-500" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
