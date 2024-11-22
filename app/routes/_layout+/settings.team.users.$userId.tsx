@@ -124,6 +124,7 @@ export default function UserPage() {
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
+    { to: "activity", content: "Activity" },
   ];
   /**
    * We assume that the user has only one role in the organization
