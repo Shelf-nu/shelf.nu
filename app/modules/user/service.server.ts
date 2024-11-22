@@ -10,6 +10,7 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
 import { sendEmail } from "~/emails/mail.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
@@ -691,6 +692,72 @@ export async function updateUser<T extends Prisma.UserInclude>(
       additionalData: { ...cleanClone, validationErrors },
       label,
       shouldBeCaptured: !isUniqueViolation,
+    });
+  }
+}
+
+/**
+ * Updates user email in both the auth and shelf databases
+ * If for some reason the user update fails we should also revenrt the auth account update
+ */
+export async function updateUserEmail({
+  userId,
+  currentEmail,
+  newEmail,
+}: {
+  userId: User["id"];
+  currentEmail: User["email"];
+  newEmail: string;
+}) {
+  try {
+    /**
+     * Update the user in supabase auth
+     */
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      userId,
+      {
+        email: newEmail,
+      }
+    );
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message:
+          "Failed to update email in auth. Please try again and if the issue persists, contact support",
+        additionalData: { userId, newEmail, currentEmail },
+        label,
+      });
+    }
+
+    /** Update the user in the DB */
+    const updatedUser = await db.user
+      .update({
+        where: { id: userId },
+        data: { email: newEmail },
+      })
+      .catch((cause) => {
+        // On failure, revert the change of the user update in auth
+        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
+          email: currentEmail,
+        });
+
+        // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
+        throw new ShelfError({
+          cause,
+          message: "Failed to update email in shelf",
+          additionalData: { userId, newEmail, currentEmail },
+          label,
+        });
+      });
+
+    return updatedUser;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update email",
+      additionalData: { userId, currentEmail, newEmail },
+      label,
     });
   }
 }
