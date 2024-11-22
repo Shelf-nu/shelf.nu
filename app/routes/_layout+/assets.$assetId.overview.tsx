@@ -83,6 +83,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       organizationId,
       userOrganizations,
+      request,
       include: ASSET_OVERVIEW_FIELDS,
     });
 

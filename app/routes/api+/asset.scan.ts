@@ -19,7 +19,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -42,7 +42,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const asset = await getAsset({
       id: assetId,
       organizationId,
-      userOrganizations,
       include: { qrCodes: true },
     });
     /** WE get the first qrCode as the app only supports 1 code per asset for now */

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { error, parseData } from "~/utils/http.server";
+import { error, parseData, safeRedirect } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -18,7 +18,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    return redirect(redirectTo ?? "/", {
+    return redirect(safeRedirect(redirectTo), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
