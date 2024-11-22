@@ -201,6 +201,7 @@ export const AssetForm = ({
                 onChange={validateFile}
                 label={"Main image"}
                 hideLabel
+                capture={"environment"}
                 error={fileError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
