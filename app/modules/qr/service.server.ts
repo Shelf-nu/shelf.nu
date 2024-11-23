@@ -37,6 +37,7 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
     });
   }
 }
+
 export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   try {
     return await db.qr.findFirst({
