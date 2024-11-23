@@ -44,6 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: assetId,
       organizationId,
       userOrganizations,
+      request,
     });
 
     return json(
