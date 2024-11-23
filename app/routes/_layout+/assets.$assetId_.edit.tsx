@@ -65,6 +65,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       include: { tags: true, customFields: true },
       userOrganizations,
+      request,
     });
 
     const { categories, totalCategories, tags, locations, totalLocations } =
