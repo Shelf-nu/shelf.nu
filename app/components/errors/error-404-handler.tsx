@@ -1,6 +1,5 @@
 import { tw } from "~/utils/tw";
 import { Error404AdditionalData } from "./utils";
-import { ErrorIcon } from ".";
 import { Button } from "../shared/button";
 import { useFetcher } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
