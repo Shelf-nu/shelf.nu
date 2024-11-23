@@ -341,7 +341,14 @@ export async function getPaginatedAndFilterableKits<
   }
 }
 
-export async function getKit<T extends Prisma.KitInclude>({
+type KitWithInclude<T extends Prisma.KitInclude | undefined> =
+  T extends Prisma.KitInclude
+    ? Prisma.KitGetPayload<{
+        include: MergeInclude<typeof GET_KIT_STATIC_INCLUDES, T>;
+      }>
+    : Prisma.KitGetPayload<{ include: typeof GET_KIT_STATIC_INCLUDES }>;
+
+export async function getKit<T extends Prisma.KitInclude | undefined>({
   id,
   organizationId,
   extraInclude,
@@ -353,10 +360,12 @@ export async function getKit<T extends Prisma.KitInclude>({
       ...extraInclude,
     } as MergeInclude<typeof GET_KIT_STATIC_INCLUDES, T>;
 
-    return (await db.kit.findUniqueOrThrow({
+    const kit = await db.kit.findUniqueOrThrow({
       where: { id, organizationId },
       include: includes,
-    })) as Prisma.KitGetPayload<{ include: typeof includes }>;
+    });
+
+    return kit as KitWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
