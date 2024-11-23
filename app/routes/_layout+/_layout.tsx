@@ -135,7 +135,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function App() {
   useCrisp();
-  const { disabledTeamOrg } = useLoaderData<typeof loader>();
+  const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   const renderInstallPwaPromptOnMobile = () =>
@@ -146,7 +146,7 @@ export default function App() {
     ) : null;
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={!minimizedSidebar}>
       <AppSidebar />
       <SidebarInset>
         <div className="flex-1 bg-gray-25 px-4 pb-6">
