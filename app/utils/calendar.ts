@@ -76,7 +76,7 @@ export function getStatusClasses(
     default:
       break;
   }
-  if(viewType=="timeGridWeek" || viewType=="timeGridDay"){
+  if (viewType == "timeGridWeek" || viewType == "timeGridDay") {
     statusClasses.push(statusClassesOnHover[status]);
   }
 
@@ -92,8 +92,12 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   COMPLETE: "md:!bg-success-100",
 };
 
-export function isOneDayEvent(from: Date | string | null, to: Date | string | null, viewDay?: string) {
-  if (!from || !to || viewDay!='dayGridMonth') {
+export function isOneDayEvent(
+  from: Date | string | null,
+  to: Date | string | null,
+  viewDay?: string
+) {
+  if (!from || !to || viewDay != "dayGridMonth") {
     return false;
   }
 

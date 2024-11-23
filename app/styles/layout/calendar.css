@@ -34,7 +34,7 @@
   max-height: 100% !important;
 }
 
-.fc-day-today-dayView{
+.fc-day-today-dayView {
   @apply bg-none border-none !important;
 }
 .fc-prev-button {
@@ -54,15 +54,16 @@
   }
 }
 
-.month-view .fc-day-today, .week-view .fc-day-today {
+.month-view .fc-day-today,
+.week-view .fc-day-today {
   @apply bg-primary-50 border-t-[1.5px] border-t-primary-200 border-l-[1.5px] border-l-primary-200 border-r-[1.5px] border-r-primary-200 border-b-[1.5px] border-b-primary-200 text-primary-700 !important;
 }
 
-.day-view .fc-day-today{
+.day-view .fc-day-today {
   @apply bg-transparent !important;
 }
 
-.fc-timegrid-event-harness{
+.fc-timegrid-event-harness {
   @apply shadow-md shadow-black	!important;
 }
 .fc-theme-standard .fc-scrollgrid {
