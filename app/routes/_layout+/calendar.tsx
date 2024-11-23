@@ -33,7 +33,7 @@ import When from "~/components/when/when";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
+import { getStatusClasses, isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -198,6 +198,8 @@ export default function Calendar() {
   );
 
   const handleEventMouseEnter = (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if(viewType!="dayGridMonth") return;
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -208,6 +210,8 @@ export default function Calendar() {
   };
 
   const handleEventMouseLeave = (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if(viewType!="dayGridMonth") return;
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -231,6 +235,17 @@ export default function Calendar() {
     updateTitle(view);
   };
 
+  const updateViewClasses = (calendarContainer:any, viewType:any) => {
+    calendarContainer.classList.remove("month-view", "week-view", "day-view");
+    if (viewType === "dayGridMonth") {
+      calendarContainer.classList.add("month-view");
+    } else if (viewType === "timeGridWeek") {
+      calendarContainer.classList.add("week-view");
+    } else if (viewType === "timeGridDay") {
+      calendarContainer.classList.add("day-view");
+    }
+  };
+
   return (
     <>
       <Header hidePageDescription={true} />
@@ -240,7 +255,7 @@ export default function Calendar() {
             <div className="text-left font-sans text-lg font-semibold leading-[20px] ">
               {calendarTitle}
             </div>
-            {!isMd ? (
+            {!isMd || calendarView=="timeGridWeek" ? (
               <div className="text-gray-600">{calendarSubtitle}</div>
             ) : null}
           </div>
@@ -330,7 +345,7 @@ export default function Calendar() {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              slotEventOverlap={false}
+              slotEventOverlap={true}
               dayMaxEvents={3}
               dayMaxEventRows={4}
               moreLinkClick="popover"
@@ -343,6 +358,25 @@ export default function Calendar() {
                 minute: "2-digit",
                 meridiem: "short",
               }}
+              viewDidMount={(args) => {
+                const calendarContainer = args.el;
+                const viewType = args.view.type;  
+                updateViewClasses(calendarContainer, viewType);
+              }}
+              datesSet={(args) => {
+                const calendarContainer = document.querySelector('.fc');
+                const viewType = args.view.type;
+                updateViewClasses(calendarContainer, viewType);
+              }}
+              eventClassNames={(eventInfo)=>{
+                const viewType = eventInfo.view.type;
+                const isOneDay = isOneDayEvent(eventInfo.event.start, eventInfo.event.end);
+                return getStatusClasses(
+                  eventInfo.event.extendedProps.status, 
+                  isOneDay, 
+                  viewType
+                );
+              }}
               loading={toggleSpinner}
             />
           )}
@@ -354,15 +388,17 @@ export default function Calendar() {
 
 const renderEventCard = (args: EventContentArg) => {
   const event = args.event;
+  const viewType = event._context.calendarApi.view.type;
+  
   const booking = event.extendedProps as CalendarExtendedProps;
-  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
+  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end, viewType);
 
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "inline-block max-w-full whitespace-normal bg-transparent lg:truncate"
+            "inline-block w-full whitespace-normal h-full bg-transparent lg:truncate"
           )}
         >
           <When truthy={_isOneDayEvent}>
