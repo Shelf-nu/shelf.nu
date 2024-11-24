@@ -64,7 +64,7 @@
 }
 
 .fc-timegrid-event-harness {
-  @apply shadow-md shadow-black	!important;
+  @apply shadow-tremor-input drop-shadow-md !important;
 }
 .fc-theme-standard .fc-scrollgrid {
   @apply border border-[#EAECF0] border-t-0;
