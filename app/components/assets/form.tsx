@@ -195,13 +195,13 @@ export const AssetForm = ({
               </p>
               <Input
                 disabled={disabled}
-                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                //Android 14 camera workaround https://stackoverflow.com/a/79163998/1894472
+                accept="image/png,.png,image/jpeg,.jpg,.jpeg,android/force-camera-workaround"
                 name="mainImage"
                 type="file"
                 onChange={validateFile}
                 label={"Main image"}
                 hideLabel
-                capture={"environment"}
                 error={fileError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
