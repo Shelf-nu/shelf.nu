@@ -55,12 +55,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.custody,
+      }
+    );
 
     const kit = await getKit({
       id: kitId,
@@ -81,6 +83,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         },
       },
+      userOrganizations,
+      request,
     });
 
     if (kit.custody) {
