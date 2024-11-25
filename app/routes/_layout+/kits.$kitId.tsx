@@ -75,7 +75,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -131,6 +131,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
           qrCodes: true,
         },
+        userOrganizations,
+        request,
       }),
       getAssetsForKits({
         request,

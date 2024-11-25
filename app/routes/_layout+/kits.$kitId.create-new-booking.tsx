@@ -31,13 +31,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      });
+    const {
+      organizationId,
+      currentOrganization,
+      isSelfServiceOrBase,
+      userOrganizations,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -54,6 +58,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       extraInclude: { assets: true },
+      userOrganizations,
+      request,
     });
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */

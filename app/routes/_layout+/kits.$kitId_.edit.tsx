@@ -43,14 +43,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
 
-    const kit = await getKit({ id: kitId, organizationId });
+    const kit = await getKit({
+      id: kitId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     const header: HeaderData = {
       title: `Edit | ${kit.name}`,
