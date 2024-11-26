@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
 import type { CustomField, CustomFieldType } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
@@ -23,7 +24,6 @@ import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
-import { SerializeFrom } from "@remix-run/node";
 
 export default function AssetCustomFields({
   zo,
