@@ -66,6 +66,7 @@ export const loader = async ({
     );
     const pdfBuffer = await generatePdfContent(
       htmlContent,
+      pdfMeta,
       getBookingAssetsCustomHeader(pdfMeta)
     );
     return new Response(pdfBuffer, {
