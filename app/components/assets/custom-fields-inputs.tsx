@@ -227,7 +227,7 @@ export default function AssetCustomFields({
           Manage custom fields
         </Link>
       </div>
-      <div>
+      <div className="border-b pb-5">
         <h3 className="mb-4 text-[16px] font-semibold">Required Fields</h3>
         {requiredFields.map((field, index) => (
           <FormRow
