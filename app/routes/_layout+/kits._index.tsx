@@ -107,6 +107,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         items: kits,
         page,
         totalItems: totalKits,
+        totalPages,
         perPage,
         modelName,
         search,
