@@ -539,8 +539,8 @@ function CustodyEnumField({
       deletedAt: null,
     },
     transformItem: (item: any) => item,
-    renderItem: (item: any) => resolveTeamMemberName(item),
-    initialDataKey: "teamMembers",
+    renderItem: (item: any) => resolveTeamMemberName(item, true),
+    initialDataKey: "rawTeamMembers",
     countKey: "totalTeamMembers",
     label: "Filter by custodian",
     hideLabel: true,
@@ -601,7 +601,9 @@ function CustodyEnumField({
       placeholder="Select custodian"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -710,7 +712,9 @@ function CategoryEnumField({
       placeholder="Select category"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -811,7 +815,9 @@ function LocationEnumField({
       placeholder="Select location"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
@@ -910,7 +916,9 @@ function KitEnumField({
       placeholder="Select kit"
       defaultValue={value as string}
       onChange={(selectedId) => {
-        handleChange(selectedId);
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
       }}
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"

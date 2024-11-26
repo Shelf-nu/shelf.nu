@@ -1,14 +1,14 @@
-import { useFetchers, useLoaderData } from "@remix-run/react";
-import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { useFetchers } from "@remix-run/react";
+import { useAssetIndexViewState } from "./use-asset-index-view-state";
 
 /** Hook that returns the image flag for the first column.
  * Can only be used in asset index page or its child routes
  */
 export function useAssetIndexShowImage() {
-  const { settings } = useLoaderData<AssetIndexLoaderData>();
+  const { settings } = useAssetIndexViewState();
 
   /** Get the mode from the settings */
-  const showAssetImage = settings.showAssetImage || false;
+  const showAssetImage = settings?.showAssetImage || false;
 
   let optimisticShowAssetImage = showAssetImage;
   const fetchers = useFetchers();

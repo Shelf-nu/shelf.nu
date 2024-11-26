@@ -38,8 +38,10 @@ export default function CategoriesInput({
             className="flex-1"
             excludeItems={categories}
             onChange={(value) => {
-              categories[i] = value;
-              setCategories([...categories]);
+              if (value !== undefined) {
+                categories[i] = value;
+                setCategories([...categories]);
+              }
             }}
           />
 

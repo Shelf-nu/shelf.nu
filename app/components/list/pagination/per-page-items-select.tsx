@@ -20,12 +20,7 @@ export default function PerPageItemsSelect() {
       /** We remove the current page when changing per-page. */
       prev.delete("page");
 
-      /** When its the defualt value, we dont add it to the params */
-      if (value === perPageValues[0]) {
-        prev.delete("per_page");
-      } else {
-        prev.set("per_page", value);
-      }
+      prev.set("per_page", value);
 
       return prev;
     });

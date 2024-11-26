@@ -167,12 +167,38 @@ export async function signInWithSSO(domain: string) {
       message,
       label,
       shouldBeCaptured,
+      additionalData: { domain },
+    });
+  }
+}
+
+/**
+ * Helper function to check if user is SSO-only and throw appropriate error
+ * @param email User's email address
+ * @throws ShelfError if user exists and is SSO-only
+ */
+async function validateNonSSOUser(email: string) {
+  const user = await db.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { sso: true },
+  });
+
+  if (user?.sso) {
+    throw new ShelfError({
+      cause: null,
+      title: "SSO User",
+      message:
+        "This email address is associated with an SSO account. Please use SSO login instead.",
+      additionalData: { email },
+      label: "Auth",
     });
   }
 }
 
 export async function sendOTP(email: string) {
   try {
+    await validateNonSSOUser(email);
+
     const { error } = await getSupabaseAdmin().auth.signInWithOtp({
       email,
       options: {
@@ -201,6 +227,8 @@ export async function sendOTP(email: string) {
 
 export async function sendResetPasswordLink(email: string) {
   try {
+    await validateNonSSOUser(email);
+
     await getSupabaseAdmin().auth.resetPasswordForEmail(email, {
       redirectTo: `${SERVER_URL}/reset-password`,
     });

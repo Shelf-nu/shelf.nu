@@ -28,6 +28,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
+// eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
@@ -159,7 +160,7 @@ export async function upsertBooking(
       | "custodianTeamMemberId"
       | "custodianUserId"
       | "description"
-    > & { assetIds: Asset["id"][] }
+    > & { assetIds: Asset["id"][]; isExpired: boolean }
   >,
   hints: ClientHint,
   isBaseOrSelfService: boolean = false
@@ -173,6 +174,7 @@ export async function upsertBooking(
       custodianUserId,
       id,
       description,
+      isExpired,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -310,14 +312,14 @@ export async function upsertBooking(
         });
 
       if (
+        // For both regular checkouts (ONGOING) and expired checkouts (OVERDUE)
+        ((booking.status === BookingStatus.ONGOING ||
+          booking.status === BookingStatus.OVERDUE) &&
+          isExpired) ||
         booking.status === BookingStatus.ONGOING ||
         (res.status === BookingStatus.ONGOING && booking.assetIds?.length)
       ) {
-        //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
-        //no need to worry about overdue as the previous state is always ongoing
         newAssetStatus = AssetStatus.CHECKED_OUT;
-
-        // If booking has some kits, then make them checked out
         if (hasKits) {
           newKitStatus = AssetStatus.CHECKED_OUT;
         }
@@ -337,7 +339,11 @@ export async function upsertBooking(
         );
       }
 
-      if (res.from && booking.status === BookingStatus.RESERVED) {
+      if (
+        res.from &&
+        booking.status === BookingStatus.RESERVED &&
+        !booking.isExpired //Only schedule if the booking is not already
+      ) {
         promises.push(cancelScheduler(res));
         const when = new Date(res.from);
         when.setHours(when.getHours() - 1); //1hour before send checkout reminder
@@ -484,7 +490,7 @@ export async function upsertBooking(
       data: data as Prisma.BookingCreateInput,
       include: { ...commonInclude, organization: true },
     });
-    if (res.from && booking.status === BookingStatus.RESERVED) {
+    if (res.from && booking.status === BookingStatus.RESERVED && !isExpired) {
       await cancelScheduler(res);
       const when = new Date(res.from);
       when.setHours(when.getHours() - 1); //1hour before send checkout reminder
@@ -1533,6 +1539,34 @@ export async function addScannedAssetsToBooking({
       message,
       additionalData: { assetIds, bookingId, organizationId },
       label,
+    });
+  }
+}
+
+export async function getExistingBookingDetails(bookingId: string) {
+  try {
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { id: true, status: true, assets: { select: { id: true } } },
+    });
+
+    if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking is not in Draft or Reserved status.",
+        label: "Booking",
+      });
+    }
+
+    return booking;
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause,
+      message:
+        cause?.message ||
+        "Something went wrong while getting existing booking details.",
+      additionalData: { bookingId },
+      label: "Booking",
     });
   }
 }

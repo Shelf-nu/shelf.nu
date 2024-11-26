@@ -23,8 +23,10 @@ import {
 import { Td as BaseTd } from "~/components/table";
 import When from "~/components/when/when";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
@@ -61,7 +63,7 @@ export function AdvancedIndexColumn({
     useLoaderData<AssetIndexLoaderData>();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
   const isCustomField = column.startsWith("cf_");
 
   if (isCustomField) {
@@ -137,6 +139,7 @@ export function AdvancedIndexColumn({
                     alt: item.title,
                   }}
                   className="size-10 rounded-[4px] border object-cover"
+                  withPreview={!!item.mainImage}
                 />
               ) : null}
 

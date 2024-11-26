@@ -47,6 +47,7 @@ import {
   ToolIcon,
   AddTagsIcon,
   RemoveTagsIcon,
+  InstallIcon,
   ColumnsIcon,
   LockIcon,
   ImageIcon,
@@ -55,6 +56,7 @@ import {
   AvailableIcon,
   UnavailableIcon,
   ChangeIcon,
+  BookingExistIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -109,6 +111,7 @@ export type IconType =
   | "scan"
   | "tool"
   | "rows"
+  | "install"
   | "columns"
   | "no-permissions"
   | "image"
@@ -116,7 +119,8 @@ export type IconType =
   | "sort"
   | "available"
   | "unavailable"
-  | "change";
+  | "change"
+  | "booking-exist";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -173,6 +177,7 @@ export const iconsMap: IconsMap = {
   scan: <ScanIcon />,
   tool: <ToolIcon />,
   rows: <RowsIcon />,
+  install: <InstallIcon />,
   columns: <ColumnsIcon />,
   lock: <LockIcon />,
   image: <ImageIcon />,
@@ -181,6 +186,7 @@ export const iconsMap: IconsMap = {
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
+  "booking-exist": <BookingExistIcon />,
 };
 
 export default iconsMap;

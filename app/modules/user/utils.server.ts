@@ -100,7 +100,7 @@ export async function resolveUserAction(
           throw new ShelfError({
             cause,
             message: "Organization not found",
-            additionalData: { organizationId },
+            additionalData: { organizationId, targetUserId, userId },
             label: "Team",
           });
         });

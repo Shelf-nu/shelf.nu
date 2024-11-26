@@ -12,7 +12,7 @@ export function BookingPageContent() {
 
   const custodianUser = teamMembers.find((member) =>
     booking.custodianUserId
-      ? booking.custodianUserId === member?.user?.id
+      ? booking.custodianUserId === member?.userId
       : booking.custodianTeamMemberId === member.id
   );
 
@@ -37,11 +37,7 @@ export function BookingPageContent() {
               ? dateForDateTimeInputValue(new Date(booking.to))
               : undefined
           }
-          custodianUserId={JSON.stringify({
-            id: custodianUser?.id,
-            name: custodianUser?.name,
-            userId: custodianUser?.userId,
-          })}
+          custodianRef={custodianUser?.id}
           bookingStatus={bookingStatus}
         />
       </div>

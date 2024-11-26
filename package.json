@@ -36,6 +36,9 @@
     "prepare": "husky install",
     "precommit": "npm run db:generate-type && npm run lint:fix && npm run format && npm run typecheck"
   },
+  "overrides": {
+    "cross-spawn": "~7.0.6"
+  },
   "dependencies": {
     "@fullcalendar/core": "^6.1.11",
     "@fullcalendar/daygrid": "^6.1.11",
@@ -55,9 +58,9 @@
     "@radix-ui/react-toast": "1.1.5",
     "@radix-ui/react-tooltip": "^1.0.7",
     "@react-email/components": "0.0.14",
-    "@remix-run/node": "2.10.3",
-    "@remix-run/react": "2.10.3",
-    "@remix-run/serve": "2.10.3",
+    "@remix-run/node": "2.13.1",
+    "@remix-run/react": "2.13.1",
+    "@remix-run/serve": "2.13.1",
     "@sentry/remix": "^8.33.1",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
@@ -100,7 +103,7 @@
     "react-map-gl": "^7.1.7",
     "react-media-devices": "^1.1.5",
     "react-microsoft-clarity": "^1.2.0",
-    "react-router-hono-server": "^0.3.0",
+    "react-router-hono-server": "^1.0.0",
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^2.15.1",
     "react-zorm": "^0.9.0",
@@ -118,8 +121,8 @@
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",
     "@playwright/test": "^1.41.2",
-    "@remix-run/dev": "2.10.3",
-    "@remix-run/eslint-config": "2.10.3",
+    "@remix-run/dev": "2.13.1",
+    "@remix-run/eslint-config": "2.13.1",
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "@tailwindcss/forms": "^0.5.7",
     "@tailwindcss/typography": "^0.5.10",
@@ -137,7 +140,7 @@
     "@types/react-dom": "^18.2.19",
     "@types/ua-parser-js": "^0.7.39",
     "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/coverage-v8": "^1.4.0",
+    "@vitest/coverage-v8": "^2.1.4",
     "autoprefixer": "^10.4.19",
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.3.0",
@@ -145,7 +148,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-no-restricted-imports": "^0.0.0",
     "eslint-plugin-tailwindcss": "^3.14.2",
-    "happy-dom": "^13.3.8",
+    "happy-dom": "^15.11.0",
     "husky": "^9.0.11",
     "msw": "^1.2.0",
     "nodemailer-mock": "^2.0.4",
@@ -164,7 +167,7 @@
     "vite": "^5.4.6",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
-    "vitest": "^1.4.0"
+    "vitest": "^2.1.4"
   },
   "engines": {
     "node": ">=20"

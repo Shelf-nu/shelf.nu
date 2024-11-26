@@ -596,6 +596,22 @@ export async function parseQrCodesFromImportData({
       });
     }
 
+    /** Check for codes that dont have org id. If they dont, update them to link them to current org */
+    const unclaimedCodes = codes.filter((code) => !code.organizationId);
+    if (unclaimedCodes.length) {
+      await db.qr.updateMany({
+        where: {
+          id: {
+            in: unclaimedCodes.map((code) => code.id),
+          },
+        },
+        data: {
+          organizationId,
+          userId,
+        },
+      });
+    }
+
     return qrCodePerAsset;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);

@@ -18,7 +18,7 @@ import {
   bookingIncludeForEmails,
   scheduleNextBookingJob,
 } from "./service.server";
-import type { SchedulerData, SchedulerDataDeprecated } from "./types";
+import type { SchedulerData } from "./types";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
@@ -251,40 +251,4 @@ export const registerBookingWorkers = async () => {
       }
     }
   );
-
-  // === @TODO MUST remove this once no more jobs with name values(`bookingSchedulerEventsEnum`) found in DB
-  // keeping it causes unncessary polling to db(2 calls / min)
-  // this is just for backward compatibility ===
-  await Promise.all(
-    Object.values(bookingSchedulerEventsEnum).map(async (key) => {
-      await scheduler.work<SchedulerDataDeprecated>(key, async (job) => {
-        const handler = event2HandlerMap[key];
-        if (typeof handler != "function") {
-          Logger.error(
-            new ShelfError({
-              cause: null,
-              message: "Wrong event type received for the scheduled worker",
-              additionalData: { job },
-              label: "Booking",
-            })
-          );
-          return;
-        }
-        const data: SchedulerData = { ...job.data, eventType: key };
-        try {
-          await handler({ ...job, data });
-        } catch (cause) {
-          Logger.error(
-            new ShelfError({
-              cause,
-              message: "Something went wrong while executing scheduled work.",
-              additionalData: { data: job.data, work: key },
-              label: "Booking",
-            })
-          );
-        }
-      });
-    })
-  );
-  // === END ===
 };

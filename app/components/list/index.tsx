@@ -8,7 +8,7 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
@@ -110,7 +110,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
 
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
-  const { modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsAdvanced } = useAssetIndexViewState();
 
   const hasSelectedItems = selectedBulkItemsCount > 0;
 

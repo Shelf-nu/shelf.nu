@@ -185,7 +185,11 @@ async function getAssetsFromView(params: {
 
     /** Default value of where. Takes the assets belonging to current user */
     let where: Prisma.AssetSearchViewWhereInput = {
-      asset: { organizationId },
+      asset: {
+        organizationId,
+        // Ensure asset exists
+        id: { not: undefined },
+      },
     };
 
     /** If the search string exists, add it to the where object */
@@ -407,7 +411,31 @@ async function getAssetsFromView(params: {
       db.assetSearchView.count({ where }),
     ]);
 
-    return { assets: assetSearch.map((a) => a.asset), totalAssets };
+    // Filter out null assets while logging errors for monitoring
+    const validAssets = assetSearch.filter((result) => {
+      if (!result.asset) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message: "Found AssetSearchView record without associated asset",
+            label: "Assets",
+            additionalData: {
+              searchViewRecord: result,
+              organizationId,
+              query: "getAssetsFromView",
+              where,
+            },
+          })
+        );
+        return false;
+      }
+      return true;
+    });
+
+    return {
+      assets: validAssets.map((result) => result.asset),
+      totalAssets: totalAssets,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -790,6 +818,7 @@ export async function createAsset({
   customFieldsValues,
   organizationId,
   valuation,
+  availableToBook = true,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -801,6 +830,7 @@ export async function createAsset({
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   organizationId: Organization["id"];
+  availableToBook?: Asset["availableToBook"];
 }) {
   try {
     /** User connection data */
@@ -852,6 +882,7 @@ export async function createAsset({
       qrCodes,
       valuation,
       organization,
+      availableToBook,
     };
 
     /** If a categoryId is passed, link the category to the asset. */
@@ -1912,6 +1943,7 @@ export async function createAssetsFromContentImport({
             : undefined,
         valuation: asset.valuation ? +asset.valuation : null,
         customFieldsValues,
+        availableToBook: asset?.bookable !== "no",
       });
     }
   } catch (cause) {
@@ -2801,9 +2833,13 @@ export async function bulkAssignAssetTags({
 
     return true;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk updating category.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while bulk updating tags.",
       additionalData: { userId, assetIds, organizationId, tagsIds },
       label,
     });
@@ -2911,4 +2947,31 @@ export async function relinkQrCode({
       } to **${qrId}**`,
     }),
   ]);
+}
+
+export async function getAvailableAssetsIdsForBooking(
+  assetIds: Asset["id"][]
+): Promise<string[]> {
+  try {
+    const selectedAssets = await db.asset.findMany({
+      where: { id: { in: assetIds } },
+      select: { status: true, id: true, kit: true },
+    });
+    if (selectedAssets.some((asset) => asset.kit)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add assets that belong to a kit.",
+        label: "Booking",
+      });
+    }
+    return selectedAssets.map((asset) => asset.id);
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause: cause,
+      message: cause?.message
+        ? cause.message
+        : "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
 }

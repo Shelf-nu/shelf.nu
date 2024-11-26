@@ -8,10 +8,11 @@ import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
-import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 
 import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
@@ -59,38 +60,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /**
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        deletedAt: null,
-        organizationId,
-      },
-      include: {
-        user: true,
-      },
-      orderBy: {
-        userId: "asc",
-      },
+    const teamMembersData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
+      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      userId,
     });
-
-    const selfServiceOrBaseUser = isSelfServiceOrBase
-      ? teamMembers.find((member) => member.userId === authSession.userId)
-      : undefined;
-
-    if (isSelfServiceOrBase && !selfServiceOrBaseUser) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "Seems like something is wrong with your user. Please contact support to get this resolved. Make sure to include the trace id seen below.",
-        label: "Booking",
-      });
-    }
 
     return json(
       data({
         showModal: true,
         isSelfServiceOrBase,
-        selfServiceOrBaseUser,
-        teamMembers,
+        ...teamMembersData,
         assetIds: assetIds.length ? assetIds : undefined,
       }),
       {
@@ -201,9 +184,11 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfServiceOrBase, selfServiceOrBaseUser, assetIds } =
+  const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
+  // The loader already takes care of returning only the current user so we just get the first and only element in the array
+  const custodianRef = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
 
   return (
     <div className="booking-inner-wrapper">
@@ -220,15 +205,7 @@ export default function NewBooking() {
           startDate={startDate}
           endDate={endDate}
           assetIds={assetIds}
-          custodianUserId={
-            isSelfServiceOrBase
-              ? JSON.stringify({
-                  id: selfServiceOrBaseUser?.id,
-                  name: selfServiceOrBaseUser?.name,
-                  userId: selfServiceOrBaseUser?.userId,
-                })
-              : undefined
-          }
+          custodianRef={custodianRef}
         />
       </div>
     </div>

@@ -16,7 +16,7 @@ import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
 import { toggleMobileNavAtom } from "./atoms";
-import { ChatWithAnExpert } from "./chat-with-an-expert";
+import { SidebarNoticeCard } from "./notice-card";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
@@ -141,14 +141,14 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
         </ul>
 
         <div className="lower-menu">
-          {/* ChatWithAnExpert component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
+          {/* Sidebar notice card component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
           {fetcher.state == "idle" ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
             >
-              <ChatWithAnExpert />
+              <SidebarNoticeCard />
             </motion.div>
           ) : null}
           <ul className="menu mb-6">

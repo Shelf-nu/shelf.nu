@@ -11,7 +11,7 @@ import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/search-params";
-import { useAssetIndexMode } from "~/hooks/use-asset-index-mode";
+import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,
@@ -37,7 +37,7 @@ export function AssetIndexFilters({
   const clearFilters = useClearValueFromParams(...searchParams);
   const { roles } = useUserRoleHelper();
 
-  const { modeIsSimple, modeIsAdvanced } = useAssetIndexMode();
+  const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 
   if (modeIsSimple) {
     return (
@@ -150,10 +150,10 @@ export function AssetIndexFilters({
                   ...item,
                   id: item.metadata?.userId ? item.metadata.userId : item.id,
                 })}
-                renderItem={(item) => resolveTeamMemberName(item)}
+                renderItem={(item) => resolveTeamMemberName(item, true)}
                 label="Filter by custodian"
                 placeholder="Search team members"
-                initialDataKey="teamMembers"
+                initialDataKey="rawTeamMembers"
                 countKey="totalTeamMembers"
                 withoutValueItem={{
                   id: "without-custody",

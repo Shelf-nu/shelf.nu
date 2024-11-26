@@ -23,7 +23,7 @@ export const LocationSelect = ({
     ? undefined
     : data?.asset?.locationId ?? undefined;
 
-  const [locationId, setLocationId] = useState(undefined);
+  const [locationId, setLocationId] = useState(assetLocationId ?? undefined);
   const disabled = isFormProcessing(navigation.state);
 
   return (
@@ -38,9 +38,11 @@ export const LocationSelect = ({
           defaultValue={locationId}
           model={{ name: "location", queryKey: "name" }}
           contentLabel="Locations"
+          placeholder="Without location"
           initialDataKey="locations"
           countKey="totalLocations"
           closeOnSelect
+          allowClear
           extraContent={
             <Button
               to="/locations/new"
