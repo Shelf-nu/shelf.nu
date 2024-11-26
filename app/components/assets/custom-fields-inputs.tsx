@@ -23,6 +23,7 @@ import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
+import { SerializeFrom } from "@remix-run/node";
 
 export default function AssetCustomFields({
   zo,
@@ -199,16 +200,8 @@ export default function AssetCustomFields({
   const requiredFields = customFields.filter((field) => field.required);
   const optionalFields = customFields.filter((field) => !field.required);
 
-  type JsonifyObject<T> = {
-    [K in keyof T]: T[K] extends Date
-      ? string
-      : T[K] extends object
-      ? JsonifyObject<T[K]>
-      : T[K];
-  };
-
   function convertJsonifiedCustomField(
-    field: JsonifyObject<CustomField>
+    field: SerializeFrom<CustomField>
   ): CustomField {
     return {
       ...field,
