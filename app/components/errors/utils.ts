@@ -2,7 +2,7 @@ import { z } from "zod";
 import { isRouteError } from "~/utils/http";
 
 export const error404AdditionalData = z.object({
-  model: z.enum(["asset", "kit"]),
+  model: z.enum(["asset", "kit", "location"]),
   id: z.string(),
   redirectTo: z.string().optional(),
   organization: z.object({
