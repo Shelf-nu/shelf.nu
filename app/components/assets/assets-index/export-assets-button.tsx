@@ -1,14 +1,17 @@
 import { useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
 
 export function ExportAssetsButton() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const { canImportAssets } = useLoaderData<AssetIndexLoaderData>();
   const disabled = selectedAssets.length === 0;
-
   const [isDownloading, setIsDownloading] = useState(false);
 
   const allSelected = isSelectingAllItems(selectedAssets);
@@ -49,7 +52,16 @@ export function ExportAssetsButton() {
       className="font-medium"
       title={title}
       disabled={
-        disabled
+        !canImportAssets
+          ? {
+              reason: (
+                <>
+                  Exporting is not available on the free tier of shelf.{" "}
+                  <UpgradeMessage />
+                </>
+              ),
+            }
+          : disabled
           ? { reason: "You must select at least 1 asset to export" }
           : isDownloading
       }
