@@ -1293,14 +1293,19 @@ export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
       (userOrg) => userOrg.organizationId === organizationId
     );
 
-    const otherOrgOfUser = userOrganizations?.find(
-      (org) =>
-        !!user.userOrganizations.find(
-          (userOrg) => userOrg.organizationId === org.organizationId
-        )
-    );
+    const otherOrgsForUser =
+      userOrganizations?.filter(
+        (org) =>
+          !!user.userOrganizations.find(
+            (userOrg) => userOrg.organizationId === org.organizationId
+          )
+      ) ?? [];
 
-    if (userOrganizations?.length && !isUserInCurrentOrg && !!otherOrgOfUser) {
+    if (
+      userOrganizations?.length &&
+      !isUserInCurrentOrg &&
+      otherOrgsForUser?.length
+    ) {
       const redirectTo =
         typeof request !== "undefined"
           ? new URL(request.url).pathname
@@ -1311,8 +1316,8 @@ export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
         title: "User not found",
         message: "",
         additionalData: {
-          model: "user",
-          organization: otherOrgOfUser,
+          model: "teamMember",
+          organizations: otherOrgsForUser,
           redirectTo,
         },
         label,
