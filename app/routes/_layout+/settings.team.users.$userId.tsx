@@ -13,7 +13,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { getUserByID } from "~/modules/user/service.server";
+import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -33,12 +33,13 @@ export const loader = async ({
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { currentOrganization, organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.teamMemberProfile,
-      action: PermissionAction.read,
-    });
+    const { currentOrganization, organizationId, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.teamMemberProfile,
+        action: PermissionAction.read,
+      });
 
     const { userId: selectedUserId } = getParams(
       params,
@@ -48,28 +49,23 @@ export const loader = async ({
       }
     );
 
-    const user = await getUserByID(selectedUserId, {
-      userOrganizations: {
-        where: {
-          organizationId,
-        },
-        select: {
-          roles: true,
-        },
-      },
-      teamMembers: {
-        where: {
-          organizationId,
-        },
-        include: {
-          receivedInvites: {
-            where: {
-              organizationId,
+    const user = await getUserFromOrg({
+      id: selectedUserId,
+      organizationId,
+      userOrganizations,
+      request,
+      extraInclude: {
+        teamMembers: {
+          where: { organizationId },
+          include: {
+            receivedInvites: {
+              where: { organizationId },
             },
           },
         },
       },
     });
+
     const userName =
       (user.firstName ? user.firstName.trim() : "") +
       " " +
