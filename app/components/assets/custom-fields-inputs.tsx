@@ -209,40 +209,99 @@ export default function AssetCustomFields({
         </Link>
       </div>
       {customFields.length > 0 ? (
-        customFields.map((field, index) => {
-          const value = customFieldsValues?.find(
-            (cfv) => cfv.customFieldId === field.id
-          )?.value;
-          const displayVal = value
-            ? (getCustomFieldDisplayValue(value) as string)
-            : "";
-          return (
-            <FormRow
-              key={field.id + index}
-              rowLabel={field.name}
-              subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-              className="border-b-0"
-              required={field.required}
-            >
-              {typeof fieldTypeToCompMap[field.type] === "function" ? (
-                fieldTypeToCompMap[field.type]!(field as unknown as CustomField)
-              ) : (
-                <Input
-                  hideLabel
-                  placeholder={field.helpText || undefined}
-                  type={field.type.toLowerCase()}
-                  label={field.name}
-                  name={`cf-${field.id}`}
-                  error={zo.errors[`cf-${field.id}`]()?.message}
-                  disabled={disabled}
-                  defaultValue={displayVal}
-                  className="w-full"
-                  required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
-                />
-              )}
-            </FormRow>
-          );
-        })
+        <>
+          <div>
+            <h3 className="text-lg font-medium mb-4">Required Fields</h3>
+            {customFields
+              .filter((field) => field.required)
+              .map((field, index) => {
+                const value = customFieldsValues?.find(
+                  (cfv) => cfv.customFieldId === field.id
+                )?.value;
+                const displayVal = value
+                  ? (getCustomFieldDisplayValue(value) as string)
+                  : "";
+                return (
+                  <FormRow
+                    key={field.id + index}
+                    rowLabel={field.name}
+                    subHeading={
+                      field.helpText ? <p>{field.helpText}</p> : undefined
+                    }
+                    className="border-b-0"
+                    required={field.required}
+                  >
+                    {typeof fieldTypeToCompMap[field.type] === "function" ? (
+                      fieldTypeToCompMap[field.type]!(
+                        field as unknown as CustomField
+                      )
+                    ) : (
+                      <Input
+                        hideLabel
+                        placeholder={field.helpText || undefined}
+                        type={field.type.toLowerCase()}
+                        label={field.name}
+                        name={`cf-${field.id}`}
+                        error={zo.errors[`cf-${field.id}`]()?.message}
+                        disabled={disabled}
+                        defaultValue={displayVal}
+                        className="w-full"
+                        required={zodFieldIsRequired(
+                          schema.shape[`cf-${field.id}`]
+                        )}
+                      />
+                    )}
+                  </FormRow>
+                );
+              })}
+          </div>
+          <hr className="my-6 border-gray-300" />
+          <div>
+            <h3 className="text-lg font-medium mb-4">Optional Fields</h3>
+            {customFields
+              .filter((field) => !field.required)
+              .map((field, index) => {
+                const value = customFieldsValues?.find(
+                  (cfv) => cfv.customFieldId === field.id
+                )?.value;
+                const displayVal = value
+                  ? (getCustomFieldDisplayValue(value) as string)
+                  : "";
+                return (
+                  <FormRow
+                    key={field.id + index}
+                    rowLabel={field.name}
+                    subHeading={
+                      field.helpText ? <p>{field.helpText}</p> : undefined
+                    }
+                    className="border-b-0"
+                    required={field.required}
+                  >
+                    {typeof fieldTypeToCompMap[field.type] === "function" ? (
+                      fieldTypeToCompMap[field.type]!(
+                        field as unknown as CustomField
+                      )
+                    ) : (
+                      <Input
+                        hideLabel
+                        placeholder={field.helpText || undefined}
+                        type={field.type.toLowerCase()}
+                        label={field.name}
+                        name={`cf-${field.id}`}
+                        error={zo.errors[`cf-${field.id}`]()?.message}
+                        disabled={disabled}
+                        defaultValue={displayVal}
+                        className="w-full"
+                        required={zodFieldIsRequired(
+                          schema.shape[`cf-${field.id}`]
+                        )}
+                      />
+                    )}
+                  </FormRow>
+                );
+              })}
+          </div>
+        </>
       ) : (
         <div>
           <div className=" mx-auto max-w-screen-sm rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
