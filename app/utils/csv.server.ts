@@ -20,8 +20,12 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
-import type { Column } from "~/modules/asset-index-settings/helpers";
+import type {
+  Column,
+  FixedField,
+} from "~/modules/asset-index-settings/helpers";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
@@ -265,7 +269,10 @@ export async function exportAssetsFromIndexToCsv({
   // Pass both assets and columns to the build function
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: settings.columns as Column[],
+    columns: [
+      { name: "name", visible: true, position: 0 },
+      ...(settings.columns as Column[]),
+    ],
   });
 
   // Join rows with CRLF as per CSV spec
@@ -303,63 +310,71 @@ export const buildCsvExportDataFromAssets = ({
       // Handle different column types
       let value: any;
 
-      switch (column.name) {
-        case "id":
-          value = asset.id;
-          break;
-        case "name":
-          value = asset.title;
-          break;
-        case "description":
-          value = asset.description ?? "";
-          break;
-        case "category":
-          value = asset.category?.name ?? "Uncategorized";
-          break;
-        case "location":
-          value = asset.location?.name;
-          break;
-        case "kit":
-          value = asset.kit?.name;
-          break;
-        case "custody":
-          value = asset.custody
-            ? resolveTeamMemberName(asset.custody.custodian)
-            : "";
-          break;
-        case "tags":
-          value = asset.tags?.map((t) => t.name).join(", ") ?? "";
-          break;
-        case "status":
-          value = asset.status;
-          break;
-        case "createdAt":
-          value = asset.createdAt
-            ? new Date(asset.createdAt).toISOString()
-            : "";
-          break;
-        case "valuation":
-          value = asset.valuation;
-          break;
-        case "availableToBook":
-          value = asset.availableToBook ? "Yes" : "No";
-          break;
-        default:
-          // Handle custom fields
-          if (column.name.startsWith("cf_")) {
-            const fieldName = column.name.replace("cf_", "");
-            const customField = asset.customFields?.find(
-              (cf) => cf.customField.name === fieldName
-            );
+      // If it's not a custom field, it must be a fixed field or 'name'
+      if (!column.name.startsWith("cf_")) {
+        const fieldName = column.name as FixedField | "name";
 
-            if (!customField) {
-              value = "";
-            } else {
-              const fieldValue =
-                customField.value as unknown as ShelfAssetCustomFieldValueType["value"];
-              value = formatCustomFieldForCsv(fieldValue, column.cfType);
-            }
-          }
+        switch (fieldName) {
+          case "id":
+            value = asset.id;
+            break;
+          case "qrId":
+            value = asset.qrId;
+            break;
+          case "name":
+            value = asset.title;
+            break;
+          case "description":
+            value = asset.description ?? "";
+            break;
+          case "category":
+            value = asset.category?.name ?? "Uncategorized";
+            break;
+          case "location":
+            value = asset.location?.name;
+            break;
+          case "kit":
+            value = asset.kit?.name;
+            break;
+          case "custody":
+            value = asset.custody
+              ? resolveTeamMemberName(asset.custody.custodian)
+              : "";
+            break;
+          case "tags":
+            value = asset.tags?.map((t) => t.name).join(", ") ?? "";
+            break;
+          case "status":
+            value = asset.status;
+            break;
+          case "createdAt":
+            value = asset.createdAt
+              ? new Date(asset.createdAt).toISOString()
+              : "";
+            break;
+          case "valuation":
+            value = asset.valuation;
+            break;
+          case "availableToBook":
+            value = asset.availableToBook ? "Yes" : "No";
+            break;
+          default:
+            checkExhaustiveSwitch(fieldName);
+            value = "";
+        }
+      } else {
+        // Handle custom fields
+        const fieldName = column.name.replace("cf_", "");
+        const customField = asset.customFields?.find(
+          (cf) => cf.customField.name === fieldName
+        );
+        if (!customField) {
+          value = "";
+        } else {
+          const fieldValue =
+            customField.value as unknown as ShelfAssetCustomFieldValueType["value"];
+          value = formatCustomFieldForCsv(fieldValue, column.cfType);
+        }
       }
 
       return formatValueForCsv(value);
