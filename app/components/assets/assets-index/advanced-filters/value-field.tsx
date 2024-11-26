@@ -563,7 +563,12 @@ function CustodyEnumField({
             className="w-full justify-start  font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
             <div className="flex items-center justify-between">
-              <span className=" text-left">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
                 {value === "without-custody"
                   ? "Without custody"
                   : selectedIds.length > 0
@@ -675,7 +680,12 @@ function CategoryEnumField({
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
             <div className="flex items-center justify-between">
-              <span className="text-left">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
                 {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
@@ -778,7 +788,12 @@ function LocationEnumField({
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
             <div className="flex items-center justify-between">
-              <span className="text-left">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
                 {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
@@ -881,7 +896,12 @@ function KitEnumField({
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
             <div className="flex items-center justify-between">
-              <span className="text-left">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
                 {selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {

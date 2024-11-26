@@ -84,7 +84,7 @@ export default function AssetCustomFields({
     DATE: (field) => (
       <div className="flex w-full items-end">
         <Input
-          className="w-full"
+          className="w-full placeholder:text-gray-500"
           label={field.name}
           hideLabel
           type="date"

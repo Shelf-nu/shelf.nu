@@ -188,7 +188,12 @@ export default function DynamicSelect({
                 ref={triggerRef}
                 className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[14px]  hover:cursor-pointer disabled:opacity-50"
               >
-                <span className="truncate whitespace-nowrap pr-2">
+                <span
+                  className={tw(
+                    "truncate whitespace-nowrap pr-2",
+                    selectedValue === undefined && "text-gray-500"
+                  )}
+                >
                   {triggerValue}
                 </span>
                 <ChevronDownIcon />
