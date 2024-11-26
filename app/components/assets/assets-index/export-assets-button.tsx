@@ -1,16 +1,14 @@
 import { useState } from "react";
-import { useFetcher } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { useDisabled } from "~/hooks/use-disabled";
 import { isSelectingAllItems } from "~/utils/list";
 
 export function ExportAssetsButton() {
-  const fetcher = useFetcher();
-  const disabled = useDisabled(fetcher);
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const disabled = selectedAssets.length === 0;
+
   const [isDownloading, setIsDownloading] = useState(false);
 
   const allSelected = isSelectingAllItems(selectedAssets);
@@ -51,9 +49,9 @@ export function ExportAssetsButton() {
       className="font-medium"
       title={title}
       disabled={
-        selectedAssets.length === 0
+        disabled
           ? { reason: "You must select at least 1 asset to export" }
-          : disabled || isDownloading
+          : isDownloading
       }
     >
       <div className="flex items-center gap-1">
