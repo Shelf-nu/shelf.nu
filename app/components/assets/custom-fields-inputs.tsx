@@ -198,6 +198,7 @@ export default function AssetCustomFields({
   };
   const requiredFields = customFields.filter((field) => field.required);
   const optionalFields = customFields.filter((field) => !field.required);
+  
   type JsonifyObject<T> = {
     [K in keyof T]: T[K] extends Date
       ? string
@@ -227,65 +228,65 @@ export default function AssetCustomFields({
           Manage custom fields
         </Link>
       </div>
-      <div className="border-b pb-5">
-        <h3 className="mb-4 text-[16px] font-semibold">Required Fields</h3>
-        {requiredFields.map((field, index) => (
-          <FormRow
-            key={field.id + index}
-            rowLabel={field.name}
-            subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-            className="border-b-0"
-            required={field.required}
-          >
-            {fieldTypeToCompMap[field.type]?.(
-              convertJsonifiedCustomField(field)
-            ) ?? (
-              <Input
-                hideLabel
-                placeholder={field.helpText || undefined}
-                type={field.type.toLowerCase()}
-                label={field.name}
-                name={`cf-${field.id}`}
-                error={zo.errors[`cf-${field.id}`]()?.message}
-                disabled={disabled}
-                defaultValue={getCustomFieldVal(field.id)}
-                className="w-full"
-                required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
-              />
-            )}
-          </FormRow>
-        ))}
-      </div>
       {customFields.length > 0 ? (
-        <div className="mt-6">
-          <h3 className="mb-4 text-[16px] font-semibold">Optional Fields</h3>
-          {optionalFields.map((field, index) => (
-            <FormRow
-              key={field.id + index}
-              rowLabel={field.name}
-              subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-              className="border-b-0"
-              required={field.required}
-            >
-              {fieldTypeToCompMap[field.type]?.(
-                convertJsonifiedCustomField(field)
-              ) ?? (
-                <Input
-                  hideLabel
-                  placeholder={field.helpText || undefined}
-                  type={field.type.toLowerCase()}
-                  label={field.name}
-                  name={`cf-${field.id}`}
-                  error={zo.errors[`cf-${field.id}`]()?.message}
-                  disabled={disabled}
-                  defaultValue={getCustomFieldVal(field.id)}
-                  className="w-full"
-                  required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
-                />
-              )}
-            </FormRow>
-          ))}
-        </div>
+        <>
+          {requiredFields.length>0 && <div>
+            <h5>Required Fields</h5>
+            {requiredFields.map((field, index) => (
+              <FormRow
+                key={field.id + index}
+                rowLabel={field.name}
+                subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
+                className="border-b-0"
+                required={field.required}
+              >
+                {fieldTypeToCompMap[field.type]?.(
+                  convertJsonifiedCustomField(field)
+                ) ?? (
+                    <Input
+                      hideLabel
+                      placeholder={field.helpText || undefined}
+                      type={field.type.toLowerCase()}
+                      label={field.name}
+                      name={`cf-${field.id}`}
+                      error={zo.errors[`cf-${field.id}`]()?.message}
+                      disabled={disabled}
+                      defaultValue={getCustomFieldVal(field.id)}
+                      className="w-full"
+                      required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])} />
+                  )}
+              </FormRow>
+            ))}
+          </div>}
+          {optionalFields.length>0 && <div className="mt-6 border-t pt-5">
+            <h5>Optional Fields</h5>
+            {optionalFields.map((field, index) => (
+              <FormRow
+                key={field.id + index}
+                rowLabel={field.name}
+                subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
+                className="border-b-0"
+                required={field.required}
+              >
+                {fieldTypeToCompMap[field.type]?.(
+                  convertJsonifiedCustomField(field)
+                ) ?? (
+                    <Input
+                      hideLabel
+                      placeholder={field.helpText || undefined}
+                      type={field.type.toLowerCase()}
+                      label={field.name}
+                      name={`cf-${field.id}`}
+                      error={zo.errors[`cf-${field.id}`]()?.message}
+                      disabled={disabled}
+                      defaultValue={getCustomFieldVal(field.id)}
+                      className="w-full"
+                      required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])} />
+                  )}
+              </FormRow>
+            ))}
+          </div>}
+        </>
       ) : (
         <div>
           <div className=" mx-auto max-w-screen-sm rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
