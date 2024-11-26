@@ -198,7 +198,7 @@ export default function AssetCustomFields({
   };
   const requiredFields = customFields.filter((field) => field.required);
   const optionalFields = customFields.filter((field) => !field.required);
-  
+
   type JsonifyObject<T> = {
     [K in keyof T]: T[K] extends Date
       ? string
@@ -230,19 +230,22 @@ export default function AssetCustomFields({
       </div>
       {customFields.length > 0 ? (
         <>
-          {requiredFields.length>0 && <div>
-            <h5>Required Fields</h5>
-            {requiredFields.map((field, index) => (
-              <FormRow
-                key={field.id + index}
-                rowLabel={field.name}
-                subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-                className="border-b-0"
-                required={field.required}
-              >
-                {fieldTypeToCompMap[field.type]?.(
-                  convertJsonifiedCustomField(field)
-                ) ?? (
+          {requiredFields.length > 0 && (
+            <div>
+              <h5>Required Fields</h5>
+              {requiredFields.map((field, index) => (
+                <FormRow
+                  key={field.id + index}
+                  rowLabel={field.name}
+                  subHeading={
+                    field.helpText ? <p>{field.helpText}</p> : undefined
+                  }
+                  className="border-b-0"
+                  required={field.required}
+                >
+                  {fieldTypeToCompMap[field.type]?.(
+                    convertJsonifiedCustomField(field)
+                  ) ?? (
                     <Input
                       hideLabel
                       placeholder={field.helpText || undefined}
@@ -253,24 +256,31 @@ export default function AssetCustomFields({
                       disabled={disabled}
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
-                      required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])} />
+                      required={zodFieldIsRequired(
+                        schema.shape[`cf-${field.id}`]
+                      )}
+                    />
                   )}
-              </FormRow>
-            ))}
-          </div>}
-          {optionalFields.length>0 && <div className="mt-6 border-t pt-5">
-            <h5>Optional Fields</h5>
-            {optionalFields.map((field, index) => (
-              <FormRow
-                key={field.id + index}
-                rowLabel={field.name}
-                subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-                className="border-b-0"
-                required={field.required}
-              >
-                {fieldTypeToCompMap[field.type]?.(
-                  convertJsonifiedCustomField(field)
-                ) ?? (
+                </FormRow>
+              ))}
+            </div>
+          )}
+          {optionalFields.length > 0 && (
+            <div className="mt-6 border-t pt-5">
+              <h5>Optional Fields</h5>
+              {optionalFields.map((field, index) => (
+                <FormRow
+                  key={field.id + index}
+                  rowLabel={field.name}
+                  subHeading={
+                    field.helpText ? <p>{field.helpText}</p> : undefined
+                  }
+                  className="border-b-0"
+                  required={field.required}
+                >
+                  {fieldTypeToCompMap[field.type]?.(
+                    convertJsonifiedCustomField(field)
+                  ) ?? (
                     <Input
                       hideLabel
                       placeholder={field.helpText || undefined}
@@ -281,11 +291,15 @@ export default function AssetCustomFields({
                       disabled={disabled}
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
-                      required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])} />
+                      required={zodFieldIsRequired(
+                        schema.shape[`cf-${field.id}`]
+                      )}
+                    />
                   )}
-              </FormRow>
-            ))}
-          </div>}
+                </FormRow>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <div>
