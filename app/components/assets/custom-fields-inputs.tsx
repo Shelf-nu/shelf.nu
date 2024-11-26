@@ -211,7 +211,7 @@ export default function AssetCustomFields({
       {customFields.length > 0 ? (
         <>
           <div>
-            <h3 className="text-lg font-medium mb-4">Required Fields</h3>
+            <h3 className="mb-4 text-lg font-medium">Required Fields</h3>
             {customFields
               .filter((field) => field.required)
               .map((field, index) => {
@@ -257,7 +257,7 @@ export default function AssetCustomFields({
           </div>
           <hr className="my-6 border-gray-300" />
           <div>
-            <h3 className="text-lg font-medium mb-4">Optional Fields</h3>
+            <h3 className="mb-4 text-lg font-medium">Optional Fields</h3>
             {customFields
               .filter((field) => !field.required)
               .map((field, index) => {
