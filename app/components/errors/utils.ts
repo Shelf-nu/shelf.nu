@@ -1,19 +1,34 @@
 import { z } from "zod";
 import { isRouteError } from "~/utils/http";
 
-export const error404AdditionalData = z.object({
-  model: z.enum(["asset", "kit", "location", "user"]),
+const baseAdditionalDataSchema = z.object({
   id: z.string(),
   redirectTo: z.string().optional(),
+});
+
+const organizationSchema = z.object({
   organization: z.object({
-    organization: z.object({
-      id: z.string(),
-      name: z.string(),
-    }),
+    id: z.string(),
+    name: z.string(),
   }),
 });
 
-export type Error404AdditionalData = z.infer<typeof error404AdditionalData>;
+export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
+  /* For common and general use case */
+  baseAdditionalDataSchema.extend({
+    model: z.enum(["asset", "kit", "location"]),
+    organization: organizationSchema,
+  }),
+  /* A team member (user) can be in multiple organization's of user so we do this. */
+  baseAdditionalDataSchema.extend({
+    model: z.literal("teamMember"),
+    organizations: organizationSchema.array(),
+  }),
+]);
+
+export type Error404AdditionalData = z.infer<
+  typeof error404AdditionalDataSchema
+>;
 
 export function parse404ErrorData(response: unknown):
   | { isError404: false; additionalData: null }
@@ -25,7 +40,7 @@ export function parse404ErrorData(response: unknown):
     return { isError404: false, additionalData: null };
   }
 
-  const parsedDataResponse = error404AdditionalData.safeParse(
+  const parsedDataResponse = error404AdditionalDataSchema.safeParse(
     response.data.error.additionalData
   );
 
