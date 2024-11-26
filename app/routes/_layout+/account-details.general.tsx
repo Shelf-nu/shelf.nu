@@ -39,6 +39,7 @@ import {
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
@@ -457,7 +458,7 @@ export default function UserPage() {
               <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
               <Input
                 disabled={disabled}
-                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                accept={ACCEPT_SUPPORTED_IMAGES}
                 name="profile-picture"
                 type="file"
                 onChange={validateFile}
