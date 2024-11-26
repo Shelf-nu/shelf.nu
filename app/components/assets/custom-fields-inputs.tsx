@@ -200,9 +200,9 @@ export default function AssetCustomFields({
   const optionalFields = customFields.filter((field) => !field.required);
   type JsonifyObject<T> = {
     [K in keyof T]: T[K] extends Date
-      ? string // Dates are converted to strings in JSON
+      ? string
       : T[K] extends object
-      ? JsonifyObject<T[K]> // Recursively apply to nested objects
+      ? JsonifyObject<T[K]>
       : T[K];
   };
 
