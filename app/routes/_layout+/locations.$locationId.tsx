@@ -62,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
@@ -80,6 +80,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
+      userOrganizations,
+      request,
     });
 
     const totalItems = totalAssetsWithinLocation;
@@ -358,5 +360,3 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
-
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;
