@@ -43,14 +43,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.update,
     });
 
-    const { location } = await getLocation({ organizationId, id });
+    const { location } = await getLocation({
+      organizationId,
+      id,
+      userOrganizations,
+      request,
+    });
 
     const header: HeaderData = {
       title: `Edit | ${location.name}`,

@@ -1,8 +1,19 @@
-import type { Prisma, User, Location, Organization } from "@prisma/client";
+import type {
+  Prisma,
+  User,
+  Location,
+  Organization,
+  UserOrganization,
+} from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  isNotFoundError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -16,11 +27,25 @@ export async function getLocation(
     /** Assets to be loaded per page with the location */
     perPage?: number;
     search?: string | null;
+    userOrganizations?: Pick<UserOrganization, "organizationId">[];
+    request?: Request;
   }
 ) {
-  const { organizationId, id, page = 1, perPage = 8, search } = params;
+  const {
+    organizationId,
+    id,
+    page = 1,
+    perPage = 8,
+    search,
+    userOrganizations,
+    request,
+  } = params;
 
   try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
@@ -37,7 +62,14 @@ export async function getLocation(
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
-        where: { id, organizationId },
+        where: {
+          OR: [
+            { id, organizationId },
+            ...(userOrganizations?.length
+              ? [{ id, organizationId: { in: otherOrganizationIds } }]
+              : []),
+          ],
+        },
         include: {
           image: {
             select: {
@@ -64,13 +96,44 @@ export async function getLocation(
       }),
     ]);
 
+    /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
+    if (
+      userOrganizations?.length &&
+      location.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(location.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? new URL(request.url).pathname
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Location not found.",
+        message: "",
+        additionalData: {
+          model: "location",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === location.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
     return { location, totalAssetsWithinLocation };
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching location",
-      additionalData: { ...params },
+      additionalData: {
+        ...params,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
