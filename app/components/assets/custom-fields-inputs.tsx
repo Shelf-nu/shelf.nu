@@ -1,11 +1,14 @@
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
-import type { CustomField, CustomFieldType } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
+import type {
+  CustomField as RawCustomField,
+  CustomFieldType,
+} from "@prisma/client";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type { WithDateFields } from "~/modules/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -24,6 +27,8 @@ import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
+
+type CustomField = WithDateFields<RawCustomField, string>;
 
 export default function AssetCustomFields({
   zo,
@@ -197,22 +202,16 @@ export default function AssetCustomFields({
       );
     },
   };
-  const requiredFields = customFields.filter((field) => field.required);
-  const optionalFields = customFields.filter((field) => !field.required);
-
-  function convertJsonifiedCustomField(
-    field: SerializeFrom<CustomField>
-  ): CustomField {
-    return {
-      ...field,
-      createdAt: new Date(field.createdAt),
-      updatedAt: new Date(field.updatedAt),
-    };
-  }
+  const requiredFields = customFields.filter(
+    (field) => field.required
+  ) as CustomField[];
+  const optionalFields = customFields.filter(
+    (field) => !field.required
+  ) as CustomField[];
 
   return (
     <div className="border-b pb-6">
-      <div className="mb-6 border-b pb-5">
+      <div className=" border-t py-5">
         <h2 className="mb-1 text-[18px] font-semibold">Custom Fields</h2>
         <Link
           to="/settings/custom-fields"
@@ -224,7 +223,7 @@ export default function AssetCustomFields({
       {customFields.length > 0 ? (
         <>
           {requiredFields.length > 0 && (
-            <div>
+            <div className="border-t pt-4">
               <h5>Required Fields</h5>
               {requiredFields.map((field, index) => (
                 <FormRow
@@ -236,9 +235,7 @@ export default function AssetCustomFields({
                   className="border-b-0"
                   required={field.required}
                 >
-                  {fieldTypeToCompMap[field.type]?.(
-                    convertJsonifiedCustomField(field)
-                  ) ?? (
+                  {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
                       hideLabel
                       placeholder={field.helpText || undefined}
@@ -259,7 +256,7 @@ export default function AssetCustomFields({
             </div>
           )}
           {optionalFields.length > 0 && (
-            <div className="mt-6 border-t pt-5">
+            <div className="border-t pt-4">
               <h5>Optional Fields</h5>
               {optionalFields.map((field, index) => (
                 <FormRow
@@ -271,9 +268,7 @@ export default function AssetCustomFields({
                   className="border-b-0"
                   required={field.required}
                 >
-                  {fieldTypeToCompMap[field.type]?.(
-                    convertJsonifiedCustomField(field)
-                  ) ?? (
+                  {fieldTypeToCompMap[field.type]?.(field) ?? (
                     <Input
                       hideLabel
                       placeholder={field.helpText || undefined}
