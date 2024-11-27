@@ -49,7 +49,6 @@ export const loader = async ({
       totalLocations,
       teamMembers,
       totalTeamMembers,
-      rawTeamMembers,
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
@@ -83,7 +82,6 @@ export const loader = async ({
         totalLocations,
         teamMembers,
         totalTeamMembers,
-        rawTeamMembers,
       })
     );
   } catch (cause) {

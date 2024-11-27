@@ -540,7 +540,7 @@ function CustodyEnumField({
     },
     transformItem: (item: any) => item,
     renderItem: (item: any) => resolveTeamMemberName(item, true),
-    initialDataKey: "rawTeamMembers",
+    initialDataKey: "teamMembers",
     countKey: "totalTeamMembers",
     label: "Filter by custodian",
     hideLabel: true,

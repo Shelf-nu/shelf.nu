@@ -63,7 +63,7 @@ export const Pagination = ({ className }: { className?: string }) => {
             of
           </span>
           <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
-            {totalPages || Math.ceil(totalItems / perPage)}
+            {Math.ceil(totalPages) || Math.ceil(totalItems / perPage)}
           </span>
         </div>
 

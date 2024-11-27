@@ -146,14 +146,10 @@ export function AssetIndexFilters({
                   queryKey: "name",
                   deletedAt: null,
                 }}
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
                 renderItem={(item) => resolveTeamMemberName(item, true)}
                 label="Filter by custodian"
                 placeholder="Search team members"
-                initialDataKey="rawTeamMembers"
+                initialDataKey="teamMembers"
                 countKey="totalTeamMembers"
                 withoutValueItem={{
                   id: "without-custody",
