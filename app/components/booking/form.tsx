@@ -137,7 +137,7 @@ export function BookingForm({
   description,
 }: BookingFormData) {
   const navigation = useNavigation();
-  const { rawTeamMembers } = useLoaderData<typeof loader>();
+  const { teamMembers } = useLoaderData<typeof loader>();
 
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
@@ -183,7 +183,7 @@ export function BookingForm({
   }, [endDate]);
 
   /** This is used when we have selfSErvice or Base as we are setting the default */
-  const defaultTeamMember = rawTeamMembers?.find(
+  const defaultTeamMember = teamMembers?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
@@ -386,7 +386,7 @@ export function BookingForm({
                     defaultTeamMember
                       ? JSON.stringify({
                           id: defaultTeamMember?.id,
-                          name: defaultTeamMember?.name,
+                          name: resolveTeamMemberName(defaultTeamMember),
                         })
                       : undefined
                   }
@@ -400,7 +400,7 @@ export function BookingForm({
                   }}
                   fieldName="custodian"
                   contentLabel="Team members"
-                  initialDataKey="rawTeamMembers"
+                  initialDataKey="teamMembers"
                   countKey="totalTeamMembers"
                   placeholder="Select a team member"
                   allowClear

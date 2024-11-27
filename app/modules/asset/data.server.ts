@@ -106,7 +106,6 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
-      rawTeamMembers,
     },
   ] = await Promise.all([
     getOrganizationTierLimit({
@@ -184,7 +183,6 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
-      rawTeamMembers,
       filters,
       organizationId,
       locale,
