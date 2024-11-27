@@ -8,6 +8,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { useSearchParams } from "~/hooks/search-params";
 import type { loader } from "~/routes/_layout+/account-details.workspace.new";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
@@ -101,7 +102,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
             </p>
             <Input
               // disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+              accept={ACCEPT_SUPPORTED_IMAGES}
               name="image"
               type="file"
               onChange={validateFile}

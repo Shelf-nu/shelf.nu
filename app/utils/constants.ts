@@ -7,3 +7,7 @@ export const INVITE_EXPIRY_TTL_DAYS = 5;
 /** Default length of custom cuid2 */
 export const DEFAULT_CUID_LENGTH = 10;
 export const LEGACY_CUID_LENGTH = 25;
+
+//Android 14 camera workaround https://stackoverflow.com/a/79163998/1894472
+export const ACCEPT_SUPPORTED_IMAGES =
+  "image/png,.png,image/jpeg,.jpg,.jpeg,android/force-camera-workaround";
