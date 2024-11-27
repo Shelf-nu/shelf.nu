@@ -26,14 +26,13 @@ import { tw } from "~/utils/tw";
 import { Pagination } from "../../list/pagination";
 import { Button } from "../../shared/button";
 import { ButtonGroup } from "../../shared/button-group";
+import { useSidebar } from "~/components/layout/sidebar/sidebar";
 
 export function AssetIndexPagination() {
   const { roles } = useUserRoleHelper();
-  let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
-    "routes/_layout+/_layout"
-  )?.minimizedSidebar;
   const fetcher = useFetcher({ key: "asset-index-settings-mode" });
   const { isMd } = useViewportHeight();
+  const { state } = useSidebar();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
   const disabledButtonStyles =
@@ -57,9 +56,9 @@ export function AssetIndexPagination() {
   return (
     <div
       className={tw(
+        "asset-index-pagination flex flex-col items-center justify-between border-t border-gray-200 bg-white md:flex-row transition-all ease-in-out delay-75",
         isMd ? "fixed bottom-0 right-0 z-[12]" : "",
-        "asset-index-pagination  flex flex-col items-center justify-between border-t border-gray-200 bg-white md:flex-row ",
-        minimizedSidebar ? "lg:left-[82px]" : "lg:left-[312px]"
+        state === "collapsed" ? "lg:left-[48px]" : "lg:left-[256px]"
       )}
     >
       <Pagination className="px-4 py-[6px]" />

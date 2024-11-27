@@ -328,7 +328,7 @@ export const AssetsList = ({
   return (
     <div
       className={tw(
-        "flex h-full flex-col",
+        "flex flex-col",
         modeIsSimple ? "gap-4 pt-4" : "gap-2 pt-2"
       )}
     >

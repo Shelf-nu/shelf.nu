@@ -148,23 +148,21 @@ export default function App() {
   return (
     <SidebarProvider defaultOpen={!minimizedSidebar}>
       <AppSidebar />
-      <SidebarInset>
-        <div className="flex-1 bg-gray-25 px-4 pb-6">
-          {disabledTeamOrg ? (
-            <NoSubscription />
-          ) : workspaceSwitching ? (
-            <div className="flex size-full flex-col items-center justify-center text-center">
-              <Spinner />
-              <p className="mt-2">Activating workspace...</p>
-            </div>
-          ) : (
-            <Outlet />
-          )}
-          <Toaster />
-          <ClientOnly fallback={null}>
-            {renderInstallPwaPromptOnMobile}
-          </ClientOnly>
-        </div>
+      <SidebarInset className="flex-1 bg-gray-25 px-4">
+        {disabledTeamOrg ? (
+          <NoSubscription />
+        ) : workspaceSwitching ? (
+          <div className="flex size-full flex-col items-center justify-center text-center">
+            <Spinner />
+            <p className="mt-2">Activating workspace...</p>
+          </div>
+        ) : (
+          <Outlet />
+        )}
+        <Toaster />
+        <ClientOnly fallback={null}>
+          {renderInstallPwaPromptOnMobile}
+        </ClientOnly>
       </SidebarInset>
     </SidebarProvider>
   );

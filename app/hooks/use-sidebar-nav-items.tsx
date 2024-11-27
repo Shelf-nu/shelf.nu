@@ -4,8 +4,8 @@ import { IconType } from "~/components/shared/icons-map";
 
 type BaseNavItem = {
   title: string;
-  icon: IconType;
   hidden?: boolean;
+  icon: IconType;
 };
 
 type ChildNavItem = BaseNavItem & {
@@ -16,7 +16,7 @@ type ChildNavItem = BaseNavItem & {
 
 type ParentNavItem = BaseNavItem & {
   type: "parent";
-  children: Omit<ChildNavItem, "type">[];
+  children: Omit<ChildNavItem, "type" | "icon">[];
 };
 
 export type NavItem = ChildNavItem | ParentNavItem;
@@ -69,23 +69,35 @@ export function useSidebarNavItems() {
       hidden: isBaseOrSelfService,
     },
     {
-      type: "child",
-      title: "Calendar",
-      to: "/calendar",
-      icon: "calendar",
-    },
-    {
-      type: "child",
+      type: "parent",
       title: "Bookings",
-      to: "/bookings",
       icon: "bookings",
+      children: [
+        {
+          title: "View Bookings",
+          to: "/bookings",
+        },
+        {
+          title: "Calendar",
+          to: "/calendar",
+        },
+      ],
     },
     {
-      type: "child",
+      type: "parent",
       title: "Team",
-      to: "/settings/team",
       icon: "user",
       hidden: isBaseOrSelfService,
+      children: [
+        {
+          title: "Users",
+          to: "/settings/team/users",
+        },
+        {
+          title: "Non-registered members",
+          to: "/settings/team/nrm",
+        },
+      ],
     },
   ];
 
@@ -106,11 +118,24 @@ export function useSidebarNavItems() {
       icon: "scanQR",
     },
     {
-      type: "child",
+      type: "parent",
       title: "Workspace settings",
-      to: "/settings",
       icon: "settings",
       hidden: isBaseOrSelfService,
+      children: [
+        {
+          title: "General",
+          to: "/settings/general",
+        },
+        {
+          title: "Custom fields",
+          to: "/settings/custom-fields",
+        },
+        {
+          title: "Team",
+          to: "/settings/team",
+        },
+      ],
     },
   ];
 

@@ -289,19 +289,14 @@ const SidebarTrigger = forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
-  const { toggleSidebar, isSidebarToggling } = useSidebar();
+  const { toggleSidebar } = useSidebar();
 
   return (
     <Button
       ref={ref}
-      disabled={isSidebarToggling}
       data-sidebar="trigger"
       variant="secondary"
-      className={tw(
-        "border-none p-0",
-        isSidebarToggling && "pointer-events-none cursor-not-allowed",
-        className
-      )}
+      className={tw("border-none p-0", className)}
       onClick={(event: any) => {
         onClick?.(event);
         toggleSidebar();
@@ -319,7 +314,7 @@ const SidebarRail = forwardRef<
   HTMLButtonElement,
   React.ComponentProps<"button">
 >(({ className, ...props }, ref) => {
-  const { toggleSidebar, isSidebarToggling } = useSidebar();
+  const { toggleSidebar } = useSidebar();
 
   return (
     <button
@@ -328,10 +323,9 @@ const SidebarRail = forwardRef<
       aria-label="Toggle Sidebar"
       tabIndex={-1}
       onClick={toggleSidebar}
-      disabled={isSidebarToggling}
       title="Toggle Sidebar"
       className={tw(
-        "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",
+        "absolute inset-y-0 z-50 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",
         "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full group-data-[collapsible=offcanvas]:hover:bg-sidebar",
@@ -347,12 +341,17 @@ SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
   ({ className, ...props }, ref) => {
+    const { state } = useSidebar();
+
     return (
       <main
         ref={ref}
         className={tw(
-          "relative flex min-h-svh flex-1 flex-col bg-background",
+          "relative flex h-[96.5vh] flex-1 flex-col bg-background",
           "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
+          state === "collapsed"
+            ? "md:max-w-[calc(100vw_-_48px)]"
+            : "md:max-w-[calc(100vw_-_274px)]",
           className
         )}
         {...props}

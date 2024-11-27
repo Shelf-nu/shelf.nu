@@ -50,7 +50,11 @@ export default function SidebarNav({
                 <SidebarMenuItem key={item.title}>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton tooltip={item.title}>
-                      <Icon size="xs" icon={item.icon} />
+                      <Icon
+                        size="xs"
+                        icon={item.icon}
+                        className="text-gray-500"
+                      />
                       <span>{item.title}</span>
                       <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                     </SidebarMenuButton>
@@ -72,12 +76,7 @@ export default function SidebarNav({
                                     "text-primary-500 bg-primary-25"
                                 )}
                               >
-                                <Icon
-                                  size="xs"
-                                  icon={child.icon}
-                                  className="text-gray-500"
-                                />
-                                <span>{child.title}</span>
+                                {child.title}
                               </NavLink>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
@@ -103,7 +102,7 @@ export default function SidebarNav({
                     isActive && "text-primary-500 bg-primary-25"
                   )}
                 >
-                  <Icon size="xs" icon={item.icon} />
+                  <Icon size="xs" icon={item.icon} className="text-gray-500" />
                   <span>{item.title}</span>
                 </NavLink>
               </SidebarMenuButton>

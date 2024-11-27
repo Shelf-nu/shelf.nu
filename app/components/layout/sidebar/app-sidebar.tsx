@@ -20,7 +20,7 @@ export default function AppSidebar(props: AppSidebarProps) {
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className={state === "collapsed" ? "p-0" : ""}>
+      <SidebarHeader className={state === "collapsed" ? "px-0" : ""}>
         <div className="flex items-center mt-2 mb-2">
           <ShelfSidebarLogo minimized={state === "collapsed"} />
         </div>
