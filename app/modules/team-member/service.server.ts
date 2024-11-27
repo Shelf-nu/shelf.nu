@@ -284,8 +284,8 @@ export async function getTeamMemberForCustodianFilter({
       return aName.localeCompare(bName);
     });
 
-    // /** Checks and fixes teamMember names if they are broken */
-    void fixTeamMembersNames(teamMembers);
+    /** Checks and fixes teamMember names if they are broken */
+    await fixTeamMembersNames(teamMembers);
 
     return {
       teamMembers,
@@ -378,13 +378,30 @@ function validateTeamMemberName(teamMember: TeamMemberWithUserData) {
  * Fixes team members with invalid names. THis runs as void on the background so it doenst block the main thread
  * @param teamMembers  Array of team members with user data
  */
-function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
+async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
   try {
     const teamMembersWithEmptyNames = teamMembers.filter(
       validateTeamMemberName
     );
+
     /** If there are none, just return */
     if (teamMembersWithEmptyNames.length === 0) return;
+
+    /**
+     * Itterate over the members and update them without awaiting
+     * Just in case we check again
+     */
+    await Promise.all(
+      teamMembersWithEmptyNames.map((teamMember) => {
+        const name = teamMember.user
+          ? `${teamMember.user.firstName} ${teamMember.user.lastName}`
+          : "Unknown name";
+        return db.teamMember.update({
+          where: { id: teamMember.id },
+          data: { name },
+        });
+      })
+    );
 
     /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */
     Logger.error(
@@ -395,20 +412,6 @@ function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
         label,
       })
     );
-
-    /**
-     * Itterate over the members and update them without awaiting
-     * Just in case we check again
-     */
-    teamMembersWithEmptyNames.forEach((teamMember) => {
-      const name = teamMember.user
-        ? `${teamMember.user.firstName} ${teamMember.user.lastName}`
-        : "Unknown name";
-      void db.teamMember.update({
-        where: { id: teamMember.id },
-        data: { name },
-      });
-    });
   } catch (cause) {
     throw new ShelfError({
       cause,
