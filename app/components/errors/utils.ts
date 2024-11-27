@@ -16,7 +16,7 @@ const organizationSchema = z.object({
 export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
   /* For common and general use case */
   baseAdditionalDataSchema.extend({
-    model: z.enum(["asset", "kit", "location"]),
+    model: z.enum(["asset", "kit", "location", "booking"]),
     organization: organizationSchema,
   }),
   /* A team member (user) can be in multiple organization's of user so we do this. */

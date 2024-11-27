@@ -84,7 +84,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -95,7 +95,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       singular: "kit",
       plural: "kits",
     };
-    const booking = await getBooking({ id: bookingId, organizationId });
+    const booking = await getBooking({
+      id: bookingId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     const { page, perPage, kits, search, totalKits, totalPages } =
