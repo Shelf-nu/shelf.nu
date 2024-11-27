@@ -143,6 +143,7 @@ export async function assertUserCanImportNRM({
         "You are not allowed to import Non-registered members due to your current plan. Please upgrade to unlock this feature.",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }
