@@ -24,6 +24,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { organizationRolesMap } from "./settings.team";
+import { ErrorContent } from "~/components/errors";
 
 export const loader = async ({
   request,
@@ -150,9 +151,10 @@ export default function UserPage() {
           ),
         }}
         subHeading={user.email}
-      ></Header>
-      <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
-        <When truthy={userOrgRole !== "Owner"}>
+      />
+
+      <When truthy={userOrgRole !== "Owner"}>
+        <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}
             email={user.email}
@@ -165,11 +167,16 @@ export default function UserPage() {
               </Button>
             )}
           />
-        </When>
-      </AbsolutePositionedHeaderActions>
+        </AbsolutePositionedHeaderActions>
+      </When>
+
       <HorizontalTabs items={TABS} />
 
       <Outlet />
     </>
   );
 }
+
+export const ErrorBoundary = () => (
+  <ErrorContent className="h-[calc(100vh_-_100px)]" />
+);
