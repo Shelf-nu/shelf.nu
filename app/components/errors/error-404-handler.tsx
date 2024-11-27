@@ -30,7 +30,8 @@ export default function Error404Handler({
     switch (additionalData.model) {
       case "asset":
       case "kit":
-      case "location": {
+      case "location":
+      case "booking": {
         return (
           <div className="flex flex-col items-center text-center">
             <div className="w-full md:max-w-screen-sm">

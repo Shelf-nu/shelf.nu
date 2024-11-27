@@ -74,12 +74,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, isSelfServiceOrBase, userOrganizations } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
 
     /**
      * If the org id in the params is different than the current organization id,
@@ -96,6 +97,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const booking = await getBooking({
       id: bookingId,
       organizationId: organizationId,
+      userOrganizations,
+      request,
     });
 
     /** For self service & base users, we only allow them to read their own bookings */
