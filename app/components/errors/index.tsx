@@ -4,8 +4,11 @@ import { isRouteError } from "~/utils/http";
 import { Button } from "../shared/button";
 import { parse404ErrorData } from "./utils";
 import Error404Handler from "./error-404-handler";
+import { tw } from "~/utils/tw";
 
-export const ErrorContent = () => {
+type ErrorContentProps = { className?: string };
+
+export const ErrorContent = ({ className }: ErrorContentProps) => {
   const loc = useLocation();
   const response = useRouteError();
 
@@ -22,14 +25,24 @@ export const ErrorContent = () => {
 
   const error404 = parse404ErrorData(response);
   if (error404.isError404) {
-    return <Error404Handler additionalData={error404.additionalData} />;
+    return (
+      <Error404Handler
+        className={className}
+        additionalData={error404.additionalData}
+      />
+    );
   }
 
   // Creating a string with <br/> tags for line breaks
   const messageHtml = { __html: message.split("\n").join("<br/>") };
 
   return (
-    <div className="flex size-full items-center justify-center">
+    <div
+      className={tw(
+        "h-screen flex size-full items-center justify-center",
+        className
+      )}
+    >
       <div className="flex flex-col items-center text-center">
         <span className="mb-5 size-[56px] text-primary">
           <ErrorIcon />
