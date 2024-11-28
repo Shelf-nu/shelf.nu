@@ -192,6 +192,7 @@ export const getBookingAssetsCustomHeader = ({
 
 export async function generatePdfContent(
   htmlContent: string,
+  pdfMeta: PdfDbResult,
   headerTemplate?: string,
   styles?: Record<string, string>
 ) {
@@ -254,6 +255,9 @@ export async function generatePdfContent(
       message: "Error generating PDF content",
       status: 500,
       label: "Booking",
+      additionalData: {
+        pdfMeta,
+      },
     });
   } finally {
     // Ensures that the browser is closed, even in the case of an error(possible memory leak)

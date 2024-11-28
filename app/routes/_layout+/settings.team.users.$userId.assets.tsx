@@ -66,10 +66,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       totalTags,
       locations,
       totalLocations,
-      teamMembers,
-      totalTeamMembers,
-      rawTeamMembers,
     } = await getPaginatedAndFilterableAssets({
+      // @TODO this is a good example where we dont need the teamMembers so we should modify the function to allow skipping it from query as it can be very heavy. This should be done for every case where we dont use teamMembers
       request,
       organizationId,
       filters: filtersSearchParams.toString(),
@@ -98,9 +96,6 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         totalTags,
         locations,
         totalLocations,
-        teamMembers,
-        totalTeamMembers,
-        rawTeamMembers,
         modelName,
       }),
       {

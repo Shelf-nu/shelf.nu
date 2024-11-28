@@ -85,7 +85,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const totalItems = totalAssetsWithinLocation;
-    const totalPages = totalAssetsWithinLocation / perPage;
+    const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     const header: HeaderData = {
       title: location.name,

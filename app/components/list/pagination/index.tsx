@@ -14,13 +14,12 @@ export const Pagination = ({ className }: { className?: string }) => {
   const {
     page,
     totalPages,
-    totalItems,
-    perPage,
     goToPage,
     prevDisabled,
     nextDisabled,
+    totalItems,
+    perPage,
   } = usePagination();
-
   return (
     <div
       className={tw(
@@ -54,15 +53,17 @@ export const Pagination = ({ className }: { className?: string }) => {
         </Button>
 
         <div className="flex items-center gap-2 px-2.5 py-[4px] leading-none text-gray-400">
+          <span className="whitespace-nowrap text-[14px] font-medium text-gray-500">
+            Page
+          </span>
           <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
-            {(page - 1) * perPage + 1} -{" "}
-            {perPage * page > totalItems ? totalItems : perPage * page}
+            {page}
           </span>
           <span className="whitespace-nowrap text-[14px] font-medium text-gray-500">
             of
           </span>
           <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
-            {totalItems}
+            {Math.ceil(totalPages) || Math.ceil(totalItems / perPage)}
           </span>
         </div>
 
