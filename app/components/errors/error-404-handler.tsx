@@ -69,6 +69,10 @@ export default function Error404Handler({
         );
       }
 
+      /**
+       * User can have a teamMember in multiple organizations, so in this case we
+       * show a Select to choose from the organization and switch to that.
+       **/
       case "teamMember": {
         return (
           <div className="flex flex-col items-center text-center">

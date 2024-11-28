@@ -21,7 +21,7 @@ import {
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
-import type { ValidationError } from "~/utils/http";
+import { getRedirectUrlFromRequest, type ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
@@ -1308,7 +1308,7 @@ export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({

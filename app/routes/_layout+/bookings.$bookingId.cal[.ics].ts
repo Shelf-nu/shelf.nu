@@ -28,12 +28,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.read,
       });
-    const booking = await getBooking({
-      id: bookingId,
-      organizationId,
-      userOrganizations,
-      request,
-    });
+
+    const booking = await getBooking({ id: bookingId, organizationId });
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {

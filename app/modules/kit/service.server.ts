@@ -44,6 +44,7 @@ import { createNote } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
 import { getUserByID } from "../user/service.server";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Kit";
 
@@ -396,7 +397,7 @@ export async function getKit<T extends Prisma.KitInclude | undefined>({
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({

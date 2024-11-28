@@ -16,6 +16,7 @@ import {
 } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Location";
 
@@ -104,7 +105,7 @@ export async function getLocation(
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({

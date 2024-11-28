@@ -91,6 +91,7 @@ import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Assets";
 
@@ -136,7 +137,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({

@@ -35,6 +35,7 @@ import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
 import { MergeInclude } from "~/utils/utils";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Booking";
 
@@ -887,7 +888,6 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
-
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
       ...extraInclude,
@@ -917,7 +917,7 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({
