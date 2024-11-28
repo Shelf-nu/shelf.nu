@@ -79,7 +79,9 @@ export function getStatusClasses(
   if (viewType == "timeGridWeek" || viewType == "timeGridDay") {
     statusClasses.push(statusClassesOnHover[status]);
   }
-
+  if(viewType == "dayGridMonth"){
+    statusClasses.push("md: !bg-transparent");
+  }
   return [...classes, ...statusClasses];
 }
 export const statusClassesOnHover: Record<BookingStatus, string> = {
