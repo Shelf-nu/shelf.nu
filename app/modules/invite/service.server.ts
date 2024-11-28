@@ -375,10 +375,10 @@ export async function updateInviteStatus({
  */
 export async function checkUserAndInviteMatch({
   context,
-  params,
+  invite,
 }: {
   context: AppLoadContext;
-  params: Params<string>;
+  invite: Invite;
 }) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -395,16 +395,7 @@ export async function checkUserAndInviteMatch({
     })
     .catch(() => null);
 
-  /** We get the invite based on the id of the params */
-  const inv = await db.invite
-    .findFirst({
-      where: {
-        id: params.inviteId,
-      },
-    })
-    .catch(() => null);
-
-  if (user?.email !== inv?.inviteeEmail) {
+  if (user?.email !== invite?.inviteeEmail) {
     throw new ShelfError({
       cause: null,
       title: "Wrong user",
