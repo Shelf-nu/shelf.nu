@@ -398,7 +398,7 @@ const renderEventCard = (args: EventContentArg) => {
   const viewType = event._context.calendarApi.view.type;
 
   const booking = event.extendedProps as CalendarExtendedProps;
-  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end, viewType);
+  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
 
   return (
     <HoverCard openDelay={0} closeDelay={0}>
@@ -408,9 +408,9 @@ const renderEventCard = (args: EventContentArg) => {
             "inline-block size-full whitespace-normal bg-transparent lg:truncate"
           )}
         >
-          <When truthy={_isOneDayEvent}>
+          {viewType=="dayGridMonth" && <When truthy={_isOneDayEvent}>
             <div className="fc-daygrid-event-dot inline-block" />
-          </When>
+          </When>}
           <DateS
             date={booking.start}
             options={{

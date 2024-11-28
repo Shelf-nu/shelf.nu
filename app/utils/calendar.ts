@@ -79,7 +79,7 @@ export function getStatusClasses(
   if (viewType == "timeGridWeek" || viewType == "timeGridDay") {
     statusClasses.push(statusClassesOnHover[status]);
   }
-  if (viewType == "dayGridMonth") {
+  if (oneDayEvent && viewType == "dayGridMonth") {
     statusClasses.push("md: !bg-transparent");
   }
   return [...classes, ...statusClasses];
@@ -96,10 +96,9 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
 
 export function isOneDayEvent(
   from: Date | string | null,
-  to: Date | string | null,
-  viewDay?: string
+  to: Date | string | null
 ) {
-  if (!from || !to || viewDay != "dayGridMonth") {
+  if (!from || !to) {
     return false;
   }
 
