@@ -176,7 +176,3 @@ export default function UserPage() {
     </>
   );
 }
-
-export const ErrorBoundary = () => (
-  <ErrorContent className="h-[calc(100vh_-_100px)]" />
-);

@@ -16,7 +16,7 @@ const organizationSchema = z.object({
 export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
   /* For common and general use case */
   baseAdditionalDataSchema.extend({
-    model: z.enum(["asset", "kit", "location", "booking"]),
+    model: z.enum(["asset", "kit", "location", "booking", "customField"]),
     organization: organizationSchema,
   }),
   /* A team member (user) can be in multiple organization's of user so we do this. */
@@ -49,4 +49,14 @@ export function parse404ErrorData(response: unknown):
   }
 
   return { isError404: true, additionalData: parsedDataResponse.data };
+}
+
+export function getModelLabelForEnumValue(
+  model: Error404AdditionalData["model"]
+) {
+  if (model === "customField") {
+    return "Custom field";
+  }
+
+  return model;
 }

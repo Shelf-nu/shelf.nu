@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { tw } from "~/utils/tw";
-import { Error404AdditionalData } from "./utils";
+import { Error404AdditionalData, getModelLabelForEnumValue } from "./utils";
 import { Button } from "../shared/button";
 import { useFetcher } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
@@ -31,22 +31,24 @@ export default function Error404Handler({
       case "asset":
       case "kit":
       case "location":
-      case "booking": {
+      case "booking":
+      case "customField": {
+        const modelLabel = getModelLabelForEnumValue(additionalData.model);
+
         return (
           <div className="flex flex-col items-center text-center">
             <div className="w-full md:max-w-screen-sm">
               <h2 className="mb-2">
-                <span className="capitalize">{additionalData.model}</span>{" "}
-                belongs to another workspace.
+                <span className="capitalize">{modelLabel}</span> belongs to
+                another workspace.
               </h2>
               <p className="mb-4">
-                The {additionalData.model} you are trying to view belongs to a
-                different workspace you are part of. Would you like to switch to
-                workspace{" "}
+                The {modelLabel} you are trying to view belongs to a different
+                workspace you are part of. Would you like to switch to workspace{" "}
                 <span className="font-bold">
                   "{additionalData.organization.organization.name}"
                 </span>{" "}
-                to view the {additionalData.model}?
+                to view the {modelLabel}?
               </p>
               <fetcher.Form
                 action="/api/user/change-current-organization"
