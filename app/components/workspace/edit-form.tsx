@@ -6,6 +6,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -111,7 +112,7 @@ export const WorkspaceEditForm = ({
             </p>
             <Input
               // disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+              accept={ACCEPT_SUPPORTED_IMAGES}
               name="image"
               type="file"
               onChange={validateFile}

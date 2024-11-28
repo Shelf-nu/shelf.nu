@@ -19,7 +19,7 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  const { rawTeamMembers } = useLoaderData<typeof loader>();
+  const { teamMembers } = useLoaderData<typeof loader>();
 
   return (
     <BulkUpdateDialogContent
@@ -38,10 +38,10 @@ export default function BulkAssignCustodyDialog() {
             <DynamicSelect
               hidden={isSelfService}
               defaultValue={
-                isSelfService && rawTeamMembers?.length > 0
+                isSelfService && teamMembers?.length > 0
                   ? JSON.stringify({
-                      id: rawTeamMembers[0].id,
-                      name: resolveTeamMemberName(rawTeamMembers[0]),
+                      id: teamMembers[0].id,
+                      name: resolveTeamMemberName(teamMembers[0]),
                     })
                   : undefined
               }
@@ -53,7 +53,7 @@ export default function BulkAssignCustodyDialog() {
               }}
               fieldName="custodian"
               contentLabel="Team members"
-              initialDataKey="rawTeamMembers"
+              initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
               allowClear
@@ -62,7 +62,10 @@ export default function BulkAssignCustodyDialog() {
                 ...item,
                 id: JSON.stringify({
                   id: item.id,
-                  //If there is a user, we use its name, otherwise we use the name of the team member
+                  /**
+                   * This is parsed on the server, because we need the name to create the note.
+                   * @TODO This should be refactored to send the name as some metadata, instaed of like this
+                   */
                   name: resolveTeamMemberName(item),
                 }),
               })}

@@ -193,6 +193,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
+    const totalPages = Math.ceil(totalAssets / perPage);
 
     return json(
       data({
@@ -203,7 +204,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         page,
         totalItems: totalAssets,
         perPage,
-        totalPages: totalAssets / perPage,
+        totalPages,
         ...teamMembersData,
         bookingFlags,
       }),

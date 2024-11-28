@@ -6,9 +6,21 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
+type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
+  include: {
+    user: {
+      select: {
+        firstName: true;
+        lastName: true;
+        email: true;
+      };
+    };
+  };
+}>;
 
 export async function createTeamMember({
   name,
@@ -253,7 +265,7 @@ export async function getTeamMemberForCustodianFilter({
         db.teamMember.count({ where: { organizationId, deletedAt: null } }),
       ]);
 
-    const allTeamMembers = [
+    const teamMembers = [
       ...teamMembersSelected,
       ...teamMemberExcludedSelected,
     ].sort((a, b) => {
@@ -272,18 +284,11 @@ export async function getTeamMemberForCustodianFilter({
       return aName.localeCompare(bName);
     });
 
-    /**
-     * If teamMember has a user associated then we have to use that user's id
-     * otherwise we have to use teamMember's id
-     */
-    const combinedTeamMembers = allTeamMembers.map((teamMember) => ({
-      ...teamMember,
-      id: teamMember.userId ? teamMember.userId : teamMember.id,
-    }));
+    /** Checks and fixes teamMember names if they are broken */
+    await fixTeamMembersNames(teamMembers);
 
     return {
-      teamMembers: combinedTeamMembers,
-      rawTeamMembers: allTeamMembers,
+      teamMembers,
       totalTeamMembers,
     };
   } catch (cause) {
@@ -353,6 +358,64 @@ export async function bulkDeleteNRMs({
     throw new ShelfError({
       cause,
       message,
+      label,
+    });
+  }
+}
+
+/**
+ * Checks if the team member name is empty. If it is, it is considered invalid and the team member id is returned
+ * @param teamMember Contains the team member data
+ * @returns teamMember.id if the name is empty
+ */
+function validateTeamMemberName(teamMember: TeamMemberWithUserData) {
+  if (!teamMember.name || teamMember.name.trim() === "") {
+    return teamMember.id;
+  }
+}
+
+/**
+ * Fixes team members with invalid names. THis runs as void on the background so it doenst block the main thread
+ * @param teamMembers  Array of team members with user data
+ */
+async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
+  try {
+    const teamMembersWithEmptyNames = teamMembers.filter(
+      validateTeamMemberName
+    );
+
+    /** If there are none, just return */
+    if (teamMembersWithEmptyNames.length === 0) return;
+
+    /**
+     * Itterate over the members and update them without awaiting
+     * Just in case we check again
+     */
+    await Promise.all(
+      teamMembersWithEmptyNames.map((teamMember) => {
+        const name = teamMember.user
+          ? `${teamMember.user.firstName} ${teamMember.user.lastName}`
+          : "Unknown name";
+        return db.teamMember.update({
+          where: { id: teamMember.id },
+          data: { name },
+        });
+      })
+    );
+
+    /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: "Team members with empty names found",
+        additionalData: { teamMembersWithEmptyNames },
+        label,
+      })
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fix team members names",
       label,
     });
   }
