@@ -1,3 +1,9 @@
+import { useState } from "react";
+import { useLoaderData } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
+import { ChevronRight, QuestionsIcon } from "~/components/icons/library";
+import { CrispButton } from "~/components/marketing/crisp";
+import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -6,20 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import ProfilePicture from "~/components/user/profile-picture";
+import type { loader } from "~/routes/_layout+/_layout";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
 } from "./sidebar";
-import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/_layout";
-import ProfilePicture from "~/components/user/profile-picture";
-import { ChevronRight, QuestionsIcon } from "~/components/icons/library";
-import { Button } from "~/components/shared/button";
-import { CrispButton } from "~/components/marketing/crisp";
-import { Form } from "~/components/custom-form";
-import { useState } from "react";
 
 export default function SidebarUserMenu() {
   const { user } = useLoaderData<typeof loader>();
@@ -37,7 +37,7 @@ export default function SidebarUserMenu() {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="border data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="!h-auto border !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50"
             >
               <ProfilePicture
                 width="w-8"
@@ -83,7 +83,7 @@ export default function SidebarUserMenu() {
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 onClick={closeDropdown}
               >
-                Account Details
+                Account settings
               </Button>
             </DropdownMenuItem>
             <DropdownMenuItem

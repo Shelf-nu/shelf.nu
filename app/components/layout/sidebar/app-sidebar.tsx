@@ -1,4 +1,6 @@
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
+import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
+import OrganizationSelector from "./organization-selector";
 import {
   Sidebar,
   SidebarContent,
@@ -7,10 +9,8 @@ import {
   SidebarRail,
   useSidebar,
 } from "./sidebar";
-import OrganizationSelector from "./organization-selector";
-import SidebarUserMenu from "./sidebar-user-menu";
 import SidebarNav from "./sidebar-nav";
-import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
+import SidebarUserMenu from "./sidebar-user-menu";
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
 
@@ -21,7 +21,7 @@ export default function AppSidebar(props: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader className={state === "collapsed" ? "px-0" : ""}>
-        <div className="flex items-center mt-2 mb-2">
+        <div className="my-2 flex items-center">
           <ShelfSidebarLogo minimized={state === "collapsed"} />
         </div>
 

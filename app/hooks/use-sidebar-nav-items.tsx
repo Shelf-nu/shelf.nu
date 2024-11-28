@@ -1,11 +1,11 @@
-import { useUserData } from "./use-user-data";
+import type { IconType } from "~/components/shared/icons-map";
 import { useUserRoleHelper } from "./user-user-role-helper";
-import { IconType } from "~/components/shared/icons-map";
 
 type BaseNavItem = {
   title: string;
   hidden?: boolean;
   icon: IconType;
+  defaultOpen?: boolean;
 };
 
 type ChildNavItem = BaseNavItem & {
@@ -22,7 +22,6 @@ type ParentNavItem = BaseNavItem & {
 export type NavItem = ChildNavItem | ParentNavItem;
 
 export function useSidebarNavItems() {
-  const user = useUserData();
   const { isBaseOrSelfService } = useUserRoleHelper();
 
   const topMenuItems: NavItem[] = [
@@ -99,24 +98,6 @@ export function useSidebarNavItems() {
         },
       ],
     },
-  ];
-
-  const bottomMenuItems: NavItem[] = [
-    {
-      type: "child",
-      title: "Asset labels",
-      to: `https://www.shelf.nu/order-tags?email=${user?.email}${
-        user?.firstName ? `&firstName=${user.firstName}` : ""
-      }${user?.lastName ? `&lastName=${user.lastName}` : ""}`,
-      icon: "asset-label",
-      target: "_blank",
-    },
-    {
-      type: "child",
-      title: "QR Scanner",
-      to: "/scanner",
-      icon: "scanQR",
-    },
     {
       type: "parent",
       title: "Workspace settings",
@@ -136,6 +117,22 @@ export function useSidebarNavItems() {
           to: "/settings/team",
         },
       ],
+    },
+  ];
+
+  const bottomMenuItems: NavItem[] = [
+    {
+      type: "child",
+      title: "Asset labels",
+      to: `https://store.shelf.nu/?ref=shelf_webapp_sidebar`,
+      icon: "asset-label",
+      target: "_blank",
+    },
+    {
+      type: "child",
+      title: "QR Scanner",
+      to: "/scanner",
+      icon: "scanQR",
     },
   ];
 

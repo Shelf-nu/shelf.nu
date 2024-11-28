@@ -1,4 +1,13 @@
-import { ChevronRight, HomeIcon } from "~/components/icons/library";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
+import { NavLink, useMatches } from "@remix-run/react";
+import Icon from "~/components/icons/icon";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "~/components/shared/collapsible";
+import type { NavItem } from "~/hooks/use-sidebar-nav-items";
+import { tw } from "~/utils/tw";
 import {
   SidebarGroup,
   SidebarMenu,
@@ -8,15 +17,6 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "./sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "~/components/shared/collapsible";
-import { matchRoutes, NavLink, useMatch, useMatches } from "@remix-run/react";
-import { NavItem, useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
-import Icon from "~/components/icons/icon";
-import { tw } from "~/utils/tw";
 
 type SidebarNavProps = {
   className?: string;
@@ -46,6 +46,7 @@ export default function SidebarNav({
                 key={item.title}
                 asChild
                 className="group/collapsible"
+                defaultOpen={item.defaultOpen}
               >
                 <SidebarMenuItem key={item.title}>
                   <CollapsibleTrigger asChild>
@@ -53,10 +54,10 @@ export default function SidebarNav({
                       <Icon
                         size="xs"
                         icon={item.icon}
-                        className="text-gray-500"
+                        className="text-gray-600"
                       />
-                      <span>{item.title}</span>
-                      <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                      <span className="font-semibold">{item.title}</span>
+                      <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
@@ -71,9 +72,8 @@ export default function SidebarNav({
                                 to={child.to}
                                 target={child.target}
                                 className={tw(
-                                  "font-medium",
-                                  isChildActive &&
-                                    "text-primary-500 bg-primary-25"
+                                  "font-medium hover:bg-gray-100",
+                                  isChildActive && "bg-gray-100"
                                 )}
                               >
                                 {child.title}
@@ -97,12 +97,9 @@ export default function SidebarNav({
                 <NavLink
                   to={item.to}
                   target={item.target}
-                  className={tw(
-                    "font-medium",
-                    isActive && "text-primary-500 bg-primary-25"
-                  )}
+                  className={tw("font-semibold", isActive && "bg-gray-100")}
                 >
-                  <Icon size="xs" icon={item.icon} className="text-gray-500" />
+                  <Icon size="xs" icon={item.icon} className="text-gray-600" />
                   <span>{item.title}</span>
                 </NavLink>
               </SidebarMenuButton>

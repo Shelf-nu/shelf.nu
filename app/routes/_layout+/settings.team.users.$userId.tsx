@@ -5,6 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, Outlet, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -24,7 +25,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { organizationRolesMap } from "./settings.team";
-import { ErrorContent } from "~/components/errors";
 
 export const loader = async ({
   request,

@@ -1,3 +1,10 @@
+import { useEffect, useState } from "react";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
+import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useSetAtom } from "jotai";
+import invariant from "tiny-invariant";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
+import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -6,24 +13,17 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { Image } from "~/components/shared/image";
+import ProfilePicture from "~/components/user/profile-picture";
+import When from "~/components/when/when";
+import type { loader } from "~/routes/_layout+/_layout";
+import { isFormProcessing } from "~/utils/form";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
 } from "./sidebar";
-import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useFetcher, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/_layout";
-import ProfilePicture from "~/components/user/profile-picture";
-import { Image } from "~/components/shared/image";
-import { Button } from "~/components/shared/button";
-import invariant from "tiny-invariant";
-import { isFormProcessing } from "~/utils/form";
-import When from "~/components/when/when";
-import { useEffect, useState } from "react";
-import { useSetAtom } from "jotai";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 
 export default function OrganizationSelector() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -72,17 +72,14 @@ export default function OrganizationSelector() {
       <SidebarMenuItem>
         <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="border data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground justify-center w-full h-full"
-            >
+            <SidebarMenuButton className="size-full justify-center border !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50">
               {currentOrganization.type === "PERSONAL" ? (
                 <ProfilePicture width="w-6" height="h-6" />
               ) : (
                 <Image
                   imageId={currentOrganization.imageId}
                   alt="img"
-                  className="size-8 rounded-sm object-cover"
+                  className="size-8 rounded-sm border object-cover"
                   updatedAt={currentOrganization.updatedAt}
                 />
               )}
@@ -101,7 +98,7 @@ export default function OrganizationSelector() {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
+            className="!mt-0 w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
@@ -109,7 +106,7 @@ export default function OrganizationSelector() {
             {organizations.map((organization, index) => (
               <DropdownMenuItem
                 key={organization.id}
-                className="gap-2 p-2 rounded-sm"
+                className="gap-2 rounded-sm p-2"
                 onClick={() => {
                   if (organization.id !== currentOrganizationId) {
                     handleSwitchOrganization(organization.id);

@@ -55,11 +55,15 @@ export function useMainMenuItems() {
   ];
   let menuItemsBottom = [
     {
+      icon: <Icon icon="settings" />,
+      to: "settings",
+      title: "Workspace settings",
+      end: true,
+    },
+    {
       icon: <Icon icon="asset-label" />,
-      to: `https://www.shelf.nu/order-tags?email=${user?.email}${
-        user?.firstName ? `&firstName=${user.firstName}` : ""
-      }${user?.lastName ? `&lastName=${user.lastName}` : ""}`,
-      title: "Asset labels",
+      to: `https://store.shelf.nu/?ref=app_sidebar`,
+      title: "Buy Asset labels",
       target: "_blank",
       isNew: true,
     },
@@ -67,12 +71,6 @@ export function useMainMenuItems() {
       icon: <Icon icon="scanQR" />,
       to: "scanner",
       title: "QR scanner",
-      end: true,
-    },
-    {
-      icon: <Icon icon="settings" />,
-      to: "settings",
-      title: "Workspace settings",
       end: true,
     },
   ];
