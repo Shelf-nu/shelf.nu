@@ -79,7 +79,7 @@ export function getStatusClasses(
   if (viewType == "timeGridWeek" || viewType == "timeGridDay") {
     statusClasses.push(statusClassesOnHover[status]);
   }
-  if(viewType == "dayGridMonth"){
+  if (viewType == "dayGridMonth") {
     statusClasses.push("md: !bg-transparent");
   }
   return [...classes, ...statusClasses];
