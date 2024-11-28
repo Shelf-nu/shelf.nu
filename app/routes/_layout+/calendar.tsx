@@ -408,9 +408,11 @@ const renderEventCard = (args: EventContentArg) => {
             "inline-block size-full whitespace-normal bg-transparent lg:truncate"
           )}
         >
-          {viewType=="dayGridMonth" && <When truthy={_isOneDayEvent}>
-            <div className="fc-daygrid-event-dot inline-block" />
-          </When>}
+          {viewType == "dayGridMonth" && (
+            <When truthy={_isOneDayEvent}>
+              <div className="fc-daygrid-event-dot inline-block" />
+            </When>
+          )}
           <DateS
             date={booking.start}
             options={{
