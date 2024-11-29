@@ -2,7 +2,8 @@ import type { BookingStatus } from "@prisma/client";
 
 export function getStatusClasses(
   status: BookingStatus,
-  oneDayEvent: boolean = false
+  oneDayEvent: boolean = false,
+  viewType?: string
 ) {
   /** Default classes */
   const classes = [
@@ -75,7 +76,12 @@ export function getStatusClasses(
     default:
       break;
   }
-
+  if (viewType == "timeGridWeek" || viewType == "timeGridDay") {
+    statusClasses.push(statusClassesOnHover[status]);
+  }
+  if (oneDayEvent && viewType == "dayGridMonth") {
+    statusClasses.push("md: !bg-transparent");
+  }
   return [...classes, ...statusClasses];
 }
 export const statusClassesOnHover: Record<BookingStatus, string> = {
@@ -88,7 +94,14 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   COMPLETE: "md:!bg-success-100",
 };
 
-export function isOneDayEvent(from: Date | string, to: Date | string) {
+export function isOneDayEvent(
+  from: Date | string | null,
+  to: Date | string | null
+) {
+  if (!from || !to) {
+    return false;
+  }
+
   const start = new Date(from);
   const end = new Date(to);
 
