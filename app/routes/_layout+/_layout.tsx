@@ -2,7 +2,7 @@ import { Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
-import { useAtom } from "jotai";
+import {  useAtomValue } from "jotai";
 import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
@@ -136,7 +136,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 export default function App() {
   useCrisp();
   const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
-  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
   const renderInstallPwaPromptOnMobile = () =>
     // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA

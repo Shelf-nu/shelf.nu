@@ -64,7 +64,7 @@ export default function OrganizationSelector() {
     function setSwitchingWorkspaceAfterFetch() {
       setWorkspaceSwitching(isSwitchingOrg);
     },
-    [isFormProcessing, setWorkspaceSwitching]
+    [isSwitchingOrg, setWorkspaceSwitching]
   );
 
   return (
