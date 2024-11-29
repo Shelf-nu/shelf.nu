@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomField } from "@prisma/client";
 import {
   Popover,
@@ -9,6 +9,7 @@ import {
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
+import { Search } from "lucide-react";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -104,21 +105,20 @@ function AdvancedFilter() {
   function addFilter() {
     setFilters((prev) => {
       const newCols = [...prev];
-      /** We need to make sure the filter we add is not one that already exists */
-
       const firstColumn = availableColumns[0];
       const fieldType = getUIFieldType({
         column: firstColumn,
       }) as FilterFieldType;
 
       newCols.push({
-        name: firstColumn.name,
+        name: firstColumn.name, // Keep the name for proper UI rendering
         operator: operatorsPerType[fieldType][0],
         value: getDefaultValueForFieldType(
           firstColumn,
           customFields as SerializeFrom<CustomField>[] | null
         ),
         type: fieldType,
+        isNew: true, // Mark as new/unselected
       });
       return newCols;
     });
@@ -184,56 +184,68 @@ function AdvancedFilter() {
                               const column = availableColumns.find(
                                 (c) => c.name === name
                               ) as Column;
-                              const fieldType = getUIFieldType({
-                                column,
-                              }) as FilterFieldType;
 
-                              const newFilters = [...prev];
-                              newFilters[index] = {
-                                ...newFilters[index],
-                                name,
-                                type: fieldType,
-                                operator: operatorsPerType[fieldType][0],
-                                value: getDefaultValueForFieldType(
+                              // Only proceed with type/operator/value setup if a valid column is selected
+                              if (column) {
+                                const fieldType = getUIFieldType({
                                   column,
-                                  customFields as
-                                    | SerializeFrom<CustomField>[]
-                                    | null
-                                ), // Add default value
-                              };
-                              return newFilters;
+                                }) as FilterFieldType;
+
+                                const newFilters = [...prev];
+                                newFilters[index] = {
+                                  ...newFilters[index],
+                                  name,
+                                  type: fieldType,
+                                  operator: operatorsPerType[fieldType][0],
+                                  value: getDefaultValueForFieldType(
+                                    column,
+                                    customFields as
+                                      | SerializeFrom<CustomField>[]
+                                      | null
+                                  ),
+                                  isNew: false,
+                                };
+                                return newFilters;
+                              }
+                              return prev;
                             });
                           }}
                         />
                       </div>
-                      <div className="w-[50px] shrink-0">
-                        <OperatorSelector
-                          filter={filter}
-                          setFilter={(operator) => {
-                            // Update filter operator
-                            setFilters((prev) => {
-                              const newFilters = [...prev];
-                              newFilters[index].operator = operator;
-                              return newFilters;
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="min-w-0 grow">
-                        <ValueField
-                          filter={filter}
-                          setFilter={(value) => {
-                            setFilters((prev) => {
-                              const newFilters = [...prev];
-                              newFilters[index].value = value;
-                              return newFilters;
-                            });
-                          }}
-                          applyFilters={applyFilters}
-                          fieldName={getFieldName(index)}
-                          zormError={getError(index)}
-                        />
-                      </div>
+
+                      {/* Only show operator and value fields if a column is selected */}
+                      {filter.name && (
+                        <>
+                          <div className="w-[50px] shrink-0">
+                            <OperatorSelector
+                              filter={filter}
+                              setFilter={(operator) => {
+                                setFilters((prev) => {
+                                  const newFilters = [...prev];
+                                  newFilters[index].operator = operator;
+                                  return newFilters;
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="min-w-0 grow">
+                            <ValueField
+                              filter={filter}
+                              setFilter={(value) => {
+                                setFilters((prev) => {
+                                  const newFilters = [...prev];
+                                  newFilters[index].value = value;
+                                  return newFilters;
+                                });
+                              }}
+                              applyFilters={applyFilters}
+                              fieldName={getFieldName(index)}
+                              zormError={getError(index)}
+                            />
+                          </div>
+                        </>
+                      )}
+
                       <Button
                         variant="block-link-gray"
                         className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
@@ -474,48 +486,99 @@ function PickAColumnToSortBy({
   sorts,
   setSorts,
 }: {
-  sorts: any[];
+  sorts: Sort[];
   setSorts: React.Dispatch<React.SetStateAction<Sort[]>>;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const { settings } = useLoaderData<AssetIndexLoaderData>();
   const columns = settings.columns as Column[];
-  const availableColumns = getAvailableColumns(columns, sorts, "sort");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Convert to sort options
-  const sortOptions: Sort[] = availableColumns.map((column) => ({
-    name: column.name,
-    direction: "asc",
-    ...(column?.cfType ? { cfType: column.cfType } : undefined),
-  }));
+  const availableColumns = useMemo(
+    () => getAvailableColumns(columns, sorts, "sort"),
+    [columns, sorts]
+  );
 
-  // Handle the name column if it's not already being sorted
-  if (!sorts.some((s) => s.name === "name")) {
-    sortOptions.unshift({
-      name: "name",
-      direction: "asc",
+  // Convert to sort options with proper handling of the name column
+  const baseOptions: Sort[] = useMemo(() => {
+    const options = availableColumns.map((column) => ({
+      name: column.name,
+      direction: "asc" as const, // Use const assertion to specify literal type
+      ...(column?.cfType ? { cfType: column.cfType } : undefined),
+    }));
+
+    if (!sorts.some((s) => s.name === "name")) {
+      options.unshift({
+        name: "name",
+        direction: "asc" as const,
+      });
+    }
+
+    return options.sort((a, b) => {
+      if (a.name === "name") return -1;
+      if (b.name === "name") return 1;
+      return 0;
     });
-  }
+  }, [availableColumns, sorts]);
 
-  /** Make sure name is always first */
-  sortOptions.sort((a, b) => {
-    if (a.name === "name") {
-      return -1;
-    }
-    if (b.name === "name") {
-      return 1;
-    }
-    return 0;
-  });
+  // Filter options based on search query
+  const filteredOptions = useMemo(() => {
+    if (!searchQuery) return baseOptions;
 
-  function addSort(column: Sort) {
+    return baseOptions.filter((option) =>
+      parseColumnName(option.name)
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase())
+    );
+  }, [baseOptions, searchQuery]);
+
+  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+    setSelectedIndex(0);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < filteredOptions.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (filteredOptions[selectedIndex]) {
+          addSort(filteredOptions[selectedIndex]);
+        }
+        break;
+    }
+  };
+
+  const addSort = (column: Sort) => {
     setSorts((prev) => {
       const newCols = [...prev];
       newCols.push(column);
       return newCols;
     });
     setIsPopoverOpen(false);
-  }
+    setSearchQuery("");
+    setSelectedIndex(0);
+  };
+
+  useEffect(() => {
+    const selectedElement = document.getElementById(
+      `sort-option-${selectedIndex}`
+    );
+    if (selectedElement) {
+      selectedElement.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -533,7 +596,7 @@ function PickAColumnToSortBy({
           }
         >
           <span>Pick a column to sort by</span>{" "}
-          <ChevronRight className="ml-2 inline-block rotate-90" />{" "}
+          <ChevronRight className="ml-2 inline-block rotate-90" />
         </Button>
       </PopoverTrigger>
       <PopoverPortal>
@@ -543,16 +606,43 @@ function PickAColumnToSortBy({
             "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
-          <div className="">
-            {sortOptions.map((c) => (
+          <div className="flex items-center border-b">
+            <Search className="ml-4 size-4 text-gray-500" />
+            <input
+              ref={searchInputRef}
+              placeholder="Search column..."
+              className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+              value={searchQuery}
+              onChange={handleSearch}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+          <div>
+            {filteredOptions.map((option, index) => (
               <div
-                key={c.name}
-                className="px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-                onClick={() => addSort(c)}
+                id={`sort-option-${index}`}
+                key={option.name}
+                className={tw(
+                  "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && [
+                    "bg-gray-50",
+                    "relative",
+                    index !== 0 &&
+                      "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                    index !== filteredOptions.length - 1 &&
+                      "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                  ]
+                )}
+                onClick={() => addSort(option)}
               >
-                {parseColumnName(c.name)}
+                {parseColumnName(option.name)}
               </div>
             ))}
+            {filteredOptions.length === 0 && (
+              <div className="px-4 py-2 text-[14px] text-gray-500">
+                No columns found
+              </div>
+            )}
           </div>
         </PopoverContent>
       </PopoverPortal>
