@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { NavLink, useMatches } from "@remix-run/react";
 import Icon from "~/components/icons/icon";
@@ -10,6 +11,7 @@ import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import { tw } from "~/utils/tw";
 import {
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -31,82 +33,113 @@ export default function SidebarNav({
 }: SidebarNavProps) {
   const matches = useMatches();
 
-  function isRouteActive(route: string) {
-    const matchesRoutes = matches.map((match) => match.pathname);
-    return matchesRoutes.some((matchRoute) => matchRoute.includes(route));
-  }
+  const isRouteActive = useCallback(
+    (route: string) => {
+      const matchesRoutes = matches.map((match) => match.pathname);
+      return matchesRoutes.some((matchRoute) => matchRoute.includes(route));
+    },
+    [matches]
+  );
 
-  return (
-    <SidebarGroup className={className} style={style}>
-      <SidebarMenu>
-        {items.map((item) => {
-          if (item.type === "parent") {
-            return (
-              <Collapsible
-                key={item.title}
-                asChild
-                className="group/collapsible"
-                defaultOpen={item.defaultOpen}
-              >
-                <SidebarMenuItem key={item.title}>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton tooltip={item.title}>
-                      <Icon
-                        size="xs"
-                        icon={item.icon}
-                        className="text-gray-600"
-                      />
-                      <span className="font-semibold">{item.title}</span>
-                      <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub>
-                      {item.children.map((child) => {
-                        const isChildActive = isRouteActive(child.to);
+  const isAnyRouteActive = useCallback(
+    (routes: string[]) => routes.some(isRouteActive),
+    [isRouteActive]
+  );
 
-                        return (
-                          <SidebarMenuSubItem key={child.title}>
-                            <SidebarMenuSubButton asChild>
-                              <NavLink
-                                to={child.to}
-                                target={child.target}
-                                className={tw(
-                                  "font-medium hover:bg-gray-100",
-                                  isChildActive && "bg-gray-100"
-                                )}
-                              >
-                                {child.title}
-                              </NavLink>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-            );
-          }
-
-          const isActive = isRouteActive(item.to);
+  const renderNavItem = useCallback(
+    (navItem: NavItem) => {
+      switch (navItem.type) {
+        case "parent": {
+          const isAnyChildActive = isAnyRouteActive(
+            navItem.children.map((child) => child.to)
+          );
 
           return (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton asChild tooltip={item.title}>
+            <Collapsible
+              key={navItem.title}
+              asChild
+              className="group/collapsible"
+              defaultOpen={isAnyChildActive}
+            >
+              <SidebarMenuItem key={navItem.title}>
+                <CollapsibleTrigger asChild>
+                  <SidebarMenuButton tooltip={navItem.title}>
+                    <Icon
+                      size="xs"
+                      icon={navItem.icon}
+                      className="text-gray-600"
+                    />
+                    <span className="font-semibold">{navItem.title}</span>
+                    <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    {navItem.children.map((child) => {
+                      const isChildActive = isRouteActive(child.to);
+
+                      return (
+                        <SidebarMenuSubItem key={child.title}>
+                          <SidebarMenuSubButton asChild>
+                            <NavLink
+                              to={child.to}
+                              target={child.target}
+                              className={tw(
+                                "font-medium hover:bg-gray-100",
+                                isChildActive && "bg-gray-100"
+                              )}
+                            >
+                              {child.title}
+                            </NavLink>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </SidebarMenuItem>
+            </Collapsible>
+          );
+        }
+
+        case "child": {
+          const isActive = isRouteActive(navItem.to);
+
+          return (
+            <SidebarMenuItem key={navItem.title}>
+              <SidebarMenuButton asChild tooltip={navItem.title}>
                 <NavLink
-                  to={item.to}
-                  target={item.target}
+                  to={navItem.to}
+                  target={navItem.target}
                   className={tw("font-semibold", isActive && "bg-gray-100")}
                 >
-                  <Icon size="xs" icon={item.icon} className="text-gray-600" />
-                  <span>{item.title}</span>
+                  <Icon
+                    size="xs"
+                    icon={navItem.icon}
+                    className="text-gray-600"
+                  />
+                  <span>{navItem.title}</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
           );
-        })}
-      </SidebarMenu>
+        }
+
+        case "label": {
+          return <SidebarGroupLabel>{navItem.title}</SidebarGroupLabel>;
+        }
+
+        default: {
+          return null;
+        }
+      }
+    },
+    [isAnyRouteActive, isRouteActive]
+  );
+
+  return (
+    <SidebarGroup className={className} style={style}>
+      <SidebarMenu>{items.map(renderNavItem)}</SidebarMenu>
     </SidebarGroup>
   );
 }

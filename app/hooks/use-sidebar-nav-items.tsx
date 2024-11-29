@@ -5,7 +5,6 @@ type BaseNavItem = {
   title: string;
   hidden?: boolean;
   icon: IconType;
-  defaultOpen?: boolean;
 };
 
 type ChildNavItem = BaseNavItem & {
@@ -19,12 +18,20 @@ type ParentNavItem = BaseNavItem & {
   children: Omit<ChildNavItem, "type" | "icon">[];
 };
 
-export type NavItem = ChildNavItem | ParentNavItem;
+type LabelNavItem = Omit<BaseNavItem, "icon"> & {
+  type: "label";
+};
+
+export type NavItem = ChildNavItem | ParentNavItem | LabelNavItem;
 
 export function useSidebarNavItems() {
   const { isBaseOrSelfService } = useUserRoleHelper();
 
   const topMenuItems: NavItem[] = [
+    {
+      type: "label",
+      title: "Asset management",
+    },
     {
       type: "child",
       title: "Dashboard",
@@ -81,6 +88,10 @@ export function useSidebarNavItems() {
           to: "/calendar",
         },
       ],
+    },
+    {
+      type: "label",
+      title: "Organization",
     },
     {
       type: "parent",
