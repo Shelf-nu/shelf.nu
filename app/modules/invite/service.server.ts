@@ -1,7 +1,6 @@
 import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext } from "@remix-run/node";
-import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
