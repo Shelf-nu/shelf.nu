@@ -1,10 +1,10 @@
 import { useLocation, useRouteError } from "@remix-run/react";
 
 import { isRouteError } from "~/utils/http";
-import { Button } from "../shared/button";
-import { parse404ErrorData } from "./utils";
-import Error404Handler from "./error-404-handler";
 import { tw } from "~/utils/tw";
+import Error404Handler from "./error-404-handler";
+import { parse404ErrorData } from "./utils";
+import { Button } from "../shared/button";
 
 type ErrorContentProps = { className?: string };
 
@@ -39,7 +39,7 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   return (
     <div
       className={tw(
-        "h-screen flex size-full items-center justify-center",
+        "flex size-full h-screen items-center justify-center",
         className
       )}
     >

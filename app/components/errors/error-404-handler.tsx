@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import { tw } from "~/utils/tw";
-import { Error404AdditionalData, getModelLabelForEnumValue } from "./utils";
-import { Button } from "../shared/button";
 import { useFetcher } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+import type { Error404AdditionalData } from "./utils";
+import { getModelLabelForEnumValue } from "./utils";
 import {
   Select,
   SelectContent,
@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
+import { Button } from "../shared/button";
 
 export type Error404HandlerProps = {
   className?: string;
@@ -91,10 +92,10 @@ export default function Error404Handler({
               <fetcher.Form
                 action="/api/user/change-current-organization"
                 method="POST"
-                className="flex items-center flex-col"
+                className="flex flex-col items-center"
               >
                 <Select name="organizationId" disabled={disabled}>
-                  <SelectTrigger className="mb-4 px-3.5 py-2 text-left text-gray-500 max-w-80">
+                  <SelectTrigger className="mb-4 max-w-80 px-3.5 py-2 text-left text-gray-500">
                     <SelectValue placeholder="Select workspace to switch" />
                   </SelectTrigger>
                   <SelectContent
@@ -129,7 +130,7 @@ export default function Error404Handler({
         return null;
       }
     }
-  }, [additionalData]);
+  }, [additionalData, disabled, fetcher]);
 
   return (
     <div

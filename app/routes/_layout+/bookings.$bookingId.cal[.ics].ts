@@ -21,13 +21,12 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
   try {
     /** Check if the current user is allowed to read booking */
-    const { organizationId, isSelfServiceOrBase, userOrganizations } =
-      await requirePermission({
-        userId: authSession.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     const booking = await getBooking({ id: bookingId, organizationId });
 

@@ -13,6 +13,7 @@ import {
   isLikeShelfError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -20,7 +21,6 @@ import {
   updateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields,
 } from "../asset-index-settings/service.server";
-import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Custom fields";
 
