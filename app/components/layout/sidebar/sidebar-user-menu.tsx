@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { Form } from "~/components/custom-form";
-import { ChevronRight, QuestionsIcon } from "~/components/icons/library";
-import { CrispButton } from "~/components/marketing/crisp";
+import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
@@ -85,26 +84,6 @@ export default function SidebarUserMenu() {
               >
                 Account settings
               </Button>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(e) => e.preventDefault()}
-              className="border-b border-gray-200 p-0"
-            >
-              <CrispButton
-                className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                variant="link"
-                width="full"
-                title="Questions/Feedback"
-              >
-                <span className="flex items-center justify-start gap-2">
-                  <i className="icon text-gray-700">
-                    <QuestionsIcon />
-                  </i>
-                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                    Questions/Feedback
-                  </span>
-                </span>
-              </CrispButton>
             </DropdownMenuItem>
             <DropdownMenuItem
               className="p-0"

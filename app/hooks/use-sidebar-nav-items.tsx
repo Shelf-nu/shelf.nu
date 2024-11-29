@@ -1,3 +1,4 @@
+import { Crisp } from "crisp-sdk-web";
 import type { IconType } from "~/components/shared/icons-map";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
@@ -22,7 +23,16 @@ type LabelNavItem = Omit<BaseNavItem, "icon"> & {
   type: "label";
 };
 
-export type NavItem = ChildNavItem | ParentNavItem | LabelNavItem;
+type ButtonNavItem = BaseNavItem & {
+  type: "button";
+  onClick: () => void;
+};
+
+export type NavItem =
+  | ChildNavItem
+  | ParentNavItem
+  | LabelNavItem
+  | ButtonNavItem;
 
 export function useSidebarNavItems() {
   const { isBaseOrSelfService } = useUserRoleHelper();
@@ -144,6 +154,14 @@ export function useSidebarNavItems() {
       title: "QR Scanner",
       to: "/scanner",
       icon: "scanQR",
+    },
+    {
+      type: "button",
+      title: "Questions/Feedback",
+      icon: "question",
+      onClick: () => {
+        Crisp.chat.open();
+      },
     },
   ];
 

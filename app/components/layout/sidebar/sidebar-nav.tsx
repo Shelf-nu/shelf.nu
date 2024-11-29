@@ -126,7 +126,25 @@ export default function SidebarNav({
         }
 
         case "label": {
-          return <SidebarGroupLabel>{navItem.title}</SidebarGroupLabel>;
+          return (
+            <SidebarGroupLabel key={navItem.title}>
+              {navItem.title}
+            </SidebarGroupLabel>
+          );
+        }
+
+        case "button": {
+          return (
+            <SidebarMenuItem key={navItem.title} onClick={navItem.onClick}>
+              <SidebarMenuButton
+                className="font-medium"
+                tooltip={navItem.title}
+              >
+                <Icon size="xs" icon={navItem.icon} className="text-gray-600" />
+                <span>{navItem.title}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          );
         }
 
         default: {
