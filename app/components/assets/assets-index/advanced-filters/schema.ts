@@ -58,6 +58,7 @@ export const filterSchema = z
       arrayValueSchema,
     ]),
     fieldType: z.nativeEnum(CustomFieldType).optional(),
+    isNew: z.boolean().optional(),
   })
   .refine(
     (data) => {

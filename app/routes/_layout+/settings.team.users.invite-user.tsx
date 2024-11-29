@@ -18,7 +18,6 @@ import {
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
-import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
@@ -253,15 +252,6 @@ export default function InviteUser() {
               required
             />
           </div>
-          <WarningBox className="">
-            <>
-              <strong>IMPORTANT</strong>: User invite emails contain a link with
-              a unique token that expires after being consumed. Please make sure
-              to add the <span className="font-medium">shelf.nu domain</span> to
-              your email whitelist to ensure the email is delivered and the link
-              is not consumed by your anti-spam software.
-            </>
-          </WarningBox>
           <div className="mt-7 flex gap-1">
             <Button
               variant="secondary"
