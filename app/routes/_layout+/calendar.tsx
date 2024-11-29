@@ -6,6 +6,7 @@ import type {
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import type { BookingStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
@@ -32,7 +33,11 @@ import When from "~/components/when/when";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
+import {
+  getStatusClasses,
+  isOneDayEvent,
+  statusClassesOnHover,
+} from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -78,6 +83,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
+
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
         cause: null,
@@ -127,7 +133,11 @@ export default function Calendar() {
   const [calendarSubtitle, setCalendarSubtitle] = useState(
     isMd ? undefined : `${startingDay} - ${endingDay}`
   );
-
+  const [calendarView, setCalendarView] = useState(
+    isMd ? "dayGridMonth" : "listWeek"
+  );
+  const disabledButtonStyles =
+    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
 
@@ -143,7 +153,7 @@ export default function Calendar() {
     updateTitle();
   };
 
-  const updateTitle = () => {
+  const updateTitle = (viewMode = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
       const currentDate = calendarApi.getDate();
@@ -151,11 +161,30 @@ export default function Calendar() {
         month: "long",
       });
       const currentYear = currentDate.getFullYear();
-      const [startingDay, endingDay] =
-        getWeekStartingAndEndingDates(currentDate);
 
-      setCalendarTitle(`${currentMonth} ${currentYear}`);
-      setCalendarSubtitle(`${startingDay} - ${endingDay}`);
+      let mainTitle = `${currentMonth} ${currentYear}`;
+      let subtitle = "";
+
+      if (viewMode === "timeGridWeek") {
+        const [startingDay, endingDay] =
+          getWeekStartingAndEndingDates(currentDate);
+        mainTitle = `${currentMonth} ${currentYear}`;
+        subtitle = `Week ${startingDay} - ${endingDay}`;
+      } else if (viewMode === "timeGridDay") {
+        const formattedDate = currentDate.toLocaleDateString("default", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        });
+        const weekday = currentDate.toLocaleDateString("default", {
+          weekday: "long",
+        });
+        mainTitle = formattedDate;
+        subtitle = weekday;
+      }
+
+      setCalendarTitle(mainTitle);
+      setCalendarSubtitle(subtitle);
     }
   };
 
@@ -173,6 +202,8 @@ export default function Calendar() {
   );
 
   const handleEventMouseEnter = (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (viewType != "dayGridMonth") return;
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -183,6 +214,8 @@ export default function Calendar() {
   };
 
   const handleEventMouseLeave = (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (viewType != "dayGridMonth") return;
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -195,7 +228,25 @@ export default function Calendar() {
   const handleWindowResize = () => {
     const calendar = calendarRef?.current?.getApi();
     if (calendar) {
-      calendar.changeView(isMd ? "dayGridMonth" : "listWeek");
+      calendar.changeView(isMd ? calendarView : "listWeek");
+    }
+  };
+
+  const handleViewChange = (view: string) => {
+    setCalendarView(view);
+    const calendarApi = calendarRef.current?.getApi();
+    calendarApi?.changeView(view);
+    updateTitle(view);
+  };
+
+  const updateViewClasses = (calendarContainer: any, viewType: any) => {
+    calendarContainer.classList.remove("month-view", "week-view", "day-view");
+    if (viewType === "dayGridMonth") {
+      calendarContainer.classList.add("month-view");
+    } else if (viewType === "timeGridWeek") {
+      calendarContainer.classList.add("week-view");
+    } else if (viewType === "timeGridDay") {
+      calendarContainer.classList.add("day-view");
     }
   };
 
@@ -208,7 +259,7 @@ export default function Calendar() {
             <div className="text-left font-sans text-lg font-semibold leading-[20px] ">
               {calendarTitle}
             </div>
-            {!isMd ? (
+            {!isMd || calendarView == "timeGridWeek" ? (
               <div className="text-gray-600">{calendarSubtitle}</div>
             ) : null}
           </div>
@@ -217,37 +268,79 @@ export default function Calendar() {
             <div ref={ripple} className="mr-3 flex justify-center">
               <Spinner />
             </div>
-            <ButtonGroup>
-              <Button
-                variant="secondary"
-                className="border-r p-[0.75em] text-gray-500"
-                onClick={() => handleNavigation("prev")}
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <Button
-                variant="secondary"
-                className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
-                onClick={() => handleNavigation("today")}
-              >
-                Today
-              </Button>
-              <Button
-                variant="secondary"
-                className="p-[0.75em] text-gray-500"
-                onClick={() => handleNavigation("next")}
-              >
-                <ChevronRightIcon />
-              </Button>
-            </ButtonGroup>
+            <div className="mr-4">
+              <ButtonGroup>
+                <Button
+                  variant="secondary"
+                  className="border-r p-[0.75em] text-gray-500"
+                  onClick={() => handleNavigation("prev")}
+                >
+                  <ChevronLeftIcon />
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
+                  onClick={() => handleNavigation("today")}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="p-[0.75em] text-gray-500"
+                  onClick={() => handleNavigation("next")}
+                >
+                  <ChevronRightIcon />
+                </Button>
+              </ButtonGroup>
+            </div>
+
+            {isMd ? (
+              <ButtonGroup>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("dayGridMonth")}
+                  className={tw(
+                    calendarView === "dayGridMonth"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Month
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("timeGridWeek")}
+                  className={tw(
+                    calendarView === "timeGridWeek"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Week
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleViewChange("timeGridDay")}
+                  className={tw(
+                    calendarView === "timeGridDay"
+                      ? `${disabledButtonStyles}`
+                      : ""
+                  )}
+                >
+                  Day
+                </Button>
+              </ButtonGroup>
+            ) : null}
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin]}
-              initialView={isMd ? "dayGridMonth" : "listWeek"}
+              plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
+              initialView={calendarView}
+              expandRows={true}
+              height="auto"
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
@@ -256,7 +349,9 @@ export default function Calendar() {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              dayMaxEvents={4}
+              slotEventOverlap={true}
+              dayMaxEvents={3}
+              dayMaxEventRows={4}
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
@@ -267,7 +362,28 @@ export default function Calendar() {
                 minute: "2-digit",
                 meridiem: "short",
               }}
-              height="auto"
+              viewDidMount={(args) => {
+                const calendarContainer = args.el;
+                const viewType = args.view.type;
+                updateViewClasses(calendarContainer, viewType);
+              }}
+              datesSet={(args) => {
+                const calendarContainer = document.querySelector(".fc");
+                const viewType = args.view.type;
+                updateViewClasses(calendarContainer, viewType);
+              }}
+              eventClassNames={(eventInfo) => {
+                const viewType = eventInfo.view.type;
+                const isOneDay = isOneDayEvent(
+                  eventInfo.event.start,
+                  eventInfo.event.end
+                );
+                return getStatusClasses(
+                  eventInfo.event.extendedProps.status,
+                  isOneDay,
+                  viewType
+                );
+              }}
               loading={toggleSpinner}
             />
           )}
@@ -279,6 +395,8 @@ export default function Calendar() {
 
 const renderEventCard = (args: EventContentArg) => {
   const event = args.event;
+  const viewType = event._context.calendarApi.view.type;
+
   const booking = event.extendedProps as CalendarExtendedProps;
   const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
 
@@ -287,12 +405,14 @@ const renderEventCard = (args: EventContentArg) => {
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "inline-block max-w-full whitespace-normal bg-transparent lg:truncate"
+            "inline-block size-full whitespace-normal bg-transparent lg:truncate"
           )}
         >
-          <When truthy={_isOneDayEvent}>
-            <div className="fc-daygrid-event-dot inline-block" />
-          </When>
+          {viewType == "dayGridMonth" && (
+            <When truthy={_isOneDayEvent}>
+              <div className="fc-daygrid-event-dot inline-block" />
+            </When>
+          )}
           <DateS
             date={booking.start}
             options={{

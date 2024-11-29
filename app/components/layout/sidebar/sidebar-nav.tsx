@@ -165,7 +165,7 @@ export default function SidebarNav({
         }
       }
     },
-    [isAnyRouteActive, isRouteActive]
+    [isAnyRouteActive, isRouteActive, navigate]
   );
 
   return (
