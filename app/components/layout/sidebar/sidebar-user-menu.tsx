@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { useLoaderData } from "@remix-run/react";
-import { Form } from "~/components/custom-form";
+import { NavLink, useFetcher, useLoaderData } from "@remix-run/react";
+import { LogOutIcon, UserRoundIcon } from "lucide-react";
 import { ChevronRight } from "~/components/icons/library";
-import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,9 +23,14 @@ export default function SidebarUserMenu() {
   const { user } = useLoaderData<typeof loader>();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const { isMobile } = useSidebar();
+  const fetcher = useFetcher();
 
   function closeDropdown() {
     setIsDropdownOpen(false);
+  }
+
+  function logOut() {
+    fetcher.submit(null, { action: "/logout", method: "POST" });
   }
 
   return (
@@ -73,34 +77,22 @@ export default function SidebarUserMenu() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="border-b border-gray-200 p-0">
-              <Button
-                to="/account-details"
-                icon="profile"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                onClick={closeDropdown}
-              >
+            <DropdownMenuItem
+              asChild
+              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              onClick={closeDropdown}
+            >
+              <NavLink to="/account-details">
+                <UserRoundIcon className="size-4" />
                 Account settings
-              </Button>
+              </NavLink>
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="p-0"
-              onSelect={(e) => e.preventDefault()}
+              className="mt-1 cursor-pointer gap-2 border-b border-gray-200 p-2"
+              onSelect={logOut}
             >
-              <Form action="/logout" method="post" className="w-full">
-                <Button
-                  icon="logout"
-                  role="link"
-                  type="submit"
-                  variant="link"
-                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                  width="full"
-                >
-                  Log Out
-                </Button>
-              </Form>
+              <LogOutIcon className="size-4" />
+              Log Out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

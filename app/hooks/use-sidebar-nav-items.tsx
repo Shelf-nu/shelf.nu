@@ -1,11 +1,25 @@
 import { Crisp } from "crisp-sdk-web";
-import type { IconType } from "~/components/shared/icons-map";
+import {
+  BoxesIcon,
+  BriefcaseConveyorBeltIcon,
+  CalendarRangeIcon,
+  ChartNoAxesCombinedIcon,
+  MapPinIcon,
+  MessageCircleIcon,
+  PackageOpenIcon,
+  QrCodeIcon,
+  ScanQrCodeIcon,
+  SettingsIcon,
+  TagsIcon,
+  UsersRoundIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 type BaseNavItem = {
   title: string;
   hidden?: boolean;
-  icon: IconType;
+  Icon: LucideIcon;
 };
 
 type ChildNavItem = BaseNavItem & {
@@ -16,10 +30,10 @@ type ChildNavItem = BaseNavItem & {
 
 type ParentNavItem = BaseNavItem & {
   type: "parent";
-  children: Omit<ChildNavItem, "type" | "icon">[];
+  children: Omit<ChildNavItem, "type" | "Icon">[];
 };
 
-type LabelNavItem = Omit<BaseNavItem, "icon"> & {
+type LabelNavItem = Omit<BaseNavItem, "Icon"> & {
   type: "label";
 };
 
@@ -46,27 +60,27 @@ export function useSidebarNavItems() {
       type: "child",
       title: "Dashboard",
       to: "/dashboard",
-      icon: "graph",
+      Icon: ChartNoAxesCombinedIcon,
       hidden: isBaseOrSelfService,
     },
     {
       type: "child",
       title: "Assets",
       to: "/assets",
-      icon: "asset",
+      Icon: PackageOpenIcon,
     },
     {
       type: "child",
       title: "Kits",
       to: "/kits",
-      icon: "kit",
+      Icon: BriefcaseConveyorBeltIcon,
       hidden: isBaseOrSelfService,
     },
     {
       type: "child",
       title: "Categories",
       to: "/categories",
-      icon: "category",
+      Icon: BoxesIcon,
       hidden: isBaseOrSelfService,
     },
 
@@ -74,20 +88,20 @@ export function useSidebarNavItems() {
       type: "child",
       title: "Tags",
       to: "/tags",
-      icon: "tag",
+      Icon: TagsIcon,
       hidden: isBaseOrSelfService,
     },
     {
       type: "child",
       title: "Locations",
       to: "/locations",
-      icon: "location",
+      Icon: MapPinIcon,
       hidden: isBaseOrSelfService,
     },
     {
       type: "parent",
       title: "Bookings",
-      icon: "bookings",
+      Icon: CalendarRangeIcon,
       children: [
         {
           title: "View Bookings",
@@ -106,7 +120,7 @@ export function useSidebarNavItems() {
     {
       type: "parent",
       title: "Team",
-      icon: "user",
+      Icon: UsersRoundIcon,
       hidden: isBaseOrSelfService,
       children: [
         {
@@ -122,7 +136,7 @@ export function useSidebarNavItems() {
     {
       type: "parent",
       title: "Workspace settings",
-      icon: "settings",
+      Icon: SettingsIcon,
       hidden: isBaseOrSelfService,
       children: [
         {
@@ -146,19 +160,19 @@ export function useSidebarNavItems() {
       type: "child",
       title: "Asset labels",
       to: `https://store.shelf.nu/?ref=shelf_webapp_sidebar`,
-      icon: "asset-label",
+      Icon: QrCodeIcon,
       target: "_blank",
     },
     {
       type: "child",
       title: "QR Scanner",
       to: "/scanner",
-      icon: "scanQR",
+      Icon: ScanQrCodeIcon,
     },
     {
       type: "button",
       title: "Questions/Feedback",
-      icon: "question",
+      Icon: MessageCircleIcon,
       onClick: () => {
         Crisp.chat.open();
       },

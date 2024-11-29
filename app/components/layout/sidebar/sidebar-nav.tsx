@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { NavLink, useMatches, useNavigate } from "@remix-run/react";
 import invariant from "tiny-invariant";
-import Icon from "~/components/icons/icon";
 import {
   Collapsible,
   CollapsibleContent,
@@ -77,11 +76,7 @@ export default function SidebarNav({
                       navigate(firstChildRoute.to);
                     }}
                   >
-                    <Icon
-                      size="xs"
-                      icon={navItem.icon}
-                      className="text-gray-600"
-                    />
+                    <navItem.Icon className="size-4 text-gray-600" />
                     <span className="font-semibold">{navItem.title}</span>
                     <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                   </SidebarMenuButton>
@@ -126,11 +121,7 @@ export default function SidebarNav({
                   target={navItem.target}
                   className={tw("font-semibold", isActive && "bg-gray-100")}
                 >
-                  <Icon
-                    size="xs"
-                    icon={navItem.icon}
-                    className="text-gray-600"
-                  />
+                  <navItem.Icon className="size-4 text-gray-600" />
                   <span>{navItem.title}</span>
                 </NavLink>
               </SidebarMenuButton>
@@ -153,7 +144,7 @@ export default function SidebarNav({
                 className="font-semibold"
                 tooltip={navItem.title}
               >
-                <Icon size="xs" icon={navItem.icon} className="text-gray-600" />
+                <navItem.Icon className="size-4 text-gray-600" />
                 <span>{navItem.title}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
