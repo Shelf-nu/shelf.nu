@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { Fragment, useCallback } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { NavLink, useMatches, useNavigate } from "@remix-run/react";
 import invariant from "tiny-invariant";
@@ -47,6 +47,18 @@ export default function SidebarNav({
     [isRouteActive]
   );
 
+  const renderTooltopContent = useCallback((navItem: NavItem) => {
+    if (typeof navItem.disabled === "boolean" && navItem.disabled) {
+      return `${navItem.title} is disabled`;
+    }
+
+    if (typeof navItem.disabled === "object") {
+      return { children: navItem.disabled.reason };
+    }
+
+    return navItem.title;
+  }, []);
+
   const renderNavItem = useCallback(
     (navItem: NavItem) => {
       switch (navItem.type) {
@@ -63,17 +75,19 @@ export default function SidebarNav({
 
           return (
             <Collapsible
-              key={navItem.title}
               asChild
               className="group/collapsible"
               defaultOpen={isAnyChildActive}
             >
-              <SidebarMenuItem key={navItem.title}>
+              <SidebarMenuItem key={navItem.title} className="z-50">
                 <CollapsibleTrigger asChild>
                   <SidebarMenuButton
-                    tooltip={navItem.title}
+                    disabled={!!navItem.disabled}
+                    tooltip={renderTooltopContent(navItem)}
                     onClick={() => {
-                      navigate(firstChildRoute.to);
+                      if (!navItem.disabled) {
+                        navigate(firstChildRoute.to);
+                      }
                     }}
                   >
                     <navItem.Icon className="size-4 text-gray-600" />
@@ -114,8 +128,12 @@ export default function SidebarNav({
           const isActive = isRouteActive(navItem.to);
 
           return (
-            <SidebarMenuItem key={navItem.title}>
-              <SidebarMenuButton asChild tooltip={navItem.title}>
+            <SidebarMenuItem className="z-50">
+              <SidebarMenuButton
+                asChild
+                disabled={!!navItem.disabled}
+                tooltip={renderTooltopContent(navItem)}
+              >
                 <NavLink
                   to={navItem.to}
                   target={navItem.target}
@@ -130,16 +148,12 @@ export default function SidebarNav({
         }
 
         case "label": {
-          return (
-            <SidebarGroupLabel key={navItem.title}>
-              {navItem.title}
-            </SidebarGroupLabel>
-          );
+          return <SidebarGroupLabel>{navItem.title}</SidebarGroupLabel>;
         }
 
         case "button": {
           return (
-            <SidebarMenuItem key={navItem.title} onClick={navItem.onClick}>
+            <SidebarMenuItem onClick={navItem.onClick}>
               <SidebarMenuButton
                 className="font-semibold"
                 tooltip={navItem.title}
@@ -156,12 +170,16 @@ export default function SidebarNav({
         }
       }
     },
-    [isAnyRouteActive, isRouteActive, navigate]
+    [isAnyRouteActive, isRouteActive, navigate, renderTooltopContent]
   );
 
   return (
     <SidebarGroup className={className} style={style}>
-      <SidebarMenu>{items.map(renderNavItem)}</SidebarMenu>
+      <SidebarMenu>
+        {items.map((navItem, i) => (
+          <Fragment key={i}>{renderNavItem(navItem)}</Fragment>
+        ))}
+      </SidebarMenu>
     </SidebarGroup>
   );
 }

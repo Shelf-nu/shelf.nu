@@ -1,8 +1,11 @@
+import { useMemo } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { Crisp } from "crisp-sdk-web";
 import {
   BoxesIcon,
   BriefcaseConveyorBeltIcon,
   CalendarRangeIcon,
+  ChartLineIcon,
   ChartNoAxesCombinedIcon,
   MapPinIcon,
   MessageCircleIcon,
@@ -14,12 +17,16 @@ import {
   UsersRoundIcon,
   type LucideIcon,
 } from "lucide-react";
+import { UpgradeMessage } from "~/components/marketing/upgrade-message";
+import When from "~/components/when/when";
+import type { loader } from "~/routes/_layout+/_layout";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 type BaseNavItem = {
   title: string;
   hidden?: boolean;
   Icon: LucideIcon;
+  disabled?: boolean | { reason: React.ReactNode };
 };
 
 type ChildNavItem = BaseNavItem & {
@@ -49,9 +56,44 @@ export type NavItem =
   | ButtonNavItem;
 
 export function useSidebarNavItems() {
+  const { isAdmin, canUseBookings, subscription } =
+    useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
 
+  const bookingDisabled = useMemo(() => {
+    if (canUseBookings) {
+      return false;
+    }
+
+    return {
+      reason: (
+        <div>
+          <h5>Disabled</h5>
+          <p>
+            Booking is a premium feature only available for Team workspaces.
+          </p>
+
+          <When truthy={!!subscription} fallback={<UpgradeMessage />}>
+            <p>Please switch to your team workspace to access this feature.</p>
+          </When>
+        </div>
+      ),
+    };
+  }, [canUseBookings, subscription]);
+
   const topMenuItems: NavItem[] = [
+    {
+      type: "label",
+      title: "Admin",
+      hidden: !isAdmin,
+    },
+    {
+      type: "child",
+      title: "Admin Dashboard",
+      to: "/admin-dashboard/users",
+      Icon: ChartLineIcon,
+      hidden: !isAdmin,
+    },
     {
       type: "label",
       title: "Asset management",
@@ -102,14 +144,17 @@ export function useSidebarNavItems() {
       type: "parent",
       title: "Bookings",
       Icon: CalendarRangeIcon,
+      disabled: bookingDisabled,
       children: [
         {
           title: "View Bookings",
           to: "/bookings",
+          disabled: bookingDisabled,
         },
         {
           title: "Calendar",
           to: "/calendar",
+          disabled: bookingDisabled,
         },
       ],
     },
