@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { NavLink, useMatches } from "@remix-run/react";
+import { NavLink, useMatches, useNavigate } from "@remix-run/react";
+import invariant from "tiny-invariant";
 import Icon from "~/components/icons/icon";
 import {
   Collapsible,
@@ -32,6 +33,7 @@ export default function SidebarNav({
   items,
 }: SidebarNavProps) {
   const matches = useMatches();
+  const navigate = useNavigate();
 
   const isRouteActive = useCallback(
     (route: string) => {
@@ -50,6 +52,12 @@ export default function SidebarNav({
     (navItem: NavItem) => {
       switch (navItem.type) {
         case "parent": {
+          const firstChildRoute = navItem.children[0];
+          invariant(
+            typeof firstChildRoute !== "undefined",
+            "'parent' nav item should have at lease one child route"
+          );
+
           const isAnyChildActive = isAnyRouteActive(
             navItem.children.map((child) => child.to)
           );
@@ -63,7 +71,12 @@ export default function SidebarNav({
             >
               <SidebarMenuItem key={navItem.title}>
                 <CollapsibleTrigger asChild>
-                  <SidebarMenuButton tooltip={navItem.title}>
+                  <SidebarMenuButton
+                    tooltip={navItem.title}
+                    onClick={() => {
+                      navigate(firstChildRoute.to);
+                    }}
+                  >
                     <Icon
                       size="xs"
                       icon={navItem.icon}
@@ -137,7 +150,7 @@ export default function SidebarNav({
           return (
             <SidebarMenuItem key={navItem.title} onClick={navItem.onClick}>
               <SidebarMenuButton
-                className="font-medium"
+                className="font-semibold"
                 tooltip={navItem.title}
               >
                 <Icon size="xs" icon={navItem.icon} className="text-gray-600" />
