@@ -1,6 +1,6 @@
+import { forwardRef } from "react";
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
-import { forwardRef } from "react";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 
@@ -61,8 +61,8 @@ const SheetContent = forwardRef<
       className={tw(sheetVariants({ side }), className)}
       {...props}
     >
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
-        <XIcon className="h-4 w-4" />
+      <SheetPrimitive.Close className="ring-offset-background data-[state=open]:bg-secondary absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        <XIcon className="size-4" />
         <span className="sr-only">Close</span>
       </SheetPrimitive.Close>
       {children}
@@ -105,7 +105,7 @@ const SheetTitle = forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Title
     ref={ref}
-    className={tw("text-lg font-semibold text-foreground", className)}
+    className={tw("text-foreground text-lg font-semibold", className)}
     {...props}
   />
 ));
@@ -117,7 +117,7 @@ const SheetDescription = forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Description
     ref={ref}
-    className={tw("text-sm text-muted-foreground", className)}
+    className={tw("text-muted-foreground text-sm", className)}
     {...props}
   />
 ));

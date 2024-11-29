@@ -7,7 +7,6 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
-  Link,
   Links,
   Meta,
   Outlet,
@@ -19,8 +18,8 @@ import {
 import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
-import { HomeIcon } from "./components/icons/library";
 import BlockInteractions from "./components/layout/maintenance-mode";
+import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
@@ -34,7 +33,6 @@ import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
-import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 
 export interface RootData {
   env: typeof getBrowserEnv;

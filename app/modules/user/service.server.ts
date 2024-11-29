@@ -33,13 +33,13 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
+import type { MergeInclude } from "~/utils/utils";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
-import { MergeInclude } from "~/utils/utils";
 
 const label: ErrorLabel = "User";
 

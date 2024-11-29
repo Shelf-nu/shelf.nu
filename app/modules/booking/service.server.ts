@@ -20,6 +20,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
+import type { MergeInclude } from "~/utils/utils";
 import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
@@ -34,7 +35,6 @@ import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
-import { MergeInclude } from "~/utils/utils";
 
 const label: ErrorLabel = "Booking";
 
