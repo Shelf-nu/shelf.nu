@@ -19,6 +19,7 @@ import { ListHeader } from "./list-header";
 import type { ListItemData } from "./list-item";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
+import BookSelectedAssetsDropdown from "../assets/assets-index/book-selected-assets-dropdown";
 import { ExportAssetsButton } from "../assets/assets-index/export-assets-button";
 import { Button } from "../shared/button";
 import { Table } from "../table";
@@ -215,6 +216,9 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               </When>
               <When truthy={!!bulkActions}>
                 <div>{bulkActions}</div>
+              </When>
+              <When truthy={modeIsAdvanced}>
+                <BookSelectedAssetsDropdown />
               </When>
             </div>
           </div>
