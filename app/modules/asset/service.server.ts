@@ -449,7 +449,7 @@ async function getAssetsFromView(params: {
 /**
  * Fetches assets directly from asset table
  */
-async function getAssets(params: {
+type GetAssetsArgs = {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
   page: number;
@@ -470,23 +470,17 @@ async function getAssets(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
-}) {
+};
+
+async function getAssets(params: GetAssetsArgs) {
   const {
     organizationId,
     orderBy,
     orderDirection,
     page = 1,
     perPage = 8,
-    search,
-    categoriesIds,
-    locationIds,
-    tagsIds,
-    status,
     bookingFrom,
     bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
-    teamMemberIds,
     extraInclude,
   } = params;
 
@@ -494,132 +488,7 @@ async function getAssets(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    /** Default value of where. Takes the assetss belonging to current user */
-    let where: Prisma.AssetWhereInput = { organizationId };
-
-    /** If the search string exists, add it to the where object */
-    if (search) {
-      where.title = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
-    }
-
-    if (status) {
-      where.status = status;
-    }
-
-    if (categoriesIds && categoriesIds.length > 0) {
-      if (categoriesIds.includes("uncategorized")) {
-        where.OR = [
-          {
-            categoryId: {
-              in: categoriesIds,
-            },
-          },
-          {
-            categoryId: null,
-          },
-        ];
-      } else {
-        where.categoryId = {
-          in: categoriesIds,
-        };
-      }
-    }
-
-    if (hideUnavailable) {
-      //not disabled for booking
-      where.availableToBook = true;
-      //not assigned to team meber
-      where.custody = null;
-      if (bookingFrom && bookingTo) {
-        //reserved during that time
-        where.bookings = {
-          none: {
-            ...(unhideAssetsBookigIds?.length && {
-              id: { notIn: unhideAssetsBookigIds },
-            }),
-            status: { in: unavailableBookingStatuses },
-            OR: [
-              {
-                from: { lte: bookingTo },
-                to: { gte: bookingFrom },
-              },
-              {
-                from: { gte: bookingFrom },
-                to: { lte: bookingTo },
-              },
-            ],
-          },
-        };
-      }
-    }
-    if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-      throw new ShelfError({
-        cause: null,
-        message: "booking dates are needed to hide unavailable assets",
-        additionalData: {
-          hideUnavailable,
-          bookingFrom,
-          bookingTo,
-        },
-        label,
-      });
-    }
-    if (bookingFrom && bookingTo) {
-      where.availableToBook = true;
-    }
-
-    if (tagsIds && tagsIds.length > 0) {
-      if (tagsIds.includes("untagged")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { tags: { every: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
-        ];
-      } else {
-        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
-      }
-    }
-
-    if (locationIds && locationIds.length > 0) {
-      if (locationIds.includes("without-location")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { locationId: { in: locationIds } },
-          { locationId: null },
-        ];
-      } else {
-        where.location = {
-          id: { in: locationIds },
-        };
-      }
-    }
-
-    /**
-     * User should only see the assets without kits for hideUnavailable true
-     */
-    if (hideUnavailable === true) {
-      where.kit = null;
-    }
-
-    if (teamMemberIds && teamMemberIds.length) {
-      where.OR = [
-        ...(where.OR ?? []),
-        {
-          custody: { teamMemberId: { in: teamMemberIds } },
-        },
-        { custody: { custodian: { userId: { in: teamMemberIds } } } },
-        {
-          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
-        },
-        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
+    const where = getAssetsWhereFromRequest(params, organizationId);
 
     const [assets, totalAssets] = await Promise.all([
       /** Get the assets */
@@ -699,6 +568,189 @@ async function getAssets(params: {
       label,
     });
   }
+}
+
+/**
+ * Helper function to create `where` query for assets based on the searchParams in url.
+ */
+export function getAssetsWhereFromRequest(
+  paramsValues: Pick<
+    GetAssetsArgs,
+    | "search"
+    | "status"
+    | "categoriesIds"
+    | "hideUnavailable"
+    | "unhideAssetsBookigIds"
+    | "bookingFrom"
+    | "bookingTo"
+    | "tagsIds"
+    | "locationIds"
+    | "teamMemberIds"
+  >,
+  organizationId: Organization["id"]
+) {
+  const {
+    search,
+    status,
+    categoriesIds,
+    hideUnavailable,
+    unhideAssetsBookigIds,
+    bookingFrom,
+    bookingTo,
+    locationIds,
+    teamMemberIds,
+  } = paramsValues;
+
+  let tagsIds = paramsValues.tagsIds;
+
+  let where: Prisma.AssetWhereInput = { organizationId };
+
+  if (search) {
+    where.title = {
+      contains: search.toLowerCase().trim(),
+      mode: "insensitive",
+    };
+  }
+
+  if (status) {
+    where.status = status;
+  }
+
+  if (categoriesIds && categoriesIds.length > 0) {
+    if (categoriesIds.includes("uncategorized")) {
+      where.OR = [
+        {
+          categoryId: {
+            in: categoriesIds,
+          },
+        },
+        {
+          categoryId: null,
+        },
+      ];
+    } else {
+      where.categoryId = {
+        in: categoriesIds,
+      };
+    }
+  }
+
+  if (hideUnavailable) {
+    //not disabled for booking
+    where.availableToBook = true;
+    //not assigned to team meber
+    where.custody = null;
+    if (bookingFrom && bookingTo) {
+      //reserved during that time
+      where.bookings = {
+        none: {
+          ...(unhideAssetsBookigIds?.length && {
+            id: { notIn: unhideAssetsBookigIds },
+          }),
+          status: { in: unavailableBookingStatuses },
+          OR: [
+            {
+              from: { lte: bookingTo },
+              to: { gte: bookingFrom },
+            },
+            {
+              from: { gte: bookingFrom },
+              to: { lte: bookingTo },
+            },
+          ],
+        },
+      };
+    }
+  }
+
+  if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
+    throw new ShelfError({
+      cause: null,
+      message: "booking dates are needed to hide unavailable assets",
+      additionalData: {
+        hideUnavailable,
+        bookingFrom,
+        bookingTo,
+      },
+      label,
+    });
+  }
+
+  if (bookingFrom && bookingTo) {
+    where.availableToBook = true;
+  }
+
+  if (tagsIds && tagsIds.length > 0) {
+    if (tagsIds.includes("untagged")) {
+      where.OR = [
+        ...(where.OR ?? []),
+        { tags: { every: { id: { in: tagsIds } } } },
+        { tags: { none: {} } },
+      ];
+    } else {
+      where.tags = { some: { id: { in: tagsIds } } };
+    }
+  }
+
+  if (tagsIds && tagsIds.length > 0) {
+    // Check if 'untagged' is part of the selected tag IDs
+    if (tagsIds.includes("untagged")) {
+      // Remove 'untagged' from the list of tags
+      tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+      // Filter for assets that are untagged only
+      where.OR = [
+        ...(where.OR ?? []), // Preserve existing AND conditions if any
+        { tags: { none: {} } }, // Include assets with no tags
+      ];
+    }
+
+    // If there are other tags specified, apply AND condition
+    if (tagsIds.length > 0) {
+      where.OR = [
+        ...(where.OR || []), // Preserve existing AND conditions if any
+        { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+      ];
+    }
+  }
+
+  if (locationIds && locationIds.length > 0) {
+    if (locationIds.includes("without-location")) {
+      where.OR = [
+        ...(where.OR ?? []),
+        { locationId: { in: locationIds } },
+        { locationId: null },
+      ];
+    } else {
+      where.location = {
+        id: { in: locationIds },
+      };
+    }
+  }
+
+  /**
+   * User should only see the assets without kits for hideUnavailable true
+   */
+  if (hideUnavailable === true) {
+    where.kit = null;
+  }
+
+  if (teamMemberIds && teamMemberIds.length) {
+    where.OR = [
+      ...(where.OR ?? []),
+      {
+        custody: { teamMemberId: { in: teamMemberIds } },
+      },
+      { custody: { custodian: { userId: { in: teamMemberIds } } } },
+      {
+        bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+      },
+      { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+      ...(teamMemberIds.includes("without-custody") ? [{ custody: null }] : []),
+    ];
+  }
+
+  return where;
 }
 
 /**
