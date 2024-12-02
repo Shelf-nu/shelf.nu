@@ -84,11 +84,6 @@ export default function SidebarNav({
                   <SidebarMenuButton
                     disabled={!!navItem.disabled}
                     tooltip={renderTooltopContent(navItem)}
-                    onClick={() => {
-                      if (!navItem.disabled) {
-                        navigate(firstChildRoute.to);
-                      }
-                    }}
                   >
                     <navItem.Icon className="size-4 text-gray-600" />
                     <span className="font-semibold">{navItem.title}</span>
@@ -108,7 +103,8 @@ export default function SidebarNav({
                               target={child.target}
                               className={tw(
                                 "font-medium hover:bg-gray-100",
-                                isChildActive && "bg-gray-100"
+                                isChildActive &&
+                                  "bg-transparent font-bold !text-primary"
                               )}
                             >
                               {child.title}
@@ -137,9 +133,17 @@ export default function SidebarNav({
                 <NavLink
                   to={navItem.to}
                   target={navItem.target}
-                  className={tw("font-semibold", isActive && "bg-gray-100")}
+                  className={tw(
+                    "font-semibold",
+                    isActive && "bg-transparent font-bold text-primary"
+                  )}
                 >
-                  <navItem.Icon className="size-4 text-gray-600" />
+                  <navItem.Icon
+                    className={tw(
+                      "size-4",
+                      isActive ? "text-primary" : "text-gray-600"
+                    )}
+                  />
                   <span>{navItem.title}</span>
                 </NavLink>
               </SidebarMenuButton>
@@ -148,7 +152,17 @@ export default function SidebarNav({
         }
 
         case "label": {
-          return <SidebarGroupLabel>{navItem.title}</SidebarGroupLabel>;
+          return (
+            <SidebarGroupLabel
+              className={
+                navItem.title.toLowerCase() === "organization"
+                  ? "mt-4"
+                  : undefined
+              }
+            >
+              {navItem.title}
+            </SidebarGroupLabel>
+          );
         }
 
         case "button": {
