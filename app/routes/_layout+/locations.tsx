@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet, json } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -34,3 +35,5 @@ export const handle = {
 export default function LocationsPage() {
   return <Outlet />;
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

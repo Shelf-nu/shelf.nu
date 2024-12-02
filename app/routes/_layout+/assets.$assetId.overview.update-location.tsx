@@ -30,13 +30,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
-    const asset = await getAsset({ organizationId, id });
+    const asset = await getAsset({
+      organizationId,
+      id,
+      userOrganizations,
+      request,
+    });
 
     const { locations } = await getAllEntriesForCreateAndEdit({
       organizationId,

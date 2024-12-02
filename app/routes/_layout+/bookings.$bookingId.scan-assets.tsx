@@ -56,18 +56,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      }
+    );
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const booking = await getBooking({
       id: bookingId,
-      organizationId: organizationId,
+      organizationId,
+      userOrganizations,
+      request,
     });
 
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);

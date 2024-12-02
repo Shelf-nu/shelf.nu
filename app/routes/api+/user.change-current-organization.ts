@@ -3,21 +3,22 @@ import { z } from "zod";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { error, parseData } from "~/utils/http.server";
+import { error, parseData, safeRedirect } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId } = parseData(
+    const { organizationId, redirectTo } = parseData(
       await request.formData(),
       z.object({
         organizationId: z.string(),
+        redirectTo: z.string().optional(),
       })
     );
 
-    return redirect("/", {
+    return redirect(safeRedirect(redirectTo), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],

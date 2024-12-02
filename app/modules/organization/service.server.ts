@@ -270,6 +270,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
     return await db.userOrganization.findMany({
       where: { userId },
       select: {
+        organizationId: true,
         roles: true,
         organization: {
           select: {

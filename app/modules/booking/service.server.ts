@@ -6,6 +6,7 @@ import type {
   Asset,
   Kit,
   User,
+  UserOrganization,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
@@ -14,11 +15,13 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isNotFoundError, ShelfError } from "~/utils/error";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
+import type { MergeInclude } from "~/utils/utils";
 import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
@@ -141,10 +144,10 @@ async function updateBookingKitStates({
   }
 }
 
-const commonInclude: Prisma.BookingInclude = {
+const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
-};
+} as Prisma.BookingInclude;
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -296,7 +299,7 @@ export async function upsertBooking(
           where: { id },
           data,
           include: {
-            ...commonInclude,
+            ...BOOKING_COMMON_INCLUDE,
             assets: true,
             ...bookingIncludeForEmails,
           },
@@ -488,7 +491,7 @@ export async function upsertBooking(
     }
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
-      include: { ...commonInclude, organization: true },
+      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
     });
     if (res.from && booking.status === BookingStatus.RESERVED && !isExpired) {
       await cancelScheduler(res);
@@ -641,7 +644,7 @@ export async function getBookings(params: {
         }),
         where,
         include: {
-          ...commonInclude,
+          ...BOOKING_COMMON_INCLUDE,
           assets: {
             select: {
               id: true,
@@ -782,7 +785,7 @@ export async function deleteBooking(
     const b = await db.booking.delete({
       where: { id },
       include: {
-        ...commonInclude,
+        ...BOOKING_COMMON_INCLUDE,
         ...bookingIncludeForEmails,
         assets: {
           select: {
@@ -849,11 +852,35 @@ export async function deleteBooking(
   }
 }
 
-export async function getBooking(
-  booking: Pick<Booking, "id" | "organizationId">
+const BOOKING_WITH_ASSETS_INCLUDE = {
+  ...BOOKING_COMMON_INCLUDE,
+  assets: {
+    select: {
+      id: true,
+      availableToBook: true,
+      status: true,
+      kitId: true,
+    },
+  },
+} satisfies Prisma.BookingInclude;
+
+type BookingWithExtraInclude<T extends Prisma.BookingInclude | undefined> =
+  T extends Prisma.BookingInclude
+    ? Prisma.BookingGetPayload<{
+        include: MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
+      }>
+    : Prisma.BookingGetPayload<{ include: typeof BOOKING_WITH_ASSETS_INCLUDE }>;
+
+export async function getBooking<T extends Prisma.BookingInclude | undefined>(
+  booking: Pick<Booking, "id" | "organizationId"> & {
+    userOrganizations?: Pick<UserOrganization, "organizationId">[];
+    request?: Request;
+    extraInclude?: T;
+  }
 ) {
   try {
-    const { id, organizationId } = booking;
+    const { id, organizationId, userOrganizations, request, extraInclude } =
+      booking;
 
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -861,20 +888,55 @@ export async function getBooking(
      * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
-    return await db.booking.findFirstOrThrow({
-      where: { id, organizationId },
-      include: {
-        ...commonInclude,
-        assets: {
-          select: {
-            id: true,
-            availableToBook: true,
-            status: true,
-            kitId: true,
-          },
-        },
+    const mergedInclude = {
+      ...BOOKING_WITH_ASSETS_INCLUDE,
+      ...extraInclude,
+    } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
+
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const bookingFound = (await db.booking.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
       },
-    });
+      include: mergedInclude,
+    })) as BookingWithExtraInclude<T>;
+
+    /* User is accessing the asset in the wrong organization. */
+    if (
+      userOrganizations?.length &&
+      bookingFound.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(bookingFound.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Booking not found",
+        message: "",
+        additionalData: {
+          model: "booking",
+          organization: userOrganizations?.find(
+            (org) => org.organizationId === bookingFound.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return bookingFound;
   } catch (cause) {
     const is404 = isNotFoundError(cause);
     throw new ShelfError({
@@ -882,7 +944,10 @@ export async function getBooking(
       title: "Booking not found",
       message:
         "The booking you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { booking },
+      additionalData: {
+        ...booking,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
       shouldBeCaptured: !is404,
     });
