@@ -14,6 +14,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -104,7 +105,7 @@ export async function getLocation(
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({
