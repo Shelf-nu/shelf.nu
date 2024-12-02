@@ -42,7 +42,8 @@ type BulkDialogType =
   | "tag-remove"
   | "cancel"
   | "available"
-  | "unavailable";
+  | "unavailable"
+  | "bookings";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -131,6 +132,10 @@ type DialogContentChildrenProps = {
 
 type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
   /**
+   * Additional className to dialog
+   */
+  className?: string;
+  /**
    * Title for the Dialog content
    * @default `Update ${type}`
    */
@@ -169,6 +174,7 @@ const BulkUpdateDialogContent = forwardRef<
   BulkUpdateDialogContentProps
 >(function (
   {
+    className,
     type,
     children,
     onSuccess,
@@ -238,7 +244,7 @@ const BulkUpdateDialogContent = forwardRef<
       <Dialog
         open={isDialogOpen}
         onClose={handleCloseDialog}
-        className="bulk-tagging-dialog lg:w-[400px]"
+        className={tw("bulk-tagging-dialog lg:w-[400px]", className)}
         title={
           <div className="w-full">
             {type !== "cancel" ? (

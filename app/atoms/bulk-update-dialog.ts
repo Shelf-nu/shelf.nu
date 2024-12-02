@@ -5,7 +5,7 @@ import type { BulkDialogType } from "~/components/bulk-update-dialog/bulk-update
  * This atom is responsible for holding the open state for dialogs
  * Open Dialog must be open at a time
  */
-export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
+const DEFAULT_STATE = {
   location: false,
   category: false,
   "assign-custody": false,
@@ -19,7 +19,16 @@ export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
   cancel: false,
   available: false,
   unavailable: false,
-});
+  bookings: false,
+};
+
+export const bulkDialogAtom =
+  atom<Record<BulkDialogType, boolean>>(DEFAULT_STATE);
+
+/** Reset the atom when it mounts */
+bulkDialogAtom.onMount = (setAtom) => {
+  setAtom(DEFAULT_STATE);
+};
 
 /**
  * This will trigger the Dialog to open for a particular key
