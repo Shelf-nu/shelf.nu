@@ -43,7 +43,8 @@ type BulkDialogType =
   | "cancel"
   | "available"
   | "unavailable"
-  | "bookings";
+  | "bookings"
+  | "booking-exist";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;

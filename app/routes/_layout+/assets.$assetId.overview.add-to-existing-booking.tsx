@@ -23,7 +23,7 @@ import {
 } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -35,17 +35,8 @@ import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
 
 const updateBookingSchema = z.object({
-  assetIds: z.array(z.string()).optional(),
-  bookingId: z.string().transform((val, ctx) => {
-    if (!val && val === "") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Please select a custodian",
-      });
-      return z.NEVER;
-    }
-    return val;
-  }),
+  assetIds: z.string().array().min(1, "At least one asset is required."),
+  bookingId: z.string().min(1, "Please select a booking."),
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -82,29 +73,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-const processBooking = async (
-  bookingId: string,
-  assetIds: string[] | undefined
-) => {
+export const processBooking = async (bookingId: string, assetIds: string[]) => {
   try {
-    let finalAssetIds: string[] = [];
-    let booking;
-    if (assetIds && assetIds.length > 0) {
-      const promises = [
-        getAvailableAssetsIdsForBooking(assetIds),
-        getExistingBookingDetails(bookingId),
-      ];
-
-      const [assets, bookingDetails] = await Promise.all(promises);
-      finalAssetIds = assets as string[];
-      booking = bookingDetails;
-    } else {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid operation. Please contact support.",
-        label: "Booking",
-      });
-    }
+    const [finalAssetIds, booking] = await Promise.all([
+      getAvailableAssetsIdsForBooking(assetIds),
+      getExistingBookingDetails(bookingId),
+    ]);
 
     if (finalAssetIds.length === 0) {
       throw new ShelfError({
@@ -118,11 +92,15 @@ const processBooking = async (
       finalAssetIds,
       bookingInfo: booking,
     };
-  } catch (cause: any) {
+  } catch (cause) {
+    let message = "Something went wrong while processing the booking.";
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
     throw new ShelfError({
       cause: cause,
-      message:
-        cause?.message || "Something went wrong while processing the booking.",
+      message,
       label: "Booking",
     });
   }
@@ -145,14 +123,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       message: "Please select a Booking",
       shouldBeCaptured: false,
     });
-
-    if (!assetIds?.length && !bookingId?.length) {
-      throw new ShelfError({
-        cause: null,
-        message: `No assets found or booking not found.`,
-        label: "Booking",
-      });
-    }
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,

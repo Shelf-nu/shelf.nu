@@ -4,7 +4,6 @@ import { ChevronRightIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { BulkUpdateDialogTrigger } from "~/components/bulk-update-dialog/bulk-update-dialog";
-import Icon from "~/components/icons/icon";
 import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
@@ -24,6 +23,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import AddAssetsToExistingBookingDialog from "./add-assets-to-existing-booking-dialog";
 import CreateBookingForSelectedAssetsDialog from "./create-booking-for-selected-assets-dialog";
 
 export default function BookSelectedAssetsDropdown() {
@@ -114,6 +114,15 @@ function ConditionalActionsDropdown() {
       >
         <CreateBookingForSelectedAssetsDialog />
       </When>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.booking,
+          action: PermissionAction.update,
+        })}
+      >
+        <AddAssetsToExistingBookingDialog />
+      </When>
 
       <DropdownMenu
         modal={false}
@@ -188,18 +197,22 @@ function ConditionalActionsDropdown() {
                 />
               </DropdownMenuItem>
             </When>
-            <Button
-              disabled={disabledReason}
-              to="overview/release-custody"
-              role="link"
-              variant="link"
-              className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-              width="full"
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.booking,
+                action: PermissionAction.update,
+              })}
             >
-              <span className="flex items-center gap-2">
-                <Icon icon="booking-exist" /> Add to existing booking
-              </span>
-            </Button>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="booking-exist"
+                  label="Add to existing"
+                  onClick={closeMenu}
+                  disabled={disabledReason}
+                />
+              </DropdownMenuItem>
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

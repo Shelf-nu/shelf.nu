@@ -20,6 +20,7 @@ const DEFAULT_STATE = {
   available: false,
   unavailable: false,
   bookings: false,
+  "booking-exist": false,
 };
 
 export const bulkDialogAtom =
