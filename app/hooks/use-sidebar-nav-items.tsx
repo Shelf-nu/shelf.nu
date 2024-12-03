@@ -83,11 +83,6 @@ export function useSidebarNavItems() {
 
   const topMenuItems: NavItem[] = [
     {
-      type: "label",
-      title: "Admin",
-      hidden: !isAdmin,
-    },
-    {
       type: "child",
       title: "Admin Dashboard",
       to: "/admin-dashboard/users",
@@ -191,10 +186,6 @@ export function useSidebarNavItems() {
         {
           title: "Custom fields",
           to: "/settings/custom-fields",
-        },
-        {
-          title: "Team",
-          to: "/settings/team",
         },
       ],
     },

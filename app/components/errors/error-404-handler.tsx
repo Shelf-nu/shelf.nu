@@ -2,10 +2,8 @@ import { useMemo } from "react";
 import { useFetcher } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import {
-  getModelLabelForEnumValue,
-  type Error404AdditionalData,
-} from "./utils";
+import type { Error404AdditionalData } from "./utils";
+import { getModelLabelForEnumValue } from "./utils";
 import {
   Select,
   SelectContent,
@@ -34,13 +32,16 @@ export default function Error404Handler({
       case "asset":
       case "kit":
       case "location":
-      case "booking": {
-        const modelLabel = getModelLabelForEnumValue(additionalData.model);
 
+      case "booking":
+      case "customField": {
+        const modelLabel = getModelLabelForEnumValue(additionalData.model);
+        
         return (
           <div className="flex flex-col items-center text-center">
             <div className="w-full md:max-w-screen-sm">
               <h2 className="mb-2">
+
                 <span className="capitalize">{modelLabel}</span> belongs to
                 another workspace.
               </h2>
@@ -73,6 +74,11 @@ export default function Error404Handler({
         );
       }
 
+
+      /**
+       * User can have a teamMember in multiple organizations, so in this case we
+       * show a Select to choose from the organization and switch to that.
+       **/
       case "teamMember": {
         return (
           <div className="flex flex-col items-center text-center">
