@@ -48,11 +48,13 @@ export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
 /**
  * Type definition for the 404 error additional data structure
  */
-export type Error404AdditionalData = z.infer<typeof error404AdditionalDataSchema>;
+export type Error404AdditionalData = z.infer<
+  typeof error404AdditionalDataSchema
+>;
 
 /**
  * Parses and validates the structure of a 404 error response.
- * 
+ *
  * @param response - The unknown response to be parsed
  * @returns An object indicating whether it's a valid 404 error and its additional data
  *          If it's not a valid 404 error or parsing fails, returns {isError404: false, additionalData: null}
@@ -60,7 +62,9 @@ export type Error404AdditionalData = z.infer<typeof error404AdditionalDataSchema
  */
 export function parse404ErrorData(
   response: unknown
-): { isError404: false; additionalData: null } | { isError404: true; additionalData: Error404AdditionalData } {
+):
+  | { isError404: false; additionalData: null }
+  | { isError404: true; additionalData: Error404AdditionalData } {
   if (!isRouteError(response)) {
     return { isError404: false, additionalData: null };
   }
@@ -78,7 +82,7 @@ export function parse404ErrorData(
 
 /**
  * Converts a model enum value to a human-readable label.
- * 
+ *
  * @param model - The model type from Error404AdditionalData
  * @returns A string representing the human-readable label for the model
  */

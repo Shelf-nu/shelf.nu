@@ -36,12 +36,11 @@ export default function Error404Handler({
       case "booking":
       case "customField": {
         const modelLabel = getModelLabelForEnumValue(additionalData.model);
-        
+
         return (
           <div className="flex flex-col items-center text-center">
             <div className="w-full md:max-w-screen-sm">
               <h2 className="mb-2">
-
                 <span className="capitalize">{modelLabel}</span> belongs to
                 another workspace.
               </h2>
@@ -73,7 +72,6 @@ export default function Error404Handler({
           </div>
         );
       }
-
 
       /**
        * User can have a teamMember in multiple organizations, so in this case we
