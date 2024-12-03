@@ -257,6 +257,7 @@ export const AssetForm = ({
             disabled={disabled}
             defaultValue={category ?? undefined}
             model={{ name: "category", queryKey: "name" }}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             contentLabel="Categories"
             label="Category"
             hideLabel
@@ -322,6 +323,7 @@ export const AssetForm = ({
             disabled={disabled}
             selectionMode="set"
             fieldName="newLocationId"
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             defaultValue={location || undefined}
             model={{ name: "location", queryKey: "name" }}
             contentLabel="Locations"
