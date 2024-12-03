@@ -1,4 +1,10 @@
-import type { CustomField, Organization, Prisma, User } from "@prisma/client";
+import type {
+  CustomField,
+  Organization,
+  Prisma,
+  User,
+  UserOrganization,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
@@ -7,6 +13,7 @@ import {
   isLikeShelfError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -140,24 +147,81 @@ export async function getFilteredAndPaginatedCustomFields(params: {
   }
 }
 
-export async function getCustomField({
+type CustomFieldWithInclude<T extends Prisma.CustomFieldInclude | undefined> =
+  T extends Prisma.CustomFieldInclude
+    ? Prisma.CustomFieldGetPayload<{ include: T }>
+    : CustomField;
+
+export async function getCustomField<
+  T extends Prisma.CustomFieldInclude | undefined,
+>({
   organizationId,
   id,
+  userOrganizations,
+  request,
+  include,
 }: Pick<CustomField, "id"> & {
   organizationId: Organization["id"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+  include?: T;
 }) {
   try {
-    return await db.customField.findFirstOrThrow({
-      where: { id, organizationId },
-      include: { categories: { select: { id: true } } },
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const customField = await db.customField.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
+      },
+      include: { ...include },
     });
+
+    /* User is trying to access customField in wrong organization. */
+    if (
+      userOrganizations?.length &&
+      customField.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(customField.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Custom field not found",
+        message: "",
+        additionalData: {
+          model: "customField",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === customField.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return customField as CustomFieldWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "Custom field not found",
       message:
         "The custom field you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { id, organizationId },
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
     });
   }

@@ -56,6 +56,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
@@ -136,7 +137,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
     ) {
       const redirectTo =
         typeof request !== "undefined"
-          ? new URL(request.url).pathname
+          ? getRedirectUrlFromRequest(request)
           : undefined;
 
       throw new ShelfError({
