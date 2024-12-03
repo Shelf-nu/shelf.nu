@@ -6,6 +6,7 @@ import type {
   Qr,
   TeamMember,
   User,
+  UserOrganization,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -21,8 +22,14 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { maybeUniqueConstraintViolation, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  maybeUniqueConstraintViolation,
+  ShelfError,
+} from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
@@ -341,30 +348,87 @@ export async function getPaginatedAndFilterableKits<
   }
 }
 
-export async function getKit<T extends Prisma.KitInclude>({
+type KitWithInclude<T extends Prisma.KitInclude | undefined> =
+  T extends Prisma.KitInclude
+    ? Prisma.KitGetPayload<{
+        include: MergeInclude<typeof GET_KIT_STATIC_INCLUDES, T>;
+      }>
+    : Prisma.KitGetPayload<{ include: typeof GET_KIT_STATIC_INCLUDES }>;
+
+export async function getKit<T extends Prisma.KitInclude | undefined>({
   id,
   organizationId,
   extraInclude,
-}: Pick<Kit, "id" | "organizationId"> & { extraInclude?: T }) {
+  userOrganizations,
+  request,
+}: Pick<Kit, "id" | "organizationId"> & {
+  extraInclude?: T;
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}) {
   try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
     // Merge static includes with dynamic includes
     const includes = {
       ...GET_KIT_STATIC_INCLUDES,
       ...extraInclude,
     } as MergeInclude<typeof GET_KIT_STATIC_INCLUDES, T>;
 
-    return (await db.kit.findUniqueOrThrow({
-      where: { id, organizationId },
+    const kit = await db.kit.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
+      },
       include: includes,
-    })) as Prisma.KitGetPayload<{ include: typeof includes }>;
+    });
+
+    /* User is accessing the asset in the wrong organizations. In that case we need special 404 handlng. */
+    if (
+      userOrganizations?.length &&
+      kit.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(kit.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Kit not found",
+        message: "",
+        additionalData: {
+          model: "kit",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === kit.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return kit as KitWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "Kit not found",
       message:
         "The kit you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { id },
-      label, // Adjust the label as needed
+      additionalData: {
+        id,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

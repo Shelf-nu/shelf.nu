@@ -1,4 +1,4 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization, User, UserOrganization } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -20,8 +20,8 @@ import {
 
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, isLikeShelfError } from "~/utils/error";
-import type { ValidationError } from "~/utils/http";
+import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
+import { getRedirectUrlFromRequest, type ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
@@ -33,8 +33,9 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
+import type { MergeInclude } from "~/utils/utils";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
-import type { UpdateUserPayload } from "./types";
+import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
@@ -1237,4 +1238,107 @@ export async function transferEntitiesToNewOwner({
       createdById: newOwnerId,
     },
   });
+}
+
+type UserWithExtraInclude<T extends Prisma.UserInclude | undefined> =
+  T extends Prisma.UserInclude
+    ? Prisma.UserGetPayload<{
+        include: MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+      }>
+    : Prisma.UserGetPayload<{ include: typeof USER_STATIC_INCLUDE }>;
+
+export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
+  id,
+  organizationId,
+  userOrganizations,
+  request,
+  extraInclude,
+}: Pick<User, "id"> & {
+  organizationId: Organization["id"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+  extraInclude?: T;
+}) {
+  try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const mergedInclude = {
+      ...USER_STATIC_INCLUDE,
+      ...extraInclude,
+    } as MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+
+    const user = (await db.user.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, userOrganizations: { some: { organizationId } } },
+          ...(userOrganizations?.length
+            ? [
+                {
+                  id,
+                  userOrganizations: {
+                    some: { organizationId: { in: otherOrganizationIds } },
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+      include: mergedInclude,
+    })) as UserWithExtraInclude<T>;
+
+    /* User is accessing the User in the wrong organization */
+    const isUserInCurrentOrg = !!user.userOrganizations.find(
+      (userOrg) => userOrg.organizationId === organizationId
+    );
+
+    const otherOrgsForUser =
+      userOrganizations?.filter(
+        (org) =>
+          !!user.userOrganizations.find(
+            (userOrg) => userOrg.organizationId === org.organizationId
+          )
+      ) ?? [];
+
+    if (
+      userOrganizations?.length &&
+      !isUserInCurrentOrg &&
+      otherOrgsForUser?.length
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "User not found",
+        message: "",
+        additionalData: {
+          model: "teamMember",
+          organizations: otherOrgsForUser,
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "User not found.",
+      message:
+        "The user you are trying to access does not exists or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: !isNotFoundError(cause),
+    });
+  }
 }

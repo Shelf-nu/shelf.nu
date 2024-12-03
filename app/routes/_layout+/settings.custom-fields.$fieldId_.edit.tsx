@@ -46,14 +46,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.customField,
       action: PermissionAction.update,
     });
 
-    const customField = await getCustomField({ organizationId, id });
+    const customField = await getCustomField({
+      organizationId,
+      id,
+      userOrganizations,
+      request,
+      include: { categories: { select: { id: true } } },
+    });
 
     const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
       {

@@ -1,10 +1,18 @@
 import type { ReactElement } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CustomField as RawCustomField,
   CustomFieldType,
 } from "@prisma/client";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverPortal,
+  PopoverContent,
+} from "@radix-ui/react-popover";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { Search } from "lucide-react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
@@ -13,18 +21,12 @@ import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
 import { Switch } from "../forms/switch";
-import { SearchIcon } from "../icons/library";
+import { CheckIcon, SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 
@@ -37,8 +39,6 @@ export default function AssetCustomFields({
   zo: Zorm<z.ZodObject<any, any, any>>;
   schema: z.ZodObject<any, any, any>;
 }) {
-  const optionTriggerRef = useRef<HTMLButtonElement>(null);
-
   /** Get the custom fields from the loader */
 
   const { customFields, asset } = useLoaderData<typeof loader>();
@@ -116,68 +116,17 @@ export default function AssetCustomFields({
         ) : null}
       </div>
     ),
-    OPTION: (field) => {
-      const val = getCustomFieldVal(field.id);
-      const options = field.options.filter((o) => o !== null && o !== "");
-      return (
-        <>
-          <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
-            <span className={field.required ? "required-input-label" : ""}>
-              {field.name}
-            </span>
-          </label>
-          <Select
-            name={`cf-${field.id}`}
-            defaultValue={val ? val : undefined}
-            disabled={disabled}
-          >
-            <SelectTrigger className="px-3.5 py-3" ref={optionTriggerRef}>
-              <SelectValue placeholder={`Choose ${field.name}`} />
-            </SelectTrigger>
-            {zo.errors[`cf-${field.id}`]()?.message ? (
-              <p className="text-sm text-error-500">
-                {zo.errors[`cf-${field.id}`]()?.message}
-              </p>
-            ) : null}
+    OPTION: (field) => (
+      <>
+        <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
+          <span className={field.required ? "required-input-label" : ""}>
+            {field.name}
+          </span>
+        </label>
 
-            <SelectContent
-              position="popper"
-              className="w-full min-w-[300px] p-0"
-              align="center"
-              sideOffset={5}
-              style={{ width: optionTriggerRef.current?.clientWidth }}
-            >
-              <div className="max-h-[320px] w-full overflow-auto">
-                {options.length ? (
-                  options.map((value, index) => (
-                    <SelectItem
-                      value={value}
-                      key={value + index}
-                      className="w-full px-6 py-4"
-                    >
-                      <span className="mr-4 text-[14px] text-gray-700">
-                        {value.toLowerCase()}
-                      </span>
-                    </SelectItem>
-                  ))
-                ) : (
-                  <div className="w-full px-6 py-4">
-                    No options available.{" "}
-                    <Button
-                      target="_blank"
-                      variant="link"
-                      to={`/settings/custom-fields/${field.id}/edit`}
-                    >
-                      Edit custom field
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </SelectContent>
-          </Select>
-        </>
-      );
-    },
+        <OptionSelect field={field} getCustomFieldVal={getCustomFieldVal} />
+      </>
+    ),
     MULTILINE_TEXT: (field) => {
       const value = customFieldsValues?.find(
         (cfv) => cfv.customFieldId === field.id
@@ -305,5 +254,155 @@ export default function AssetCustomFields({
         </div>
       )}
     </div>
+  );
+}
+
+/** Component that renders select for CustomField OPTION fields */
+function OptionSelect({
+  field,
+  getCustomFieldVal,
+}: {
+  field: CustomField;
+  getCustomFieldVal: (id: string) => string;
+}) {
+  // State for popover, search, selection
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [value, setValue] = useState(getCustomFieldVal(field.id) || "");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Refs for elements
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter options based on search
+  const filteredOptions = useMemo(() => {
+    const options = field.options.filter((o) => o !== null && o !== "");
+    if (!searchQuery) return options;
+
+    return options.filter((option) =>
+      option.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [field.options, searchQuery]);
+
+  const displayValue = value || `Choose ${field.name}`;
+
+  // Handle option selection
+  function handleOptionClick(option: string) {
+    if (value === option) {
+      setValue("");
+    } else {
+      setValue(option);
+    }
+    setIsPopoverOpen(false);
+    setSearchQuery("");
+  }
+
+  // Keyboard navigation handler
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < filteredOptions.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (filteredOptions[selectedIndex]) {
+          handleOptionClick(filteredOptions[selectedIndex]);
+        }
+        break;
+    }
+  };
+
+  // Ensure selected option is visible
+  useEffect(() => {
+    const selectedElement = document.getElementById(`option-${selectedIndex}`);
+    selectedElement?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  return (
+    <>
+      <input type="hidden" value={value} name={`cf-${field.id}`} />
+      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="secondary"
+            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left"
+            ref={triggerRef}
+          >
+            <div className="flex w-full items-center justify-between">
+              <span className={value === "" ? "text-gray-500" : ""}>
+                {displayValue}
+              </span>
+              <ChevronDownIcon />
+            </div>
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className="z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+          >
+            {/* Search input */}
+            <div className="flex items-center border-b">
+              <Search className="ml-4 size-4 text-gray-500" />
+              <input
+                ref={searchInputRef}
+                placeholder={`Search ${field.name}...`}
+                className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+            </div>
+
+            {/* Options list */}
+            {filteredOptions.length === 0 ? (
+              <div className="max-w-[400px] p-4">No options found</div>
+            ) : (
+              filteredOptions.map((option, index) => {
+                const isSelected = value === option;
+                const isHighlighted = index === selectedIndex;
+
+                return (
+                  <div
+                    id={`option-${index}`}
+                    key={option}
+                    className={tw(
+                      "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                      isHighlighted && [
+                        "bg-gray-50",
+                        "relative",
+                        index !== 0 &&
+                          "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                        index !== filteredOptions.length - 1 &&
+                          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                      ]
+                    )}
+                    onClick={() => handleOptionClick(option)}
+                    style={{
+                      width: triggerRef.current?.clientWidth || "auto",
+                    }}
+                  >
+                    <span>{option}</span>
+                    {isSelected && (
+                      <span className="h-auto w-[14px] text-primary">
+                        <CheckIcon />
+                      </span>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </>
   );
 }
