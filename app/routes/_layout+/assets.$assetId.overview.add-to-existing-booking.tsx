@@ -40,7 +40,7 @@ const updateBookingSchema = z.object({
     if (!val && val === "") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Please select a custodian",
+        message: "Please select a booking",
       });
       return z.NEVER;
     }
