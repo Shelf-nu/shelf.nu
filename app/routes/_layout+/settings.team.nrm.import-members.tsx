@@ -118,11 +118,10 @@ export default function ImportNRMs() {
             team members just requires you to upload a txt file with member
             names separated by comas.
             <br />
-            <ul>
+            <ul className="list-inside list-disc pl-4">
               <li>Names which are already in the system will be ignored.</li>
               <li>Duplicates will be skipped.</li>
             </ul>
-            <br />
             <WarningBox className="my-2">
               Import is final and cannot be reverted. If you want to later edit
               team members, you can do so from the Team settings page.
