@@ -83,13 +83,17 @@ export async function createTeamMemberIfNotExists({
       return {};
     }
 
-    // now we loop through the categories and check if they exist
+    // Process each team member with case-insensitive matching
     for (const [teamMember, _] of teamMembers) {
       const existingTeamMember = await db.teamMember.findFirst({
         where: {
           deletedAt: null,
-          name: teamMember,
           organizationId,
+          // Use case-insensitive comparison via Prisma's mode option
+          name: {
+            equals: teamMember as string,
+            mode: "insensitive",
+          },
         },
       });
 
