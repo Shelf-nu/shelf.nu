@@ -16,7 +16,7 @@ import Input from "~/components/forms/input";
 import { SwitchIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
-import { Sheet, SheetContent } from "~/components/shared/sheet";
+import { Sheet, SheetContent, SheetTitle } from "~/components/shared/sheet";
 import { Skeleton } from "~/components/shared/skeleton";
 import {
   Tooltip,
@@ -223,6 +223,7 @@ const Sidebar = forwardRef<
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
           <SheetContent
+            aria-describedby="sidebar"
             data-sidebar="sidebar"
             data-mobile="true"
             className="w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
@@ -233,7 +234,8 @@ const Sidebar = forwardRef<
             }
             side={side}
           >
-            <div className="flex size-full flex-col">{children}</div>
+            <SheetTitle className="sr-only" />
+            {children}
           </SheetContent>
         </Sheet>
       );
@@ -288,8 +290,8 @@ Sidebar.displayName = "Sidebar";
 
 const SidebarTrigger = forwardRef<
   React.ElementRef<typeof Button>,
-  React.ComponentProps<typeof Button>
->(({ className, onClick, ...props }, ref) => {
+  React.ComponentProps<typeof Button> & { iconClassName?: string }
+>(({ className, onClick, iconClassName, ...props }, ref) => {
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -304,7 +306,7 @@ const SidebarTrigger = forwardRef<
       }}
       {...props}
     >
-      <SwitchIcon className="size-4 text-gray-500" />
+      <SwitchIcon className={tw("size-4 text-gray-500", iconClassName)} />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -341,24 +343,16 @@ const SidebarRail = forwardRef<
 SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
-  ({ className, ...props }, ref) => {
-    const { state } = useSidebar();
-
-    return (
-      <main
-        ref={ref}
-        className={tw(
-          "bg-background relative flex h-[96.5vh] flex-1 flex-col",
-          "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
-          state === "collapsed"
-            ? "md:max-w-[calc(100vw_-_48px)]"
-            : "md:max-w-[calc(100vw_-_274px)]",
-          className
-        )}
-        {...props}
-      />
-    );
-  }
+  ({ className, ...props }, ref) => (
+    <main
+      ref={ref}
+      className={tw(
+        "relative h-screen w-full overflow-auto bg-gray-25 px-4 pb-10",
+        className
+      )}
+      {...props}
+    />
+  )
 );
 SidebarInset.displayName = "SidebarInset";
 
@@ -524,7 +518,7 @@ const SidebarMenuItem = forwardRef<HTMLLIElement, React.ComponentProps<"li">>(
 SidebarMenuItem.displayName = "SidebarMenuItem";
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-primary-500 transition-[width,height,padding]  focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-primary-500 transition-[width,height,padding] focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {

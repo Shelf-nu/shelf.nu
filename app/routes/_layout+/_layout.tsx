@@ -1,8 +1,9 @@
 import { Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
+import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { ScanQrCodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
@@ -12,8 +13,10 @@ import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
   SidebarProvider,
+  SidebarTrigger,
 } from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
+import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
@@ -38,6 +41,7 @@ import {
   stripe,
 } from "~/utils/stripe.server";
 import { canUseBookings } from "~/utils/subscription.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -148,7 +152,7 @@ export default function App() {
   return (
     <SidebarProvider defaultOpen={!minimizedSidebar}>
       <AppSidebar />
-      <SidebarInset className="flex-1 bg-gray-25 px-4">
+      <SidebarInset>
         {disabledTeamOrg ? (
           <NoSubscription />
         ) : workspaceSwitching ? (
@@ -157,7 +161,29 @@ export default function App() {
             <p className="mt-2">Activating workspace...</p>
           </div>
         ) : (
-          <Outlet />
+          <>
+            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+              <Link to="." title="Home" className="block h-8">
+                <ShelfMobileLogo />
+              </Link>
+              <div className="flex items-center space-x-4">
+                <NavLink
+                  to="/scanner"
+                  title="Scan QR Code"
+                  className={({ isActive }) =>
+                    tw(
+                      "relative flex items-center justify-center px-2 transition",
+                      isActive ? "text-primary-600" : "text-gray-500"
+                    )
+                  }
+                >
+                  <ScanQrCodeIcon />
+                </NavLink>
+                <SidebarTrigger iconClassName="size-6" />
+              </div>
+            </header>
+            <Outlet />
+          </>
         )}
         <Toaster />
         <ClientOnly fallback={null}>

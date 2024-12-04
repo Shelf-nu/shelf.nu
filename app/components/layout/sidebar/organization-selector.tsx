@@ -18,6 +18,7 @@ import ProfilePicture from "~/components/user/profile-picture";
 import When from "~/components/when/when";
 import type { loader } from "~/routes/_layout+/_layout";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -28,7 +29,7 @@ import {
 export default function OrganizationSelector() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  const { open, isMobile } = useSidebar();
+  const { open, openMobile, isMobile } = useSidebar();
 
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
@@ -69,10 +70,15 @@ export default function OrganizationSelector() {
 
   return (
     <SidebarMenu>
-      <SidebarMenuItem>
+      <SidebarMenuItem className={tw(openMobile && "px-2")}>
         <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
-            <SidebarMenuButton className="size-full justify-center border !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50">
+            <SidebarMenuButton
+              className={tw(
+                "size-full justify-center !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50",
+                open || openMobile ? "border" : ""
+              )}
+            >
               {currentOrganization.type === "PERSONAL" ? (
                 <ProfilePicture width="w-6" height="h-6" />
               ) : (
@@ -84,7 +90,7 @@ export default function OrganizationSelector() {
                 />
               )}
 
-              <When truthy={open}>
+              <When truthy={open || openMobile}>
                 <>
                   <div className="flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">

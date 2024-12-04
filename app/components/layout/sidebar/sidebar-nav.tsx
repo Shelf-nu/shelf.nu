@@ -1,12 +1,18 @@
 import { Fragment, useCallback } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { NavLink, useMatches, useNavigate } from "@remix-run/react";
+import {
+  NavLink,
+  useLocation,
+  useMatches,
+  useNavigate,
+} from "@remix-run/react";
 import invariant from "tiny-invariant";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "~/components/shared/collapsible";
+import When from "~/components/when/when";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import { tw } from "~/utils/tw";
 import {
@@ -18,6 +24,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "./sidebar";
 
 type SidebarNavProps = {
@@ -31,15 +38,18 @@ export default function SidebarNav({
   style,
   items,
 }: SidebarNavProps) {
+  const { isMobile, toggleSidebar } = useSidebar();
   const matches = useMatches();
   const navigate = useNavigate();
+  const location = useLocation();
+  const currentRoute = matches.at(-1);
+  // @ts-expect-error
+  const handle = currentRoute?.handle?.name;
 
   const isRouteActive = useCallback(
-    (route: string) => {
-      const matchesRoutes = matches.map((match) => match.pathname);
-      return matchesRoutes.some((matchRoute) => matchRoute.includes(route));
-    },
-    [matches]
+    (route: string) =>
+      location.pathname.includes(route) && handle !== "$userId.bookings",
+    [handle, location.pathname]
   );
 
   const isAnyRouteActive = useCallback(
@@ -59,6 +69,20 @@ export default function SidebarNav({
     return navItem.title;
   }, []);
 
+  const closeIfMobile = useCallback(() => {
+    if (isMobile) {
+      toggleSidebar();
+    }
+  }, [isMobile, toggleSidebar]);
+
+  const navigateParentNav = useCallback(
+    (to: string) => {
+      navigate(to);
+      closeIfMobile();
+    },
+    [closeIfMobile, navigate]
+  );
+
   const renderNavItem = useCallback(
     (navItem: NavItem) => {
       switch (navItem.type) {
@@ -77,13 +101,16 @@ export default function SidebarNav({
             <Collapsible
               asChild
               className="group/collapsible"
-              defaultOpen={isAnyChildActive}
+              defaultOpen={isAnyChildActive && !navItem.disabled}
             >
               <SidebarMenuItem key={navItem.title} className="z-50">
                 <CollapsibleTrigger asChild>
                   <SidebarMenuButton
                     disabled={!!navItem.disabled}
                     tooltip={renderTooltopContent(navItem)}
+                    onClick={() => {
+                      navigateParentNav(firstChildRoute.to);
+                    }}
                   >
                     <navItem.Icon className="size-4 text-gray-600" />
                     <span className="font-semibold">{navItem.title}</span>
@@ -92,27 +119,32 @@ export default function SidebarNav({
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarMenuSub>
-                    {navItem.children.map((child) => {
-                      const isChildActive = isRouteActive(child.to);
+                    <When truthy={!navItem.disabled}>
+                      {navItem.children.map((child) => {
+                        const isChildActive = isRouteActive(child.to);
 
-                      return (
-                        <SidebarMenuSubItem key={child.title}>
-                          <SidebarMenuSubButton asChild>
-                            <NavLink
-                              to={child.to}
-                              target={child.target}
-                              className={tw(
-                                "font-medium hover:bg-gray-100",
-                                isChildActive &&
-                                  "bg-transparent font-bold !text-primary"
-                              )}
+                        return (
+                          <SidebarMenuSubItem key={child.title}>
+                            <SidebarMenuSubButton
+                              onClick={closeIfMobile}
+                              asChild
                             >
-                              {child.title}
-                            </NavLink>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      );
-                    })}
+                              <NavLink
+                                to={child.to}
+                                target={child.target}
+                                className={tw(
+                                  "font-medium hover:bg-gray-100",
+                                  isChildActive &&
+                                    "bg-transparent font-bold !text-primary"
+                                )}
+                              >
+                                {child.title}
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        );
+                      })}
+                    </When>
                   </SidebarMenuSub>
                 </CollapsibleContent>
               </SidebarMenuItem>
@@ -129,19 +161,20 @@ export default function SidebarNav({
                 asChild
                 disabled={!!navItem.disabled}
                 tooltip={renderTooltopContent(navItem)}
+                onClick={closeIfMobile}
               >
                 <NavLink
                   to={navItem.to}
                   target={navItem.target}
                   className={tw(
                     "font-semibold",
-                    isActive && "bg-transparent font-bold text-primary"
+                    isActive ? "bg-transparent font-bold text-primary" : ""
                   )}
                 >
                   <navItem.Icon
                     className={tw(
-                      "size-4",
-                      isActive ? "text-primary" : "text-gray-600"
+                      "size-4 text-gray-600",
+                      isActive && "text-primary"
                     )}
                   />
                   <span>{navItem.title}</span>
@@ -184,7 +217,13 @@ export default function SidebarNav({
         }
       }
     },
-    [isAnyRouteActive, isRouteActive, navigate, renderTooltopContent]
+    [
+      closeIfMobile,
+      isAnyRouteActive,
+      isRouteActive,
+      navigateParentNav,
+      renderTooltopContent,
+    ]
   );
 
   return (

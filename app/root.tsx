@@ -78,12 +78,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
+
   useEffect(() => {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="overflow-hidden">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -93,13 +94,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         <Clarity />
       </head>
-      <body className="h-full">
+      <body>
         <noscript>
           <BlockInteractions
-            title={"JavaScript is disabled"}
-            content={
-              "This website requires JavaScript to be enabled to function properly. Please enable JavaScript or change browser and try again."
-            }
+            title="JavaScript is disabled"
+            content="This website requires JavaScript to be enabled to function properly. Please enable JavaScript or change browser and try again."
             icon="x"
           />
         </noscript>
@@ -108,10 +107,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           children
         ) : (
           <BlockInteractions
-            title={"Cookies are disabled"}
-            content={
-              "This website requires cookies to be enabled to function properly. Please enable cookies and try again."
-            }
+            title="Cookies are disabled"
+            content="This website requires cookies to be enabled to function properly. Please enable cookies and try again."
             icon="x"
           />
         )}

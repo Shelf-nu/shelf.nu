@@ -20,6 +20,8 @@ import {
 import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import When from "~/components/when/when";
 import type { loader } from "~/routes/_layout+/_layout";
+import { isPersonalOrg } from "~/utils/organization";
+import { useCurrentOrganization } from "./use-current-organization-id";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 type BaseNavItem = {
@@ -59,6 +61,8 @@ export function useSidebarNavItems() {
   const { isAdmin, canUseBookings, subscription } =
     useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
+  const currentOrganization = useCurrentOrganization();
+  const isPersonalOrganization = isPersonalOrg(currentOrganization);
 
   const bookingDisabled = useMemo(() => {
     if (canUseBookings) {
@@ -111,7 +115,6 @@ export function useSidebarNavItems() {
       title: "Kits",
       to: "/kits",
       Icon: BriefcaseConveyorBeltIcon,
-      hidden: isBaseOrSelfService,
     },
     {
       type: "child",
@@ -156,6 +159,7 @@ export function useSidebarNavItems() {
     {
       type: "label",
       title: "Organization",
+      hidden: isBaseOrSelfService,
     },
     {
       type: "parent",
@@ -166,6 +170,7 @@ export function useSidebarNavItems() {
         {
           title: "Users",
           to: "/settings/team/users",
+          hidden: isPersonalOrganization,
         },
         {
           title: "Non-registered members",
@@ -216,7 +221,22 @@ export function useSidebarNavItems() {
   ];
 
   return {
-    topMenuItems: topMenuItems.filter((item) => !item.hidden),
-    bottomMenuItems: bottomMenuItems.filter((item) => !item.hidden),
+    topMenuItems: removeHiddenNavItems(topMenuItems),
+    bottomMenuItems: removeHiddenNavItems(bottomMenuItems),
   };
+}
+
+function removeHiddenNavItems(navItems: NavItem[]) {
+  return navItems
+    .filter((item) => !item.hidden)
+    .map((item) => {
+      if (item.type === "parent") {
+        return {
+          ...item,
+          children: item.children.filter((child) => !child.hidden),
+        };
+      }
+
+      return item;
+    });
 }
