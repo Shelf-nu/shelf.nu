@@ -97,7 +97,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true }));
+    return json(data({ success: true, bookingId: booking.id }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });

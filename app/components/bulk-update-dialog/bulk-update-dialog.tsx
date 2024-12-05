@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -12,7 +12,7 @@ import {
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
-import type { action } from "~/routes/api+/assets.bulk-update-location";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
@@ -130,6 +130,7 @@ type DialogContentChildrenProps = {
   handleCloseDialog: () => void;
   fetcherError?: string;
   fetcherErrorAdditionalData?: Record<string, any>;
+  fetcherData?: Record<string, any>;
 };
 
 type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
@@ -168,6 +169,10 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    * Id of the array input field
    */
   arrayFieldId: string;
+  /**
+   * If `true` then the dialog will not close after the success of dialog action.
+   */
+  skipCloseOnSuccess?: boolean;
 };
 
 /** This component is basically the body of the Dialog */
@@ -184,12 +189,13 @@ const BulkUpdateDialogContent = forwardRef<
     description,
     actionUrl,
     arrayFieldId,
+    skipCloseOnSuccess = false,
   },
   ref
 ) {
   const { items } = useLoaderData<{ items: ListItemData[] }>();
 
-  const fetcher = useFetcher<typeof action>();
+  const fetcher = useFetcherWithReset<any>();
   const disabled = isFormProcessing(fetcher.state);
 
   const [searchParams] = useSearchParams();
@@ -205,12 +211,17 @@ const BulkUpdateDialogContent = forwardRef<
 
   const handleCloseDialog = useCallback(() => {
     closeBulkDialog(type);
-  }, [closeBulkDialog, type]);
+    fetcher.reset();
+  }, [closeBulkDialog, type, fetcher]);
 
   const handleBulkActionSuccess = useCallback(() => {
     if (type === "trash" || type === "archive" || type === "cancel") {
       setSelectedItems([]);
-      handleCloseDialog();
+
+      if (!skipCloseOnSuccess) {
+        handleCloseDialog();
+      }
+
       onSuccess && onSuccess();
       return;
     }
@@ -223,9 +234,18 @@ const BulkUpdateDialogContent = forwardRef<
       items.filter((item) => prev.some((i) => i.id === item.id))
     );
 
-    handleCloseDialog();
+    if (!skipCloseOnSuccess) {
+      handleCloseDialog();
+    }
     onSuccess && onSuccess();
-  }, [handleCloseDialog, items, onSuccess, setSelectedItems, type]);
+  }, [
+    handleCloseDialog,
+    items,
+    onSuccess,
+    setSelectedItems,
+    type,
+    skipCloseOnSuccess,
+  ]);
 
   useEffect(
     function handleOnSuccess() {
@@ -290,6 +310,7 @@ const BulkUpdateDialogContent = forwardRef<
               ? children({
                   disabled,
                   handleCloseDialog,
+                  fetcherData: fetcher?.data,
                   fetcherError: fetcher?.data?.error?.message,
                   fetcherErrorAdditionalData:
                     fetcher?.data?.error?.additionalData,
