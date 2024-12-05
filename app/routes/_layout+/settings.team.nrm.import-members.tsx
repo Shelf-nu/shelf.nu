@@ -17,7 +17,8 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { WarningBox } from "~/components/shared/warning-box";
-import { db } from "~/database/db.server";
+import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
+import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { memoryUploadHandler } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
@@ -75,16 +76,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     const csvFile = formData.get("file") as File;
-    const text = await csvFile.text(); // This method depends on your specific environment
-
+    const text = await csvFile.text();
     const memberNames = text.split(",").map((name) => name.trim());
 
-    await db.teamMember.createMany({
-      data: memberNames.map((name) => ({
-        name,
-        organizationId,
-      })),
+    // Transform member names into format expected by createTeamMemberIfNotExists
+    const importData: CreateAssetFromContentImportPayload[] = memberNames.map(
+      (name) => ({
+        title: "", // Required by type but unused
+        tags: [], // Required by type but unused
+        custodian: name,
+      })
+    );
+
+    await createTeamMemberIfNotExists({
+      data: importData,
+      organizationId,
     });
+
     return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -110,6 +118,10 @@ export default function ImportNRMs() {
             team members just requires you to upload a txt file with member
             names separated by comas.
             <br />
+            <ul className="list-inside list-disc pl-4">
+              <li>Names which are already in the system will be ignored.</li>
+              <li>Duplicates will be skipped.</li>
+            </ul>
             <WarningBox className="my-2">
               Import is final and cannot be reverted. If you want to later edit
               team members, you can do so from the Team settings page.
