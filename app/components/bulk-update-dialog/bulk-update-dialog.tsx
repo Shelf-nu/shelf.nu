@@ -129,6 +129,7 @@ type DialogContentChildrenProps = {
   disabled: boolean;
   handleCloseDialog: () => void;
   fetcherError?: string;
+  fetcherErrorAdditionalData?: Record<string, any>;
 };
 
 type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
@@ -290,6 +291,8 @@ const BulkUpdateDialogContent = forwardRef<
                   disabled,
                   handleCloseDialog,
                   fetcherError: fetcher?.data?.error?.message,
+                  fetcherErrorAdditionalData:
+                    fetcher?.data?.error?.additionalData,
                 })
               : children}
           </div>

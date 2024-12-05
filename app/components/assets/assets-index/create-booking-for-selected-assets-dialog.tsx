@@ -25,6 +25,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
       title="Create booking"
       description={`Create a new booking with selected(${selectedAssets.length}) assets`}
       actionUrl="/bookings/new"
+      className="lg:w-[600px]"
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
@@ -143,17 +144,9 @@ export default function CreateBookingForSelectedAssetsDialog() {
               />
             </FormRow>
           </Card>
-          {selectedAssets.map((asset, i) => (
-            <input
-              key={asset.id}
-              type="hidden"
-              name={`assetIds[${i}]`}
-              value={asset.id}
-            />
-          ))}
 
           {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
+            <p className="mt-2 text-sm text-error-500">{fetcherError}</p>
           ) : null}
 
           <div className="flex items-center gap-3">

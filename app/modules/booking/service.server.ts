@@ -33,7 +33,6 @@ import {
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
-import { getAvailableAssetsIdsForBooking } from "../asset/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
@@ -1613,7 +1612,11 @@ export async function getExistingBookingDetails(bookingId: string) {
   try {
     const booking = await db.booking.findUniqueOrThrow({
       where: { id: bookingId },
-      select: { id: true, status: true, assets: { select: { id: true } } },
+      select: {
+        id: true,
+        status: true,
+        assets: { select: { id: true, title: true } },
+      },
     });
 
     if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
@@ -1637,18 +1640,45 @@ export async function getExistingBookingDetails(bookingId: string) {
   }
 }
 
+export async function getAvailableAssetsIdsForBooking(
+  assetIds: Asset["id"][]
+): Promise<string[]> {
+  try {
+    const selectedAssets = await db.asset.findMany({
+      where: { id: { in: assetIds } },
+      select: { status: true, id: true, kit: true },
+    });
+    if (selectedAssets.some((asset) => asset.kit)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add assets that belong to a kit.",
+        label: "Booking",
+      });
+    }
+    return selectedAssets.map((asset) => asset.id);
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause: cause,
+      message: cause?.message
+        ? cause.message
+        : "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
+}
+
 /**
  * This function checks for the available assets.
- * and returned the ids and booking info.
+ * and returns the ids and booking info.
  */
 export async function processBooking(bookingId: string, assetIds: string[]) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
       getAvailableAssetsIdsForBooking(assetIds),
-      getExistingBookingDetails(bookingId)
+      getExistingBookingDetails(bookingId),
     ]);
 
-    if(!finalAssetIds.length) {
+    if (!finalAssetIds.length) {
       throw new ShelfError({
         cause: null,
         message: "No assets available.",
@@ -1658,9 +1688,8 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
 
     return {
       finalAssetIds,
-      bookingInfo
-    }
-
+      bookingInfo,
+    };
   } catch (cause) {
     let message = "Something went wrong while processing the booking.";
     if (isLikeShelfError(cause)) {

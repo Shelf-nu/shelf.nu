@@ -32,7 +32,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { id, assetsIds } = parseData(
+    const { id, assetsIds, addOnlyRestAssets } = parseData(
       formData,
       addAssetsToExistingBookingSchema,
       {
@@ -40,7 +40,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     );
 
-    const { finalAssetIds, bookingInfo } = await processBooking(id, assetsIds);
+    let { finalAssetIds, bookingInfo } = await processBooking(id, assetsIds);
+
+    /**
+     * Remove already added assets and proceed with not added assets.
+     */
+    if (addOnlyRestAssets) {
+      const bookingAssetIds = bookingInfo.assets.map((asset) => asset.id);
+      finalAssetIds = finalAssetIds.filter(
+        (assetId) => !bookingAssetIds.includes(assetId)
+      );
+    }
 
     if (
       bookingInfo.assets.length &&
@@ -53,6 +63,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
         cause: null,
         message:
           "The booking you have selected already contains the asset you are trying to add. Please select a different booking.",
+        additionalData: {
+          alreadyAddedAssets: bookingInfo.assets.filter((asset) =>
+            finalAssetIds.includes(asset.id)
+          ),
+        },
         label: "Booking",
       });
     }

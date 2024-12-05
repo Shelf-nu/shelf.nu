@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Booking } from "@prisma/client";
+import type { Asset, Booking } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
@@ -13,10 +13,12 @@ import {
   SelectValue,
 } from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
+import When from "~/components/when/when";
 
 export const addAssetsToExistingBookingSchema = z.object({
   id: z.string(),
   assetsIds: z.string().array().min(1, "Please select at least one asset."),
+  addOnlyRestAssets: z.coerce.boolean().optional(),
 });
 
 type BookingWithDates = Booking & {
@@ -51,12 +53,22 @@ export default function AddAssetsToExistingBookingDialog() {
       title="Add to existing booking"
       description={`Add selected(${selectedAssets.length}) assets to existing booking.`}
       actionUrl="/api/assets/add-to-booking"
+      className="lg:w-[600px]"
     >
-      {({ disabled, handleCloseDialog, fetcherError }) => (
+      {({
+        disabled,
+        handleCloseDialog,
+        fetcherError,
+        fetcherErrorAdditionalData,
+      }) => (
         <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
           <Select name="id" disabled={isFetchingBookings}>
             <SelectTrigger className="mb-4">
-              <SelectValue placeholder="Select booking" />
+              <SelectValue
+                placeholder={
+                  isFetchingBookings ? "Fetching bookings..." : "Select booking"
+                }
+              />
             </SelectTrigger>
             <SelectContent>
               {bookings.map((booking) => (
@@ -74,18 +86,35 @@ export default function AddAssetsToExistingBookingDialog() {
             </SelectContent>
           </Select>
 
-          {selectedAssets.map((asset, i) => (
-            <input
-              key={asset.id}
-              type="hidden"
-              name={`assetIds[${i}]`}
-              value={asset.id}
-            />
-          ))}
+          <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
+            <div className="mb-4 rounded-md border border-error-500 bg-error-50 p-2 text-error-500">
+              <When truthy={!!fetcherError}>
+                <p>{fetcherError}</p>
+              </When>
+              <When
+                truthy={
+                  !!fetcherErrorAdditionalData &&
+                  fetcherErrorAdditionalData?.alreadyAddedAssets?.length
+                }
+              >
+                <div className="mt-4">
+                  <p>Already added assets are - </p>
+                  <ul className="mb-2 list-inside list-disc">
+                    {fetcherErrorAdditionalData?.alreadyAddedAssets.map(
+                      (asset: Pick<Asset, "id" | "title">) => (
+                        <li key={asset.id}>{asset.title}</li>
+                      )
+                    )}
+                  </ul>
 
-          {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
-          ) : null}
+                  <input type="hidden" name="addOnlyRestAssets" value="true" />
+                  <Button className="w-full bg-error-500 hover:bg-error-400">
+                    Add only the rest of the assets
+                  </Button>
+                </div>
+              </When>
+            </div>
+          </When>
 
           <div className="flex items-center gap-3">
             <Button
