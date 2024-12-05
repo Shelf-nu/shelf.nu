@@ -38,7 +38,7 @@ export default function SidebarNav({
   style,
   items,
 }: SidebarNavProps) {
-  const { isMobile, toggleSidebar } = useSidebar();
+  const { isMobile, toggleSidebar, open } = useSidebar();
   const matches = useMatches();
   const navigate = useNavigate();
   const location = useLocation();
@@ -109,10 +109,18 @@ export default function SidebarNav({
                     disabled={!!navItem.disabled}
                     tooltip={renderTooltopContent(navItem)}
                     onClick={() => {
-                      navigateParentNav(firstChildRoute.to);
+                      /** Clicking on the parent item should navigate to the first item, if the menu is not open */
+                      if (!open) {
+                        navigateParentNav(firstChildRoute.to);
+                      }
                     }}
                   >
-                    <navItem.Icon className="size-4 text-gray-600" />
+                    <navItem.Icon
+                      className={tw(
+                        "size-4 text-gray-600",
+                        !open && isAnyChildActive && "text-primary"
+                      )}
+                    />
                     <span className="font-semibold">{navItem.title}</span>
                     <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                   </SidebarMenuButton>
@@ -222,6 +230,7 @@ export default function SidebarNav({
       isAnyRouteActive,
       isRouteActive,
       navigateParentNav,
+      open,
       renderTooltopContent,
     ]
   );
