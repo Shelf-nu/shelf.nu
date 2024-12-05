@@ -242,17 +242,33 @@ async function getAssetsFromView(params: {
 
     /** If the search string exists, add it to the where object */
     if (search) {
-      const words = search
-        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
-        .trim()
-        .replace(/ +/g, " ") //replace multiple spaces into 1
-        .split(" ")
-        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
-        .filter(Boolean)
-        .join(" & ");
-      where.searchVector = {
-        search: words,
-      };
+      try {
+        const words = search
+          .replace(/([()&|!':><])/g, "\\$1")
+          .trim()
+          .replace(/ +/g, " ")
+          .split(" ")
+          .map((w) => {
+            const trimmed = w.trim();
+            return trimmed ? trimmed + ":*" : "";
+          })
+          .filter(Boolean)
+          .join(" & ");
+
+        where.searchVector = {
+          search: words || undefined, // Prevent empty search causing DB error
+        };
+      } catch (error) {
+        // Log error but allow query to continue without search filter
+        Logger.error(
+          new ShelfError({
+            cause: error,
+            message: "Failed to parse search string for tsquery",
+            additionalData: { search },
+            label: "Assets",
+          })
+        );
+      }
     }
 
     if (status && where.asset) {
