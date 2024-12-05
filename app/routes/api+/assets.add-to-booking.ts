@@ -1,6 +1,9 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
-import { upsertBooking } from "~/modules/booking/service.server";
+import {
+  processBooking,
+  upsertBooking,
+} from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
@@ -13,7 +16,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
-import { processBooking } from "../_layout+/assets.$assetId.overview.add-to-existing-booking";
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const authSession = context.getSession();

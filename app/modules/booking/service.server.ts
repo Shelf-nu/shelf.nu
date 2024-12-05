@@ -33,6 +33,7 @@ import {
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
+import { getAvailableAssetsIdsForBooking } from "../asset/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
@@ -1631,6 +1632,44 @@ export async function getExistingBookingDetails(bookingId: string) {
         cause?.message ||
         "Something went wrong while getting existing booking details.",
       additionalData: { bookingId },
+      label: "Booking",
+    });
+  }
+}
+
+/**
+ * This function checks for the available assets.
+ * and returned the ids and booking info.
+ */
+export async function processBooking(bookingId: string, assetIds: string[]) {
+  try {
+    const [finalAssetIds, bookingInfo] = await Promise.all([
+      getAvailableAssetsIdsForBooking(assetIds),
+      getExistingBookingDetails(bookingId)
+    ]);
+
+    if(!finalAssetIds.length) {
+      throw new ShelfError({
+        cause: null,
+        message: "No assets available.",
+        label: "Booking",
+      });
+    }
+
+    return {
+      finalAssetIds,
+      bookingInfo
+    }
+
+  } catch (cause) {
+    let message = "Something went wrong while processing the booking.";
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
+    throw new ShelfError({
+      cause: cause,
+      message,
       label: "Booking",
     });
   }

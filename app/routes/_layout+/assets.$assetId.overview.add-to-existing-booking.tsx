@@ -6,10 +6,9 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { BookingExistIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { getAvailableAssetsIdsForBooking } from "~/modules/asset/service.server";
 
 import {
-  getExistingBookingDetails,
+  processBooking,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { loadBookingsData } from "~/modules/booking/utils.server";
@@ -23,7 +22,7 @@ import {
 } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -72,39 +71,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw json(error(reason), { status: reason.status });
   }
 }
-
-export const processBooking = async (bookingId: string, assetIds: string[]) => {
-  try {
-    const [finalAssetIds, booking] = await Promise.all([
-      getAvailableAssetsIdsForBooking(assetIds),
-      getExistingBookingDetails(bookingId),
-    ]);
-
-    if (finalAssetIds.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "No assets available.",
-        label: "Booking",
-      });
-    }
-
-    return {
-      finalAssetIds,
-      bookingInfo: booking,
-    };
-  } catch (cause) {
-    let message = "Something went wrong while processing the booking.";
-    if (isLikeShelfError(cause)) {
-      message = cause.message;
-    }
-
-    throw new ShelfError({
-      cause: cause,
-      message,
-      label: "Booking",
-    });
-  }
-};
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();

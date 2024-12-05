@@ -88,6 +88,7 @@ import {
   getLocationUpdateNoteContent,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
+import { getExistingBookingDetails } from "../booking/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
