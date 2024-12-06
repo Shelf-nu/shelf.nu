@@ -594,12 +594,26 @@ export async function getBookings(params: {
         mode: "insensitive",
       };
     }
-    if (custodianTeamMemberId) {
-      where.custodianTeamMemberId = custodianTeamMemberId;
+
+    /** In the case both are passed, we do an OR */
+    if (custodianTeamMemberId && custodianUserId) {
+      where.OR = [
+        {
+          custodianTeamMemberId,
+        },
+        {
+          custodianUserId,
+        },
+      ];
+    } else {
+      if (custodianTeamMemberId) {
+        where.custodianTeamMemberId = custodianTeamMemberId;
+      }
+      if (custodianUserId) {
+        where.custodianUserId = custodianUserId;
+      }
     }
-    if (custodianUserId) {
-      where.custodianUserId = custodianUserId;
-    }
+
     if (statuses?.length) {
       where.status = {
         in: statuses,
