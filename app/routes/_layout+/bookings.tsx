@@ -19,6 +19,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -69,6 +70,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    /**
+     * For self service and base users, we need to get the teamMember to be able to filter by it as well.
+     * Tis is to handle a case when a booking was assigned when there wasnt a user attached to a team member but they were later on linked.
+     * This is to ensure that the booking is still visible to the user that was assigned to it.
+     * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
+     * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
+     * Ideally in the future we should remove this as it adds another query to the db
+     * @TODO this can safely be remove 3-6 months after this commit
+     */
+    let selfServiceData = null;
+    if (isSelfServiceOrBase) {
+      const teamMember = await db.teamMember.findFirst({
+        where: {
+          userId,
+          organizationId,
+        },
+      });
+      if (!teamMember) {
+        throw new ShelfError({
+          cause: null,
+          title: "Team member not found",
+          message:
+            "You are not part of a team in this organization. Please contact your organization admin to resolve this",
+          label: "Booking",
+          shouldBeCaptured: false,
+        });
+      }
+      selfServiceData = {
+        // If the user is self service, we only show bookings that belong to that user)
+        custodianUserId: authSession?.userId,
+        custodianTeamMemberId: teamMember.id,
+      };
+    }
+
     const { bookings, bookingCount } = await getBookings({
       organizationId,
       page,
@@ -79,10 +114,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // If status is in the params, we filter based on it
         statuses: [status],
       }),
-      ...(isSelfServiceOrBase && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: authSession?.userId,
-      }),
+      ...selfServiceData,
     });
 
     const totalPages = Math.ceil(bookingCount / perPage);
