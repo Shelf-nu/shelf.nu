@@ -68,8 +68,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           ResetPasswordSchema
         );
 
-        console.log({ password, refreshToken });
-
         const authSession = await refreshAccessToken(refreshToken);
 
         await updateAccountPassword(
