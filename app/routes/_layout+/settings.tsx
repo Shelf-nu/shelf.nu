@@ -60,9 +60,7 @@ export default function SettingsPage() {
       >
         <HorizontalTabs items={items} />
       </When>
-      <div>
-        <Outlet />
-      </div>
+      <Outlet />
     </>
   );
 }

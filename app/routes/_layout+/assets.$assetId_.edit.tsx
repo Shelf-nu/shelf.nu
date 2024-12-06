@@ -52,17 +52,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
-    });
+    const { organizationId, currentOrganization, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      });
 
     const asset = await getAsset({
       organizationId,
       id,
       include: { tags: true, customFields: true },
+      userOrganizations,
+      request,
     });
 
     const { categories, totalCategories, tags, locations, totalLocations } =

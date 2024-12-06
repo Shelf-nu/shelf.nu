@@ -11,6 +11,7 @@ import type {
   Booking,
   Kit,
   AssetIndexSettings,
+  UserOrganization,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -55,6 +56,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
@@ -101,16 +103,58 @@ type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
 export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   id,
   organizationId,
+  userOrganizations,
+  request,
   include,
 }: Pick<Asset, "id"> & {
   organizationId: Asset["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
   include?: T;
 }): Promise<AssetWithInclude<T>> {
   try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
     const asset = await db.asset.findFirstOrThrow({
-      where: { id, organizationId },
+      where: {
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
+      },
       include: { ...include },
     });
+
+    /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
+    if (
+      userOrganizations?.length &&
+      asset.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(asset.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message: "",
+        additionalData: {
+          model: "asset",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === asset.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
 
     return asset as AssetWithInclude<T>;
   } catch (cause) {
@@ -119,7 +163,11 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       title: "Asset not found",
       message:
         "The asset you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { id, organizationId },
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
       shouldBeCaptured: !isNotFoundError(cause),
     });
@@ -194,17 +242,33 @@ async function getAssetsFromView(params: {
 
     /** If the search string exists, add it to the where object */
     if (search) {
-      const words = search
-        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
-        .trim()
-        .replace(/ +/g, " ") //replace multiple spaces into 1
-        .split(" ")
-        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
-        .filter(Boolean)
-        .join(" & ");
-      where.searchVector = {
-        search: words,
-      };
+      try {
+        const words = search
+          .replace(/([()&|!':><])/g, "\\$1")
+          .trim()
+          .replace(/ +/g, " ")
+          .split(" ")
+          .map((w) => {
+            const trimmed = w.trim();
+            return trimmed ? trimmed + ":*" : "";
+          })
+          .filter(Boolean)
+          .join(" & ");
+
+        where.searchVector = {
+          search: words || undefined, // Prevent empty search causing DB error
+        };
+      } catch (error) {
+        // Log error but allow query to continue without search filter
+        Logger.error(
+          new ShelfError({
+            cause: error,
+            message: "Failed to parse search string for tsquery",
+            additionalData: { search },
+            label: "Assets",
+          })
+        );
+      }
     }
 
     if (status && where.asset) {
