@@ -1,29 +1,13 @@
 import { Fragment, useCallback } from "react";
-import { ChevronDownIcon } from "@radix-ui/react-icons";
-import {
-  NavLink,
-  useLocation,
-  useMatches,
-  useNavigate,
-} from "@remix-run/react";
-import invariant from "tiny-invariant";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "~/components/shared/collapsible";
-import When from "~/components/when/when";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
-import { tw } from "~/utils/tw";
+import ChildNavItem from "./child-nav-item";
+import ParentNavItem from "./parent-nav-item";
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   useSidebar,
 } from "./sidebar";
 
@@ -39,23 +23,6 @@ export default function SidebarNav({
   items,
 }: SidebarNavProps) {
   const { isMobile, toggleSidebar } = useSidebar();
-  const matches = useMatches();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const currentRoute = matches.at(-1);
-  // @ts-expect-error
-  const handle = currentRoute?.handle?.name;
-
-  const isRouteActive = useCallback(
-    (route: string) =>
-      location.pathname.includes(route) && handle !== "$userId.bookings",
-    [handle, location.pathname]
-  );
-
-  const isAnyRouteActive = useCallback(
-    (routes: string[]) => routes.some(isRouteActive),
-    [isRouteActive]
-  );
 
   const renderTooltopContent = useCallback((navItem: NavItem) => {
     if (typeof navItem.disabled === "boolean" && navItem.disabled) {
@@ -75,112 +42,26 @@ export default function SidebarNav({
     }
   }, [isMobile, toggleSidebar]);
 
-  const navigateParentNav = useCallback(
-    (to: string) => {
-      navigate(to);
-      closeIfMobile();
-    },
-    [closeIfMobile, navigate]
-  );
-
   const renderNavItem = useCallback(
     (navItem: NavItem) => {
       switch (navItem.type) {
         case "parent": {
-          const firstChildRoute = navItem.children[0];
-          invariant(
-            typeof firstChildRoute !== "undefined",
-            "'parent' nav item should have at lease one child route"
-          );
-
-          const isAnyChildActive = isAnyRouteActive(
-            navItem.children.map((child) => child.to)
-          );
-
           return (
-            <Collapsible
-              asChild
-              className="group/collapsible"
-              defaultOpen={isAnyChildActive && !navItem.disabled}
-            >
-              <SidebarMenuItem key={navItem.title} className="z-50">
-                <CollapsibleTrigger asChild>
-                  <SidebarMenuButton
-                    disabled={!!navItem.disabled}
-                    tooltip={renderTooltopContent(navItem)}
-                    onClick={() => {
-                      navigateParentNav(firstChildRoute.to);
-                    }}
-                  >
-                    <navItem.Icon className="size-4 text-gray-600" />
-                    <span className="font-semibold">{navItem.title}</span>
-                    <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                  </SidebarMenuButton>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <SidebarMenuSub>
-                    <When truthy={!navItem.disabled}>
-                      {navItem.children.map((child) => {
-                        const isChildActive = isRouteActive(child.to);
-
-                        return (
-                          <SidebarMenuSubItem key={child.title}>
-                            <SidebarMenuSubButton
-                              onClick={closeIfMobile}
-                              asChild
-                            >
-                              <NavLink
-                                to={child.to}
-                                target={child.target}
-                                className={tw(
-                                  "font-medium hover:bg-gray-100",
-                                  isChildActive &&
-                                    "bg-transparent font-bold !text-primary"
-                                )}
-                              >
-                                {child.title}
-                              </NavLink>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
-                    </When>
-                  </SidebarMenuSub>
-                </CollapsibleContent>
-              </SidebarMenuItem>
-            </Collapsible>
+            <ParentNavItem
+              route={navItem}
+              tooltip={renderTooltopContent(navItem)}
+              closeIfMobile={closeIfMobile}
+            />
           );
         }
 
         case "child": {
-          const isActive = isRouteActive(navItem.to);
-
           return (
-            <SidebarMenuItem className="z-50">
-              <SidebarMenuButton
-                asChild
-                disabled={!!navItem.disabled}
-                tooltip={renderTooltopContent(navItem)}
-                onClick={closeIfMobile}
-              >
-                <NavLink
-                  to={navItem.to}
-                  target={navItem.target}
-                  className={tw(
-                    "font-semibold",
-                    isActive ? "bg-transparent font-bold text-primary" : ""
-                  )}
-                >
-                  <navItem.Icon
-                    className={tw(
-                      "size-4 text-gray-600",
-                      isActive && "text-primary"
-                    )}
-                  />
-                  <span>{navItem.title}</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            <ChildNavItem
+              route={navItem}
+              closeIfMobile={closeIfMobile}
+              tooltip={renderTooltopContent(navItem)}
+            />
           );
         }
 
@@ -217,13 +98,7 @@ export default function SidebarNav({
         }
       }
     },
-    [
-      closeIfMobile,
-      isAnyRouteActive,
-      isRouteActive,
-      navigateParentNav,
-      renderTooltopContent,
-    ]
+    [closeIfMobile, renderTooltopContent]
   );
 
   return (

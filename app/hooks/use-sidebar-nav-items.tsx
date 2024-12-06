@@ -31,13 +31,13 @@ type BaseNavItem = {
   disabled?: boolean | { reason: React.ReactNode };
 };
 
-type ChildNavItem = BaseNavItem & {
+export type ChildNavItem = BaseNavItem & {
   type: "child";
   to: string;
   target?: string;
 };
 
-type ParentNavItem = BaseNavItem & {
+export type ParentNavItem = BaseNavItem & {
   type: "parent";
   children: Omit<ChildNavItem, "type" | "Icon">[];
 };
