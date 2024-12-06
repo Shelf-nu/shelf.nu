@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  type Asset,
-  type Booking,
-  type Category,
-  type Custody,
-} from "@prisma/client";
+import type { Asset, Booking, Category, Custody } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -44,7 +39,9 @@ import {
 } from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 
+import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getBooking,
   getKitIdsByAssets,
@@ -56,7 +53,14 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -160,14 +164,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.update,
     });
 
-    const { assetIds, removedAssetIds, redirectTo } = parseData(
+    let { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -178,6 +182,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         additionalData: { userId, bookingId },
       }
     );
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+
+      assetIds = allAssets.map((asset) => asset.id);
+    }
 
     const user = await getUserByID(authSession.userId);
 
@@ -232,7 +256,8 @@ export default function AddAssetsToNewBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
+  const { booking, header, bookingKitIds, items } =
+    useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -246,6 +271,7 @@ export default function AddAssetsToNewBooking() {
   const [selectedAssets, setSelectedAssets] = useAtom(
     bookingsSelectedAssetsAtom
   );
+  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
 
   const removedAssetIds = useMemo(
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
@@ -278,6 +304,14 @@ export default function AddAssetsToNewBooking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.id]);
 
+  function handleSelectAll() {
+    if (hasSelectedAll) {
+      setSelectedAssets(bookingAssetsIds);
+    } else {
+      setSelectedAssets([...items.map((item) => item.id), ALL_SELECTED_KEY]);
+    }
+  }
+
   return (
     <Tabs
       className="-mx-6 flex h-full max-h-full flex-col"
@@ -303,7 +337,9 @@ export default function AddAssetsToNewBooking() {
             Assets{" "}
             {selectedAssets.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {selectedAssets.length}
+                {hasSelectedAll
+                  ? selectedAssets.length - 1
+                  : selectedAssets.length}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -402,8 +438,18 @@ export default function AddAssetsToNewBooking() {
 
       {/* Footer of the modal */}
       <footer className="item-center flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center">
-          {selectedAssets.length} assets selected
+        <div className="flex items-center gap-2">
+          <p>
+            {hasSelectedAll ? selectedAssets.length - 1 : selectedAssets.length}{" "}
+            assets selected
+          </p>
+          <Button
+            variant="secondary"
+            className="px-2 py-1 text-sm font-normal"
+            onClick={handleSelectAll}
+          >
+            {hasSelectedAll ? "Clear all" : "Select all"}
+          </Button>
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
