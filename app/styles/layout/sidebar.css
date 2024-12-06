@@ -42,3 +42,7 @@
     @apply pointer-events-none hidden;
   }
 }
+
+.active\:text-sidebar-accent-foreground:active {
+  @apply text-primary;
+}
