@@ -10,7 +10,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { Image } from "~/components/shared/image";
@@ -109,18 +108,31 @@ export default function OrganizationSelector() {
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
           >
-            {organizations.map((organization, index) => (
+            {organizations.map((organization) => (
               <DropdownMenuItem
                 key={organization.id}
-                className="gap-2 rounded-sm p-2"
+                className={tw(
+                  "gap-2 rounded-sm p-2",
+                  currentOrganization.id === organization.id &&
+                    "bg-gray-50 text-sidebar-accent-foreground"
+                )}
                 onClick={() => {
                   if (organization.id !== currentOrganizationId) {
                     handleSwitchOrganization(organization.id);
                   }
                 }}
               >
+                {organization.type === "PERSONAL" ? (
+                  <ProfilePicture width="w-6" height="h-6" />
+                ) : (
+                  <Image
+                    imageId={organization.imageId}
+                    alt="img"
+                    className="size-6 rounded-sm border object-cover"
+                    updatedAt={organization.updatedAt}
+                  />
+                )}
                 {organization.name}
-                <DropdownMenuShortcut>⌘{index + 1}</DropdownMenuShortcut>
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
