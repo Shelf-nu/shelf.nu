@@ -26,10 +26,8 @@ import {
 import { Td } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import {
-  getAssetsWhereFromRequest,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -41,7 +39,7 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -178,11 +176,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const params = getParamsValues(searchParams);
-      const assetsWhere = getAssetsWhereFromRequest(
-        { ...params, status: params.status as AssetStatus },
-        organizationId
-      );
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
 
       const allAssets = await db.asset.findMany({
         where: assetsWhere,
