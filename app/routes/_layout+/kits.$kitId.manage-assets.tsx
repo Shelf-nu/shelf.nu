@@ -416,6 +416,14 @@ export default function ManageAssetsInKit() {
 
   const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
 
+  function handleSelectAll() {
+    if (hasSelectedAll) {
+      setSelectedAssets(kitAssetIds);
+    } else {
+      setSelectedAssets([...items.map((item) => item.id), ALL_SELECTED_KEY]);
+    }
+  }
+
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per kit
    * So we do a manual effect to set the selected assets to the kit assets ids
@@ -424,14 +432,6 @@ export default function ManageAssetsInKit() {
     setSelectedAssets(kitAssetIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kit.id]);
-
-  function handleSelectAll() {
-    if (hasSelectedAll) {
-      setSelectedAssets(kitAssetIds);
-    } else {
-      setSelectedAssets([...items.map((item) => item.id), ALL_SELECTED_KEY]);
-    }
-  }
 
   return (
     <div className="flex h-full max-h-full flex-col">
