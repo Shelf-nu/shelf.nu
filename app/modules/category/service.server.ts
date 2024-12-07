@@ -185,16 +185,15 @@ export async function getCategory({
   organizationId,
 }: Pick<Category, "id" | "organizationId">) {
   try {
-    return await db.category.findUnique({
-      where: {
-        id,
-        organizationId,
-      },
+    return await db.category.findFirstOrThrow({
+      where: { id, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching the category",
+      title: "Category not found",
+      message:
+        "The category you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
     });
