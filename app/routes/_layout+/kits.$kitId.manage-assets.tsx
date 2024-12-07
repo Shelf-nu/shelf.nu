@@ -169,26 +169,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, organizationId, kitId } }
     );
 
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      assetIds = allAssets.map((asset) => asset.id);
-    }
-
     const user = await getUserByID(userId);
 
     const kit = await db.kit
@@ -236,6 +216,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const removedAssets = kit.assets.filter(
       (asset) => !assetIds.includes(asset.id)
     );
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+      const kitAssets = kit.assets.map((asset) => asset.id);
+      const removedAssetsIds = removedAssets.map((asset) => asset.id);
+
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...kitAssets.filter((asset) => !removedAssetsIds.includes(asset)),
+        ]),
+      ];
+    }
 
     const newlyAddedAssets = await db.asset
       .findMany({
@@ -420,7 +432,11 @@ export default function ManageAssetsInKit() {
     if (hasSelectedAll) {
       setSelectedAssets(kitAssetIds);
     } else {
-      setSelectedAssets([...items.map((item) => item.id), ALL_SELECTED_KEY]);
+      setSelectedAssets([
+        ...kitAssetIds,
+        ...items.map((item) => item.id),
+        ALL_SELECTED_KEY,
+      ]);
     }
   }
 

@@ -199,8 +199,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: assetsWhere,
         select: { id: true },
       });
+      const bookingAssets = await db.asset.findMany({
+        where: {
+          id: { notIn: removedAssetIds },
+          bookings: { some: { id: bookingId } },
+        },
+        select: { id: true },
+      });
 
-      assetIds = allAssets.map((asset) => asset.id);
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...bookingAssets.map((asset) => asset.id),
+        ]),
+      ];
     }
 
     const user = await getUserByID(authSession.userId);
@@ -308,7 +325,11 @@ export default function AddAssetsToNewBooking() {
     if (hasSelectedAll) {
       setSelectedAssets(bookingAssetsIds);
     } else {
-      setSelectedAssets([...items.map((item) => item.id), ALL_SELECTED_KEY]);
+      setSelectedAssets([
+        ...bookingAssetsIds,
+        ...items.map((item) => item.id),
+        ALL_SELECTED_KEY,
+      ]);
     }
   }
 
