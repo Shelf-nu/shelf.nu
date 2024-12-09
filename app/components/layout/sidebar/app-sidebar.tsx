@@ -1,5 +1,6 @@
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
 import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
+import { SidebarNoticeCard } from "./notice-card";
 import OrganizationSelector from "./organization-selector";
 import {
   Sidebar,
@@ -30,6 +31,7 @@ export default function AppSidebar(props: AppSidebarProps) {
 
       <SidebarContent>
         <SidebarNav items={topMenuItems} />
+        <SidebarNoticeCard />
       </SidebarContent>
 
       <SidebarFooter>
