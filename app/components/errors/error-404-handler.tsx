@@ -32,6 +32,7 @@ export default function Error404Handler({
       case "asset":
       case "kit":
       case "location":
+
       case "booking":
       case "customField": {
         const modelLabel = getModelLabelForEnumValue(additionalData.model);

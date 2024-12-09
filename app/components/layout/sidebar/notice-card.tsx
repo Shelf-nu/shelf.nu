@@ -13,8 +13,8 @@ export const SidebarNoticeCard = () => {
       fetcher.formData.get("noticeCardVisibility") === "hidden";
   }
 
-  return optimisticHideNoticeCard ? null : (
-    <div className="support-banner mb-6 hidden rounded bg-gray-50 px-4 py-5 md:mt-10 md:block">
+  return !optimisticHideNoticeCard ? null : (
+    <div className="support-banner mx-2 mb-6 hidden rounded bg-gray-50 px-4 py-5 md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
           Install Shelf for Mobile
