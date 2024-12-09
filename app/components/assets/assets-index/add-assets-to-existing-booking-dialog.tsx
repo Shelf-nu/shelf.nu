@@ -99,7 +99,7 @@ export default function AddAssetsToExistingBookingDialog() {
               </Select>
 
               <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
-                <div className="mb-4 rounded-md border border-error-500 bg-error-50 p-2 text-error-500">
+                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
                   <When truthy={!!fetcherError}>
                     <p>{fetcherError}</p>
                   </When>
@@ -110,7 +110,7 @@ export default function AddAssetsToExistingBookingDialog() {
                     }
                   >
                     <div className="mt-4">
-                      <p>Already added assets are - </p>
+                      <p>Already added assets are : </p>
                       <ul className="mb-2 list-inside list-disc">
                         {fetcherErrorAdditionalData?.alreadyAddedAssets.map(
                           (asset: Pick<Asset, "id" | "title">) => (
@@ -124,9 +124,14 @@ export default function AddAssetsToExistingBookingDialog() {
                         name="addOnlyRestAssets"
                         value="true"
                       />
-                      <Button className="w-full bg-error-500 hover:bg-error-400">
-                        Add only the rest of the assets
-                      </Button>
+
+                      <When
+                        truthy={!fetcherErrorAdditionalData?.allAssetsInBooking}
+                      >
+                        <Button className="w-full" variant="secondary">
+                          Add only the rest of the assets
+                        </Button>
+                      </When>
                     </div>
                   </When>
                 </div>
@@ -166,18 +171,20 @@ export default function AddAssetsToExistingBookingDialog() {
 
               <div className="flex items-center gap-3">
                 <Button
+                  type="button"
                   variant="secondary"
                   width="full"
+                  disabled={disabled}
                   onClick={handleCloseDialog}
                 >
                   Add more
                 </Button>
                 <Button
-                  type="submit"
+                  type="button"
                   variant="primary"
                   width="full"
+                  disabled={disabled}
                   onClick={() => {
-                    handleCloseDialog();
                     navigate(`/bookings/${fetcherData?.bookingId}`);
                   }}
                 >

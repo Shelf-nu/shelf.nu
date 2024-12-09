@@ -59,14 +59,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
         finalAssetIds
       )
     ) {
+      const alreadyAddedAssets = bookingInfo.assets.filter((asset) =>
+        finalAssetIds.includes(asset.id)
+      );
+      const allAssetsInBooking =
+        alreadyAddedAssets.length === finalAssetIds.length;
+
       throw new ShelfError({
         cause: null,
-        message:
-          "The booking you have selected already contains the asset you are trying to add. Please select a different booking.",
+        message: allAssetsInBooking
+          ? "The booking you have selected already contains all the selected assets. Please select different booking or different assets."
+          : "The booking you have selected already contains the asset you are trying to add. Please select a different booking.",
         additionalData: {
-          alreadyAddedAssets: bookingInfo.assets.filter((asset) =>
-            finalAssetIds.includes(asset.id)
-          ),
+          alreadyAddedAssets,
+          allAssetsInBooking,
         },
         label: "Booking",
       });
