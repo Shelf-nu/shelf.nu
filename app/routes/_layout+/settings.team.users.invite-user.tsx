@@ -126,6 +126,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           "User already has a pending invite. Either resend it or cancel it in order to be able to send a new one.",
         additionalData: { email, organizationId },
         label: "Invite",
+        shouldBeCaptured: false,
       });
     }
 

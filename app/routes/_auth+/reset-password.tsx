@@ -104,7 +104,11 @@ export default function ResetPassword() {
     } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
       // Effect run twice and break listener chain
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+      if (
+        event === "PASSWORD_RECOVERY" ||
+        event === "SIGNED_IN" ||
+        event === "INITIAL_SESSION"
+      ) {
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
