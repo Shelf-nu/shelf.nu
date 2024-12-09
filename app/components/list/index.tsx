@@ -213,9 +213,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               <When truthy={modeIsAdvanced}>
                 <ExportAssetsButton />
               </When>
-              <When truthy={!!bulkActions}>
-                <div>{bulkActions}</div>
-              </When>
+              <When truthy={!!bulkActions}>{bulkActions}</When>
             </div>
           </div>
           <Table
