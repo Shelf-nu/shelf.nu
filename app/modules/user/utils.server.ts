@@ -6,6 +6,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { data, parseData } from "~/utils/http.server";
+import { randomUsernameFromEmail } from "~/utils/user";
 import { revokeAccessToOrganization } from "./service.server";
 import { revokeAccessEmailText } from "../invite/helpers";
 import { createInvite } from "../invite/service.server";
@@ -214,4 +215,43 @@ export async function resolveUserAction(
       });
     }
   }
+}
+
+/**
+ * Maximum number of attempts to generate a unique username
+ * This prevents infinite loops while still providing multiple retry attempts
+ */
+const MAX_USERNAME_ATTEMPTS = 5;
+
+/**
+ * Generates a unique username for a new user with retry mechanism
+ * @param email - User's email to base username on
+ * @returns Unique username or throws if cannot generate after max attempts
+ * @throws {ShelfError} If unable to generate unique username after max attempts
+ */
+export async function generateUniqueUsername(email: string): Promise<string> {
+  let attempts = 0;
+
+  while (attempts < MAX_USERNAME_ATTEMPTS) {
+    const username = randomUsernameFromEmail(email);
+
+    // Check if username exists
+    const existingUser = await db.user.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+
+    if (!existingUser) {
+      return username;
+    }
+
+    attempts++;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    message: "Unable to generate unique username after maximum attempts",
+    label: "User",
+    additionalData: { email, attempts: MAX_USERNAME_ATTEMPTS },
+  });
 }

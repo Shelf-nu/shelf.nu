@@ -2573,8 +2573,9 @@ export async function bulkCheckOutAssets({
       throw new ShelfError({
         cause: null,
         message:
-          "There are sone unavailable assets. Please make sure you are selecting only available assets.",
+          "There are some unavailable assets. Please make sure you are selecting only available assets.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2670,6 +2671,7 @@ export async function bulkCheckInAssets({
         message:
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2983,6 +2985,7 @@ export async function relinkQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      shouldBeCaptured: false,
     });
   }
 
