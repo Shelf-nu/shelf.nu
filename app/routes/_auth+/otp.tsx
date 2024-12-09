@@ -16,6 +16,7 @@ import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -30,7 +31,6 @@ import {
 import { validEmail } from "~/utils/misc";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
-import { randomUsernameFromEmail } from "~/utils/user";
 import type { action as resendOtpAction } from "./resend-otp";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
@@ -70,9 +70,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const userExists = Boolean(await findUserByEmail(email));
 
         if (!userExists) {
+          const username = await generateUniqueUsername(authSession.email);
           await createUser({
             ...authSession,
-            username: randomUsernameFromEmail(authSession.email),
+            username,
           });
         }
 
