@@ -25,7 +25,7 @@ function FilterOperatorDisplay({
 }
 
 /** Maps the FilterOperator to a user friendly name */
-const operatorsMap: Record<FilterOperator, string[]> = {
+export const operatorsMap: Record<FilterOperator, string[]> = {
   is: ["=", "is"],
   isNot: ["≠", "Is not"],
   contains: ["∋", "Contains"],

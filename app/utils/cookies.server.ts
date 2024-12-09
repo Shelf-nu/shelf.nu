@@ -1,7 +1,10 @@
+import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
 import { cleanParamsForCookie } from "~/hooks/search-params";
+import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getCurrentSearchParams } from "./http.server";
 
 // find cookie by name from request headers
@@ -141,36 +144,87 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
+/**
+ * Gets and validates advanced filters from request parameters
+ * Ensures URL parameters match the expected advanced filter format
+ * @param request - The incoming request
+ * @param organizationId - The organization ID for the request
+ * @param settings - The asset index settings containing column configuration
+ * @returns Object containing filters, serialized cookie, and redirect status
+ */
 export async function getAdvancedFiltersFromRequest(
   request: Request,
-  organizationId: string
-) {
+  organizationId: string,
+  settings: AssetIndexSettings
+): Promise<{
+  filters: string | undefined;
+  serializedCookie: string | undefined;
+  redirectNeeded: boolean;
+}> {
   let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");
+  const advancedAssetFilterCookie =
+    createAdvancedAssetFilterCookie(organizationId);
 
-  const assetFilterCookie = createAdvancedAssetFilterCookie(organizationId);
   if (filters) {
-    // Clean filters before storing in cookie
-    const cleanedFilters = cleanParamsForCookie(filters);
-    // Only serialize to cookie if we have filters after cleaning
-    const serializedCookie = cleanedFilters
-      ? await assetFilterCookie.serialize(cleanedFilters)
-      : null;
+    const validatedParams = new URLSearchParams();
+    const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
-    // Return original filters for URL but cleaned cookie
-    return { filters, serializedCookie };
-  } else if (cookieHeader) {
-    // Use existing cookie filter but clean it
-    filters = (await assetFilterCookie.parse(cookieHeader)) || {};
-    const cleanedFilters = cleanParamsForCookie(filters);
+    new URLSearchParams(filters).forEach((value, key) => {
+      if (!columnNames.includes(key as any)) {
+        validatedParams.append(key, value);
+        return;
+      }
 
-    // Only redirect if we have filters after cleaning
+      if (advancedFilterFormatSchema.safeParse(value).success) {
+        validatedParams.append(key, value);
+      }
+    });
+
+    const validatedParamsString = validatedParams.toString();
+    const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+
     return {
-      filters: cleanedFilters,
-      redirectNeeded: !!cleanedFilters,
+      filters: validatedParamsString,
+      serializedCookie: cleanedFilters
+        ? await advancedAssetFilterCookie.serialize(cleanedFilters)
+        : undefined,
+      redirectNeeded: validatedParamsString !== filters,
     };
+  } else if (cookieHeader) {
+    filters = (await advancedAssetFilterCookie.parse(cookieHeader)) || "";
+
+    if (filters) {
+      const validatedParams = new URLSearchParams();
+      const columnNames = (settings.columns as Column[]).map((col) => col.name);
+
+      new URLSearchParams(filters).forEach((value, key) => {
+        if (!columnNames.includes(key as any)) {
+          validatedParams.append(key, value);
+          return;
+        }
+
+        if (advancedFilterFormatSchema.safeParse(value).success) {
+          validatedParams.append(key, value);
+        }
+      });
+
+      const validatedParamsString = validatedParams.toString();
+      const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+
+      return {
+        filters: cleanedFilters || undefined,
+        serializedCookie: undefined,
+        redirectNeeded: !!cleanedFilters,
+      };
+    }
   }
-  return { filters };
+
+  return {
+    filters: "",
+    serializedCookie: undefined,
+    redirectNeeded: false,
+  };
 }
 
 /** HIDE PWA INSTALL PROMPT COOKIE */

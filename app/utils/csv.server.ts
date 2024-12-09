@@ -250,7 +250,8 @@ export async function exportAssetsFromIndexToCsv({
   /** Parse filters */
   const { filters } = await getAdvancedFiltersFromRequest(
     request,
-    organizationId
+    organizationId,
+    settings
   );
 
   /** Make an array of the ids and check if we have to take all */

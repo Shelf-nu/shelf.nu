@@ -219,7 +219,7 @@ export async function advancedModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId);
+  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -227,9 +227,12 @@ export async function advancedModeLoader({
     : getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
-  if (filters && redirectNeeded) {
+
+  if (redirectNeeded) {
     const cookieParams = new URLSearchParams(filters);
-    return redirect(`/assets?${cookieParams.toString()}`);
+    return redirect(`/assets?${cookieParams.toString()}`, {
+      headers: filtersCookie ? [setCookie(filtersCookie)] : undefined,
+    });
   }
 
   /** Query tierLimit, assets & Asset index settings */
