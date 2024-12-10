@@ -1,10 +1,10 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { CalendarCheck } from "lucide-react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { BookingExistIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -165,7 +165,7 @@ export default function ExistingBooking() {
     <Form method="post">
       <div className="modal-content-wrapper">
         <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-          <BookingExistIcon />
+          <CalendarCheck />
         </div>
         <div className="mb-5">
           <h3>Add to Existing Booking</h3>

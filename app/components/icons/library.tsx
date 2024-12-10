@@ -1,3 +1,4 @@
+import { CalendarPlus } from "lucide-react";
 import type { SVGProps } from "react";
 
 export function LogoutIcon(props: SVGProps<SVGSVGElement>) {
@@ -1453,24 +1454,7 @@ export const CalendarIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const BookingsIcon = (props: SVGProps<SVGSVGElement>) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="20"
-    height="20"
-    viewBox="0 0 20 20"
-    fill="none"
-    {...props}
-  >
-    <path
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M19 7H1m13-6v3M6 1v3m4 13v-6m-3 3h6m-7.2 7h8.4c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C19 18.72 19 17.88 19 16.2V7.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C16.72 3 15.88 3 14.2 3H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 5.28 1 6.12 1 7.8v8.4c0 1.68 0 2.52.327 3.162a3 3 0 0 0 1.311 1.311C3.28 21 4.12 21 5.8 21Z"
-    />
-  </svg>
-);
+export const BookingsIcon = () => <CalendarPlus />;
 
 export const CustomFiedIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
@@ -1834,39 +1818,6 @@ export const AlertIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinejoin="round"
       strokeWidth={2}
       d="M12 9v4m0 4h.01M10.615 3.892 2.39 18.098c-.456.788-.684 1.182-.65 1.506a1 1 0 0 0 .406.705c.263.191.718.191 1.629.191h16.45c.91 0 1.365 0 1.628-.191a1 1 0 0 0 .407-.705c.034-.324-.195-.718-.65-1.506L13.383 3.892c-.454-.785-.681-1.178-.978-1.31a1 1 0 0 0-.813 0c-.296.132-.523.525-.978 1.31Z"
-    />
-  </svg>
-);
-
-export const BookingExistIcon = (props: SVGProps<SVGSVGElement>) => (
-  <svg
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M5.5 2.5H7V0.5H9V2.5H15V0.5H17V2.5H18.5C21 2.5 22.5 3.61984 22.5 5V20C22.5 21.3802 21 22.5 18.5 22.5H5.5C3 22.5 1.5 21.3802 1.5 20V5C1.5 3.61984 3 2.5 5.5 2.5Z"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M2 8H22"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M9 14L11 16L15 12"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
     />
   </svg>
 );
