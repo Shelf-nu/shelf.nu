@@ -498,7 +498,7 @@ const SidebarMenu = forwardRef<HTMLUListElement, React.ComponentProps<"ul">>(
     <ul
       ref={ref}
       data-sidebar="menu"
-      className={tw("flex w-full min-w-0 flex-col gap-1", className)}
+      className={tw("flex w-full min-w-0 flex-col ", className)}
       {...props}
     />
   )

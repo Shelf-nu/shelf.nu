@@ -6,7 +6,6 @@ import type { loader } from "~/routes/_layout+/_layout";
 export const SidebarNoticeCard = () => {
   const { hideNoticeCard } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
-  console.log("hideNoticeCard", hideNoticeCard);
 
   let optimisticHideNoticeCard = hideNoticeCard;
   if (fetcher.formData) {
