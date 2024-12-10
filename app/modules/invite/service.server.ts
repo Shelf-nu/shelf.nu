@@ -339,7 +339,22 @@ export async function updateInviteStatus({
 
       await db.teamMember.update({
         where: { id: invite.teamMemberId },
-        data: { deletedAt: null, user: { connect: { id: user.id } } },
+        data: {
+          deletedAt: null,
+          user: { connect: { id: user.id } },
+          /**
+           * This handles a special case.
+           * If an invite is still pending, the team member is not yet linked to a user.
+           * However the admin is allowed to assign bookings to that team member.
+           * When the invite is accepted, we need to update all those bookings to also be linked to the user so they can see it on their bookings index.
+           */
+          bookings: {
+            updateMany: {
+              where: { custodianTeamMemberId: invite.teamMemberId },
+              data: { custodianUserId: user.id },
+            },
+          },
+        },
       });
     }
 

@@ -392,18 +392,39 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
     if (teamMembersWithEmptyNames.length === 0) return;
 
     /**
-     * Itterate over the members and update them without awaiting
-     * Just in case we check again
+     * Updates team member names by:
+     * 1. Using first + last name if both exist
+     * 2. Using just first or last name if one exists
+     * 3. Falling back to email username if no name exists
+     * 4. Using "Unknown" as last resort if no email exists
      */
     await Promise.all(
       teamMembersWithEmptyNames.map((teamMember) => {
-        const name = teamMember.user
-          ? `${teamMember.user.firstName} ${teamMember.user.lastName}`
-          : "Unknown name";
-        return db.teamMember.update({
-          where: { id: teamMember.id },
-          data: { name },
-        });
+        let name: string;
+
+        if (teamMember.user) {
+          const { firstName, lastName, email } = teamMember.user;
+
+          if (firstName?.trim() || lastName?.trim()) {
+            // At least one name exists - concatenate available names
+            name = [firstName?.trim(), lastName?.trim()]
+              .filter(Boolean)
+              .join(" ");
+          } else {
+            // No names but email exists - use email username
+            name = email.split("@")[0];
+            // Optionally improve email username readability
+            name = name
+              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+          }
+
+          return db.teamMember.update({
+            where: { id: teamMember.id },
+            data: { name },
+          });
+        }
+        return null;
       })
     );
 

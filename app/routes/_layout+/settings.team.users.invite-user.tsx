@@ -111,6 +111,25 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       }
     }
 
+    const existingInvites = await db.invite.findMany({
+      where: {
+        status: "PENDING",
+        inviteeEmail: email,
+        organizationId,
+      },
+    });
+
+    if (existingInvites.length) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "User already has a pending invite. Either resend it or cancel it in order to be able to send a new one.",
+        additionalData: { email, organizationId },
+        label: "Invite",
+        shouldBeCaptured: false,
+      });
+    }
+
     const invite = await createInvite({
       organizationId,
       inviteeEmail: email,
@@ -252,6 +271,13 @@ export default function InviteUser() {
               required
             />
           </div>
+
+          {actionData?.error ? (
+            <div className="text-sm text-error-500">
+              {actionData.error.message}
+            </div>
+          ) : null}
+
           <div className="mt-7 flex gap-1">
             <Button
               variant="secondary"
@@ -267,11 +293,6 @@ export default function InviteUser() {
             </Button>
           </div>
         </Form>
-        {actionData?.error ? (
-          <div className="text-sm text-error-500">
-            {actionData.error.message}
-          </div>
-        ) : null}
       </div>
     </>
   ) : null;

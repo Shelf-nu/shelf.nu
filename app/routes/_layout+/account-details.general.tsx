@@ -239,6 +239,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               : "Failed to initiate email change",
             additionalData: { userId, newEmail },
             label: "Auth",
+            shouldBeCaptured: !emailExists,
           });
         }
 
