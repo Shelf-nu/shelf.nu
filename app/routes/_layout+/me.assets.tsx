@@ -35,8 +35,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return redirect(`/assets?${cookieParams.toString()}`);
     }
 
-    const filtersSearchParams = new URLSearchParams();
-    filtersSearchParams.set("userId", userId);
+    const filtersSearchParams = new URLSearchParams(filters);
+    filtersSearchParams.set("teamMember", userId);
 
     const {
       search,
