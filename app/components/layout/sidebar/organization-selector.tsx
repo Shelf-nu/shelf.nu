@@ -74,7 +74,7 @@ export default function OrganizationSelector() {
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               className={tw(
-                "size-full justify-center !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50",
+                "size-full truncate !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50",
                 open || openMobile ? "border" : ""
               )}
             >
@@ -91,8 +91,11 @@ export default function OrganizationSelector() {
 
               <When truthy={open || openMobile}>
                 <>
-                  <div className="flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">
+                  <div
+                    className="max-w-[calc(100%-36px)] flex-1 text-left text-sm leading-tight"
+                    title={currentOrganization.name}
+                  >
+                    <span className="block max-w-full truncate font-semibold">
                       {currentOrganization.name}
                     </span>
                   </div>
