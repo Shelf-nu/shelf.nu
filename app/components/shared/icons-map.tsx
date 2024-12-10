@@ -1,4 +1,5 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
+import { CalendarCheck } from "lucide-react";
 import { Spinner } from "./spinner";
 
 import {
@@ -56,7 +57,6 @@ import {
   AvailableIcon,
   UnavailableIcon,
   ChangeIcon,
-  BookingExistIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -186,7 +186,7 @@ export const iconsMap: IconsMap = {
   available: <AvailableIcon />,
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
-  "booking-exist": <BookingExistIcon />,
+  "booking-exist": <CalendarCheck />,
 };
 
 export default iconsMap;

@@ -1254,7 +1254,7 @@ export async function updateAssetMainImage({
         Date.now()
       )}`,
       resizeOptions: {
-        width: 800,
+        width: 1200,
         withoutEnlargement: true,
       },
     });
@@ -3014,31 +3014,4 @@ export async function relinkQrCode({
       } to **${qrId}**`,
     }),
   ]);
-}
-
-export async function getAvailableAssetsIdsForBooking(
-  assetIds: Asset["id"][]
-): Promise<string[]> {
-  try {
-    const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
-    });
-    if (selectedAssets.some((asset) => asset.kit)) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add assets that belong to a kit.",
-        label: "Booking",
-      });
-    }
-    return selectedAssets.map((asset) => asset.id);
-  } catch (cause: ShelfError | any) {
-    throw new ShelfError({
-      cause: cause,
-      message: cause?.message
-        ? cause.message
-        : "Something went wrong while getting available assets.",
-      label: "Assets",
-    });
-  }
 }

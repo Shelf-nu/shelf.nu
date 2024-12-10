@@ -1,15 +1,14 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { CalendarCheck } from "lucide-react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { BookingExistIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { getAvailableAssetsIdsForBooking } from "~/modules/asset/service.server";
 
 import {
-  getExistingBookingDetails,
+  processBooking,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { loadBookingsData } from "~/modules/booking/utils.server";
@@ -35,17 +34,8 @@ import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
 
 const updateBookingSchema = z.object({
-  assetIds: z.array(z.string()).optional(),
-  bookingId: z.string().transform((val, ctx) => {
-    if (!val && val === "") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Please select a booking",
-      });
-      return z.NEVER;
-    }
-    return val;
-  }),
+  assetIds: z.string().array().min(1, "At least one asset is required."),
+  bookingId: z.string().min(1, "Please select a booking."),
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -82,52 +72,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-const processBooking = async (
-  bookingId: string,
-  assetIds: string[] | undefined
-) => {
-  try {
-    let finalAssetIds: string[] = [];
-    let booking;
-    if (assetIds && assetIds.length > 0) {
-      const promises = [
-        getAvailableAssetsIdsForBooking(assetIds),
-        getExistingBookingDetails(bookingId),
-      ];
-
-      const [assets, bookingDetails] = await Promise.all(promises);
-      finalAssetIds = assets as string[];
-      booking = bookingDetails;
-    } else {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid operation. Please contact support.",
-        label: "Booking",
-      });
-    }
-
-    if (finalAssetIds.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "No assets available.",
-        label: "Booking",
-      });
-    }
-
-    return {
-      finalAssetIds,
-      bookingInfo: booking,
-    };
-  } catch (cause: any) {
-    throw new ShelfError({
-      cause: cause,
-      message:
-        cause?.message || "Something went wrong while processing the booking.",
-      label: "Booking",
-    });
-  }
-};
-
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -145,14 +89,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       message: "Please select a Booking",
       shouldBeCaptured: false,
     });
-
-    if (!assetIds?.length && !bookingId?.length) {
-      throw new ShelfError({
-        cause: null,
-        message: `No assets found or booking not found.`,
-        label: "Booking",
-      });
-    }
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
@@ -229,7 +165,7 @@ export default function ExistingBooking() {
     <Form method="post">
       <div className="modal-content-wrapper">
         <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-          <BookingExistIcon />
+          <CalendarCheck />
         </div>
         <div className="mb-5">
           <h3>Add to Existing Booking</h3>
