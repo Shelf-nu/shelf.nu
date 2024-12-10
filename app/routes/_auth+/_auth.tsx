@@ -16,41 +16,38 @@ export default function App() {
   const { title, subHeading } = data;
 
   return (
-    <div className="flex h-full min-h-screen flex-col ">
-      <main className="flex size-full">
-        <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
-          <div className=" mb-8 text-center">
-            <Link to="/" reloadDocument>
-              <ShelfSymbolLogo />
-            </Link>
+    <main className="flex h-screen">
+      <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
+        <div className=" mb-8 text-center">
+          <Link to="/" reloadDocument>
+            <ShelfSymbolLogo />
+          </Link>
 
-            <h1>{title}</h1>
-            {subHeading && (
-              <SubHeading className="max-w-md">{subHeading}</SubHeading>
-            )}
-          </div>
-          <div className=" w-[360px]">
-            <Outlet />
-          </div>
+          <h1>{title}</h1>
+          {subHeading && (
+            <SubHeading className="max-w-md">{subHeading}</SubHeading>
+          )}
         </div>
-        <aside className="relative hidden h-full items-end justify-end p-8 lg:flex lg:w-[700px] xl:w-[900px]">
-          <a
-            href="https://www.nga.gov/collection/art-object-page.52316.html"
-            rel="noreferrer"
-            target="_blank"
-            className="relative z-20 w-[150px] text-right text-sm text-black no-underline hover:text-black"
-          >
-            John Singer Sargent <br />A Corner of the Library in Venice,
-            1904/1907
-          </a>
-          <img
-            className="absolute inset-0 size-full max-w-none object-cover"
-            src="/static/images/auth-cover.jpg"
-            alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
-          />
-        </aside>
-      </main>
-    </div>
+        <div className=" w-[360px]">
+          <Outlet />
+        </div>
+      </div>
+      <aside className="relative hidden h-full items-end justify-end p-8 lg:flex lg:w-[700px] xl:w-[900px]">
+        <a
+          href="https://www.nga.gov/collection/art-object-page.52316.html"
+          rel="noreferrer"
+          target="_blank"
+          className="relative z-20 w-[150px] text-right text-sm text-black no-underline hover:text-black"
+        >
+          John Singer Sargent <br />A Corner of the Library in Venice, 1904/1907
+        </a>
+        <img
+          className="absolute inset-0 size-full max-w-none object-cover"
+          src="/static/images/auth-cover.jpg"
+          alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
+        />
+      </aside>
+    </main>
   );
 }
 

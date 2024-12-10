@@ -7,7 +7,6 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
-  Link,
   Links,
   Meta,
   Outlet,
@@ -19,8 +18,8 @@ import {
 import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
-import { HomeIcon } from "./components/icons/library";
 import BlockInteractions from "./components/layout/maintenance-mode";
+import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
@@ -41,11 +40,7 @@ export interface RootData {
 }
 
 export const handle = {
-  breadcrumb: () => (
-    <Link to="/" title="Home" id="homeCrumb">
-      <HomeIcon className="inline" />
-    </Link>
-  ),
+  breadcrumb: () => <SidebarTrigger />,
 };
 
 export const links: LinksFunction = () => [
@@ -83,12 +78,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
+
   useEffect(() => {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="overflow-hidden">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -98,13 +94,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         <Clarity />
       </head>
-      <body className="h-full">
+      <body>
         <noscript>
           <BlockInteractions
-            title={"JavaScript is disabled"}
-            content={
-              "This website requires JavaScript to be enabled to function properly. Please enable JavaScript or change browser and try again."
-            }
+            title="JavaScript is disabled"
+            content="This website requires JavaScript to be enabled to function properly. Please enable JavaScript or change browser and try again."
             icon="x"
           />
         </noscript>
@@ -113,10 +107,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           children
         ) : (
           <BlockInteractions
-            title={"Cookies are disabled"}
-            content={
-              "This website requires cookies to be enabled to function properly. Please enable cookies and try again."
-            }
+            title="Cookies are disabled"
+            content="This website requires cookies to be enabled to function properly. Please enable cookies and try again."
             icon="x"
           />
         )}
