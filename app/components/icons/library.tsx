@@ -1,5 +1,5 @@
-import { CalendarPlus } from "lucide-react";
 import type { SVGProps } from "react";
+import { CalendarPlus } from "lucide-react";
 
 export function LogoutIcon(props: SVGProps<SVGSVGElement>) {
   return (
