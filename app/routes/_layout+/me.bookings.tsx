@@ -1,23 +1,13 @@
 import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
   formatBookingsDates,
   getBookings,
 } from "~/modules/booking/service.server";
-import {
-  setCookie,
-  updateCookieWithPerPage,
-  userPrefs,
-} from "~/utils/cookies.server";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-} from "~/utils/http.server";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -26,23 +16,15 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage from "./bookings";
 
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { userId } = authSession;
-
-  const { userId: selectedUserId } = getParams(
-    params,
-    z.object({ userId: z.string() }),
-    {
-      additionalData: { userId },
-    }
-  );
+  const userId = authSession.userId;
 
   try {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMemberProfile,
+      entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
 
@@ -58,16 +40,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
-      userId: authSession?.userId,
-      custodianUserId: selectedUserId,
+      userId,
+      custodianUserId: userId,
       statuses: status ? [status] : Object.values(BookingStatus),
     });
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
-    const header: HeaderData = {
-      title: "Bookings",
-    };
+    const header: HeaderData = { title: "Bookings" };
+
     const modelName = {
       singular: "booking",
       plural: "bookings",
@@ -86,10 +67,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-      }),
-      {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
-      }
+      })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -97,10 +75,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-export const handle = {
-  name: "$userId.bookings",
-};
-
-export default function UserBookingsPage() {
-  return <BookingsIndexPage className="!mt-0" disableBulkActions />;
+export default function MyBookings() {
+  return <BookingsIndexPage disableBulkActions className="!mt-0" />;
 }
+
+export const handle = {
+  name: "me.bookings",
+};

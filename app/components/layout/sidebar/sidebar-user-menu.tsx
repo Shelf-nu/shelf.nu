@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, useFetcher, useLoaderData } from "@remix-run/react";
-import { LogOutIcon, UserRoundIcon } from "lucide-react";
+import { LogOutIcon, UserPenIcon, UserRoundIcon } from "lucide-react";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -77,6 +77,16 @@ export default function SidebarUserMenu() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem
+              asChild
+              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              onClick={closeDropdown}
+            >
+              <NavLink to="/me">
+                <UserPenIcon className="size-4" />
+                My Profile
+              </NavLink>
+            </DropdownMenuItem>
             <DropdownMenuItem
               asChild
               className="cursor-pointer gap-2 border-b border-gray-200 p-2"
