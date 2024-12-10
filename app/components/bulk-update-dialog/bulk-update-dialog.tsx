@@ -212,7 +212,9 @@ const BulkUpdateDialogContent = forwardRef<
   const handleCloseDialog = useCallback(() => {
     closeBulkDialog(type);
     fetcher.reset();
-  }, [closeBulkDialog, type, fetcher]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeBulkDialog, type]);
 
   const handleBulkActionSuccess = useCallback(() => {
     if (type === "trash" || type === "archive" || type === "cancel") {
@@ -239,12 +241,12 @@ const BulkUpdateDialogContent = forwardRef<
     }
     onSuccess && onSuccess();
   }, [
+    type,
+    setSelectedItems,
+    skipCloseOnSuccess,
+    onSuccess,
     handleCloseDialog,
     items,
-    onSuccess,
-    setSelectedItems,
-    type,
-    skipCloseOnSuccess,
   ]);
 
   useEffect(

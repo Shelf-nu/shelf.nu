@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useNavigate } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
 import { selectedBulkItemsAtom } from "~/atoms/list";
@@ -17,9 +18,11 @@ import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 
 export const addAssetsToExistingBookingSchema = z.object({
-  id: z.string(),
+  id: z
+    .string({ required_error: "Please select booking." })
+    .min(1, "Please select booking."),
   assetsIds: z.string().array().min(1, "Please select at least one asset."),
-  addOnlyRestAssets: z.coerce.boolean().optional(),
+  addOnlyRestAssets: z.coerce.boolean().optional().nullable(),
 });
 
 type BookingWithDates = Booking & {
@@ -30,6 +33,11 @@ type BookingWithDates = Booking & {
 export default function AddAssetsToExistingBookingDialog() {
   const navigate = useNavigate();
 
+  const zo = useZorm(
+    "AddAssetsToExistingBooking",
+    addAssetsToExistingBookingSchema
+  );
+
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
 
@@ -39,20 +47,23 @@ export default function AddAssetsToExistingBookingDialog() {
   const isDialogOpen = bulkDialogOpenState["booking-exist"] === true;
 
   useEffect(() => {
-    setIsFetchingBookings(true);
+    if (isDialogOpen) {
+      setIsFetchingBookings(true);
 
-    fetch("/api/bookings/get-all")
-      .then((response) => response.json())
-      .then((data: { bookings: BookingWithDates[] }) => {
-        setBookings(data.bookings);
-      })
-      .finally(() => {
-        setIsFetchingBookings(false);
-      });
+      fetch("/api/bookings/get-all")
+        .then((response) => response.json())
+        .then((data: { bookings: BookingWithDates[] }) => {
+          setBookings(data.bookings);
+        })
+        .finally(() => {
+          setIsFetchingBookings(false);
+        });
+    }
   }, [isDialogOpen]);
 
   return (
     <BulkUpdateDialogContent
+      ref={zo.ref}
       type="booking-exist"
       arrayFieldId="assetsIds"
       title="Add to existing booking"
@@ -97,6 +108,11 @@ export default function AddAssetsToExistingBookingDialog() {
                   ))}
                 </SelectContent>
               </Select>
+              <When truthy={!!zo.errors.id()?.message}>
+                <p className="mb-4 text-sm text-error-500">
+                  {zo.errors.id()?.message}
+                </p>
+              </When>
 
               <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
                 <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
