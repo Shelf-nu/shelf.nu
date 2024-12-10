@@ -30,6 +30,11 @@ import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-posit
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "../shared/hover-card";
 import { Image } from "../shared/image";
 import {
   Tooltip,
@@ -192,7 +197,19 @@ export const AssetForm = ({
             ) : null}
             <div>
               <p className="hidden lg:block">
-                Accepts PNG, JPG or JPEG (max.4 MB)
+                <HoverCard openDelay={50} closeDelay={50}>
+                  <HoverCardTrigger
+                    className={tw(
+                      "disabled inline-flex w-full cursor-not-allowed "
+                    )}
+                  ></HoverCardTrigger>
+                  <HoverCardContent side="left">
+                    Images will be automatically resized on upload. Width will
+                    be set at 1200px and height will be adjusted accordingly to
+                    keep the aspect ratio.
+                  </HoverCardContent>
+                </HoverCard>
+                Accepts PNG, JPG or JPEG (max.8 MB)
               </p>
               <Input
                 disabled={disabled}

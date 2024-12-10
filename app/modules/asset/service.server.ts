@@ -1254,7 +1254,7 @@ export async function updateAssetMainImage({
         Date.now()
       )}`,
       resizeOptions: {
-        width: 800,
+        width: 1200,
         withoutEnlargement: true,
       },
     });
