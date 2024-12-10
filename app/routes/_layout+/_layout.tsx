@@ -1,15 +1,22 @@
 import { Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
-import { useAtom } from "jotai";
+import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { ScanQrCodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
-import Sidebar from "~/components/layout/sidebar/sidebar";
+import AppSidebar from "~/components/layout/sidebar/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
+import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
@@ -34,6 +41,7 @@ import {
   stripe,
 } from "~/utils/stripe.server";
 import { canUseBookings } from "~/utils/subscription.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -131,9 +139,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function App() {
   useCrisp();
-  const { currentOrganizationId, disabledTeamOrg } =
-    useLoaderData<typeof loader>();
-  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
+  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
   const renderInstallPwaPromptOnMobile = () =>
     // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
@@ -143,35 +150,47 @@ export default function App() {
     ) : null;
 
   return (
-    <>
-      <div
-        id="container"
-        key={currentOrganizationId}
-        className="flex h-screen max-h-screen min-h-screen min-w-[320px] flex-col"
-      >
-        <div className="inner-container flex flex-col md:flex-row">
-          <Sidebar />
-          <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-            <div className="flex h-full flex-1 flex-col">
-              {disabledTeamOrg ? (
-                <NoSubscription />
-              ) : workspaceSwitching ? (
-                <div className="flex size-full flex-col items-center justify-center text-center">
-                  <Spinner />
-                  <p className="mt-2">Activating workspace...</p>
-                </div>
-              ) : (
-                <Outlet />
-              )}
-            </div>
-            <Toaster />
-            <ClientOnly fallback={null}>
-              {renderInstallPwaPromptOnMobile}
-            </ClientOnly>
-          </main>
-        </div>
-      </div>
-    </>
+    <SidebarProvider defaultOpen={!minimizedSidebar}>
+      <AppSidebar />
+      <SidebarInset>
+        {disabledTeamOrg ? (
+          <NoSubscription />
+        ) : workspaceSwitching ? (
+          <div className="flex size-full flex-col items-center justify-center text-center">
+            <Spinner />
+            <p className="mt-2">Activating workspace...</p>
+          </div>
+        ) : (
+          <>
+            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+              <Link to="." title="Home" className="block h-8">
+                <ShelfMobileLogo />
+              </Link>
+              <div className="flex items-center space-x-4">
+                <NavLink
+                  to="/scanner"
+                  title="Scan QR Code"
+                  className={({ isActive }) =>
+                    tw(
+                      "relative flex items-center justify-center px-2 transition",
+                      isActive ? "text-primary-600" : "text-gray-500"
+                    )
+                  }
+                >
+                  <ScanQrCodeIcon />
+                </NavLink>
+                <SidebarTrigger iconClassName="size-6" />
+              </div>
+            </header>
+            <Outlet />
+          </>
+        )}
+        <Toaster />
+        <ClientOnly fallback={null}>
+          {renderInstallPwaPromptOnMobile}
+        </ClientOnly>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
