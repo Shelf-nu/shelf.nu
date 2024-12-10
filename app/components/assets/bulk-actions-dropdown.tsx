@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "../shared/dropdown";
 import When from "../when/when";
+import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -46,8 +47,9 @@ export default function BulkActionsDropdown() {
   }
 
   return (
-    <div className="actions-dropdown flex">
+    <div className="actions-dropdown flex items-center gap-2">
       <ConditionalDropdown />
+      <BookSelectedAssetsDropdown />
     </div>
   );
 }
