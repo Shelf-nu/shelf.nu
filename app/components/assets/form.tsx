@@ -198,18 +198,15 @@ export const AssetForm = ({
             <div>
               <p className="hidden lg:block">
                 <HoverCard openDelay={50} closeDelay={50}>
-                  <HoverCardTrigger
-                    className={tw(
-                      "disabled inline-flex w-full cursor-not-allowed "
-                    )}
-                  ></HoverCardTrigger>
+                  <HoverCardTrigger className={tw("inline-flex w-full  ")}>
+                    Accepts PNG, JPG or JPEG (max.8 MB)
+                  </HoverCardTrigger>
                   <HoverCardContent side="left">
                     Images will be automatically resized on upload. Width will
                     be set at 1200px and height will be adjusted accordingly to
                     keep the aspect ratio.
                   </HoverCardContent>
                 </HoverCard>
-                Accepts PNG, JPG or JPEG (max.8 MB)
               </p>
               <Input
                 disabled={disabled}
