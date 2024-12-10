@@ -31,10 +31,10 @@ export default function AppSidebar(props: AppSidebarProps) {
 
       <SidebarContent>
         <SidebarNav items={topMenuItems} />
-        <SidebarNoticeCard />
       </SidebarContent>
 
       <SidebarFooter>
+        <SidebarNoticeCard />
         <SidebarNav className="p-0" items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>

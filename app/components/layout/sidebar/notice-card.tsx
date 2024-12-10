@@ -6,6 +6,7 @@ import type { loader } from "~/routes/_layout+/_layout";
 export const SidebarNoticeCard = () => {
   const { hideNoticeCard } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  console.log("hideNoticeCard", hideNoticeCard);
 
   let optimisticHideNoticeCard = hideNoticeCard;
   if (fetcher.formData) {
@@ -13,8 +14,8 @@ export const SidebarNoticeCard = () => {
       fetcher.formData.get("noticeCardVisibility") === "hidden";
   }
 
-  return !optimisticHideNoticeCard ? null : (
-    <div className="support-banner mx-2 mb-6 hidden rounded bg-gray-50 px-4 py-5 md:block">
+  return optimisticHideNoticeCard ? null : (
+    <div className="support-banner mb-6 hidden rounded border bg-gray-50 px-2 py-3 md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
           Install Shelf for Mobile
