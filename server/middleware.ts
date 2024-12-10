@@ -57,6 +57,7 @@ export function protect({
           cause: null,
           message: "Session might have expired. Please log in again.",
           label: "Auth",
+          shouldBeCaptured: false,
         })
       );
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);

@@ -1261,7 +1261,7 @@ export async function updateAssetMainImage({
         Date.now()
       )}`,
       resizeOptions: {
-        width: 800,
+        width: 1200,
         withoutEnlargement: true,
       },
     });
@@ -2580,8 +2580,9 @@ export async function bulkCheckOutAssets({
       throw new ShelfError({
         cause: null,
         message:
-          "There are sone unavailable assets. Please make sure you are selecting only available assets.",
+          "There are some unavailable assets. Please make sure you are selecting only available assets.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2677,6 +2678,7 @@ export async function bulkCheckInAssets({
         message:
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2990,6 +2992,7 @@ export async function relinkQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      shouldBeCaptured: false,
     });
   }
 
@@ -3018,31 +3021,4 @@ export async function relinkQrCode({
       } to **${qrId}**`,
     }),
   ]);
-}
-
-export async function getAvailableAssetsIdsForBooking(
-  assetIds: Asset["id"][]
-): Promise<string[]> {
-  try {
-    const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
-    });
-    if (selectedAssets.some((asset) => asset.kit)) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add assets that belong to a kit.",
-        label: "Booking",
-      });
-    }
-    return selectedAssets.map((asset) => asset.id);
-  } catch (cause: ShelfError | any) {
-    throw new ShelfError({
-      cause: cause,
-      message: cause?.message
-        ? cause.message
-        : "Something went wrong while getting available assets.",
-      label: "Assets",
-    });
-  }
 }

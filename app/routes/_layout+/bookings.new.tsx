@@ -183,6 +183,7 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
 export default function NewBooking() {
   const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();

@@ -5,6 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, Outlet, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { AbsolutePositionedHeaderActions } from "~/components/layout/header/absolute-positioned-header-actions";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -175,3 +176,7 @@ export default function UserPage() {
     </>
   );
 }
+
+export const ErrorBoundary = () => (
+  <ErrorContent className="h-[calc(100vh_-_100px)]" />
+);

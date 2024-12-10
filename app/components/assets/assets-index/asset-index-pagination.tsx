@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
 import { AlertIcon, ChevronRight } from "~/components/icons/library";
+import { useSidebar } from "~/components/layout/sidebar/sidebar";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -16,7 +17,6 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import {
   PermissionAction,
   PermissionEntity,
@@ -29,11 +29,9 @@ import { ButtonGroup } from "../../shared/button-group";
 
 export function AssetIndexPagination() {
   const { roles } = useUserRoleHelper();
-  let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
-    "routes/_layout+/_layout"
-  )?.minimizedSidebar;
   const fetcher = useFetcher({ key: "asset-index-settings-mode" });
   const { isMd } = useViewportHeight();
+  const { state } = useSidebar();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
   const disabledButtonStyles =
@@ -57,9 +55,9 @@ export function AssetIndexPagination() {
   return (
     <div
       className={tw(
+        "asset-index-pagination flex flex-col items-center justify-between border-t border-gray-200 bg-white transition-all delay-75 ease-in-out md:flex-row",
         isMd ? "fixed bottom-0 right-0 z-[12]" : "",
-        "asset-index-pagination  flex flex-col items-center justify-between border-t border-gray-200 bg-white md:flex-row ",
-        minimizedSidebar ? "lg:left-[82px]" : "lg:left-[312px]"
+        state === "collapsed" ? "lg:left-[48px]" : "lg:left-[256px]"
       )}
     >
       <Pagination className="px-4 py-[6px]" />
