@@ -12,7 +12,7 @@ export const validateFileAtom = atom(
       const file = event?.target?.files?.[0];
       if (file) {
         const allowedType = verifyAccept(file.type, event.target.accept);
-        const allowedSize = file.size < 4_000_000;
+        const allowedSize = file.size < 8_000_000;
 
         if (!allowedType) {
           event.target.value = "";
@@ -22,7 +22,7 @@ export const validateFileAtom = atom(
         if (!allowedSize) {
           /** Clean the field */
           event.target.value = "";
-          return "Max file size is 4MB";
+          return "Max file size is 8MB";
         }
 
         return undefined;
