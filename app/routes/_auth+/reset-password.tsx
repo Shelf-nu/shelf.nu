@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type {
   ActionFunctionArgs,
@@ -13,6 +13,7 @@ import { Form } from "~/components/custom-form";
 
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 
 import {
@@ -24,8 +25,6 @@ import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
-import { useSearchParams } from "~/hooks/search-params";
-import { r } from "node_modules/msw/lib/glossary-2792c6da";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Set new password";
