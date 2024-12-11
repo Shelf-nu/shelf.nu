@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   ActionFunctionArgs,
@@ -24,6 +24,8 @@ import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
+import { useSearchParams } from "~/hooks/search-params";
+import { r } from "node_modules/msw/lib/glossary-2792c6da";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Set new password";
@@ -102,6 +104,25 @@ export default function ResetPassword() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+  const [searchParams] = useSearchParams();
+  const [genericError, setGenericError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get the hash fragment (everything after #)
+    const hash = window.location.hash.substring(1);
+
+    // Convert the hash string to URLSearchParams object
+    const params = new URLSearchParams(hash);
+
+    if (params.has("error_description")) {
+      // URLSearchParams automatically handles the URL decoding
+      setGenericError(params.get("error_description"));
+    }
+
+    if (actionData?.error.message) {
+      setGenericError(actionData.error.message);
+    }
+  }, [searchParams, actionData]);
 
   useEffect(() => {
     const {
@@ -178,10 +199,10 @@ export default function ResetPassword() {
             </Button>
           </div>
         ) : null}
-        {actionData?.error.message ? (
+        {genericError ? (
           <div className="flex flex-col items-center">
-            <div className={tw(`mb-2 text-center text-red-600`)}>
-              {actionData.error.message}
+            <div className={tw(`my-2 text-center text-red-600`)}>
+              {genericError}
             </div>
             <Button
               variant="link"
