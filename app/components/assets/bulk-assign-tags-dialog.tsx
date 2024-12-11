@@ -2,16 +2,15 @@ import { useEffect, useMemo } from "react";
 import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import type { ModelFiltersLoader } from "~/routes/api+/model-filters";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete, type TagSuggestion } from "../tag/tags-autocomplete";
+import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 /**
- * Schema for bulk tag assignment validation
+ * Schema for bulk tag update validation
  * Ensures at least one asset and one tag are selected
  */
-export const BulkAssignTagsSchema = z.object({
+export const BulkUpdateTagsSchema = z.object({
   // Validate array of asset IDs
   assetIds: z.array(z.string()).min(1, "At least one asset must be selected"),
   // Transform comma-separated string to array and validate
@@ -25,21 +24,24 @@ export const BulkAssignTagsSchema = z.object({
     ),
 });
 
-export default function BulkAssignTagsDialog() {
-  const zo = useZorm("BulkAssignTags", BulkAssignTagsSchema);
+export type TagsFetcherData = { filters: Array<{ name: string; id: string }> };
 
-  const fetcher = useFetcher<ModelFiltersLoader>();
+export default function BulkAssignTagsDialog() {
+  const zo = useZorm("BulkAssignTags", BulkUpdateTagsSchema);
+
+  const fetcher = useFetcher<TagsFetcherData>();
 
   // Transform API response to TagSuggestion format
-  const suggestions = useMemo(
-    () =>
-      // @ts-expect-error - fetcher.data type is unknown
-      (fetcher.data?.filters?.map((tagResponse) => ({
-        label: tagResponse.name,
-        value: tagResponse.id,
-      })) as TagSuggestion[]) ?? [],
-    [fetcher.data]
-  );
+  const suggestions = useMemo(() => {
+    if (!fetcher.data?.filters) {
+      return [];
+    }
+
+    return fetcher.data.filters.map((tagResponse) => ({
+      label: tagResponse.name,
+      value: tagResponse.id,
+    }));
+  }, [fetcher.data]);
 
   useEffect(() => {
     fetcher.submit(
