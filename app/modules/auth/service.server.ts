@@ -415,6 +415,9 @@ export async function refreshAccessToken(
       message:
         "Unable to refresh access token. Please try again. If the issue persists, contact support",
       label,
+      additionalData: {
+        refreshToken,
+      },
     });
   }
 }

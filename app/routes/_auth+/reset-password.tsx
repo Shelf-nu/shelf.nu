@@ -43,7 +43,12 @@ const ResetPasswordSchema = z
     confirmPassword: z
       .string()
       .min(8, "Password is too short. Minimum 8 characters."),
-    refreshToken: z.string(),
+    refreshToken: z
+      .string()
+      .min(
+        1,
+        "Refresh token is missing. Please request a new link. If the issue persists, contact support."
+      ),
   })
   .superRefine(({ password, confirmPassword, refreshToken }, ctx) => {
     if (password !== confirmPassword) {
@@ -104,11 +109,8 @@ export default function ResetPassword() {
     } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
       // Effect run twice and break listener chain
-      if (
-        event === "PASSWORD_RECOVERY" ||
-        event === "SIGNED_IN" ||
-        event === "INITIAL_SESSION"
-      ) {
+
+      if (event === "PASSWORD_RECOVERY") {
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
@@ -151,6 +153,7 @@ export default function ResetPassword() {
             name={zo.fields.refreshToken()}
             value={userRefreshToken}
           />
+
           <Button
             data-test-id="change-password"
             type="submit"
@@ -160,9 +163,24 @@ export default function ResetPassword() {
             Change password
           </Button>
         </Form>
+
+        {zo.errors.refreshToken() ? (
+          <div className="flex flex-col items-center">
+            <div className={tw(`my-2 text-center text-red-600`)}>
+              {zo.errors.refreshToken()?.message}
+            </div>
+            <Button
+              variant="link"
+              className="text-blue-500 underline"
+              to="/forgot-password"
+            >
+              Resend link
+            </Button>
+          </div>
+        ) : null}
         {actionData?.error.message ? (
           <div className="flex flex-col items-center">
-            <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
+            <div className={tw(`mb-2 text-center text-red-600`)}>
               {actionData.error.message}
             </div>
             <Button
