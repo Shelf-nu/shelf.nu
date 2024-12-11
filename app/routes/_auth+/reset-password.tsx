@@ -13,7 +13,6 @@ import { Form } from "~/components/custom-form";
 
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { supabaseClient } from "~/integrations/supabase/client";
 
 import {
   refreshAccessToken,
@@ -24,18 +23,6 @@ import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
-
-export function loader({ context }: LoaderFunctionArgs) {
-  const title = "Set new password";
-  const subHeading =
-    "Your new password must be different to previously used passwords.";
-
-  if (context.isAuthenticated) {
-    return redirect("/assets");
-  }
-
-  return json(data({ title, subHeading }));
-}
 
 const ResetPasswordSchema = z
   .object({
@@ -56,6 +43,18 @@ const ResetPasswordSchema = z
 
     return { password, confirmPassword, refreshToken };
   });
+
+export function loader({ context }: LoaderFunctionArgs) {
+  const title = "Set new password";
+  const subHeading =
+    "Your new password must be different to previously used passwords.";
+
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
+}
 
 export async function action({ context, request }: ActionFunctionArgs) {
   try {
@@ -99,29 +98,19 @@ export default function ResetPassword() {
   const disabled = isFormProcessing(transition.state);
 
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
-      // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
-      // Effect run twice and break listener chain
-      if (
-        event === "PASSWORD_RECOVERY" ||
-        event === "SIGNED_IN" ||
-        event === "INITIAL_SESSION"
-      ) {
-        const refreshToken = supabaseSession?.refresh_token;
+    if (window) {
+      const href = window.location.href;
+      const urlWithSearchParams = href.replace("#", "?");
+      const searchParams = new URL(urlWithSearchParams).searchParams;
+      const refreshToken = searchParams.get("refresh_token");
 
-        if (!refreshToken) return;
-
-        setUserRefreshToken(refreshToken);
+      if (!refreshToken) {
+        return;
       }
-    });
 
-    return () => {
-      // prevent memory leak. Listener stays alive 👨‍🎤
-      subscription.unsubscribe();
-    };
-  }, [setUserRefreshToken]);
+      setUserRefreshToken(refreshToken);
+    }
+  }, []);
 
   return (
     <div className="flex min-h-full flex-col justify-center">
