@@ -453,8 +453,19 @@ export default function ManageAssetsInKit() {
     <div className="flex h-full max-h-full flex-col">
       <Header
         {...header}
-        hideBreadcrumbs={true}
+        hideBreadcrumbs
         classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+        slots={{
+          "right-of-title": (
+            <Button
+              variant="secondary"
+              className="mr-6 px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          ),
+        }}
       />
 
       <div className="-mx-6 border-b px-6 md:pb-3">
@@ -542,19 +553,10 @@ export default function ManageAssetsInKit() {
 
       {/* Footer of the modal */}
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center gap-2 font-medium">
-          <p>
-            {hasSelectedAll ? totalItems : selectedAssets.length} assets
-            selected
-          </p>
-          <Button
-            variant="secondary"
-            className="px-2 py-1 text-sm font-normal"
-            onClick={handleSelectAll}
-          >
-            {hasSelectedAll ? "Clear all" : "Select all"}
-          </Button>
-        </div>
+        <p>
+          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+        </p>
+
         <div className="flex gap-3">
           <Button variant="secondary" to="..">
             Close

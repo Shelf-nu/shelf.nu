@@ -380,6 +380,17 @@ export default function AddAssetsToLocation() {
         {...header}
         hideBreadcrumbs={true}
         classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+        slots={{
+          "right-of-title": (
+            <Button
+              variant="secondary"
+              className="mr-6 min-w-24 px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          ),
+        }}
       />
 
       <div className="-mx-6 border-b px-6 md:pb-3">
@@ -456,19 +467,10 @@ export default function AddAssetsToLocation() {
       </div>
       {/* Footer of the modal */}
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center gap-2">
-          <p>
-            {hasSelectedAll ? totalItems : selectedAssets.length} assets
-            selected
-          </p>
-          <Button
-            variant="secondary"
-            className="px-2 py-1 text-sm font-normal"
-            onClick={handleSelectAll}
-          >
-            {hasSelectedAll ? "Clear all" : "Select all"}
-          </Button>
-        </div>
+        <p>
+          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+        </p>
+
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close

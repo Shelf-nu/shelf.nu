@@ -350,6 +350,17 @@ export default function AddAssetsToNewBooking() {
         {...header}
         hideBreadcrumbs={true}
         classNames="text-left [&>div]:px-6 -mt-6 mx-0"
+        slots={{
+          "right-of-title": (
+            <Button
+              variant="secondary"
+              className="mr-6 px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          ),
+        }}
       />
 
       <div className="border-b px-6 py-2">
@@ -459,19 +470,10 @@ export default function AddAssetsToNewBooking() {
 
       {/* Footer of the modal */}
       <footer className="item-center flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center gap-2">
-          <p>
-            {hasSelectedAll ? totalItems : selectedAssets.length} assets
-            selected
-          </p>
-          <Button
-            variant="secondary"
-            className="px-2 py-1 text-sm font-normal"
-            onClick={handleSelectAll}
-          >
-            {hasSelectedAll ? "Clear all" : "Select all"}
-          </Button>
-        </div>
+        <p>
+          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+        </p>
+
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
