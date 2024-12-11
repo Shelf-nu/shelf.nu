@@ -1,25 +1,29 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
-import { z } from "zod";
+import {
+  type TagsFetcherData,
+  BulkUpdateTagsSchema,
+} from "./bulk-assign-tags-dialog";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
-import { TagsAutocomplete, type TagSuggestion } from "../tag/tags-autocomplete";
-
-export const BulkRemoveTagsSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
-  tags: z.string(),
-});
+import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 export default function BulkRemoveTagsDialog() {
-  const zo = useZorm("BulkRemoveTags", BulkRemoveTagsSchema);
+  const zo = useZorm("BulkRemoveTags", BulkUpdateTagsSchema);
 
-  const fetcher = useFetcher();
-  // @ts-ignore
-  const suggestions = fetcher.data?.filters.map((tagResponse) => ({
-    label: tagResponse.name,
-    value: tagResponse.id,
-  })) as TagSuggestion[];
+  const fetcher = useFetcher<TagsFetcherData>();
+
+  const suggestions = useMemo(() => {
+    if (!fetcher.data?.filters) {
+      return [];
+    }
+
+    return fetcher.data.filters.map((tagResponse) => ({
+      label: tagResponse.name,
+      value: tagResponse.id,
+    }));
+  }, [fetcher.data]);
 
   useEffect(() => {
     fetcher.submit(
@@ -36,6 +40,16 @@ export default function BulkRemoveTagsDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Handle validation errors
+  const validationErrors = useMemo(() => {
+    const tagsError = zo.errors.tags()?.message;
+    const assetIdsError = zo.errors.assetIds()?.message;
+    return {
+      tags: tagsError,
+      assetIds: assetIdsError,
+    };
+  }, [zo.errors]);
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
@@ -50,11 +64,14 @@ export default function BulkRemoveTagsDialog() {
           <div className="relative z-50 mb-8">
             <TagsAutocomplete existingTags={[]} suggestions={suggestions} />
 
-            {zo.errors.tags()?.message ? (
+            {validationErrors.tags && (
+              <p className="text-sm text-error-500">{validationErrors.tags}</p>
+            )}
+            {validationErrors.assetIds && (
               <p className="text-sm text-error-500">
-                {zo.errors.tags()?.message}
+                {validationErrors.assetIds}
               </p>
-            ) : null}
+            )}
             {fetcherError ? (
               <p className="text-sm text-error-500">{fetcherError}</p>
             ) : null}
