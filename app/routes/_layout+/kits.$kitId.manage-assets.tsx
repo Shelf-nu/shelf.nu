@@ -417,7 +417,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function ManageAssetsInKit() {
-  const { kit, header, items } = useLoaderData<typeof loader>();
+  const { kit, header, items, totalItems } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -544,8 +544,8 @@ export default function ManageAssetsInKit() {
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
         <div className="flex items-center gap-2 font-medium">
           <p>
-            {hasSelectedAll ? selectedAssets.length - 1 : selectedAssets.length}{" "}
-            assets selected
+            {hasSelectedAll ? totalItems : selectedAssets.length} assets
+            selected
           </p>
           <Button
             variant="secondary"

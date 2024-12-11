@@ -332,7 +332,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location, header, items } = useLoaderData<typeof loader>();
+  const { location, header, items, totalItems } =
+    useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -457,8 +458,8 @@ export default function AddAssetsToLocation() {
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
         <div className="flex items-center gap-2">
           <p>
-            {hasSelectedAll ? selectedAssets.length - 1 : selectedAssets.length}{" "}
-            assets selected
+            {hasSelectedAll ? totalItems : selectedAssets.length} assets
+            selected
           </p>
           <Button
             variant="secondary"

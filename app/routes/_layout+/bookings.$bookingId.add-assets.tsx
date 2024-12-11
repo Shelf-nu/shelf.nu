@@ -273,7 +273,7 @@ export default function AddAssetsToNewBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds, items } =
+  const { booking, header, bookingKitIds, items, totalItems } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -461,8 +461,8 @@ export default function AddAssetsToNewBooking() {
       <footer className="item-center flex justify-between border-t px-6 pt-3">
         <div className="flex items-center gap-2">
           <p>
-            {hasSelectedAll ? selectedAssets.length - 1 : selectedAssets.length}{" "}
-            assets selected
+            {hasSelectedAll ? totalItems : selectedAssets.length} assets
+            selected
           </p>
           <Button
             variant="secondary"
