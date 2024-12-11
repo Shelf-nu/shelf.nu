@@ -1,5 +1,5 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { BulkAssignTagsSchema } from "~/components/assets/bulk-assign-tags-dialog";
+import { BulkUpdateTagsSchema } from "~/components/assets/bulk-assign-tags-dialog";
 import { bulkAssignAssetTags } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -38,7 +38,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // Validate form data using combined schema
     const { assetIds, tags, currentSearchParams } = parseData(
       formData,
-      BulkAssignTagsSchema.and(CurrentSearchParamsSchema),
+      BulkUpdateTagsSchema.and(CurrentSearchParamsSchema),
       {
         message: "Invalid tag assignment data provided",
         additionalData: { userId, organizationId },
@@ -56,7 +56,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Assets updated",
-      message: "Your asset's categories have been successfully updated",
+      message: "Your asset's tags have been successfully updated",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
