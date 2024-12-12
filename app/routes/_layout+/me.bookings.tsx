@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -42,7 +41,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       search,
       userId,
       custodianUserId: userId,
-      statuses: status ? [status] : Object.values(BookingStatus),
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
+      }),
     });
 
     const totalPages = Math.ceil(bookingCount / perPage);

@@ -28,7 +28,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => "single",
+  breadcrumb: () => "My profile",
 };
 
 export function meta({ data }: MetaArgs<typeof loader>) {
@@ -46,7 +46,6 @@ export default function Me() {
   return (
     <>
       <Header
-        hideBreadcrumbs
         slots={{
           "left-of-title": (
             <img
