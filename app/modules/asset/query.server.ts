@@ -768,7 +768,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "contains": {
       // Single tag filtering using the existing join
-      return Prisma.sql`${whereClause} AND t.name = ${filter.value}`;
+      return Prisma.sql`${whereClause} AND t.name ILIKE ${`%${filter.value}%`}`;
     }
     case "containsAll": {
       // ALL tags must be present
