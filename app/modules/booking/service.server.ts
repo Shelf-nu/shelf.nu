@@ -12,6 +12,7 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -1652,6 +1653,31 @@ export async function getExistingBookingDetails(bookingId: string) {
       label: "Booking",
     });
   }
+}
+
+export function formatBookingsDates(bookings: Booking[], request: Request) {
+  return bookings.map((b) => {
+    if (b.from && b.to) {
+      const from = new Date(b.from);
+      const displayFrom = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(from);
+
+      const to = new Date(b.to);
+      const displayTo = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(to);
+
+      return {
+        ...b,
+        displayFrom: displayFrom.split(","),
+        displayTo: displayTo.split(","),
+      };
+    }
+    return b;
+  });
 }
 
 export async function getAvailableAssetsIdsForBooking(
