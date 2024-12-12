@@ -128,6 +128,7 @@ function AdvancedFilter() {
     useFilterFormValidation(filters, initialFilters);
 
   const validation = getValidationState();
+
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
@@ -145,9 +146,7 @@ function AdvancedFilter() {
       <PopoverPortal>
         <PopoverContent
           align="start"
-          className={tw(
-            "z-[999999]  mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
-          )}
+          className="z-[999999] mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
         >
           <div className="border-b p-4 pb-5">
             {filters.length === 0 ? (

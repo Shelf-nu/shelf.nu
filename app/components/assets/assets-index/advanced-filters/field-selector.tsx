@@ -90,9 +90,7 @@ export function FieldSelector({
     }
   }, [selectedIndex]);
 
-  const displayText = filter.isNew
-    ? "Select column"
-    : parseColumnName(fieldName);
+  const displayText = fieldName ? parseColumnName(fieldName) : "Select column";
 
   return (
     <Popover>

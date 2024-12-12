@@ -118,12 +118,10 @@ export function useFilterFormValidation(
     );
     const haveFiltersChanged =
       JSON.stringify(initialFilters) !== JSON.stringify(filters);
-    const hasNewFilters = filters.some((filter) => filter.isNew);
 
     return {
       isValid: !hasInvalidFilters,
-      canApplyFilters:
-        !hasInvalidFilters && haveFiltersChanged && !hasNewFilters,
+      canApplyFilters: !hasInvalidFilters && haveFiltersChanged,
       hasChanges: haveFiltersChanged,
     };
   };
