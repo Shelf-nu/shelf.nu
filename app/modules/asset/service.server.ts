@@ -19,7 +19,7 @@ import {
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import type {
   SortingDirection,
   SortingOptions,
@@ -42,7 +42,12 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  getFiltersFromRequest,
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -3014,4 +3019,81 @@ export async function relinkQrCode({
       } to **${qrId}**`,
     }),
   ]);
+}
+
+export async function getAssetsTabLoaderData({
+  userId,
+  request,
+  organizationId,
+}: {
+  userId: User["id"];
+  request: Request;
+  organizationId: Organization["id"];
+}) {
+  try {
+    const { filters, redirectNeeded } = await getFiltersFromRequest(
+      request,
+      organizationId
+    );
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/assets?${cookieParams.toString()}`);
+    }
+
+    const filtersSearchParams = new URLSearchParams(filters);
+    filtersSearchParams.set("teamMember", userId);
+
+    const {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      filters: filtersSearchParams.toString(),
+    });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+    const headers = [setCookie(userPrefsCookie)];
+
+    return {
+      search,
+      totalItems: totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      items: assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      modelName,
+      headers,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: "Something went wrong while fetching assets",
+    });
+  }
 }
