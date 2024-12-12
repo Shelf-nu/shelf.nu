@@ -13,6 +13,7 @@ import { Form } from "~/components/custom-form";
 
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 
 import {
@@ -43,7 +44,12 @@ const ResetPasswordSchema = z
     confirmPassword: z
       .string()
       .min(8, "Password is too short. Minimum 8 characters."),
-    refreshToken: z.string(),
+    refreshToken: z
+      .string()
+      .min(
+        1,
+        "Refresh token is missing. Please request a new link. If the issue persists, contact support."
+      ),
   })
   .superRefine(({ password, confirmPassword, refreshToken }, ctx) => {
     if (password !== confirmPassword) {
@@ -97,6 +103,25 @@ export default function ResetPassword() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+  const [searchParams] = useSearchParams();
+  const [genericError, setGenericError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get the hash fragment (everything after #)
+    const hash = window.location.hash.substring(1);
+
+    // Convert the hash string to URLSearchParams object
+    const params = new URLSearchParams(hash);
+
+    if (params.has("error_description")) {
+      // URLSearchParams automatically handles the URL decoding
+      setGenericError(params.get("error_description"));
+    }
+
+    if (actionData?.error.message) {
+      setGenericError(actionData.error.message);
+    }
+  }, [searchParams, actionData]);
 
   useEffect(() => {
     const {
@@ -104,11 +129,8 @@ export default function ResetPassword() {
     } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
       // Effect run twice and break listener chain
-      if (
-        event === "PASSWORD_RECOVERY" ||
-        event === "SIGNED_IN" ||
-        event === "INITIAL_SESSION"
-      ) {
+
+      if (event === "PASSWORD_RECOVERY") {
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
@@ -151,6 +173,7 @@ export default function ResetPassword() {
             name={zo.fields.refreshToken()}
             value={userRefreshToken}
           />
+
           <Button
             data-test-id="change-password"
             type="submit"
@@ -160,10 +183,25 @@ export default function ResetPassword() {
             Change password
           </Button>
         </Form>
-        {actionData?.error.message ? (
+
+        {zo.errors.refreshToken() ? (
           <div className="flex flex-col items-center">
-            <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
-              {actionData.error.message}
+            <div className={tw(`my-2 text-center text-red-600`)}>
+              {zo.errors.refreshToken()?.message}
+            </div>
+            <Button
+              variant="link"
+              className="text-blue-500 underline"
+              to="/forgot-password"
+            >
+              Resend link
+            </Button>
+          </div>
+        ) : null}
+        {genericError ? (
+          <div className="flex flex-col items-center">
+            <div className={tw(`my-2 text-center text-red-600`)}>
+              {genericError}
             </div>
             <Button
               variant="link"
