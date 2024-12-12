@@ -1,10 +1,5 @@
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
-import {
-  getFiltersFromRequest,
-  setCookie,
-  userPrefs,
-} from "~/utils/cookies.server";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { getAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -26,67 +21,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { filters, redirectNeeded } = await getFiltersFromRequest(
-      request,
-      organizationId
-    );
-    if (filters && redirectNeeded) {
-      const cookieParams = new URLSearchParams(filters);
-      return redirect(`/assets?${cookieParams.toString()}`);
-    }
-
-    const filtersSearchParams = new URLSearchParams(filters);
-    filtersSearchParams.set("teamMember", userId);
-
-    const {
-      search,
-      totalAssets,
-      perPage,
-      page,
-      categories,
-      tags,
-      assets,
-      totalPages,
-      cookie,
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-    } = await getPaginatedAndFilterableAssets({
+    const { headers, ...loaderData } = await getAssetsTabLoaderData({
+      userId,
       request,
       organizationId,
-      filters: filtersSearchParams.toString(),
     });
 
-    const modelName = {
-      singular: "asset",
-      plural: "assets",
-    };
-
-    const userPrefsCookie = await userPrefs.serialize(cookie);
-    const headers = [setCookie(userPrefsCookie)];
-
-    return json(
-      data({
-        search,
-        totalItems: totalAssets,
-        perPage,
-        page,
-        categories,
-        tags,
-        items: assets,
-        totalPages,
-        cookie,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        modelName,
-      }),
-      {
-        headers,
-      }
-    );
+    return json(data(loaderData), { headers });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
