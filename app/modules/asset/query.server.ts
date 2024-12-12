@@ -767,26 +767,26 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
    */
   switch (filter.operator) {
     case "contains": {
-      // Single tag filtering using the existing join
-      return Prisma.sql`${whereClause} AND t.name ILIKE ${`%${filter.value}%`}`;
+      // Single tag filtering using the existing join with case-insensitive comparison
+      return Prisma.sql`${whereClause} AND LOWER(t.name) = LOWER(${filter.value})`;
     }
     case "containsAll": {
-      // ALL tags must be present
+      // ALL tags must be present, case-insensitive
       const values = (filter.value as string).split(",").map((v) => v.trim());
       return Prisma.sql`${whereClause} AND NOT EXISTS (
-        SELECT unnest(${values}::text[]) AS required_tag
+        SELECT LOWER(unnest(${values}::text[])) AS required_tag
         EXCEPT
-        SELECT t.name 
+        SELECT LOWER(t2.name)
         FROM "_AssetToTag" att2 
         JOIN "Tag" t2 ON t2.id = att2."B"
         WHERE att2."A" = a.id
       )`;
     }
     case "containsAny": {
-      // ANY of the tags must be present
+      // ANY of the tags must be present, case-insensitive
       const values = (filter.value as string).split(",").map((v) => v.trim());
       const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
-      return Prisma.sql`${whereClause} AND t.name = ANY(${valuesArray}::text[])`;
+      return Prisma.sql`${whereClause} AND LOWER(t.name) = ANY(ARRAY(SELECT LOWER(unnest(${valuesArray}::text[]))))`;
     }
     default:
       return whereClause;
