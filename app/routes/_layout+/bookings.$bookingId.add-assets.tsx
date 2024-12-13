@@ -358,9 +358,7 @@ export default function AddAssetsToNewBooking() {
             Assets{" "}
             {selectedAssets.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {hasSelectedAll
-                  ? selectedAssets.length - 1
-                  : selectedAssets.length}
+                {hasSelectedAll ? totalItems : selectedAssets.length}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
