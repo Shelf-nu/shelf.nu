@@ -5,14 +5,15 @@ import {
   useNavigation,
   useRouteLoaderData,
 } from "@remix-run/react";
-import Lottie from "lottie-react";
 import { useZxing } from "react-zxing";
 
+import { ClientOnly } from "remix-utils/client-only";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
+import SuccessAnimation from "./success-animation";
 import {
   Select,
   SelectContent,
@@ -22,7 +23,6 @@ import {
 } from "../forms/select";
 import Icon from "../icons/icon";
 import { Spinner } from "../shared/spinner";
-import successfullScanAnimation from "./../../lottie/success-scan.json";
 
 type ZXingScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
@@ -205,13 +205,9 @@ export const ZXingScanner = ({
             {paused && (
               <div className="flex h-full flex-col items-center justify-center p-4 text-center">
                 <h5>Code detected</h5>
-                <div>
-                  <Lottie
-                    animationData={successfullScanAnimation}
-                    loop={false}
-                    style={{ width: 200, height: 200 }}
-                  />
-                </div>
+                <ClientOnly fallback={null}>
+                  {() => <SuccessAnimation />}
+                </ClientOnly>
                 <p>Scanner paused</p>
               </div>
             )}
