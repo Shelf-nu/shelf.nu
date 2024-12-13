@@ -180,7 +180,13 @@ export function getAvailableColumns(
   // Get columns that are visible and not already used
   const availableColumns = columns.filter(
     (column) =>
-      column.visible && !usedColumns.find((f) => f.name === column.name)
+      column.visible &&
+      !usedColumns.find((f) => {
+        if (operation === "filter" && "isNew" in f) {
+          return f.name === column.name && !f.isNew;
+        }
+        return f.name === column.name;
+      })
   );
 
   // Apply operation-specific filtering
