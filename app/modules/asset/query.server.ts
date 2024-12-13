@@ -776,10 +776,10 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND NOT EXISTS (
         SELECT LOWER(unnest(${values}::text[])) AS required_tag
         EXCEPT
-        SELECT LOWER(t2.name)
-        FROM "_AssetToTag" att2 
-        JOIN "Tag" t2 ON t2.id = att2."B"
-        WHERE att2."A" = a.id
+        SELECT LOWER(t.name)
+        FROM "_AssetToTag" att 
+        JOIN "Tag" t ON t.id = att."B"
+        WHERE att."A" = a.id
       )`;
     }
     case "containsAny": {
