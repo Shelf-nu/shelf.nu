@@ -355,7 +355,7 @@ export default function AddAssetsToLocation() {
 
   function handleSelectAll() {
     if (hasSelectedAll) {
-      setSelectedAssets(locationAssetsIds);
+      setSelectedAssets([]);
     } else {
       setSelectedAssets([
         ...locationAssetsIds,

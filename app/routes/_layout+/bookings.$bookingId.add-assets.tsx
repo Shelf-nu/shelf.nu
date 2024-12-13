@@ -323,7 +323,7 @@ export default function AddAssetsToNewBooking() {
 
   function handleSelectAll() {
     if (hasSelectedAll) {
-      setSelectedAssets(bookingAssetsIds);
+      setSelectedAssets([]);
     } else {
       setSelectedAssets([
         ...bookingAssetsIds,

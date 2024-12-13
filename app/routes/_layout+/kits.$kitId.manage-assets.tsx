@@ -430,7 +430,7 @@ export default function ManageAssetsInKit() {
 
   function handleSelectAll() {
     if (hasSelectedAll) {
-      setSelectedAssets(kitAssetIds);
+      setSelectedAssets([]);
     } else {
       setSelectedAssets([
         ...kitAssetIds,
