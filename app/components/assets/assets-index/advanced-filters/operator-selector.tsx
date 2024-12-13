@@ -5,6 +5,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import type { DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
 import type { Filter, FilterDefinition, FilterOperator } from "./schema";
@@ -58,9 +59,11 @@ export const operatorsPerType: FilterDefinition = {
 export function OperatorSelector({
   filter,
   setFilter,
+  disabled,
 }: {
   filter: Filter;
   setFilter: (filter: Filter["operator"]) => void;
+  disabled?: DisabledProp;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
@@ -79,6 +82,7 @@ export function OperatorSelector({
           variant="secondary"
           title={operatorsMap[operator][1]}
           className="w-[50px] font-normal"
+          disabled={disabled}
         >
           {operatorsMap[operator][0]}
         </Button>
