@@ -79,6 +79,8 @@ export type ListProps = {
 
   /** Optionally recieve an element for custom pagination */
   customPagination?: React.ReactElement;
+  /** Any extra content to the right in Header */
+  headerExtraContent?: React.ReactNode;
 };
 
 /**
@@ -96,6 +98,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     emptyStateClassName,
     bulkActions,
     customPagination,
+    headerExtraContent,
   }: ListProps,
   ref
 ) {
@@ -210,6 +213,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
               <When truthy={modeIsAdvanced}>
                 <ExportAssetsButton />
               </When>

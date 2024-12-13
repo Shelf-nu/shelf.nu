@@ -455,17 +455,6 @@ export default function ManageAssetsInKit() {
         {...header}
         hideBreadcrumbs
         classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
-        slots={{
-          "right-of-title": (
-            <Button
-              variant="secondary"
-              className="mr-6 px-2 py-1 text-sm font-normal"
-              onClick={handleSelectAll}
-            >
-              {hasSelectedAll ? "Clear all" : "Select all"}
-            </Button>
-          ),
-        }}
       />
 
       <div className="-mx-6 border-b px-6 md:pb-3">
@@ -548,6 +537,15 @@ export default function ManageAssetsInKit() {
             newButtonContent: "New asset",
           }}
           className="-mx-5 flex h-full flex-col justify-start border-0"
+          headerExtraContent={
+            <Button
+              variant="secondary"
+              className="px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          }
         />
       </div>
 
