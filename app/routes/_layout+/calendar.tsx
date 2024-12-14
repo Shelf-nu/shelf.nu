@@ -274,6 +274,7 @@ export default function Calendar() {
                   variant="secondary"
                   className="border-r p-[0.75em] text-gray-500"
                   onClick={() => handleNavigation("prev")}
+                  aria-label="Previous month"
                 >
                   <ChevronLeftIcon />
                 </Button>
@@ -288,6 +289,7 @@ export default function Calendar() {
                   variant="secondary"
                   className="p-[0.75em] text-gray-500"
                   onClick={() => handleNavigation("next")}
+                  aria-label="Next month"
                 >
                   <ChevronRightIcon />
                 </Button>
