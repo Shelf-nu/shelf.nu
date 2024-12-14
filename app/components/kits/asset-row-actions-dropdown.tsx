@@ -20,6 +20,7 @@ export default function AssetRowActionsDropdown({
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
+        aria-label="Actions Trigger"
         className={tw("asset-actions", fullWidth ? "w-full" : "")}
       >
         <span className="flex items-center gap-2">
