@@ -68,13 +68,14 @@ export default function SidebarNav({
         case "label": {
           return (
             <SidebarGroupLabel
+              asChild
               className={
                 navItem.title.toLowerCase() === "organization"
                   ? "mt-4"
                   : undefined
               }
             >
-              {navItem.title}
+              <li>{navItem.title}</li>
             </SidebarGroupLabel>
           );
         }

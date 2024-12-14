@@ -436,8 +436,8 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
             {category.name}
           </Badge>
         ) : (
-          <Badge color={"#808080"} withDot={false}>
-            {"Uncategorized"}
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
           </Badge>
         )}
       </Td>
