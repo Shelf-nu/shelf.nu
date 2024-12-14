@@ -183,3 +183,22 @@ export function getLocale(request: Request) {
 export function formatDateBasedOnLocaleOnly(value: string, locale: string) {
   return parseISO(value).toLocaleDateString(locale);
 }
+
+/**
+ * date-only formats are interpreted as UTC when passed to the Date constructor, per ECMAScript
+ * So when parsing the date (e.g 13-12-2024) you get local time from the date object.
+ * To perfectly parse date-only string we have to parse date as integers.
+ * For more information refer to this comment on github - https://github.com/date-fns/date-fns/issues/489#issuecomment-302271425
+ *
+ * This function converts date-only strings into Date object without making it local.
+ * Make sure the date passed to this function is in following format - YYYY-MM-DD
+ */
+export function parseDateOnlyString(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+
+  return new Date(
+    year,
+    month - 1, // Converting month to JS format
+    day
+  );
+}

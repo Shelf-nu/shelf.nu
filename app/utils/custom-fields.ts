@@ -5,7 +5,10 @@ import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
-import { formatDateBasedOnLocaleOnly } from "./client-hints";
+import {
+  formatDateBasedOnLocaleOnly,
+  parseDateOnlyString,
+} from "./client-hints";
 import { ShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
 
@@ -159,7 +162,10 @@ export const buildCustomFieldValue = (
       case "BOOLEAN":
         return { raw, valueBoolean: Boolean(raw) };
       case "DATE":
-        return { raw, valueDate: new Date(raw as string).toISOString() };
+        return {
+          raw,
+          valueDate: parseDateOnlyString(raw as string).toISOString(),
+        };
       case "OPTION":
         return { raw, valueOption: String(raw) };
       case "MULTILINE_TEXT":
