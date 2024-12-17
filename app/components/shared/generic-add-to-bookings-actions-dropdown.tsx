@@ -1,7 +1,10 @@
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { useHydrated } from "remix-utils/use-hydrated";
 import Icon from "~/components/icons/icon";
-import type { ButtonProps, DisabledProp } from "~/components/shared/button";
+import type {
+  CommonButtonProps,
+  DisabledProp,
+} from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -17,16 +20,21 @@ import When from "../when/when";
 
 type IndexType = "kit" | "asset";
 
-export interface BookLink extends ButtonProps {
+/**
+ * Extend CommonButtonProps instead of ButtonProps for the interface
+ */
+export interface BookLink extends CommonButtonProps {
   indexType: IndexType;
+  to: string; // Add required properties from LinkButtonProps
+  id: string; // Make id required for BookLink
+  icon?: "bookings" | "booking-exist"; // Narrow down the icon types
 }
-
 const ConditionalActionsDropdown = ({
   links,
   label,
   disabledTrigger,
 }: {
-  links: ButtonProps[];
+  links: BookLink[];
 
   label: string;
   disabledTrigger?: DisabledProp;
