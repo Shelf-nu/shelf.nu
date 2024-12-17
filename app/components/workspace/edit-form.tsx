@@ -149,7 +149,10 @@ export const WorkspaceEditForm = ({
               disabled={disabled}
               name={zo.fields.currency()}
             >
-              <SelectTrigger className="px-3.5 py-3">
+              <SelectTrigger
+                className="px-3.5 py-3"
+                aria-label="Select currency"
+              >
                 <SelectValue placeholder="Choose a field type" />
               </SelectTrigger>
               <SelectContent

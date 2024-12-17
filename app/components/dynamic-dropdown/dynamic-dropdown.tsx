@@ -106,14 +106,14 @@ export default function DynamicDropdown({
           )}
           asChild
         >
-          <div>
+          <button>
             {cloneElement(trigger)}
             <When truthy={selectedItems.length > 0 && !hideCounter}>
               <div className="flex size-6 items-center justify-center rounded-full bg-primary-50 px-2 py-[2px] text-xs font-medium text-primary-700">
                 {selectedItems.length}
               </div>
             </When>
-          </div>
+          </button>
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent

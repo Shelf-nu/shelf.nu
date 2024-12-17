@@ -100,7 +100,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           onClick={() => setOpen(!open)}
           asChild
         >
-          <Button variant="secondary">
+          <Button variant="secondary" aria-label="Actions Trigger">
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
             </span>
@@ -113,6 +113,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           className="actions-dropdown sm:hidden"
           width="full"
           onClick={() => setOpen(true)}
+          aria-label="Actions Trigger"
         >
           <span className="flex items-center gap-2">
             Actions <ChevronRight className="chev" />
@@ -158,6 +159,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     width="full"
                     onClick={() => setOpen(false)}
                     disabled={disableReleaseForSelfService}
+                    aria-label="Release Custody"
                   >
                     <span className="flex items-center gap-1">
                       <Icon icon="release-custody" /> Release custody
@@ -168,12 +170,11 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     to="assign-custody"
                     role="link"
                     variant="link"
-                    className={tw(
-                      "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                    )}
+                    className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
                     disabled={someAssetIsNotAvailable}
+                    aria-label="Assign/Take Custody"
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}
