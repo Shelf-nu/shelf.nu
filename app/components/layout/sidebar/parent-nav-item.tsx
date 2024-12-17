@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from "@remix-run/react";
+import { NavLink } from "@remix-run/react";
 import { ChevronDownIcon } from "lucide-react";
 import invariant from "tiny-invariant";
 import {
@@ -35,7 +35,6 @@ export default function ParentNavItem({
   tooltip,
   closeIfMobile,
 }: ParentNavItemProps) {
-  const navigate = useNavigate();
   const isAnyChildActive = useIsAnyRouteActive(
     route.children.map((child) => child.to)
   );
@@ -47,7 +46,6 @@ export default function ParentNavItem({
   );
 
   function handleClick() {
-    navigate(firstChildRoute.to);
     closeIfMobile && closeIfMobile();
   }
 
