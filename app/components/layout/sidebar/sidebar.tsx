@@ -12,6 +12,7 @@ import { useFetcher } from "@remix-run/react";
 import type { VariantProps } from "class-variance-authority";
 import { cva } from "class-variance-authority";
 
+import { MenuIcon } from "lucide-react";
 import Input from "~/components/forms/input";
 import { SwitchIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -306,7 +307,12 @@ const SidebarTrigger = forwardRef<
       }}
       {...props}
     >
-      <SwitchIcon className={tw("size-4 text-gray-500", iconClassName)} />
+      <SwitchIcon
+        className={tw("hidden size-5 text-gray-500 md:block", iconClassName)}
+      />
+      <MenuIcon
+        className={tw("block size-6 text-gray-500 md:hidden", iconClassName)}
+      />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
