@@ -5,7 +5,10 @@ import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
-import { formatDateBasedOnLocaleOnly } from "./client-hints";
+import {
+  formatDateBasedOnLocaleOnly,
+  parseDateOnlyString,
+} from "./client-hints";
 import { ShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
 
@@ -144,6 +147,15 @@ export const extractCustomFieldValuesFromPayload = ({
     .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
 };
 
+/**
+ * Builds a custom field value based on the field definition and raw input
+ * For date fields, ensures dates are stored in ISO format required by DB constraints
+ * while preserving the intended date regardless of timezone
+ *
+ * @param value - The raw value and any additional field-specific values
+ * @param def - The custom field definition
+ * @returns Formatted custom field value or undefined if no valid value
+ */
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
@@ -158,8 +170,21 @@ export const buildCustomFieldValue = (
     switch (def.type) {
       case "BOOLEAN":
         return { raw, valueBoolean: Boolean(raw) };
-      case "DATE":
-        return { raw, valueDate: new Date(raw as string).toISOString() };
+      case "DATE": {
+        // Store raw date as entered by user
+        // But format valueDate as ISO string with UTC midnight to satisfy DB constraint
+        // while ensuring the date remains the same in all timezones
+        const dateOnly = raw as string; // YYYY-MM-DD
+        const [year, month, day] = dateOnly.split("-").map(Number);
+
+        // Create date at UTC midnight to preserve the date across all timezones
+        const utcDate = new Date(Date.UTC(year, month - 1, day));
+
+        return {
+          raw: dateOnly,
+          valueDate: utcDate.toISOString(), // Will be in format required by DB constraint
+        };
+      }
       case "OPTION":
         return { raw, valueOption: String(raw) };
       case "MULTILINE_TEXT":
@@ -174,12 +199,20 @@ export const buildCustomFieldValue = (
         cause instanceof RangeError
           ? cause?.message
           : "Invalid custom field value",
-      message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: mm/dd/yyyy`,
+      message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: YYYY-MM-DD`,
       label: "Custom fields",
     });
   }
 };
 
+/**
+ * Returns a display value for a custom field based on its type
+ * For dates, uses the raw date string to avoid timezone conversions
+ *
+ * @param value - The custom field value to display
+ * @param hints - Client hints containing locale information
+ * @returns Formatted display value as string or markdown node
+ */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   hints?: ClientHint
@@ -192,11 +225,14 @@ export const getCustomFieldDisplayValue = (
     return value.valueBoolean ? "Yes" : "No";
   }
 
-  if (value.valueDate && value.raw) {
+  if (value.valueDate) {
+    // Use raw date string directly for formatting
+    // This ensures the date displayed matches the date entered
     return hints
-      ? formatDateBasedOnLocaleOnly(value.valueDate as string, hints.locale)
-      : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
+      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+      : format(parseDateOnlyString(value.raw as string), "PPP");
   }
+
   return String(value.raw);
 };
 
