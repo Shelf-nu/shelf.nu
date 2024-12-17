@@ -1,4 +1,5 @@
-import { Form, Link, useNavigation } from "@remix-run/react";
+import { useEffect } from "react";
+import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -10,7 +11,7 @@ import TeamMembersSelector from "./team-members-selector";
 export const setReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),
   message: z.string().min(1, "Please enter message."),
-  alertDate: z.coerce.date().min(new Date()),
+  alertDateTime: z.coerce.date().min(new Date()),
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),
@@ -23,8 +24,18 @@ export type SetReminderFormProps = {
 export default function SetReminderForm({ onCancel }: SetReminderFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const actionData = useActionData<{ success: boolean }>();
 
   const zo = useZorm("SetReminder", setReminderSchema);
+
+  useEffect(
+    function handleOnSuccess() {
+      if (actionData?.success) {
+        onCancel && onCancel();
+      }
+    },
+    [actionData, onCancel]
+  );
 
   return (
     <Form
@@ -72,8 +83,8 @@ export default function SetReminderForm({ onCancel }: SetReminderFormProps) {
         <div>
           <Input
             type="datetime-local"
-            name={zo.fields.alertDate()}
-            error={zo.errors.alertDate()?.message}
+            name={zo.fields.alertDateTime()}
+            error={zo.errors.alertDateTime()?.message}
             label="Alert Date"
             disabled={disabled}
             autoFocus

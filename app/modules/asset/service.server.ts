@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  AssetReminder,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -3094,6 +3095,49 @@ export async function getAssetsTabLoaderData({
       cause,
       label,
       message: "Something went wrong while fetching assets",
+    });
+  }
+}
+
+export async function createAssetReminder({
+  name,
+  message,
+  alertDateTime,
+  assetId,
+  createdById,
+  organizationId,
+  teamMembers,
+}: Pick<
+  AssetReminder,
+  | "name"
+  | "message"
+  | "alertDateTime"
+  | "assetId"
+  | "createdById"
+  | "organizationId"
+> & { teamMembers: TeamMember["id"][] }) {
+  try {
+    const assetReminder = await db.assetReminder.create({
+      data: {
+        name,
+        message,
+        alertDateTime,
+        assetId,
+        createdById,
+        organizationId,
+        teamMembers: {
+          connect: teamMembers.map((id) => ({ id })),
+        },
+      },
+    });
+
+    return assetReminder;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating asset reminder.",
+      label,
+      additionalData: { assetId, organizationId, createdById },
     });
   }
 }
