@@ -33,7 +33,10 @@ export default function PerPageItemsSelect() {
         defaultValue={perPage.toString()}
         onValueChange={onValueChange}
       >
-        <SelectTrigger className="h-[34px] px-3 py-[5.5px] text-[14px]">
+        <SelectTrigger
+          aria-label="Select per page"
+          className="h-[34px] px-3 py-[5.5px] text-[14px]"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="w-[250px]" position="popper" align="start">

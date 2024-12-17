@@ -101,6 +101,7 @@ const Input = forwardRef(function Input(
   let input = (
     <input
       {...inputProps}
+      aria-label={label}
       ref={ref as RefObject<HTMLInputElement> | undefined}
     />
   );
@@ -112,12 +113,16 @@ const Input = forwardRef(function Input(
         maxLength={rest.maxLength || 250}
         rows={rest.rows || 8}
         ref={ref as RefObject<HTMLTextAreaElement> | undefined}
+        aria-label={label}
       />
     );
   }
 
   return (
-    <label className={tw("relative flex flex-col", className)}>
+    <label
+      className={tw("relative flex flex-col", className)}
+      htmlFor={inputProps.name}
+    >
       {/* Label */}
       <InnerLabel hideLg={hideLabel} required={required}>
         {label}
