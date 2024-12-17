@@ -161,6 +161,7 @@ export async function getTeamMembers(params: {
         orderBy: { createdAt: "desc" },
         include: {
           custodies: true,
+          user: { select: { profilePicture: true } },
         },
       }),
 

@@ -1821,3 +1821,22 @@ export const AlertIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const AlarmClockIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 16 16"
+    width="100%"
+    height="100%"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="m3.333 1-2 2m13.334 0-2-2M4 11.667 2.667 13M12 11.667 13.333 13M8 5v2.667L9.333 9M8 13A5.333 5.333 0 1 0 8 2.333 5.333 5.333 0 0 0 8 13Z"
+    />
+  </svg>
+);
