@@ -57,7 +57,12 @@ export function TeamUsersActionsDropdown({
           {customTrigger ? (
             customTrigger(disabled)
           ) : (
-            <Button variant="tertiary" width="full" className="border-0 pr-0">
+            <Button
+              variant="tertiary"
+              width="full"
+              className="border-0 pr-0"
+              aria-label="Actions Trigger"
+            >
               {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
             </Button>
           )}

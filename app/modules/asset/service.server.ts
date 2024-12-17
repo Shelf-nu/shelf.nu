@@ -19,7 +19,7 @@ import {
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import type {
   SortingDirection,
   SortingOptions,
@@ -42,7 +42,12 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  getFiltersFromRequest,
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -510,9 +515,6 @@ async function getAssetsFromView(params: {
   }
 }
 
-/**
- * Fetches assets directly from asset table
- */
 async function getAssets(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -535,7 +537,7 @@ async function getAssets(params: {
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
 }) {
-  const {
+  let {
     organizationId,
     orderBy,
     orderDirection,
@@ -635,15 +637,25 @@ async function getAssets(params: {
       where.availableToBook = true;
     }
 
-    if (tagsIds && tagsIds.length > 0) {
+    if (tagsIds && tagsIds.length) {
+      // Check if 'untagged' is part of the selected tag IDs
       if (tagsIds.includes("untagged")) {
+        // Remove 'untagged' from the list of tags
+        tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+        // Filter for assets that are untagged only
         where.OR = [
-          ...(where.OR ?? []),
-          { tags: { every: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { none: {} } }, // Include assets with no tags
         ];
-      } else {
-        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
+      }
+
+      // If there are other tags specified, apply AND condition
+      if (tagsIds.length > 0) {
+        where.OR = [
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+        ];
       }
     }
 
@@ -1254,7 +1266,7 @@ export async function updateAssetMainImage({
         Date.now()
       )}`,
       resizeOptions: {
-        width: 800,
+        width: 1200,
         withoutEnlargement: true,
       },
     });
@@ -3016,29 +3028,79 @@ export async function relinkQrCode({
   ]);
 }
 
-export async function getAvailableAssetsIdsForBooking(
-  assetIds: Asset["id"][]
-): Promise<string[]> {
+export async function getAssetsTabLoaderData({
+  userId,
+  request,
+  organizationId,
+}: {
+  userId: User["id"];
+  request: Request;
+  organizationId: Organization["id"];
+}) {
   try {
-    const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
-    });
-    if (selectedAssets.some((asset) => asset.kit)) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add assets that belong to a kit.",
-        label: "Booking",
-      });
+    const { filters, redirectNeeded } = await getFiltersFromRequest(
+      request,
+      organizationId
+    );
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/assets?${cookieParams.toString()}`);
     }
-    return selectedAssets.map((asset) => asset.id);
-  } catch (cause: ShelfError | any) {
+
+    const filtersSearchParams = new URLSearchParams(filters);
+    filtersSearchParams.set("teamMember", userId);
+
+    const {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      filters: filtersSearchParams.toString(),
+    });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+    const headers = [setCookie(userPrefsCookie)];
+
+    return {
+      search,
+      totalItems: totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      items: assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      modelName,
+      headers,
+    };
+  } catch (cause) {
     throw new ShelfError({
-      cause: cause,
-      message: cause?.message
-        ? cause.message
-        : "Something went wrong while getting available assets.",
-      label: "Assets",
+      cause,
+      label,
+      message: "Something went wrong while fetching assets",
     });
   }
 }

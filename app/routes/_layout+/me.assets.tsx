@@ -1,9 +1,7 @@
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { z } from "zod";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { getAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -11,28 +9,20 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { AssetsList } from "./assets._index";
 
-export async function loader({ request, context, params }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { userId } = authSession;
+  const userId = authSession.userId;
 
   try {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMemberProfile,
+      entity: PermissionEntity.asset,
       action: PermissionAction.read,
     });
 
-    const { userId: selectedUserId } = getParams(
-      params,
-      z.object({ userId: z.string() }),
-      {
-        additionalData: { userId },
-      }
-    );
-
     const { headers, ...loaderData } = await getAssetsTabLoaderData({
-      userId: selectedUserId,
+      userId,
       request,
       organizationId,
     });
@@ -44,19 +34,15 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   }
 }
 
-export default function UserAssetsPage() {
+export default function MyAssets() {
   return (
     <AssetsList
       disableTeamMemberFilter
       disableBulkActions
       customEmptyState={{
-        title: "No assets in custody",
-        text: "This user currently has no assets in their custody.",
+        title: "No assets",
+        text: "You have not created any assets yet and no assets are assigned to you.",
       }}
     />
   );
 }
-
-export const handle = {
-  name: "$userId.assets",
-};

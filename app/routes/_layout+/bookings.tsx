@@ -229,6 +229,7 @@ export default function BookingsIndexPage({
     "$assetId.bookings",
     "$userId.bookings",
     "bookings.update-existing",
+    "me.bookings",
   ];
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
@@ -237,6 +238,7 @@ export default function BookingsIndexPage({
   const isChildBookingsPage = [
     "$assetId.bookings",
     "$userId.bookings",
+    "me.bookings",
   ].includes(currentRoute?.handle?.name);
 
   const isBookingUpdateExisting =

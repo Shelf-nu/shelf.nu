@@ -29,12 +29,14 @@ export function ValueField({
   applyFilters,
   fieldName, // From zorm
   zormError, // From zorm
+  disabled,
 }: {
   filter: Filter;
   setFilter: (value: Filter["value"]) => void;
   applyFilters: () => void;
   fieldName: string;
   zormError?: string;
+  disabled?: boolean;
 }) {
   const data = useLoaderData<AssetIndexLoaderData>();
   const customFields = useMemo(() => data?.customFields || [], [data]);
@@ -128,16 +130,18 @@ export function ValueField({
     inputClassName: "px-4 py-2 text-[14px] leading-5",
     hideLabel: true,
     label: filter.name,
+    disabled,
   };
 
   const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !disabled) {
       applyFilters();
     }
   };
 
   /** Generates placeholder for text input fields, based on the operator */
   function placeholder(operator: Filter["operator"]) {
+    if (disabled) return "Select a column first";
     return ["contains", "containsAll", "containsAny", "matchesAny"].includes(
       operator
     )
@@ -205,7 +209,7 @@ export function ValueField({
             type="number"
             value={filter.value as number}
             onChange={handleChange}
-            placeholder="Enter number"
+            placeholder={placeholder(filter.operator)}
             min={0}
             onKeyUp={submitOnEnter}
             error={error}
@@ -221,6 +225,7 @@ export function ValueField({
             value={filter.value as boolean}
             handleBooleanChange={handleBooleanChange}
             name={fieldName}
+            disabled={disabled}
           />
           <ErrorDisplay error={error} />
         </>
@@ -234,6 +239,7 @@ export function ValueField({
             setFilter={setFilter}
             applyFilters={applyFilters}
             name={fieldName}
+            disabled={disabled}
           />
           <ErrorDisplay error={error} />
         </>
@@ -248,6 +254,7 @@ export function ValueField({
             handleChange={setFilter}
             multiSelect={filter.operator === "containsAny"}
             name={fieldName}
+            disabled={disabled}
           />
           <ErrorDisplay error={error} />
         </>
@@ -288,10 +295,12 @@ function BooleanField({
   name,
   value,
   handleBooleanChange,
+  disabled = false,
 }: {
   name: string;
   value: boolean | string;
   handleBooleanChange: (value: "true" | "false") => void;
+  disabled?: boolean;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
@@ -300,14 +309,20 @@ function BooleanField({
   return (
     <>
       <input type="hidden" value={String(boolValue)} name={name} />
-      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+      <Popover
+        open={isPopoverOpen && !disabled}
+        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+      >
         <PopoverTrigger asChild>
           <Button
             variant="secondary"
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
-            <span className="ml-2">{boolValue ? "Yes" : "No"}</span>{" "}
+            <span className="ml-2">
+              {disabled ? "Select a column first" : boolValue ? "Yes" : "No"}
+            </span>{" "}
           </Button>
         </PopoverTrigger>
         <PopoverPortal>
@@ -353,6 +368,7 @@ interface EnumFieldProps {
   handleChange: (value: string) => void;
   multiSelect?: boolean;
   name?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -364,13 +380,16 @@ function EnumField({
   handleChange,
   multiSelect = false,
   name,
+  disabled = false,
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
 
-  const displayValue = multiSelect
+  const displayValue = disabled
+    ? "Select a column first"
+    : multiSelect
     ? selectedValues
         .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
         .join(", ")
@@ -402,11 +421,15 @@ function EnumField({
         value={multiSelect ? displayValue : value}
         name={name}
       />
-      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+      <Popover
+        open={isPopoverOpen && !disabled}
+        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+      >
         <PopoverTrigger asChild>
           <Button
             variant="secondary"
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
             <span className="ml-2">{displayValue}</span>
@@ -458,6 +481,7 @@ function StatusEnumField({
   handleChange,
   multiSelect,
   name,
+  disabled = false,
 }: Omit<EnumFieldProps, "options">) {
   const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
     id: status,
@@ -471,6 +495,7 @@ function StatusEnumField({
       handleChange={handleChange}
       multiSelect={multiSelect}
       name={name}
+      disabled={disabled}
     />
   );
 }
@@ -484,6 +509,7 @@ function CustomFieldEnumField({
   fieldName,
   multiSelect,
   name,
+  disabled,
 }: Omit<EnumFieldProps, "options"> & { fieldName: string }) {
   const data = useLoaderData<AssetIndexLoaderData>();
   const customFields = useMemo(
@@ -506,6 +532,7 @@ function CustomFieldEnumField({
       handleChange={handleChange}
       multiSelect={multiSelect}
       name={name}
+      disabled={disabled}
     />
   );
 }
@@ -519,6 +546,7 @@ function CustodyEnumField({
   handleChange,
   multiSelect,
   name,
+  disabled,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -550,6 +578,7 @@ function CustodyEnumField({
       id: "without-custody",
       name: "Without custody",
     },
+    disabled,
   };
 
   if (multiSelect) {
@@ -561,6 +590,7 @@ function CustodyEnumField({
           <Button
             variant="secondary"
             className="w-full justify-start  font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
           >
             <div className="flex items-center justify-between">
               <span
@@ -624,6 +654,7 @@ function CategoryEnumField({
   handleChange,
   multiSelect,
   name,
+  disabled = false,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -666,6 +697,7 @@ function CategoryEnumField({
       id: "uncategorized",
       name: "Uncategorized",
     },
+    disabled,
   };
 
   // For multi-select (containsAny operator), use DynamicDropdown
@@ -686,7 +718,9 @@ function CategoryEnumField({
                   selectedIds.length <= 0 && "text-gray-500"
                 )}
               >
-                {selectedIds.length > 0
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
                         const category = data.categories?.find(
@@ -719,7 +753,7 @@ function CategoryEnumField({
     <DynamicSelect
       {...commonProps}
       fieldName={name}
-      placeholder="Select category"
+      placeholder={disabled ? "Select a column first" : "Select category"}
       defaultValue={value as string}
       onChange={(selectedId) => {
         if (selectedId !== undefined) {
@@ -740,6 +774,7 @@ function LocationEnumField({
   handleChange,
   multiSelect,
   name,
+  disabled = false,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -774,6 +809,7 @@ function LocationEnumField({
       id: "without-location",
       name: "Without location",
     },
+    disabled,
   };
 
   // For multi-select (containsAny operator), use DynamicDropdown
@@ -794,7 +830,9 @@ function LocationEnumField({
                   selectedIds.length <= 0 && "text-gray-500"
                 )}
               >
-                {selectedIds.length > 0
+                {disabled
+                  ? "Select column first"
+                  : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
                         const location = data.locations?.find(
@@ -827,7 +865,7 @@ function LocationEnumField({
     <DynamicSelect
       {...commonProps}
       fieldName={name}
-      placeholder="Select location"
+      placeholder={disabled ? "Select a column first" : "Select location"}
       defaultValue={value as string}
       onChange={(selectedId) => {
         if (selectedId !== undefined) {
@@ -848,6 +886,7 @@ function KitEnumField({
   handleChange,
   multiSelect,
   name,
+  disabled,
 }: Omit<EnumFieldProps, "options">) {
   const data = useLoaderData<AssetIndexLoaderData>();
 
@@ -882,6 +921,7 @@ function KitEnumField({
       id: "without-kit",
       name: "Without kit",
     },
+    disabled,
   };
 
   // For multi-select (containsAny operator), use DynamicDropdown
@@ -902,7 +942,9 @@ function KitEnumField({
                   selectedIds.length <= 0 && "text-gray-500"
                 )}
               >
-                {selectedIds.length > 0 && data.kits && data.kits.length > 0
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
                         const kit = data.kits?.find((kit) => kit.id === id);
@@ -933,7 +975,7 @@ function KitEnumField({
     <DynamicSelect
       {...commonProps}
       fieldName={name}
-      placeholder="Select kit"
+      placeholder={disabled ? "Select a column first" : "Select kit"}
       defaultValue={value as string}
       onChange={(selectedId) => {
         if (selectedId !== undefined) {
@@ -958,6 +1000,7 @@ function ValueEnumField({
   multiSelect,
   name,
   error,
+  disabled = false,
 }: {
   fieldName: string;
   value: string;
@@ -965,6 +1008,7 @@ function ValueEnumField({
   multiSelect?: boolean;
   name?: string;
   error?: string;
+  disabled?: boolean;
 }) {
   if (fieldName === "status") {
     return (
@@ -974,6 +1018,7 @@ function ValueEnumField({
           handleChange={handleChange}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -988,6 +1033,7 @@ function ValueEnumField({
           handleChange={handleChange}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -1003,6 +1049,7 @@ function ValueEnumField({
           handleChange={handleChange}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -1017,6 +1064,7 @@ function ValueEnumField({
           handleChange={handleChange}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -1031,6 +1079,7 @@ function ValueEnumField({
           handleChange={handleChange}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -1046,6 +1095,7 @@ function ValueEnumField({
           fieldName={fieldName}
           multiSelect={multiSelect}
           name={name}
+          disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
       </>
@@ -1061,6 +1111,7 @@ type DateFieldProps = {
   filter: Filter;
   setFilter: (value: Filter["value"]) => void;
   applyFilters: () => void;
+  disabled?: boolean;
 };
 
 /**
@@ -1073,6 +1124,7 @@ export function DateField({
   setFilter,
   applyFilters,
   error,
+  disabled = false,
 }: DateFieldProps) {
   const { timeZone } = useHints();
   const [localValue, setLocalValue] = useState<[string, string]>(["", ""]);
@@ -1161,7 +1213,19 @@ export function DateField({
     hideLabel: true,
     label: filter.name,
     onKeyUp: submitOnEnter,
+    disabled,
   };
+
+  if (disabled) {
+    return (
+      <Input
+        {...commonInputProps}
+        label={""}
+        type="text"
+        placeholder="Select a column first"
+      />
+    );
+  }
 
   if (filter.operator === "between") {
     return (
@@ -1211,6 +1275,7 @@ export function DateField({
         onChange={handleDateChange(0)}
         error={combinedError}
         name={name}
+        disabled={disabled}
       />
     );
   }

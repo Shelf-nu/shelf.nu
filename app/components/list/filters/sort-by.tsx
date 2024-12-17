@@ -41,13 +41,13 @@ export function SortBy() {
         className="inline-flex items-center gap-2 text-gray-500"
         asChild
       >
-        <div className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
+        <button className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
           <span className="truncate whitespace-nowrap text-[14px]">
             {/* We only show the message if orderBy is present in params so in the default case we dont show it */}
             Sorted by: {sortingOptions[orderBy]}
           </span>
           <CaretSortIcon />
-        </div>
+        </button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
