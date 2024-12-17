@@ -211,6 +211,7 @@ export function BookingAssetsColumn() {
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
                                   className="text-center font-bold text-gray-600 hover:text-gray-900"
+                                  aria-label="Toggle kit expand"
                                 >
                                   <ChevronDownIcon
                                     className={tw(

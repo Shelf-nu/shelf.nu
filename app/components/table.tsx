@@ -27,7 +27,7 @@ export function Table({
       <div
         className={tw(
           "fixed-gradient",
-          modeIsAdvanced ? "right-[11px]" : "-right-px"
+          modeIsAdvanced ? "right-0" : "-right-px"
         )}
       ></div>
       <div

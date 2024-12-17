@@ -45,8 +45,11 @@ export function StatusFilter({
         onValueChange={handleValueChange}
         disabled={disabled}
       >
-        <SelectTrigger className="mt-2 px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
-          <SelectValue placeholder={`Filter by status`} />
+        <SelectTrigger
+          aria-label="Filter by status"
+          className="mt-2 px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
+        >
+          <SelectValue placeholder="Filter by status" />
         </SelectTrigger>
         <SelectContent
           position="popper"

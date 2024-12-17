@@ -33,9 +33,8 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(1)}
           disabled={prevDisabled}
-          className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
-          )}
+          className="rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          aria-label="Go to page 1"
         >
           <ChevronLeftDoubleIcon />
         </Button>
@@ -45,9 +44,8 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(page - 1)}
           disabled={prevDisabled}
-          className={tw(
-            "h-8 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
-          )}
+          className="h-8 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          aria-label="Go to previous page"
         >
           <ChevronRight />
         </Button>
@@ -72,9 +70,8 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(page + 1)}
           disabled={nextDisabled}
-          className={tw(
-            "h-8 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
-          )}
+          className="h-8 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          aria-label="Go to next page"
         >
           <ChevronRight />
         </Button>
@@ -84,16 +81,15 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(totalPages)}
           disabled={nextDisabled}
-          className={tw(
-            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
-          )}
+          className="rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          aria-label="Go to last page"
         >
           <ChevronLeftDoubleIcon />
         </Button>
       </div>
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
-        <p className="hidden text-[14px] font-medium text-gray-400 lg:block">
+        <p className="hidden text-[14px] font-medium text-gray-500 lg:block">
           <span className="capitalize">{modelName.plural}</span> per page
         </p>
       </div>

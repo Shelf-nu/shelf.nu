@@ -516,9 +516,6 @@ async function getAssetsFromView(params: {
   }
 }
 
-/**
- * Fetches assets directly from asset table
- */
 async function getAssets(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -541,7 +538,7 @@ async function getAssets(params: {
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
 }) {
-  const {
+  let {
     organizationId,
     orderBy,
     orderDirection,
@@ -641,15 +638,25 @@ async function getAssets(params: {
       where.availableToBook = true;
     }
 
-    if (tagsIds && tagsIds.length > 0) {
+    if (tagsIds && tagsIds.length) {
+      // Check if 'untagged' is part of the selected tag IDs
       if (tagsIds.includes("untagged")) {
+        // Remove 'untagged' from the list of tags
+        tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+        // Filter for assets that are untagged only
         where.OR = [
-          ...(where.OR ?? []),
-          { tags: { every: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { none: {} } }, // Include assets with no tags
         ];
-      } else {
-        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
+      }
+
+      // If there are other tags specified, apply AND condition
+      if (tagsIds.length > 0) {
+        where.OR = [
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+        ];
       }
     }
 

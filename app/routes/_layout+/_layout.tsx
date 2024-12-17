@@ -3,7 +3,7 @@ import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { ScanQrCodeIcon } from "lucide-react";
+import { ScanBarcodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
@@ -166,7 +166,7 @@ export default function App() {
               <Link to="." title="Home" className="block h-8">
                 <ShelfMobileLogo />
               </Link>
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
                 <NavLink
                   to="/scanner"
                   title="Scan QR Code"
@@ -177,9 +177,9 @@ export default function App() {
                     )
                   }
                 >
-                  <ScanQrCodeIcon />
+                  <ScanBarcodeIcon />
                 </NavLink>
-                <SidebarTrigger iconClassName="size-6" />
+                <SidebarTrigger />
               </div>
             </header>
             <Outlet />

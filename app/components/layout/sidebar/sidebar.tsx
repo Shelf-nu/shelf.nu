@@ -12,6 +12,7 @@ import { useFetcher } from "@remix-run/react";
 import type { VariantProps } from "class-variance-authority";
 import { cva } from "class-variance-authority";
 
+import { MenuIcon } from "lucide-react";
 import Input from "~/components/forms/input";
 import { SwitchIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -306,7 +307,12 @@ const SidebarTrigger = forwardRef<
       }}
       {...props}
     >
-      <SwitchIcon className={tw("size-4 text-gray-500", iconClassName)} />
+      <SwitchIcon
+        className={tw("hidden size-5 text-gray-500 md:block", iconClassName)}
+      />
+      <MenuIcon
+        className={tw("block size-6 text-gray-500 md:hidden", iconClassName)}
+      />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -447,7 +453,7 @@ const SidebarGroupLabel = forwardRef<
       ref={ref}
       data-sidebar="group-label"
       className={tw(
-        "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-semibold text-sidebar-foreground/70 outline-none ring-primary-500 transition-[margin,opa] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-semibold text-sidebar-foreground/75 outline-none ring-primary-500 transition-[margin,opa] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
         "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
         className
       )}
