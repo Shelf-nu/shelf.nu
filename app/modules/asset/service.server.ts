@@ -71,7 +71,7 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
-import { assetIndexFields } from "./fields";
+import { ASSET_REMINDER_INCLUDE_FIELDS, assetIndexFields } from "./fields";
 import {
   assetQueryFragment,
   assetQueryJoins,
@@ -3145,6 +3145,50 @@ export async function createAssetReminder({
       message: "Something went wrong while creating asset reminder.",
       label,
       additionalData: { assetId, organizationId, createdById },
+    });
+  }
+}
+
+export async function getPaginatedAndFilterableReminders({
+  assetId,
+  organizationId,
+  request,
+}: Pick<AssetReminder, "assetId" | "organizationId"> & { request: Request }) {
+  try {
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
+
+    const [reminders, totalReminders] = await Promise.all([
+      db.assetReminder.findMany({
+        where: { assetId, organizationId },
+        take,
+        skip,
+        include: ASSET_REMINDER_INCLUDE_FIELDS,
+      }),
+      db.assetReminder.count({
+        where: { assetId, organizationId },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalReminders / perPageParam);
+
+    return {
+      reminders,
+      totalReminders,
+      page,
+      perPage,
+      totalPages,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting asset alerts.",
+      label,
     });
   }
 }

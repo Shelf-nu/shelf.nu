@@ -238,6 +238,7 @@ export default function AssetDetailsPage() {
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },
+    { to: "alerts", content: "Alerts" },
   ];
 
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
