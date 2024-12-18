@@ -9,12 +9,14 @@ type TeamMembersSelectorProps = {
   className?: string;
   style?: React.CSSProperties;
   error?: string;
+  defaultValues?: string[];
 };
 
 export default function TeamMembersSelector({
   className,
   style,
   error,
+  defaultValues,
 }: TeamMembersSelectorProps) {
   const {
     items,
@@ -24,7 +26,7 @@ export default function TeamMembersSelector({
     selectedItems,
   } = useModelFilters({
     selectionMode: "none",
-    defaultValues: [],
+    defaultValues,
     model: {
       name: "teamMember",
       queryKey: "name",

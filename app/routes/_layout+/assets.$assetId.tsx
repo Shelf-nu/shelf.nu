@@ -12,7 +12,7 @@ import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
-import { setReminderSchema } from "~/components/assets/set-reminder-form/set-reminder-form";
+import { setReminderSchema } from "~/components/assets/reminders/set-or-edit-reminder-dialog";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";

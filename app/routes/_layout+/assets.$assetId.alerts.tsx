@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
+import ActionsDropdown from "~/components/assets/reminders/actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import {
@@ -12,6 +13,7 @@ import {
 import { Td, Th } from "~/components/table";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -59,6 +61,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }).format(reminder.alertDateTime),
     }));
 
+    /** We need teamMembers in SetReminderForm */
+    const { teamMembers, totalTeamMembers } =
+      await getPaginatedAndFilterableTeamMembers({
+        request,
+        organizationId,
+      });
+
     return json(
       data({
         header,
@@ -68,6 +77,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         page,
         perPage,
         totalPages,
+        teamMembers,
+        totalTeamMembers,
       })
     );
   } catch (cause) {
@@ -104,14 +115,14 @@ function ListContent({
       <Td>{item.name}</Td>
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <Td>{item.displayDate}</Td>
-      <Td className="flex items-center">
+      <Td className="flex shrink-0 items-center">
         {item.teamMembers.map((teamMember) => (
           <TooltipProvider key={teamMember.id}>
             <Tooltip>
               <TooltipTrigger>
                 <img
                   alt={teamMember.name}
-                  className="-ml-1 size-6 rounded border border-white"
+                  className="-ml-1 size-6 rounded border border-white object-cover"
                   src={
                     teamMember?.user?.profilePicture ??
                     "/static/images/default_pfp.jpg"
@@ -124,6 +135,9 @@ function ListContent({
             </Tooltip>
           </TooltipProvider>
         ))}
+      </Td>
+      <Td>
+        <ActionsDropdown reminder={item} />
       </Td>
     </>
   );

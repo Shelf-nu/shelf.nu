@@ -20,7 +20,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
-import SetReminderDialog from "./set-reminder-dialog";
+import SetOrEditReminderDialog from "./reminders/set-or-edit-reminder-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
@@ -302,7 +302,7 @@ const ConditionalActionsDropdown = () => {
         />
       </When>
       <When truthy={isSetReminderDialogOpen && isAdministratorOrOwner}>
-        <SetReminderDialog
+        <SetOrEditReminderDialog
           open={isSetReminderDialogOpen}
           onClose={() => {
             setIsSetReminderDialogOpen(false);
