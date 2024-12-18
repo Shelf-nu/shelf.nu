@@ -6,7 +6,7 @@ datasource db {
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["views", "fullTextSearch"]
+  previewFeatures = ["fullTextSearch"]
 }
 
 model Image {
@@ -113,23 +113,11 @@ model Asset {
   reports         ReportFound[]
   tags            Tag[]
   customFields    AssetCustomFieldValue[]
-  assetSearchView AssetSearchView?
   bookings        Booking[]
 
   //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
-view AssetSearchView {
-  id           String @id @default(cuid())
-  searchVector String
-
-  // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id])
-  assetId String @unique
-
-  // Datetime
-  createdAt DateTime @default(now())
-}
 
 enum AssetStatus {
   AVAILABLE
