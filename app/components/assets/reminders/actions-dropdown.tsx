@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
+import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 
 type ActionsDropdownProps = {
@@ -33,11 +34,11 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="order p-1.5   ">
-        <DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Button
             role="button"
             variant="link"
-            className="justify-start text-gray-700 hover:text-gray-700"
+            className="cursor-pointer justify-start text-gray-700 hover:text-gray-700"
             width="full"
             onClick={() => {
               setIsDropdownOpen(false);
@@ -49,6 +50,9 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
               <PencilIcon className="size-4" /> Edit
             </span>
           </Button>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <DeleteReminder reminder={reminder} />
         </DropdownMenuItem>
       </DropdownMenuContent>
 

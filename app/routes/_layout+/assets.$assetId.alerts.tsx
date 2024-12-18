@@ -15,12 +15,14 @@ import {
 import { Td, Th } from "~/components/table";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import {
+  deleteAssetReminder,
   editAssetReminder,
   getPaginatedAndFilterableReminders,
 } from "~/modules/asset/service.server";
 import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -102,7 +104,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["edit-reminder"]) })
+      z.object({ intent: z.enum(["edit-reminder", "delete-reminder"]) })
     );
 
     const { organizationId } = await requirePermission({
@@ -126,6 +128,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
           alertDateTime: payload.alertDateTime,
           teamMembers: payload.teamMembers,
           organizationId,
+        });
+
+        sendNotification({
+          title: "Reminder updated",
+          message: "Your asset reminder has been updated successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "delete-reminder": {
+        const { id } = parseData(formData, z.object({ id: z.string().min(1) }));
+
+        await deleteAssetReminder({ id, organizationId });
+
+        sendNotification({
+          title: "Reminder deleted",
+          message: "Your asset reminder has been deleted successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
         });
 
         return json(data({ success: true }));

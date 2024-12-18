@@ -3234,3 +3234,24 @@ export async function editAssetReminder({
     });
   }
 }
+
+export async function deleteAssetReminder({
+  id,
+  organizationId,
+}: Pick<AssetReminder, "id" | "organizationId">) {
+  try {
+    const deletedReminder = await db.assetReminder.delete({
+      where: { id, organizationId },
+    });
+
+    return deletedReminder;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isNotFoundError(cause)
+        ? "Reminder not found or you are viewing in wrong organization."
+        : "Something went wrong while deleting reminder.",
+      label,
+    });
+  }
+}
