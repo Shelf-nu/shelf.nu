@@ -11,7 +11,7 @@ import {
   MessageCircleIcon,
   PackageOpenIcon,
   QrCodeIcon,
-  ScanQrCodeIcon,
+  ScanBarcodeIcon,
   SettingsIcon,
   TagsIcon,
   UsersRoundIcon,
@@ -208,7 +208,7 @@ export function useSidebarNavItems() {
       type: "child",
       title: "QR Scanner",
       to: "/scanner",
-      Icon: ScanQrCodeIcon,
+      Icon: ScanBarcodeIcon,
     },
     {
       type: "button",
