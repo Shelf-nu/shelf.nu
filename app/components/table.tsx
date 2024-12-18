@@ -41,7 +41,7 @@ export function Table({
         style={
           modeIsAdvanced
             ? {
-                maxHeight: `${vh - 271}px`,
+                maxHeight: `${vh - 280}px`,
                 scrollbarWidth: "thin",
               }
             : undefined
