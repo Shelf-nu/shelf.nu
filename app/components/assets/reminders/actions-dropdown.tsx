@@ -28,7 +28,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
       onOpenChange={setIsDropdownOpen}
       modal={false}
     >
-      <DropdownMenuTrigger>
+      <DropdownMenuTrigger className="px-2">
         <VerticalDotsIcon />
       </DropdownMenuTrigger>
 
@@ -54,6 +54,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
 
       <SetOrEditReminderDialog
         reminder={{
+          id: reminder.id,
           name: reminder.name,
           message: reminder.message,
           alertDateTime: reminder.alertDateTime,

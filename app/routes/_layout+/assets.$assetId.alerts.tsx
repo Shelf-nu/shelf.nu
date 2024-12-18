@@ -1,7 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/reminders/actions-dropdown";
+import { setReminderSchema } from "~/components/assets/reminders/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import {
@@ -12,11 +14,15 @@ import {
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
-import { getPaginatedAndFilterableReminders } from "~/modules/asset/service.server";
+import {
+  editAssetReminder,
+  getPaginatedAndFilterableReminders,
+} from "~/modules/asset/service.server";
 import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -84,6 +90,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const userId = authSession.userId;
+
+  try {
+    const formData = await request.formData();
+
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["edit-reminder"]) })
+    );
+
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    switch (intent) {
+      case "edit-reminder": {
+        const payload = parseData(
+          formData,
+          setReminderSchema.extend({ id: z.string() })
+        );
+
+        await editAssetReminder({
+          id: payload.id,
+          name: payload.name,
+          message: payload.message,
+          alertDateTime: payload.alertDateTime,
+          teamMembers: payload.teamMembers,
+          organizationId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
 }
 

@@ -3192,3 +3192,45 @@ export async function getPaginatedAndFilterableReminders({
     });
   }
 }
+
+export async function editAssetReminder({
+  id,
+  name,
+  message,
+  alertDateTime,
+  organizationId,
+  teamMembers,
+}: Pick<
+  AssetReminder,
+  "id" | "name" | "message" | "alertDateTime" | "organizationId"
+> & { teamMembers: TeamMember["id"][] }) {
+  try {
+    /** This will act as a validation to check if reminder exists */
+    const reminder = await db.assetReminder.findFirstOrThrow({
+      where: { id, organizationId },
+    });
+
+    const updatedReminder = await db.assetReminder.update({
+      where: { id: reminder.id },
+      data: {
+        name,
+        message,
+        alertDateTime,
+        teamMembers: {
+          set: [], // set empty so that if any team member is removed, the relation is removed
+          connect: teamMembers.map((id) => ({ id })), // then connect
+        },
+      },
+    });
+
+    return updatedReminder;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isNotFoundError(cause)
+        ? "Reminder not found or you are viewing in wrong organization."
+        : "Something went wrong while editing reminder.",
+      label,
+    });
+  }
+}

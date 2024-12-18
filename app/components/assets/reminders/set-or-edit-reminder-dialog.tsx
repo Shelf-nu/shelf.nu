@@ -23,7 +23,7 @@ export const setReminderSchema = z.object({
 type SetOrEditReminderDialogProps = {
   open: boolean;
   onClose: () => void;
-  reminder?: z.infer<typeof setReminderSchema>;
+  reminder?: z.infer<typeof setReminderSchema> & { id: string };
 };
 
 export default function SetOrEditReminderDialog({
@@ -36,6 +36,8 @@ export default function SetOrEditReminderDialog({
   const actionData = useActionData<{ success: boolean }>();
 
   const zo = useZorm("SetOrEditReminder", setReminderSchema);
+
+  const isEdit = !!reminder;
 
   useEffect(
     function handleOnSuccess() {
@@ -69,7 +71,16 @@ export default function SetOrEditReminderDialog({
           className="grid grid-cols-1 divide-x md:grid-cols-2"
         >
           <div className="px-6 py-4">
-            <input type="hidden" name="intent" value="set-reminder" />
+            <input
+              type="hidden"
+              name="intent"
+              value={isEdit ? "edit-reminder" : "set-reminder"}
+            />
+            {isEdit ? (
+              <input type="hidden" name="id" value={reminder.id} />
+            ) : (
+              false
+            )}
 
             <Input
               defaultValue={reminder?.name ?? ""}
