@@ -13,6 +13,7 @@ import {
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/atoms/file";
 
 import Header from "~/components/layout/header";
 import {
@@ -62,8 +63,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
-
-export const MAX_IMAGE_UPLOAD_SIZE = 1024 * 1024 * 8; // 8MB
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

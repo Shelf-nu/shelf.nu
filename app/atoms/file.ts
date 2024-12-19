@@ -1,7 +1,8 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
-import { MAX_IMAGE_UPLOAD_SIZE } from "~/routes/_layout+/locations.new";
 import { verifyAccept } from "~/utils/verify-file-accept";
+
+export const MAX_IMAGE_UPLOAD_SIZE = 1024 * 1024 * 8; // 8MB
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
 
