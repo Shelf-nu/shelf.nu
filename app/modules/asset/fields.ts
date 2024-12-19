@@ -75,6 +75,11 @@ export const ASSET_OVERVIEW_FIELDS = {
   },
 } satisfies Prisma.AssetInclude;
 
+/**
+ * Generates include fields for asset queries with optimized field selection
+ * @param params Optional parameters to customize included fields
+ * @returns Prisma include object for asset queries
+ */
 export const assetIndexFields = ({
   bookingFrom,
   bookingTo,
@@ -83,7 +88,7 @@ export const assetIndexFields = ({
   bookingFrom?: Date | null;
   bookingTo?: Date | null;
   unavailableBookingStatuses?: BookingStatus[];
-}) => {
+} = {}) => {
   const fields = {
     kit: true,
     category: true,
@@ -111,33 +116,6 @@ export const assetIndexFields = ({
         },
       },
     },
-    ...(bookingTo && bookingFrom && unavailableBookingStatuses
-      ? {
-          bookings: {
-            where: {
-              status: { in: unavailableBookingStatuses },
-              OR: [
-                {
-                  from: { lte: bookingTo },
-                  to: { gte: bookingFrom },
-                },
-                {
-                  from: { gte: bookingFrom },
-                  to: { lte: bookingTo },
-                },
-              ],
-            },
-            take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
-            select: {
-              from: true,
-              to: true,
-              status: true,
-              id: true,
-              name: true,
-            },
-          },
-        }
-      : {}),
     customFields: {
       where: {
         customField: {
@@ -158,6 +136,36 @@ export const assetIndexFields = ({
       },
     },
   } satisfies Prisma.AssetInclude;
+
+  // Conditionally add bookings if date range is provided
+  if (bookingTo && bookingFrom && unavailableBookingStatuses) {
+    return {
+      ...fields,
+      bookings: {
+        where: {
+          status: { in: unavailableBookingStatuses },
+          OR: [
+            {
+              from: { lte: bookingTo },
+              to: { gte: bookingFrom },
+            },
+            {
+              from: { gte: bookingFrom },
+              to: { lte: bookingTo },
+            },
+          ],
+        },
+        take: 1,
+        select: {
+          from: true,
+          to: true,
+          status: true,
+          id: true,
+          name: true,
+        },
+      },
+    } satisfies Prisma.AssetInclude;
+  }
 
   return fields;
 };
