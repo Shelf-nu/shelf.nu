@@ -63,7 +63,7 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
+export const MAX_IMAGE_UPLOAD_SIZE = 1024 * 1024 * 8; // 8MB
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -98,7 +98,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
     );
 
     const file = formDataFile.get("image") as File | null;

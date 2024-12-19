@@ -29,7 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./locations.new";
+import { MAX_IMAGE_UPLOAD_SIZE } from "./locations.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -109,7 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       clonedRequest,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
     );
 
     const file = formDataFile.get("image") as File | null;
