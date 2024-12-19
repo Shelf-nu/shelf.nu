@@ -61,6 +61,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           "This QR code doesn't exist or it doesn't belong to your current organization.",
         additionalData: { qrId, shouldSendNotification: false },
         label: "QR",
+        shouldBeCaptured: false,
       });
     }
 

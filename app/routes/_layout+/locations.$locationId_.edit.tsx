@@ -13,6 +13,7 @@ import { useAtomValue } from "jotai";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/atoms/file";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -29,7 +30,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -109,7 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       clonedRequest,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
     );
 
     const file = formDataFile.get("image") as File | null;

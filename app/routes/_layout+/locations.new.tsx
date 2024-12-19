@@ -13,6 +13,7 @@ import {
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/atoms/file";
 
 import Header from "~/components/layout/header";
 import {
@@ -63,8 +64,6 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
-
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -98,7 +97,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
     );
 
     const file = formDataFile.get("image") as File | null;
