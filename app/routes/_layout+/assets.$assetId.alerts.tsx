@@ -74,6 +74,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableTeamMembers({
         request,
         organizationId,
+        where: { user: { isNot: null } },
       });
 
     return json(

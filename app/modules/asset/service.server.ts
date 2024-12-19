@@ -2759,6 +2759,8 @@ export async function createAssetReminder({
   | "organizationId"
 > & { teamMembers: TeamMember["id"][] }) {
   try {
+    await validateTeamMembersForReminder(teamMembers);
+
     const assetReminder = await db.assetReminder.create({
       data: {
         name,
@@ -2777,9 +2779,29 @@ export async function createAssetReminder({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while creating asset reminder.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while creating asset reminder.",
       label,
       additionalData: { assetId, organizationId, createdById },
+    });
+  }
+}
+
+async function validateTeamMembersForReminder(teamMembers: TeamMember["id"][]) {
+  const teamMembersWithUserCount = await db.teamMember.count({
+    where: {
+      id: { in: teamMembers },
+      user: { isNot: null },
+    },
+  });
+
+  if (teamMembersWithUserCount !== teamMembers.length) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      message:
+        "Something went wrong while validating team members for reminder. Please contact support",
     });
   }
 }
@@ -2840,6 +2862,8 @@ export async function editAssetReminder({
   "id" | "name" | "message" | "alertDateTime" | "organizationId"
 > & { teamMembers: TeamMember["id"][] }) {
   try {
+    await validateTeamMembersForReminder(teamMembers);
+
     /** This will act as a validation to check if reminder exists */
     const reminder = await db.assetReminder.findFirstOrThrow({
       where: { id, organizationId },
@@ -2860,11 +2884,19 @@ export async function editAssetReminder({
 
     return updatedReminder;
   } catch (cause) {
+    let message = "Something went wrong while editing reminder.";
+
+    if (isNotFoundError(cause)) {
+      message = "Reminder not found or you are viewing in wrong organization.";
+    }
+
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
     throw new ShelfError({
       cause,
-      message: isNotFoundError(cause)
-        ? "Reminder not found or you are viewing in wrong organization."
-        : "Something went wrong while editing reminder.",
+      message,
       label,
     });
   }
