@@ -19,7 +19,12 @@ import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-e
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
+import {
+  ShelfError,
+  isZodValidationError,
+  makeShelfError,
+  notAllowedMethod,
+} from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
@@ -87,7 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
       case "POST": {
         const { email, password } = parseData(
           await request.formData(),
-          JoinFormSchema
+          JoinFormSchema.and(z.object({ testing: z.string().min(1) }))
         );
         // Block signup if domain uses SSO
         await validateNonSSOSignup(email);
@@ -118,7 +123,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(
+      cause,
+      undefined,
+      isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }
