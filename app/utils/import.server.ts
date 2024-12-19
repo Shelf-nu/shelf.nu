@@ -39,6 +39,9 @@ export function extractCSVDataFromContentImport(data: string[][]) {
         switch (keys[index]) {
           case "tags":
             return [keys[index], value.split(",").map((tag) => tag.trim())];
+          case "imageUrl":
+            // Return empty string if URL is empty/undefined, otherwise trim
+            return [keys[index], value?.trim() || ""];
           default:
             return [keys[index], value];
         }

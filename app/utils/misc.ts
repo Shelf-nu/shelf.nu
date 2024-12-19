@@ -12,3 +12,25 @@ export const isLink = (val: string) =>
 
 export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
+
+/**
+ * Validates if a string is a properly formatted URL and potentially an image URL
+ * @param url - The URL to validate
+ * @returns boolean indicating if URL is valid
+ */
+export function isValidImageUrl(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    // Check if URL has a valid protocol
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      return false;
+    }
+    // Check if URL ends with common image extensions
+    const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+    return imageExtensions.some((ext) =>
+      parsedUrl.pathname.toLowerCase().endsWith(ext)
+    );
+  } catch {
+    return false;
+  }
+}

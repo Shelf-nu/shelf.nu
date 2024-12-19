@@ -5,10 +5,11 @@ import {
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { MAX_FILE_SIZE } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import type { ErrorLabel } from "./error";
-import { ShelfError } from "./error";
+import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
 import { Logger } from "./logger";
 
@@ -145,6 +146,100 @@ export async function parseFileFormData({
       cause,
       message:
         "Something went wrong while uploading the file. Please try again or contact support.",
+      label,
+    });
+  }
+}
+
+/**
+ * Downloads and processes an image from a URL for upload
+ * @param imageUrl - URL of the image to download and process
+ * @param options - Upload configuration options
+ * @returns Processed file path after upload
+ */
+export async function uploadImageFromUrl(
+  imageUrl: string,
+  { filename, contentType, bucketName, resizeOptions }: UploadOptions
+) {
+  try {
+    // Fetch the image and validate content type
+    const response = await fetch(imageUrl).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message: "Failed to fetch image from URL",
+        additionalData: { imageUrl },
+        label,
+      });
+    });
+
+    if (!response.ok) {
+      throw new ShelfError({
+        cause: null,
+        message: "Failed to fetch image from URL",
+        additionalData: { imageUrl, status: response.status },
+        label,
+      });
+    }
+
+    const responseContentType = response.headers.get("content-type");
+    if (!responseContentType?.startsWith("image/")) {
+      throw new ShelfError({
+        cause: null,
+        message: "URL does not point to a valid image",
+        additionalData: { imageUrl, contentType: responseContentType },
+        label,
+      });
+    }
+
+    // Get the image data as blob
+    const imageBlob = await response.blob();
+    if (imageBlob.size > MAX_FILE_SIZE) {
+      throw new ShelfError({
+        cause: null,
+        message: "Image file size exceeds maximum allowed size of 8MB",
+        additionalData: { imageUrl, size: imageBlob.size },
+        label,
+      });
+    }
+
+    // Convert to AsyncIterable<Uint8Array>
+    const arrayBuffer = await imageBlob.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
+      // Legitimate await to satisfy the linter and ensure async behavior
+      await Promise.resolve();
+      yield uint8Array;
+    }
+
+    // Process image through sharp for resizing/optimization
+    const file = await cropImage(toAsyncIterable(), resizeOptions);
+
+    // Upload to Supabase
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, file, {
+        contentType,
+        upsert: true,
+        metadata: {
+          source: "url",
+          originalUrl: imageUrl,
+        },
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    return data.path;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Failed to process and upload image from URL",
+      additionalData: { imageUrl, filename, contentType, bucketName },
       label,
     });
   }

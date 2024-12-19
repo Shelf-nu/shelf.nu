@@ -221,7 +221,7 @@ export const AssetForm = ({
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
               <p className="mt-2 lg:hidden">
-                Accepts PNG, JPG or JPEG (max.4 MB)
+                Accepts PNG, JPG or JPEG (max.8 MB)
               </p>
             </div>
           </div>

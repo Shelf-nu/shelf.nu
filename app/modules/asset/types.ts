@@ -54,6 +54,7 @@ export interface CreateAssetFromContentImportPayload
   location?: string;
   custodian?: string;
   bookable?: "yes" | "no";
+  imageUrl?: string; // URL of the image to import
 }
 export interface CreateAssetFromBackupImportPayload
   extends Record<string, any> {
