@@ -2980,6 +2980,17 @@ export async function editAssetReminder({
       },
     });
 
+    /** Reschedule Reminder */
+    await cancelAssetReminderScheduler(reminder);
+    const when = new Date(alertDateTime);
+    await scheduleAssetReminder({
+      data: {
+        reminderId: reminder.id,
+        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+      },
+      when,
+    });
+
     return updatedReminder;
   } catch (cause) {
     let message = "Something went wrong while editing reminder.";
