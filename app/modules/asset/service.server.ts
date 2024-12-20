@@ -90,6 +90,10 @@ import {
   parseFilters,
   parseSortingOptions,
 } from "./query.server";
+import {
+  ASSETS_EVENT_TYPE_MAP,
+  scheduleAssetReminder,
+} from "./scheduler.server";
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,
@@ -2858,6 +2862,14 @@ export async function createAssetReminder({
           connect: teamMembers.map((id) => ({ id })),
         },
       },
+    });
+
+    await scheduleAssetReminder({
+      data: {
+        reminderId: assetReminder.id,
+        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+      },
+      when: alertDateTime,
     });
 
     return assetReminder;

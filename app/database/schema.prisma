@@ -108,18 +108,17 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody         Custody?
-  notes           Note[]
-  qrCodes         Qr[]
-  reports         ReportFound[]
-  tags            Tag[]
-  customFields    AssetCustomFieldValue[]
-  bookings        Booking[]
-  reminders       AssetReminder[]
+  custody      Custody?
+  notes        Note[]
+  qrCodes      Qr[]
+  reports      ReportFound[]
+  tags         Tag[]
+  customFields AssetCustomFieldValue[]
+  bookings     Booking[]
+  reminders    AssetReminder[]
 
   //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
 }
-
 
 enum AssetStatus {
   AVAILABLE
@@ -753,6 +752,8 @@ model AssetReminder {
   name          String
   message       String
   alertDateTime DateTime
+
+  activeSchedulerReference String?
 
   organization   Organization @relation(fields: [organizationId], references: [id])
   organizationId String

@@ -15,8 +15,8 @@ import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
 
 type AssetAlertEmailProps = {
-  user: User;
-  asset: Asset;
+  user: Pick<User, "email" | "firstName" | "lastName" | "email">;
+  asset: Pick<Asset, "id" | "title" | "mainImage" | "mainImageExpiration">;
   reminder: AssetReminder;
   workspaceName: string;
 };
