@@ -92,7 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
       case "POST": {
         const { email, password } = parseData(
           await request.formData(),
-          JoinFormSchema.and(z.object({ testing: z.string().min(1) }))
+          JoinFormSchema
         );
         // Block signup if domain uses SSO
         await validateNonSSOSignup(email);
