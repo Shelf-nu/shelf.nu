@@ -12,6 +12,7 @@ import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
+import { setReminderSchema } from "~/components/assets/reminders/set-or-edit-reminder-dialog";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -19,11 +20,13 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
+  createAssetReminder,
   deleteAsset,
   deleteOtherImages,
   getAsset,
   relinkQrCode,
 } from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -74,6 +77,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
+    /** We need teamMembers in SetReminderForm */
+    const { teamMembers, totalTeamMembers } =
+      await getPaginatedAndFilterableTeamMembers({
+        request,
+        organizationId,
+        where: {
+          user: { isNot: null },
+        },
+      });
+
     const header: HeaderData = {
       title: asset.title,
     };
@@ -88,6 +101,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           }).format(asset.createdAt),
         },
         header,
+        teamMembers,
+        totalTeamMembers,
       })
     );
   } catch (cause) {
@@ -108,12 +123,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete", "relink-qr-code"]) })
+      z.object({ intent: z.enum(["delete", "relink-qr-code", "set-reminder"]) })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
       "relink-qr-code": PermissionAction.update,
+      "set-reminder": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -174,6 +190,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
 
+      case "set-reminder": {
+        const payload = parseData(formData, setReminderSchema);
+
+        await createAssetReminder({
+          ...payload,
+          assetId: id,
+          organizationId,
+          createdById: userId,
+        });
+
+        sendNotification({
+          title: "Reminder created",
+          message: "A reminder for you asset has been created successfully.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
@@ -205,6 +241,7 @@ export default function AssetDetailsPage() {
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },
+    { to: "alerts", content: "Alerts" },
   ];
 
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type

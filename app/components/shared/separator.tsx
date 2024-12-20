@@ -15,7 +15,7 @@ const Separator = forwardRef<
       decorative={decorative}
       orientation={orientation}
       className={tw(
-        "bg-border shrink-0",
+        "shrink-0 bg-gray-100",
         orientation === "horizontal" ? "h-px w-full" : "h-full w-px",
         className
       )}
