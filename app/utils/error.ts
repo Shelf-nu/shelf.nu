@@ -209,9 +209,21 @@ export function isNotFoundError(
   );
 }
 
+/**
+ * This function is used to check if the error is a zod validation error.
+ */
+export function isZodValidationError(cause: unknown) {
+  if (!isLikeShelfError(cause)) {
+    return false;
+  }
+
+  return cause.additionalData && "validationErrors" in cause.additionalData;
+}
+
 export function makeShelfError(
   cause: unknown,
-  additionalData?: AdditionalData
+  additionalData?: AdditionalData,
+  shouldBeCaptured?: boolean
 ) {
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
@@ -221,6 +233,7 @@ export function makeShelfError(
         ...cause.additionalData,
         ...additionalData,
       },
+      shouldBeCaptured,
     });
   }
 
@@ -230,6 +243,7 @@ export function makeShelfError(
     message: "Sorry, something went wrong.",
     additionalData,
     label: "Unknown",
+    shouldBeCaptured,
   });
 }
 

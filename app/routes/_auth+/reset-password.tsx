@@ -21,7 +21,11 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import {
+  isZodValidationError,
+  makeShelfError,
+  notAllowedMethod,
+} from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
@@ -88,7 +92,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(
+      cause,
+      undefined,
+      !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }
