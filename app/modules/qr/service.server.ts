@@ -11,7 +11,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
@@ -79,6 +79,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
       status: 404,
       additionalData: { id },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -245,6 +246,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
       status: 403,
       additionalData: { qrId, organizationId },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
