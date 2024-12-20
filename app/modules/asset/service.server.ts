@@ -92,6 +92,7 @@ import {
 } from "./query.server";
 import {
   ASSETS_EVENT_TYPE_MAP,
+  cancelAssetReminderScheduler,
   scheduleAssetReminder,
 } from "./scheduler.server";
 import type {
@@ -3007,6 +3008,8 @@ export async function deleteAssetReminder({
     const deletedReminder = await db.assetReminder.delete({
       where: { id, organizationId },
     });
+
+    await cancelAssetReminderScheduler(deletedReminder);
 
     return deletedReminder;
   } catch (cause) {

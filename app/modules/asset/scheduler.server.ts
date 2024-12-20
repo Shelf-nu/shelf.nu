@@ -1,5 +1,8 @@
+import type { AssetReminder } from "@prisma/client";
+import { isBefore } from "date-fns";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 export const ASSETS_QUEUE_KEY = "assets-queue";
 
@@ -44,5 +47,34 @@ export async function scheduleAssetReminder({
       label: "Asset Scheduler",
       additionalData: { ...data, when },
     });
+  }
+}
+
+/**
+ * This function is used to cancel an asset reminder scheduler.
+ */
+export async function cancelAssetReminderScheduler(reminder: AssetReminder) {
+  try {
+    /**
+     * If the reminder is already triggered, then we don't need to cancel the scheduler.
+     */
+    if (isBefore(reminder.alertDateTime, new Date())) {
+      return;
+    }
+
+    if (!reminder.activeSchedulerReference) {
+      return;
+    }
+
+    await scheduler.cancel(reminder.activeSchedulerReference);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to cancel asset reminder scheduler",
+        additionalData: { ...reminder },
+        label: "Asset Scheduler",
+      })
+    );
   }
 }
