@@ -134,7 +134,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Reminder updated",
           message: "Your asset reminder has been updated successfully",
-          icon: { name: "trash", variant: "error" },
+          icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
 
