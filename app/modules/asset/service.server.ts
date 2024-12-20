@@ -20,6 +20,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { LRUCache } from "lru-cache";
 import type {
   SortingDirection,
   SortingOptions,
@@ -42,6 +43,7 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
+import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import {
   getFiltersFromRequest,
   setCookie,
@@ -64,10 +66,17 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import * as importImageCacheServer from "~/utils/import.image-cache.server";
+import type { CachedImage } from "~/utils/import.image-cache.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
-import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import {
+  createSignedUrl,
+  parseFileFormData,
+  uploadImageFromUrl,
+} from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
 import { assetIndexFields } from "./fields";
@@ -542,6 +551,9 @@ export async function createAsset({
   organizationId,
   valuation,
   availableToBook = true,
+  mainImage,
+  mainImageExpiration,
+  id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -554,6 +566,9 @@ export async function createAsset({
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
+  id?: Asset["id"]; // Make ID optional
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
 }) {
   try {
     /** User connection data */
@@ -598,7 +613,8 @@ export async function createAsset({
           };
 
     /** Data object we send via prisma to create Asset */
-    const data = {
+    const data: Prisma.AssetCreateInput = {
+      id: assetId, // Use provided ID if available
       title,
       description,
       user,
@@ -606,6 +622,8 @@ export async function createAsset({
       valuation,
       organization,
       availableToBook,
+      mainImage,
+      mainImageExpiration,
     };
 
     /** If a categoryId is passed, link the category to the asset. */
@@ -1565,6 +1583,10 @@ export async function fetchAssetsForExport({
   }
 }
 
+/**
+ * Creates assets from imported content, handling image URLs if provided
+ * Pre-generates IDs for consistent asset and image file naming
+ */
 export async function createAssetsFromContentImport({
   data,
   userId,
@@ -1575,48 +1597,57 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    // Create cache instance for this import operation
+    const imageCache = new LRUCache<string, CachedImage>({
+      maxSize: importImageCacheServer.MAX_CACHE_SIZE,
+      sizeCalculation: (value) => value.size,
+    });
+
     const qrCodesPerAsset = await parseQrCodesFromImportData({
       data,
       organizationId,
       userId,
     });
 
-    const kits = await createKitsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
+    // Create all required related entities
+    const [kits, categories, locations, teamMembers, tags, { customFields }] =
+      await Promise.all([
+        createKitsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createCategoriesIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createLocationsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createTeamMemberIfNotExists({
+          data,
+          organizationId,
+        }),
+        createTagsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createCustomFieldsIfNotExists({
+          data,
+          organizationId,
+          userId,
+        }),
+      ]);
 
-    const categories = await createCategoriesIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const locations = await createLocationsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const teamMembers = await createTeamMemberIfNotExists({
-      data,
-      organizationId,
-    });
-
-    const tags = await createTagsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const { customFields } = await createCustomFieldsIfNotExists({
-      data,
-      organizationId,
-      userId,
-    });
-
+    // Process assets sequentially to handle image uploads
     for (let asset of data) {
+      // Generate asset ID upfront
+      const assetId = id(LEGACY_CUID_LENGTH); // This generates our standard CUID format. We use legacy length(25 chars) so it fits with the length of IDS generated by prisma
+
       const customFieldsValues: ShelfAssetCustomFieldValueType[] =
         Object.entries(asset).reduce((res, [key, val]) => {
           if (key.startsWith("cf:") && val) {
@@ -1634,7 +1665,59 @@ export async function createAssetsFromContentImport({
           return res;
         }, [] as ShelfAssetCustomFieldValueType[]);
 
+      // Handle image URL if provided
+      let mainImage: string | undefined;
+      let mainImageExpiration: Date | undefined;
+
+      if (asset.imageUrl) {
+        try {
+          if (!isValidImageUrl(asset.imageUrl)) {
+            throw new ShelfError({
+              cause: null,
+              message: "Invalid image format. Please use .png, .jpg, or .jpeg",
+              additionalData: { url: asset.imageUrl },
+              label: "Assets",
+              shouldBeCaptured: false,
+            });
+          }
+          const filename = `${userId}/${assetId}/main-image-${dateTimeInUnix(
+            Date.now()
+          )}`;
+
+          const path = await uploadImageFromUrl(
+            asset.imageUrl,
+            {
+              filename,
+              contentType: "image/jpeg",
+              bucketName: "assets",
+              resizeOptions: {
+                width: 1200,
+                withoutEnlargement: true,
+              },
+            },
+            imageCache
+          );
+
+          if (path) {
+            mainImage = await createSignedUrl({ filename: path });
+            mainImageExpiration = oneDayFromNow();
+          }
+        } catch (cause) {
+          const isShelfError = isLikeShelfError(cause);
+
+          throw new ShelfError({
+            cause,
+            message: isShelfError
+              ? `${cause?.message} for asset: ${asset.title}`
+              : `Failed to upload image for asset ${asset.title}`,
+            additionalData: { imageUrl: asset.imageUrl, assetId },
+            label: "Assets",
+          });
+        }
+      }
+
       await createAsset({
+        id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.title === asset.title)?.qrId,
         organizationId,
         title: asset.title,
@@ -1655,6 +1738,8 @@ export async function createAssetsFromContentImport({
         valuation: asset.valuation ? +asset.valuation : null,
         customFieldsValues,
         availableToBook: asset?.bookable !== "no",
+        mainImage: mainImage || null,
+        mainImageExpiration: mainImageExpiration || null,
       });
     }
   } catch (cause) {
