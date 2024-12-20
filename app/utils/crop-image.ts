@@ -23,7 +23,7 @@ export const cropImage = async (
           withoutEnlargement: true,
         }
       )
-      .toFormat("webp")
+      .webp({ quality: 80 })
       .toBuffer();
   } catch (cause) {
     throw new ShelfError({

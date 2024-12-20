@@ -2,15 +2,20 @@ import {
   unstable_composeUploadHandlers,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
+import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { MAX_FILE_SIZE } from "./constants";
+import { MAX_IMAGE_UPLOAD_SIZE } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
-import type { ErrorLabel } from "./error";
+import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import {
+  cacheOptimizedImage,
+  type CachedImage,
+} from "./import.image-cache.server";
 import { Logger } from "./logger";
 
 const label: ErrorLabel = "File storage";
@@ -152,17 +157,69 @@ export async function parseFileFormData({
 }
 
 /**
+ * Logs an error that occurred during image upload to Supoabase
+ * @param cause
+ * @param additionalData
+ */
+function logUploadError(cause: unknown, additionalData: AdditionalData) {
+  Logger.error(
+    new ShelfError({
+      cause,
+      message: "Failed to upload image",
+      additionalData,
+      label,
+    })
+  );
+}
+
+/**
  * Downloads and processes an image from a URL for upload
- * @param imageUrl - URL of the image to download and process
- * @param options - Upload configuration options
- * @returns Processed file path after upload
+ * Implements caching of Supabase-optimized versions for repeated URLs
  */
 export async function uploadImageFromUrl(
   imageUrl: string,
-  { filename, contentType, bucketName, resizeOptions }: UploadOptions
+  { filename, contentType, bucketName, resizeOptions }: UploadOptions,
+  cache?: LRUCache<string, CachedImage>
 ) {
   try {
-    // Fetch the image and validate content type
+    let buffer: Buffer;
+    let actualContentType: string;
+
+    // Check cache first if provided
+    if (cache) {
+      const cached = cache.get(imageUrl);
+      if (cached) {
+        buffer = cached.buffer;
+        actualContentType = cached.contentType;
+
+        // Upload cached optimized version
+        const { data, error } = await getSupabaseAdmin()
+          .storage.from(bucketName)
+          .upload(filename, buffer, {
+            contentType: actualContentType,
+            upsert: true,
+            metadata: {
+              source: "url",
+              originalUrl: imageUrl,
+            },
+          });
+
+        if (error) {
+          /** Log the error so we are aware if there are some issues with uploading */
+          logUploadError(error, {
+            imageUrl,
+            filename,
+            contentType,
+            bucketName,
+          });
+
+          throw error;
+        }
+        return data.path;
+      }
+    }
+
+    // If not in cache, download the image
     const response = await fetch(imageUrl).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -181,45 +238,43 @@ export async function uploadImageFromUrl(
       });
     }
 
-    const responseContentType = response.headers.get("content-type");
-    if (!responseContentType?.startsWith("image/")) {
+    actualContentType = response.headers.get("content-type") || contentType;
+    if (!actualContentType?.startsWith("image/")) {
       throw new ShelfError({
         cause: null,
         message: "URL does not point to a valid image",
-        additionalData: { imageUrl, contentType: responseContentType },
+        additionalData: { imageUrl, contentType: actualContentType },
         label,
       });
     }
 
-    // Get the image data as blob
     const imageBlob = await response.blob();
-    if (imageBlob.size > MAX_FILE_SIZE) {
+    if (imageBlob.size > MAX_IMAGE_UPLOAD_SIZE) {
       throw new ShelfError({
         cause: null,
-        message: "Image file size exceeds maximum allowed size of 8MB",
+        message: `Image file size exceeds maximum allowed size of ${
+          MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+        }MB`,
         additionalData: { imageUrl, size: imageBlob.size },
         label,
       });
     }
 
-    // Convert to AsyncIterable<Uint8Array>
     const arrayBuffer = await imageBlob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+    buffer = Buffer.from(arrayBuffer);
 
     async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
-      // Legitimate await to satisfy the linter and ensure async behavior
       await Promise.resolve();
-      yield uint8Array;
+      yield new Uint8Array(buffer);
     }
 
-    // Process image through sharp for resizing/optimization
     const file = await cropImage(toAsyncIterable(), resizeOptions);
 
     // Upload to Supabase
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, {
-        contentType,
+        contentType: actualContentType,
         upsert: true,
         metadata: {
           source: "url",
@@ -228,7 +283,19 @@ export async function uploadImageFromUrl(
       });
 
     if (error) {
+      /** Log the error so we are aware if there are some issues with uploading */
+      logUploadError(error, {
+        imageUrl,
+        filename,
+        contentType,
+        bucketName,
+      });
       throw error;
+    }
+
+    // After successful upload, cache the optimized version if cache is provided
+    if (cache && data.path) {
+      await cacheOptimizedImage(data.path, imageUrl, cache);
     }
 
     return data.path;

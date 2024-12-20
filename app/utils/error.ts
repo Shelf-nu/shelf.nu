@@ -89,7 +89,9 @@ export type FailureReason = {
     | "Request validation"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
-    | "Environment"; // Related to the environment setup
+    | "Environment" // Related to the environment setup
+    | "Image Import"
+    | "Image Cache"; // Error related to the image import
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

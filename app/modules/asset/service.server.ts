@@ -20,6 +20,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { LRUCache } from "lru-cache";
 import type {
   SortingDirection,
   SortingOptions,
@@ -65,6 +66,8 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import * as importImageCacheServer from "~/utils/import.image-cache.server";
+import type { CachedImage } from "~/utils/import.image-cache.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { isValidImageUrl } from "~/utils/misc";
@@ -1594,6 +1597,12 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    // Create cache instance for this import operation
+    const imageCache = new LRUCache<string, CachedImage>({
+      maxSize: importImageCacheServer.MAX_CACHE_SIZE,
+      sizeCalculation: (value) => value.size,
+    });
+
     const qrCodesPerAsset = await parseQrCodesFromImportData({
       data,
       organizationId,
@@ -1675,15 +1684,19 @@ export async function createAssetsFromContentImport({
             Date.now()
           )}`;
 
-          const path = await uploadImageFromUrl(asset.imageUrl, {
-            filename,
-            contentType: "image/jpeg",
-            bucketName: "assets",
-            resizeOptions: {
-              width: 1200,
-              withoutEnlargement: true,
+          const path = await uploadImageFromUrl(
+            asset.imageUrl,
+            {
+              filename,
+              contentType: "image/jpeg",
+              bucketName: "assets",
+              resizeOptions: {
+                width: 1200,
+                withoutEnlargement: true,
+              },
             },
-          });
+            imageCache
+          );
 
           if (path) {
             mainImage = await createSignedUrl({ filename: path });
@@ -1745,6 +1758,7 @@ export async function createAssetsFromContentImport({
     });
   }
 }
+
 export async function createAssetsFromBackupImport({
   data,
   userId,

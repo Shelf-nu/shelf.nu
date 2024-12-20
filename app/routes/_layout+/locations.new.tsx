@@ -13,8 +13,6 @@ import {
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { MAX_IMAGE_UPLOAD_SIZE } from "~/atoms/file";
-
 import Header from "~/components/layout/header";
 import {
   LocationForm,
@@ -23,6 +21,7 @@ import {
 
 import { createLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
