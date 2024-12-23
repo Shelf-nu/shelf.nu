@@ -372,6 +372,7 @@ export async function validateSession(token: string) {
         cause: null,
         message: "Something went wrong while valdiating the session",
         label,
+        shouldBeCaptured: false,
       })
     );
     return false;
