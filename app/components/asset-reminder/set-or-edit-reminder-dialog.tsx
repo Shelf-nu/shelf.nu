@@ -9,7 +9,7 @@ import { Separator } from "~/components/shared/separator";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import TeamMembersSelector from "./team-members-selector";
-import { Dialog, DialogPortal } from "../../layout/dialog";
+import { Dialog, DialogPortal } from "../layout/dialog";
 
 export const setReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),

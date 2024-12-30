@@ -2,8 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import ActionsDropdown from "~/components/assets/reminders/actions-dropdown";
-import { setReminderSchema } from "~/components/assets/reminders/set-or-edit-reminder-dialog";
+import ActionsDropdown from "~/components/asset-reminder/actions-dropdown";
+import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import {

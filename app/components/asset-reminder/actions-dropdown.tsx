@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
+import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 

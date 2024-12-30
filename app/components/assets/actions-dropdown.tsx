@@ -20,8 +20,8 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
-import SetOrEditReminderDialog from "./reminders/set-or-edit-reminder-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
+import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import When from "../when/when";

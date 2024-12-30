@@ -8,11 +8,11 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
+import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
-import { setReminderSchema } from "~/components/assets/reminders/set-or-edit-reminder-dialog";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
