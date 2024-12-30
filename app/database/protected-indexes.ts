@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Configuration and utilities for protecting specific PostgreSQL indexes from being dropped during Prisma migrations.
  * This is necessary because Prisma attempts to drop certain many-to-many relationship indexes that we want to maintain.
