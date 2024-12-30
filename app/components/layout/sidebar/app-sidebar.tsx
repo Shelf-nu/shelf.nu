@@ -34,7 +34,7 @@ export default function AppSidebar(props: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarNoticeCard />
+        {state !== "collapsed" && <SidebarNoticeCard />}
         <SidebarNav className="p-0" items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>
