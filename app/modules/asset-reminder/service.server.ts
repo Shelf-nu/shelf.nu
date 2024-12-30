@@ -215,3 +215,25 @@ export async function deleteAssetReminder({
     });
   }
 }
+
+export async function getRemindersForOverviewPage({
+  assetId,
+  organizationId,
+}: {
+  assetId: AssetReminder["assetId"];
+  organizationId: AssetReminder["organizationId"];
+}) {
+  try {
+    return await db.assetReminder.findMany({
+      where: { assetId, organizationId },
+      take: 2,
+      include: ASSET_REMINDER_INCLUDE_FIELDS,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting asset alerts.",
+      label,
+    });
+  }
+}
