@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
+import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { isFormProcessing } from "~/utils/form";
 
 type DeleteReminderProps = {

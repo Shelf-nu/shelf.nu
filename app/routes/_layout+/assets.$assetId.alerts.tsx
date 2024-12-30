@@ -13,12 +13,12 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset/fields";
+import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import {
   deleteAssetReminder,
   editAssetReminder,
   getPaginatedAndFilterableReminders,
-} from "~/modules/asset/service.server";
+} from "~/modules/asset-reminder/service.server";
 import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";

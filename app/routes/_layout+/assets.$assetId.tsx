@@ -20,12 +20,12 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
-  createAssetReminder,
   deleteAsset,
   deleteOtherImages,
   getAsset,
   relinkQrCode,
 } from "~/modules/asset/service.server";
+import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
