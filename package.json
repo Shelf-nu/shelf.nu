@@ -6,7 +6,7 @@
   "scripts": {
     "build": "NODE_ENV=production remix vite:build",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
-    "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
+    "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed && tsx app/database/post-migration.ts",
     "db:generate-type": "prisma generate",
     "db:deploy": "prisma migrate deploy",
     "db:deploy-migration": "prisma migrate deploy && prisma generate",
