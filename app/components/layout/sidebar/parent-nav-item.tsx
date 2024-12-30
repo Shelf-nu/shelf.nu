@@ -36,7 +36,7 @@ export default function ParentNavItem({
   tooltip,
   closeIfMobile,
 }: ParentNavItemProps) {
-  const { open } = useSidebar();
+  const { state, isMobile } = useSidebar();
   const navigate = useNavigate();
   const isAnyChildActive = useIsAnyRouteActive(
     route.children.map((child) => child.to)
@@ -49,10 +49,12 @@ export default function ParentNavItem({
   );
 
   function handleClick() {
-    if (!open) {
-      navigate(firstChildRoute.to);
+    if (!isMobile) {
+      if (state === "collapsed") {
+        navigate(firstChildRoute.to);
+      }
+      closeIfMobile && closeIfMobile();
     }
-    closeIfMobile && closeIfMobile();
   }
 
   return (
