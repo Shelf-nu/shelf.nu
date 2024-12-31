@@ -101,7 +101,7 @@ export const ImportContent = () => (
           <b>multiline text</b>
         </li>
         <li>
-          <b>date</b> - must be in <b>mm/dd/yyyy</b> format
+          <b>date</b> - must be in <b>YYYY-MM-DD</b> format
         </li>
       </ul>
       If no type is mentioned <b>"text"</b> is used as default type.
@@ -200,7 +200,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
           <Button
             title={"Confirm asset import"}
             disabled={!selectedFile}
-            className="mt-4"
+            className="my-4"
           >
             Confirm asset import
           </Button>

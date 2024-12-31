@@ -101,7 +101,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      excludeSearchFromView: true,
     });
 
     const modelName = {

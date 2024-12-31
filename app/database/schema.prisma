@@ -6,7 +6,7 @@ datasource db {
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["views", "fullTextSearch"]
+  previewFeatures = ["fullTextSearch"]
 }
 
 model Image {
@@ -113,23 +113,22 @@ model Asset {
   reports         ReportFound[]
   tags            Tag[]
   customFields    AssetCustomFieldValue[]
-  assetSearchView AssetSearchView?
   bookings        Booking[]
 
-  //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
+  
+  // Special GIN index for optimization of simple search queries
+  @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
+
+  // Indexes for optimization of queries
+  @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
+  @@index([status, organizationId], name: "Asset_status_organizationId_idx")
+  @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
+  @@index([valuation, organizationId], name: "Asset_valuation_organizationId_idx")
+  @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
+  @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
+  @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
 }
 
-view AssetSearchView {
-  id           String @id @default(cuid())
-  searchVector String
-
-  // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id])
-  assetId String @unique
-
-  // Datetime
-  createdAt DateTime @default(now())
-}
 
 enum AssetStatus {
   AVAILABLE
@@ -274,6 +273,8 @@ model Qr {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   scans     Scan[]
+
+  @@index([assetId], name: "Qr_assetId_idx")
 }
 
 model PrintBatch {
@@ -400,6 +401,9 @@ model TeamMember {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
   bookings  Booking[]
+  
+  // Special GIN index for optimization of simple search queries
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 model Custody {
@@ -414,6 +418,8 @@ model Custody {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
 }
 
 model Organization {
@@ -597,6 +603,8 @@ model AssetCustomFieldValue {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
 }
 
 enum Currency {
