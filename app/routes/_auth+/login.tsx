@@ -25,6 +25,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import {
+  isLikeShelfError,
   isZodValidationError,
   makeShelfError,
   notAllowedMethod,
@@ -106,7 +107,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const reason = makeShelfError(
       cause,
       undefined,
-      !isZodValidationError(cause)
+      isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isZodValidationError(cause)
     );
     return json(error(reason), { status: reason.status });
   }
