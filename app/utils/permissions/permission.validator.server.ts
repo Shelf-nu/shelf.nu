@@ -82,6 +82,7 @@ export const validatePermission = async (props: PermissionCheckProps) => {
       additionalData: { ...props },
       status: 403,
       label: "Permission",
+      shouldBeCaptured: false,
     });
   }
   return true;
