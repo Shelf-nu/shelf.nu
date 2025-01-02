@@ -6,6 +6,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -18,6 +19,8 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const payload = await request.text();
     const sig = request.headers.get("stripe-signature") as string;
+
+    const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
 
     const event = stripe.webhooks.constructEvent(
       payload,
@@ -56,6 +59,11 @@ export async function action({ request }: ActionFunctionArgs) {
         /* get the string with the customer id */
         const customerId = subscription.customer as string;
 
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
+
         const tierId = product?.metadata?.shelf_tier;
 
         if (!tierId) {
@@ -92,6 +100,11 @@ export async function action({ request }: ActionFunctionArgs) {
       case "customer.subscription.created": {
         const { subscription, customerId, tierId } =
           await getDataFromStripeEvent(event);
+
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
 
         if (!tierId) {
           throw new ShelfError({
@@ -141,6 +154,11 @@ export async function action({ request }: ActionFunctionArgs) {
         const { subscription, customerId, tierId } =
           await getDataFromStripeEvent(event);
 
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
+
         if (!tierId) {
           throw new ShelfError({
             cause: null,
@@ -179,6 +197,11 @@ export async function action({ request }: ActionFunctionArgs) {
       case "customer.subscription.updated": {
         const { subscription, customerId, tierId } =
           await getDataFromStripeEvent(event);
+
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
 
         if (!tierId) {
           throw new ShelfError({
@@ -222,6 +245,11 @@ export async function action({ request }: ActionFunctionArgs) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
+
         await db.user
           .update({
             where: { customerId },
@@ -246,6 +274,11 @@ export async function action({ request }: ActionFunctionArgs) {
         // Occurs three days before the trial period of a subscription is scheduled to end.
         const { customerId, tierId, subscription } =
           await getDataFromStripeEvent(event);
+
+        /** We don't have to do anything in case if the user is custom install. */
+        if (customInstallUsers.includes(customerId)) {
+          return new Response(null, { status: 200 });
+        }
 
         if (!tierId) {
           throw new ShelfError({
