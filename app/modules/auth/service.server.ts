@@ -362,6 +362,7 @@ export async function validateSession(token: string) {
           cause: null,
           message: "Refresh token is invalid or has been revoked",
           label,
+          shouldBeCaptured: false,
         })
       );
     }
