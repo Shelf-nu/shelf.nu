@@ -243,7 +243,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
       message:
         "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
       title: "QR code not found",
-      status: 403,
+      status: 404,
       additionalData: { qrId, organizationId },
       label,
       shouldBeCaptured: !isNotFoundError(cause),

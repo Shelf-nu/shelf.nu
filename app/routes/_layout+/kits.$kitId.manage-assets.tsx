@@ -274,6 +274,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: "Cannot add unavailable asset in a kit.",
         additionalData: { userId, kitId },
         label: "Kit",
+        shouldBeCaptured: false,
       });
     }
 
