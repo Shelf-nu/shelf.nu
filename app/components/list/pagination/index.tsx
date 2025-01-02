@@ -20,6 +20,9 @@ export const Pagination = ({ className }: { className?: string }) => {
     totalItems,
     perPage,
   } = usePagination();
+
+  const total = Math.ceil(totalPages) || Math.ceil(totalItems / perPage);
+
   return (
     <div
       className={tw(
@@ -61,7 +64,7 @@ export const Pagination = ({ className }: { className?: string }) => {
             of
           </span>
           <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
-            {Math.ceil(totalPages) || Math.ceil(totalItems / perPage)}
+            {total === 0 ? 1 : total}
           </span>
         </div>
 
