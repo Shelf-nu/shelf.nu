@@ -227,7 +227,7 @@ export function isZodValidationError(cause: unknown) {
 export function makeShelfError(
   cause: unknown,
   additionalData?: AdditionalData,
-  shouldBeCaptured?: boolean
+  shouldBeCaptured: boolean = true
 ) {
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
@@ -237,7 +237,7 @@ export function makeShelfError(
         ...cause.additionalData,
         ...additionalData,
       },
-      shouldBeCaptured,
+      shouldBeCaptured: cause.shouldBeCaptured || shouldBeCaptured,
     });
   }
 

@@ -121,6 +121,7 @@ export async function getLocation(
         },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
@@ -134,7 +135,9 @@ export async function getLocation(
         ...(isLikeShelfError(cause) ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
