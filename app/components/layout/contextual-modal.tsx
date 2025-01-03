@@ -32,7 +32,7 @@ const Dialog = ({
       <dialog className="dialog" open={true}>
         <div
           className={tw(
-            " relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
+            "relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
             noScroll ? "md:h-[85vh]" : "md:overflow-y-auto"
           )}
         >

@@ -131,6 +131,7 @@ export async function getTeamMembers(params: {
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
+  where?: Prisma.TeamMemberWhereInput;
 }) {
   const { organizationId, page = 1, perPage = 8, search } = params;
 
@@ -142,6 +143,7 @@ export async function getTeamMembers(params: {
     let where: Prisma.TeamMemberWhereInput = {
       deletedAt: null,
       organizationId,
+      ...params.where,
     };
 
     /** If the search string exists, add it to the where object */
@@ -161,6 +163,14 @@ export async function getTeamMembers(params: {
         orderBy: { createdAt: "desc" },
         include: {
           custodies: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+            },
+          },
         },
       }),
 
@@ -182,9 +192,11 @@ export async function getTeamMembers(params: {
 export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
+  where,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
+  where?: Prisma.TeamMemberWhereInput;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -198,6 +210,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
       page,
       perPage,
       search,
+      where,
     });
     const totalPages = Math.ceil(totalTeamMembers / perPage);
 

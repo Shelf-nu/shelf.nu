@@ -7,6 +7,7 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
@@ -22,6 +23,16 @@ schedulerService
         new ShelfError({
           cause,
           message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+
+    await regierAssetWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering asset workers.",
           label: "Scheduler",
         })
       );

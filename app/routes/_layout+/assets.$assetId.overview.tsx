@@ -9,6 +9,7 @@ import { json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import AssetAlertCards from "~/components/assets/asset-alert-cards";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -33,6 +34,7 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
@@ -119,6 +121,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
+    const alerts = await getRemindersForOverviewPage({
+      assetId: id,
+      organizationId,
+    });
+
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     let currentBooking: any = null;
 
@@ -164,6 +171,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         locale,
         timeZone,
         qrObj,
+        alerts,
       })
     );
   } catch (cause) {
@@ -448,6 +456,8 @@ export default function AssetOverview() {
               </fetcher.Form>
             </Card>
           </When>
+
+          <AssetAlertCards className="my-2" />
 
           {asset?.kit?.name ? (
             <Card className="my-3 py-3 md:border">
