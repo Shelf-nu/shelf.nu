@@ -57,6 +57,7 @@ export default function CategoriesInput({
                 className="py-2"
                 variant="outline"
                 type="button"
+                disabled={categories.length === 1}
                 onClick={() => {
                   categories.splice(i, 1);
                   setCategories([...categories]);
