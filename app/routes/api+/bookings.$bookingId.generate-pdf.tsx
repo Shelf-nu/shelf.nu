@@ -1,16 +1,9 @@
-import React from "react";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import ReactDOMServer from "react-dom/server";
 import { z } from "zod";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
-import {
-  fetchAllPdfRelatedData,
-  generatePdfContent,
-  getBookingAssetsCustomHeader,
-} from "~/modules/booking/pdf-helpers";
+import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getDateTimeFormat } from "~/utils/client-hints";
-import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
 import {

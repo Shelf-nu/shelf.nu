@@ -1,16 +1,14 @@
+import type { RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import type {
-  Asset,
-  Booking,
-  Organization,
-  TeamMember,
-  User,
-} from "@prisma/client";
+import type { Asset, Booking } from "@prisma/client";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 
+import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { SERVER_URL } from "~/utils/env";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import { DateS } from "../shared/date";
+import { Spinner } from "../shared/spinner";
 
 export const GenerateBookingPdf = ({
   booking,
@@ -24,15 +22,28 @@ export const GenerateBookingPdf = ({
   timeStamp: number;
 }) => {
   const totalAssets = booking.assets.length;
-  const url = `/bookings/${booking.id.toString()}/generate-pdf/booking-checklist-${new Date()
-    .toISOString()
-    .slice(0, 10)}.pdf?timeStamp=${timeStamp}`;
-
-  const handleMobileView = () => {
-    window.location.href = url;
-  };
-
+  const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [pdfMeta, setPdfMeta] = useState<PdfDbResult | null>(null);
+  const [isFetchingBookings, setIsFetchingBookings] = useState(true);
+
+  useEffect(() => {
+    if (isDialogOpen) {
+      fetch(`/api/bookings/${booking.id}/generate-pdf`)
+        .then((response) => response.json())
+        .then((data) => {
+          setPdfMeta(data.pdfMeta);
+        })
+        .finally(() => {
+          setIsFetchingBookings(false);
+        });
+    }
+  }, [booking, isDialogOpen]);
+
+  const handlePrint = useReactToPrint({
+    content: () => componentRef.current,
+    documentTitle: `booking-${booking.name}-${timeStamp}`,
+  });
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
@@ -60,18 +71,32 @@ export const GenerateBookingPdf = ({
           onClose={handleCloseDialog}
           className="h-[90vh] w-full py-0 md:h-[calc(100vh-4rem)]  md:w-[90%]"
           title={
-            <div>
+            <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
               <h3>Generate booking checklist for "{booking?.name}"</h3>
               <p>You can either preview or download the PDF.</p>
+              {!isFetchingBookings && (
+                <div className="mt-4">
+                  <Button onClick={handlePrint}>Download PDF</Button>
+                </div>
+              )}
             </div>
           }
         >
           <div className="flex h-full flex-col px-6">
             <div className="grow">
-              <BookingPDFPreview
-                isDialogOpen={isDialogOpen}
-                bookingId={booking.id}
-              />
+              {isFetchingBookings ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2">
+                  <div>Generating PDF preview...</div>
+                  <div>
+                    <Spinner />
+                  </div>
+                </div>
+              ) : (
+                <BookingPDFPreview
+                  pdfMeta={pdfMeta}
+                  componentRef={componentRef}
+                />
+              )}
             </div>
             <div className="flex justify-end gap-3 py-4">
               <Button variant="secondary" onClick={handleCloseDialog}>
@@ -89,7 +114,7 @@ export const GenerateBookingPdf = ({
         width="full"
         name="generate pdf"
         disabled={!totalAssets}
-        onClick={handleMobileView}
+        // onClick={handleMobileView}
       >
         Generate overview PDF
       </Button>
@@ -97,72 +122,49 @@ export const GenerateBookingPdf = ({
   );
 };
 
-interface PdfDbResult {
-  booking: Booking & {
-    custodianUser?: User;
-    custodianTeamMember?: TeamMember;
-  };
-  organization: Organization;
-  assets: Array<
-    Asset & {
-      kit?: { name: string } | null;
-      category?: { name: string } | null;
-      location?: { name: string } | null;
-    }
-  >;
-  assetIdToQrCodeMap: Map<string, string>;
-  from?: string;
-  to?: string;
-}
-
 const BookingPDFPreview = ({
-  bookingId,
-  isDialogOpen,
+  componentRef,
+  pdfMeta,
 }: {
-  bookingId: string;
-  isDialogOpen: boolean;
+  componentRef: RefObject<HTMLDivElement>;
+  pdfMeta: PdfDbResult | null;
 }) => {
-  const [pdfMeta, setPdfMeta] = useState<PdfDbResult | null>(null);
-  const [isFetchingBookings, setIsFetchingBookings] = useState(true);
-  const componentRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({
-    content: () => componentRef.current,
-    documentTitle: `booking-${pdfMeta?.booking.id}`,
-  });
-  useEffect(() => {
-    if (isDialogOpen) {
-      fetch(`/api/bookings/${bookingId}/generate-pdf`)
-        .then((response) => response.json())
-        .then((data) => {
-          setPdfMeta(data.pdfMeta);
-        })
-        .finally(() => {
-          setIsFetchingBookings(false);
-        });
-    }
-  }, [bookingId, isDialogOpen]);
+  if (!pdfMeta) return null;
 
-  if (!pdfMeta) {
-    return null;
-  }
   const { booking, organization, assets, assetIdToQrCodeMap } = pdfMeta;
-
   const custodianName = booking.custodianUser
     ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName} <${booking.custodianUser.email}>`
     : booking.custodianTeamMember?.name;
 
   return (
-    <>
-      <button onClick={handlePrint}>Download PDF</button>
+    <div className="border bg-gray-200 py-4">
+      <style>
+        {`@media print {
+          @page {
+            margin: 10mm;  /* Adjust margin size as needed */
+            size: A4;
+          }
+          .pdf-wrapper {
+            margin: 0;
+            padding: 0;
+          }
+
+      }`}
+      </style>
       <div
-        className="mx-auto box-border w-full max-w-[210mm] border p-4 font-inter"
+        className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
         ref={componentRef}
       >
-        <div className="mb-5">
-          <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
-          <h1 className="mt-0.5 text-xl font-medium">
-            Booking checklist for {booking?.name}
-          </h1>
+        <div className="mb-5 flex justify-between">
+          <div>
+            <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
+            <h1 className="mt-0.5 text-xl font-medium">
+              Booking checklist for {booking?.name}
+            </h1>
+          </div>
+          <div className="text-gray-500">
+            {booking.name} | <DateS date={new Date()} />
+          </div>
         </div>
 
         <section className="mb-5 mt-2.5 border border-gray-300">
@@ -194,23 +196,28 @@ const BookingPDFPreview = ({
           </div>
         </section>
 
-        <table className="w-full border-collapse rounded border border-gray-300">
+        <table className="w-full border-collapse border border-gray-300">
           <thead>
             <tr>
-              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium"></th>
-              <th className="w-[30%] border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+                #
+              </th>
+              <th className="w-20 min-w-[76px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+                Image
+              </th>
+              <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Name
               </th>
-              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Kit
               </th>
-              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Category
               </th>
-              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
@@ -218,66 +225,46 @@ const BookingPDFPreview = ({
           <tbody>
             {assets.map((asset, index) => (
               <tr key={asset.id} className="align-top">
-                <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
-                  <div className="flex items-start justify-between">
-                    <span>{index + 1}</span>
-                    <img
-                      src={
-                        asset?.mainImage ||
-                        `${SERVER_URL}/static/images/asset-placeholder.jpg`
-                      }
-                      alt="Asset"
-                      className="size-14 object-cover"
-                    />
-                  </div>
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  {index + 1}
                 </td>
-                <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <img
+                    src={
+                      asset?.mainImage ||
+                      `${SERVER_URL}/static/images/asset-placeholder.jpg`
+                    }
+                    alt="Asset"
+                    className="!size-14 object-cover"
+                  />
+                </td>
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {asset?.title}
                 </td>
-                <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {asset?.kit?.name}
                 </td>
-                <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {asset?.category?.name}
                 </td>
-                <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {asset?.location?.name}
                 </td>
-                {/* <td className="border-b border-gray-300 p-2.5 text-sm text-gray-600">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={assetIdToQrCodeMap.get(asset.id) || ""}
-                    alt="QR Code"
-                    className="size-14 object-cover"
-                  />
-                  <input type="checkbox" className="block size-5 border-none" />
-                </div>
-              </td> */}
+                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={assetIdToQrCodeMap[asset.id] || ""}
+                      alt="QR Code"
+                      className="size-14 object-cover"
+                    />
+                    <input type="checkbox" className="block size-5 border" />
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </>
+    </div>
   );
 };
-
-// Print-specific CSS
-const printStyles = `
-  @media print {
-    @page {
-      size: A4;
-      margin: 20mm;
-    }
-    
-    /* Hide everything except the PDF preview */
-    body > *:not(.pdf-preview) {
-      display: none !important;
-    }
-    
-    .pdf-preview {
-      width: 100% !important;
-      max-width: none !important;
-    }
-  }
-`;
