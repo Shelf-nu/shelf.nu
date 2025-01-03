@@ -40,7 +40,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
-    userIsNotNull: z.coerce.boolean().optional(), // To get only the teamMember which have a user associated
+    userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
@@ -94,8 +94,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
 
       where.deletedAt = modelFilters.deletedAt;
-      if (modelFilters.userIsNotNull) {
-        where.user = { isNot: null };
+      if (modelFilters.userWithAdminAndOwnerOnly) {
+        where.AND = [
+          { user: { isNot: null } },
+          {
+            user: {
+              userOrganizations: {
+                some: {
+                  AND: [
+                    { organizationId },
+                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                  ],
+                },
+              },
+            },
+          },
+        ];
       }
     } else {
       where.OR.push({

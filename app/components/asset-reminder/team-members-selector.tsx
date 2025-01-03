@@ -31,7 +31,7 @@ export default function TeamMembersSelector({
       name: "teamMember",
       queryKey: "name",
       deletedAt: null,
-      userIsNotNull: true,
+      userWithAdminAndOwnerOnly: true,
     },
     countKey: "totalTeamMembers",
     initialDataKey: "teamMembers",

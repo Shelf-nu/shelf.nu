@@ -84,7 +84,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         where: {
-          user: { isNot: null },
+          AND: [
+            { user: { isNot: null } },
+            {
+              user: {
+                userOrganizations: {
+                  some: {
+                    AND: [
+                      { organizationId },
+                      { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
         },
       });
 
