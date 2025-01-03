@@ -1,0 +1,1 @@
+ALTER TABLE "_AssetToTag" ENABLE row level security;

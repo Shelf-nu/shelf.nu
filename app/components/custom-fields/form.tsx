@@ -47,7 +47,10 @@ export const NewCustomFieldFormSchema = z.object({
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
   options: z.array(z.string()).optional(),
-  categories: z.array(z.string()).optional(),
+  categories: z
+    .array(z.string().min(1, "Please select a category"))
+    .optional()
+    .default([]),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -263,6 +266,7 @@ export const CustomFieldForm = ({
               <CategoriesInput
                 categories={categories}
                 name={(i) => zo.fields.categories(i)()}
+                error={(i) => zo.errors.categories(i)()?.message}
               />
             )}
           </FormRow>
