@@ -458,8 +458,8 @@ interface QRCodeMapParams {
 export async function getQrCodeMaps({
   assets,
   size,
-}: QRCodeMapParams): Promise<Map<string, string>> {
-  const finalMap = new Map<string, string>();
+}: QRCodeMapParams): Promise<Record<string, string>> {
+  const finalObject: Record<string, string> = {};
 
   try {
     const qrCodePromises = assets.map(async (asset) => {
@@ -473,8 +473,9 @@ export async function getQrCodeMaps({
               qr,
             })
           : null;
+
         if (qrCode?.code) {
-          finalMap.set(asset.id, qrCode?.code?.src || "");
+          finalObject[asset.id] = qrCode.code.src || "";
         }
       } catch (error) {
         // Handle the error if needed
@@ -488,7 +489,8 @@ export async function getQrCodeMaps({
     // eslint-disable-next-line no-console
     console.error("Error generating QR code maps:", err);
   }
-  return finalMap;
+
+  return finalObject;
 }
 
 /** Extracts qrCodes from data and checks their validity for import
