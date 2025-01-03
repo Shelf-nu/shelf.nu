@@ -6,6 +6,7 @@ import type { action } from "~/routes/api+/asset.refresh-main-image";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 type AssetImageProps = {
   asset: {
@@ -40,7 +41,7 @@ export const AssetImage = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const handleImageLoad = () => {
-    setIsLoading(false);
+    // setIsLoading(false);
   };
 
   const handleOpenDialog = () => {
@@ -72,16 +73,15 @@ export const AssetImage = ({
     <>
       <>
         {isLoading && (
-          <img
-            src="/static/images/asset-placeholder.jpg"
-            alt="placeholder"
+          <div
             className={tw(
-              "absolute inset-0 bg-gray-100",
+              "absolute inset-0 top-[6px] flex items-center justify-center bg-gray-100",
               "transition-opacity", // Fallback animation
               className
             )}
-            style={{ animation: "pulse 2s infinite" }} // CSS fallback
-          />
+          >
+            <Spinner className="[&_.spinner]:before:border-t-gray-400 " />
+          </div>
         )}
 
         <img
