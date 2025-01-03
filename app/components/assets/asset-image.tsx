@@ -41,7 +41,7 @@ export const AssetImage = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const handleImageLoad = () => {
-    // setIsLoading(false);
+    setIsLoading(false);
   };
 
   const handleOpenDialog = () => {
