@@ -32,7 +32,7 @@ export default function AssetAlertCards({
       <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <h5>Reminders</h5>
 
-        <Button variant="block-link-gray">
+        <Button variant="block-link-gray" className="text-gray-400">
           <EllipsisIcon />
         </Button>
       </div>
@@ -43,7 +43,7 @@ export default function AssetAlertCards({
           alert.teamMembers.length - slicedTeamMembers.length;
 
         return (
-          <div key={alert.id} className="px-4 py-3">
+          <div key={alert.id} className="border-b px-4 py-3">
             <h5 className="text-gray-700">{alert.name}</h5>
             <p className="mb-2 text-xs text-gray-600">{alert.message}</p>
 

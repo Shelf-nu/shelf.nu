@@ -6,6 +6,7 @@ import type {
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
+import { DateTime } from "luxon";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
@@ -31,7 +32,7 @@ import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, data, parseData } from "~/utils/http.server";
@@ -192,10 +193,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       case "set-reminder": {
         const payload = parseData(formData, setReminderSchema);
+        const hints = getHints(request);
+
+        const fmt = "yyyy-MM-dd'T'HH:mm";
+
+        const alertDateTime = DateTime.fromFormat(
+          formData.get("alertDateTime")!.toString()!,
+          fmt,
+          {
+            zone: hints.timeZone,
+          }
+        ).toJSDate();
 
         await createAssetReminder({
           ...payload,
           assetId: id,
+          alertDateTime,
           organizationId,
           createdById: userId,
         });

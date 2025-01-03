@@ -117,10 +117,8 @@ model Asset {
   bookings     Booking[]
   reminders    AssetReminder[]
 
-  
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
-
   // Indexes for optimization of queries
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
@@ -396,7 +394,7 @@ model TeamMember {
   deletedAt      DateTime?
   bookings       Booking[]
   assetReminders AssetReminder[]
-  
+
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
