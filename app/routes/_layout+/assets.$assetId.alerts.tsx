@@ -176,6 +176,7 @@ export default function AssetAlerts() {
         <>
           <Th>Message</Th>
           <Th>Alert Date</Th>
+          <Th>Status</Th>
           <Th>Users</Th>
         </>
       }
@@ -190,11 +191,16 @@ function ListContent({
     include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
   }> & { displayDate: string };
 }) {
+  const now = new Date();
+  const status =
+    now < new Date(item.alertDateTime) ? "Pending" : "Reminder sent";
+
   return (
     <>
       <Td>{item.name}</Td>
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <Td>{item.displayDate}</Td>
+      <Td>{status}</Td>
       <Td className="flex shrink-0 items-center">
         {item.teamMembers.map((teamMember) => (
           <TooltipProvider key={teamMember.id}>
