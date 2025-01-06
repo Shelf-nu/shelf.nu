@@ -166,6 +166,7 @@ export default function UserPage() {
                 Actions
               </Button>
             )}
+            role={userOrgRole}
           />
         </AbsolutePositionedHeaderActions>
       </When>

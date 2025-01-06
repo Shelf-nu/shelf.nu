@@ -229,6 +229,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             name={item.name}
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
             isSSO={item.sso || false}
+            role={item.role}
           />
         ) : null}
       </Td>
