@@ -6,13 +6,9 @@ import type { action } from "~/routes/api+/asset.refresh-main-image";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
-export const AssetImage = ({
-  asset,
-  className,
-  withPreview = false,
-  ...rest
-}: {
+type AssetImageProps = {
   asset: {
     assetId: Asset["id"];
     mainImage: Asset["mainImage"];
@@ -22,22 +18,31 @@ export const AssetImage = ({
   withPreview?: boolean;
   className?: string;
   rest?: HTMLImageElement;
-}) => {
+};
+
+export const AssetImage = ({
+  asset,
+  className,
+  withPreview = false,
+  ...rest
+}: AssetImageProps) => {
   const fetcher = useFetcher<typeof action>();
   const { assetId, mainImage, mainImageExpiration, alt } = asset;
   const updatedAssetMainImage = fetcher.data?.error
     ? null
     : fetcher.data?.asset.mainImage;
+
   const url =
     mainImage ||
     updatedAssetMainImage ||
     "/static/images/asset-placeholder.jpg";
+
   const [isLoading, setIsLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
   const handleImageLoad = () => {
     setIsLoading(false);
   };
-
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
@@ -70,21 +75,19 @@ export const AssetImage = ({
         {isLoading && (
           <div
             className={tw(
-              "absolute inset-0 bg-gray-100",
-              "opacity-50 transition-opacity", // Fallback animation
+              "absolute inset-0 top-[6px] flex items-center justify-center bg-gray-100",
+              "transition-opacity", // Fallback animation
               className
             )}
-            style={{ animation: "pulse 2s infinite" }} // CSS fallback
-          />
+          >
+            <Spinner className="[&_.spinner]:before:border-t-gray-400 " />
+          </div>
         )}
+
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
           src={url}
-          className={tw(
-            withPreview && "cursor-pointer",
-            // "max-w-none",
-            className
-          )}
+          className={tw(withPreview && "cursor-pointer", className)}
           alt={alt}
           onLoad={handleImageLoad}
           loading="lazy"
