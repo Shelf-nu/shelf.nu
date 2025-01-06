@@ -6,7 +6,6 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
-import { StatusFilter } from "~/components/booking/status-filter";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -75,8 +74,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     };
 
     const modelName = {
-      singular: "invite",
-      plural: "invites",
+      singular: "pending invite",
+      plural: "pending invites",
     };
 
     return {
@@ -119,17 +118,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-const STATUS_FILTERS = {
-  PENDING: "PENDING",
-  ACCEPTED: "ACCEPTED",
-};
-
 export const handle = {
   name: "settings.team.users",
   breadcrumb: () => <Link to="/settings/team">Team</Link>,
 };
 
-export default function UserTeamSetting() {
+export default function UserInvitesSetting() {
   /**
    * We have 4 cases when we should render index:
    * 1. When we are on the index route
@@ -141,6 +135,7 @@ export default function UserTeamSetting() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
   const allowedRoutes = [
     "settings.team.users", // users index
+    // "settings.team.invites", // users index
     "settings.team.users.invite-user", // invite user modal
   ];
 
@@ -164,13 +159,7 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters
-          slots={{
-            "left-of-search": (
-              <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
-            ),
-          }}
-        >
+        <Filters>
           <Button
             variant="primary"
             to="invite-user"
@@ -276,11 +265,3 @@ const TeamMemberDetails = ({
     </div>
   </div>
 );
-
-// // export const shouldRevalidate = () => false;
-
-// export default function UserTeamPage() {
-//   return <Outlet />;
-// }
-
-// export const ErrorBoundary = () => <ErrorContent />;

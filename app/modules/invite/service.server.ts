@@ -478,7 +478,7 @@ export async function getPaginatedAndFilterableSettingInvites({
       inviteWhere.status = inviteStatus;
     }
 
-    const [invites, totalItems] = await Promise.all([
+    const [invites, totalItemsGrouped] = await Promise.all([
       /** Get the invites */
       db.invite.findMany({
         where: inviteWhere,
@@ -514,8 +514,8 @@ export async function getPaginatedAndFilterableSettingInvites({
       userId: null,
       sso: false,
     }));
-
-    const totalPages = Math.ceil(totalItems.length / perPage);
+    const totalItems = totalItemsGrouped.length;
+    const totalPages = Math.ceil(totalItems / perPage);
 
     return {
       page,

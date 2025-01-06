@@ -158,16 +158,10 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters
-        // slots={{
-        //   "left-of-search": (
-        //     <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
-        //   ),
-        // }}
-        >
+        <Filters>
           <Button
             variant="primary"
-            to="invite-user"
+            to="../invites/invite-user"
             className="mt-2 w-full md:mt-0 md:w-max"
           >
             <span className=" whitespace-nowrap">Invite a user</span>

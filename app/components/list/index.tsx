@@ -103,8 +103,6 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
 ) {
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
-
-  console.log(items);
   const { singular, plural } = modelName;
   const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
@@ -228,7 +226,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               hideFirstColumn={hideFirstHeaderColumn}
             />
             <tbody>
-              {/* {items.map((item, i) => (
+              {items.map((item, i) => (
                 <ListItem
                   item={item}
                   key={`${item.id}-${i}`}
@@ -237,10 +235,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
                   <ItemComponent item={item} />
                 </ListItem>
-              ))} */}
+              ))}
             </tbody>
           </Table>
-          {/* {!customPagination && <Pagination />} */}
+          {!customPagination && <Pagination />}
         </>
       )}
       {/*  Always render it, even if no items in list. */}
