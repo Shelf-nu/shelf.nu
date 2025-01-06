@@ -171,7 +171,7 @@ export const buildCustomFieldValue = (
       case "BOOLEAN": {
         const finalValue =
           typeof raw === "string" ? raw === "yes" : Boolean(raw);
-        return { raw: finalValue, valueBoolean: finalValue };
+        return { raw, valueBoolean: finalValue };
       }
       case "DATE": {
         // Store raw date as entered by user
