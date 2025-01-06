@@ -6,6 +6,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
+import { StatusFilter } from "~/components/booking/status-filter";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -17,8 +18,8 @@ import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
 
+import { getPaginatedAndFilterableSettingInvites } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
-import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -64,7 +65,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     const { page, perPage, search, items, totalItems, totalPages } =
-      await getPaginatedAndFilterableSettingUsers({
+      await getPaginatedAndFilterableSettingInvites({
         organizationId,
         request,
       });
@@ -74,8 +75,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     };
 
     const modelName = {
-      singular: "user",
-      plural: "users",
+      singular: "invite",
+      plural: "invites",
     };
 
     return {
@@ -118,6 +119,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+const STATUS_FILTERS = {
+  PENDING: "PENDING",
+  ACCEPTED: "ACCEPTED",
+};
+
 export const handle = {
   name: "settings.team.users",
   breadcrumb: () => <Link to="/settings/team">Team</Link>,
@@ -159,11 +165,11 @@ export default function UserTeamSetting() {
 
       <ListContentWrapper>
         <Filters
-        // slots={{
-        //   "left-of-search": (
-        //     <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
-        //   ),
-        // }}
+          slots={{
+            "left-of-search": (
+              <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
+            ),
+          }}
         >
           <Button
             variant="primary"
@@ -202,13 +208,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        {item.status === "ACCEPTED" ? (
-          <Link to={`${item.id}/assets`}>
-            <TeamMemberDetails details={item} />
-          </Link>
-        ) : (
-          <TeamMemberDetails details={item} />
-        )}
+        <TeamMemberDetails details={item} />
       </Td>
       <Td>{item.custodies || 0}</Td>
       <Td>{item.role}</Td>
