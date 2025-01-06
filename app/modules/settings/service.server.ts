@@ -38,11 +38,6 @@ export async function getPaginatedAndFilterableSettingUsers({
 
   const { page, perPageParam, search } = paramsValues;
 
-  const inviteStatus =
-    searchParams.get("inviteStatus") === "ALL"
-      ? null
-      : (searchParams.get("inviteStatus") as InviteStatuses);
-
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -54,12 +49,6 @@ export async function getPaginatedAndFilterableSettingUsers({
       organizationId,
     };
 
-    const inviteWhere: Prisma.InviteWhereInput = {
-      organizationId,
-      status: InviteStatuses.PENDING,
-      inviteeEmail: { not: "" },
-    };
-
     if (search) {
       /** Either search the input against organization's user */
       userOrganizationWhere.user = {
@@ -68,86 +57,33 @@ export async function getPaginatedAndFilterableSettingUsers({
           { lastName: { contains: search, mode: "insensitive" } },
         ],
       };
-
-      /** Or search the input against input user/teamMember */
-      inviteWhere.OR = [
-        {
-          inviteeTeamMember: {
-            name: { contains: search, mode: "insensitive" },
-          },
-        },
-        {
-          inviteeUser: {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" } },
-              { lastName: { contains: search, mode: "insensitive" } },
-            ],
-          },
-        },
-      ];
     }
 
-    if (inviteStatus) {
-      Object.assign(userOrganizationWhere, {
-        user: {
-          receivedInvites: { some: { status: inviteStatus } },
-        },
-      });
-      inviteWhere.status = inviteStatus;
-    }
-
-    /**
-     * We have to get the items from two different data models, so have to
-     * divide skip and take into two part to get equal items from each model
-     */
-    const finalSkip = skip / 2;
-    const finalTake = take / 2;
-
-    const [userMembers, invites, totalUserMembers, totalInvites] =
-      await Promise.all([
-        /** Get Users */
-        db.userOrganization.findMany({
-          where: userOrganizationWhere,
-          skip: finalSkip,
-          take: finalTake,
-          select: {
-            user: {
-              include: {
-                teamMembers: {
-                  where: { organizationId },
-                  include: {
-                    _count: {
-                      select: { custodies: true },
-                    },
+    const [userMembers, totalItems] = await Promise.all([
+      /** Get Users */
+      db.userOrganization.findMany({
+        where: userOrganizationWhere,
+        skip,
+        take,
+        select: {
+          user: {
+            include: {
+              teamMembers: {
+                where: { organizationId },
+                include: {
+                  _count: {
+                    select: { custodies: true },
                   },
                 },
               },
             },
-            roles: true,
           },
-        }),
-        /** Get the invites */
-        db.invite.findMany({
-          where: inviteWhere,
-          distinct: ["inviteeEmail"],
-          skip: finalSkip,
-          take: finalTake,
-          select: {
-            id: true,
-            teamMemberId: true,
-            inviteeEmail: true,
-            status: true,
-            inviteeTeamMember: { select: { name: true } },
-            roles: true,
-          },
-        }),
-        db.userOrganization.count({ where: userOrganizationWhere }),
+          roles: true,
+        },
+      }),
 
-        db.invite.groupBy({
-          by: ["inviteeEmail"],
-          where: inviteWhere,
-        }),
-      ]);
+      db.userOrganization.count({ where: userOrganizationWhere }),
+    ]);
 
     /**
      * Create a structure for the users org members and merge it with invites
@@ -167,23 +103,6 @@ export async function getPaginatedAndFilterableSettingUsers({
         custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
       }));
 
-    /**
-     * Create the same structure for the invites
-     */
-    for (const invite of invites) {
-      teamMembersWithUserOrInvite.push({
-        id: invite.id,
-        name: invite.inviteeTeamMember.name,
-        img: "/static/images/default_pfp.jpg",
-        email: invite.inviteeEmail,
-        status: invite.status,
-        role: organizationRolesMap[invite?.roles[0]],
-        userId: null,
-        sso: false,
-      });
-    }
-
-    const totalItems = totalUserMembers + totalInvites.length;
     const totalPages = Math.ceil(totalItems / perPage);
 
     return {

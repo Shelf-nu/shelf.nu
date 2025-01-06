@@ -52,7 +52,12 @@ export default function TeamSettings() {
   const { isPersonalOrg, orgName } = useLoaderData<typeof loader>();
 
   const TABS: Item[] = [
-    ...(!isPersonalOrg ? [{ to: "users", content: "Users" }] : []),
+    ...(!isPersonalOrg
+      ? [
+          { to: "users", content: "Users" },
+          { to: "invites", content: "Invites" },
+        ]
+      : []),
     { to: "nrm", content: "Non-registered members" },
   ];
 
@@ -61,7 +66,7 @@ export default function TeamSettings() {
   return (
     <>
       <When truthy={!params.userId}>
-        <div className="h-full rounded border bg-white p-4 md:px-10 md:py-8">
+        <div className="rounded border bg-white p-4 md:px-10 md:py-8">
           <h1 className="text-[18px] font-semibold">
             {isPersonalOrg ? "Team" : `${orgName}’s team`}
           </h1>
