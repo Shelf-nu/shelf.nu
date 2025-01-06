@@ -149,6 +149,17 @@ export async function editAssetReminder({
       where: { id, organizationId },
     });
 
+    const now = new Date();
+    if (now > reminder.alertDateTime) {
+      throw new ShelfError({
+        cause: null,
+        message: "Edit is not allowed for this reminder.",
+        label: "Asset Reminder",
+        additionalData: { id },
+        shouldBeCaptured: false,
+      });
+    }
+
     const updatedReminder = await db.assetReminder.update({
       where: { id: reminder.id },
       data: {

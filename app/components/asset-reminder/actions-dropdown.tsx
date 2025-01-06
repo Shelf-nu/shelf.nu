@@ -12,6 +12,7 @@ import {
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
+import When from "../when/when";
 
 type ActionsDropdownProps = {
   reminder: Prisma.AssetReminderGetPayload<{
@@ -22,6 +23,9 @@ type ActionsDropdownProps = {
 export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
   const [isDropdownOpem, setIsDropdownOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+  const now = new Date();
+  const isPending = now < new Date(reminder.alertDateTime);
 
   return (
     <DropdownMenu
@@ -34,23 +38,25 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="order p-1.5   ">
-        <DropdownMenuItem asChild>
-          <Button
-            role="button"
-            variant="link"
-            className="cursor-pointer justify-start text-gray-700 hover:text-gray-700"
-            width="full"
-            onClick={() => {
-              setIsDropdownOpen(false);
-              setIsEditDialogOpen(true);
-            }}
-            aria-label="Edit Reminder"
-          >
-            <span className="flex items-center gap-2">
-              <PencilIcon className="size-4" /> Edit
-            </span>
-          </Button>
-        </DropdownMenuItem>
+        <When truthy={isPending}>
+          <DropdownMenuItem asChild>
+            <Button
+              role="button"
+              variant="link"
+              className="cursor-pointer justify-start text-gray-700 hover:text-gray-700"
+              width="full"
+              onClick={() => {
+                setIsDropdownOpen(false);
+                setIsEditDialogOpen(true);
+              }}
+              aria-label="Edit Reminder"
+            >
+              <span className="flex items-center gap-2">
+                <PencilIcon className="size-4" /> Edit
+              </span>
+            </Button>
+          </DropdownMenuItem>
+        </When>
         <DropdownMenuItem asChild>
           <DeleteReminder reminder={reminder} />
         </DropdownMenuItem>
