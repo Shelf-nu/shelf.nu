@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { DateTime } from "luxon";
 import { z } from "zod";
 import ActionsDropdown from "~/components/asset-reminder/actions-dropdown";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
@@ -21,7 +22,7 @@ import {
 } from "~/modules/asset-reminder/service.server";
 import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -122,12 +123,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
           setReminderSchema.extend({ id: z.string() })
         );
 
+        const hints = getHints(request);
+        const fmt = "yyyy-MM-dd'T'HH:mm";
+
+        const alertDateTime = DateTime.fromFormat(
+          formData.get("alertDateTime")!.toString()!,
+          fmt,
+          { zone: hints.timeZone }
+        ).toJSDate();
+
         await editAssetReminder({
           id: payload.id,
           name: payload.name,
           message: payload.message,
-          alertDateTime: payload.alertDateTime,
           teamMembers: payload.teamMembers,
+          alertDateTime,
           organizationId,
         });
 
