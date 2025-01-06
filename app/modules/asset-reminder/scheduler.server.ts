@@ -3,6 +3,7 @@ import { isBefore } from "date-fns";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { scheduler } from "~/utils/scheduler.server";
 
 export const ASSETS_QUEUE_KEY = "assets-queue";
 
