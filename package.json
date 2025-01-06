@@ -100,7 +100,6 @@
     "pg-boss": "^9.0.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",
-    "puppeteer": "^23.0.2",
     "qrcode-generator": "^1.4.4",
     "react": "18.2.0",
     "react-day-picker": "^8.10.0",
