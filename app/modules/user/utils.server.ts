@@ -190,7 +190,7 @@ export async function resolveUserAction(
 
       /** Find the Role based on its user friendly name */
       const role = Object.keys(organizationRolesMap).find(
-        (key) => organizationRolesMap[key] === "Base"
+        (key) => organizationRolesMap[key] === userFriendlyRole
       ) as OrganizationRoles | undefined;
 
       if (!role) {
