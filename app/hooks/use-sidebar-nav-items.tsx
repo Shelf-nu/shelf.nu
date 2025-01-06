@@ -173,6 +173,11 @@ export function useSidebarNavItems() {
           hidden: isPersonalOrganization,
         },
         {
+          title: "Pending invites",
+          to: "/settings/team/invites",
+          hidden: isPersonalOrganization,
+        },
+        {
           title: "Non-registered members",
           to: "/settings/team/nrm",
         },

@@ -55,7 +55,7 @@ export const parseCsv = (csvData: ArrayBuffer) => {
   const csv = iconv.decode(Buffer.from(csvData), encoding || "utf-8");
   const delimiter = guessDelimiters(csv, [",", ";"]);
 
-  return new Promise((resolve, reject) => {
+  return new Promise<CSVData>((resolve, reject) => {
     const parser = parse({
       encoding: "utf-8", // Set encoding to utf-8
       delimiter, // Set delimiter
@@ -95,7 +95,7 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
 
     const csvData = await csvFile.arrayBuffer();
 
-    return (await parseCsv(csvData)) as CSVData;
+    return await parseCsv(csvData);
   } catch (cause) {
     throw new ShelfError({
       cause,
