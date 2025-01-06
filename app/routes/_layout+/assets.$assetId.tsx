@@ -27,7 +27,6 @@ import {
   relinkQrCode,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
-import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -78,30 +77,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    /** We need teamMembers in SetReminderForm */
-    const { teamMembers, totalTeamMembers } =
-      await getPaginatedAndFilterableTeamMembers({
-        request,
-        organizationId,
-        where: {
-          AND: [
-            { user: { isNot: null } },
-            {
-              user: {
-                userOrganizations: {
-                  some: {
-                    AND: [
-                      { organizationId },
-                      { roles: { hasSome: ["ADMIN", "OWNER"] } },
-                    ],
-                  },
-                },
-              },
-            },
-          ],
-        },
-      });
-
     const header: HeaderData = {
       title: asset.title,
     };
@@ -116,8 +91,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           }).format(asset.createdAt),
         },
         header,
-        teamMembers,
-        totalTeamMembers,
       })
     );
   } catch (cause) {

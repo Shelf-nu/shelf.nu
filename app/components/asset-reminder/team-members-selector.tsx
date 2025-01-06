@@ -1,8 +1,9 @@
-import type { Prisma } from "@prisma/client";
+import { useMemo, useState } from "react";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
-import { useModelFilters } from "~/hooks/use-model-filters";
+import useApiQuery from "~/hooks/use-api-query";
+import type { AlertTeamMember } from "~/routes/api+/alerts.team-members";
 import { tw } from "~/utils/tw";
 
 type TeamMembersSelectorProps = {
@@ -18,24 +19,34 @@ export default function TeamMembersSelector({
   error,
   defaultValues,
 }: TeamMembersSelectorProps) {
-  const {
-    items,
-    handleSearchQueryChange,
-    searchQuery,
-    handleSelectItemChange,
-    selectedItems,
-  } = useModelFilters({
-    selectionMode: "none",
-    defaultValues,
-    model: {
-      name: "teamMember",
-      queryKey: "name",
-      deletedAt: null,
-      userWithAdminAndOwnerOnly: true,
-    },
-    countKey: "totalTeamMembers",
-    initialDataKey: "teamMembers",
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>(
+    defaultValues?.length ? defaultValues : []
+  );
+
+  const { isLoading, data } = useApiQuery<{
+    teamMembers: AlertTeamMember[];
+  }>({
+    api: "/api/alerts/team-members",
   });
+
+  const teamMembers = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    if (!searchQuery) {
+      return data.teamMembers;
+    }
+
+    const normalizedQuery = searchQuery.toLowerCase().trim();
+    return data.teamMembers.filter(
+      (tm) =>
+        tm.name.toLowerCase().includes(normalizedQuery) ||
+        tm.user?.firstName?.toLowerCase().includes(normalizedQuery) ||
+        tm.user?.lastName?.toLowerCase().includes(normalizedQuery)
+    );
+  }, [data, searchQuery]);
 
   return (
     <div
@@ -49,7 +60,9 @@ export default function TeamMembersSelector({
           placeholder="Find team members"
           className="flex-1 border-none p-0 focus:border-none focus:ring-0"
           value={searchQuery}
-          onChange={handleSearchQueryChange}
+          onChange={(event) => {
+            setSearchQuery(event.target.value);
+          }}
         />
       </div>
       <When truthy={!!error}>
@@ -58,7 +71,7 @@ export default function TeamMembersSelector({
 
       <Separator />
 
-      {selectedItems.map((item, i) => (
+      {selectedTeamMembers.map((item, i) => (
         <input
           key={item}
           type="hidden"
@@ -67,41 +80,53 @@ export default function TeamMembersSelector({
         />
       ))}
 
-      {items.map((item) => {
-        const teamMember = item as unknown as Prisma.TeamMemberGetPayload<{
-          include: { user: { select: { profilePicture: true } } };
-        }>;
-        const isTeamMemberSelected = selectedItems.includes(teamMember.id);
+      <When truthy={isLoading}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="mb-1 h-14 w-full animate-pulse bg-gray-100" />
+        ))}
+      </When>
 
-        return (
-          <div
-            key={teamMember.id}
-            className={tw(
-              "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-gray-100",
-              isTeamMemberSelected && "bg-gray-100"
-            )}
-            onClick={() => {
-              handleSelectItemChange(teamMember.id);
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <img
-                className="size-6 rounded-sm"
-                alt={`${teamMember.name}'s img`}
-                src={
-                  teamMember.user?.profilePicture ??
-                  "/static/images/default_pfp.jpg"
-                }
-              />
-              <p className="font-medium">{teamMember.name}</p>
+      <When truthy={!isLoading}>
+        {teamMembers.map((teamMember) => {
+          const isTeamMemberSelected = selectedTeamMembers.includes(
+            teamMember.id
+          );
+
+          return (
+            <div
+              key={teamMember.id}
+              className={tw(
+                "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-gray-100",
+                isTeamMemberSelected && "bg-gray-100"
+              )}
+              onClick={() => {
+                setSelectedTeamMembers((prev) => {
+                  if (prev.includes(teamMember.id)) {
+                    return prev.filter((tm) => tm !== teamMember.id);
+                  }
+                  return [...prev, teamMember.id];
+                });
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <img
+                  className="size-6 rounded-sm"
+                  alt={`${teamMember.name}'s img`}
+                  src={
+                    teamMember.user?.profilePicture ??
+                    "/static/images/default_pfp.jpg"
+                  }
+                />
+                <p className="font-medium">{teamMember.name}</p>
+              </div>
+
+              <When truthy={isTeamMemberSelected}>
+                <CheckIcon className="size-4 text-primary" />
+              </When>
             </div>
-
-            <When truthy={isTeamMemberSelected}>
-              <CheckIcon className="size-4 text-primary" />
-            </When>
-          </div>
-        );
-      })}
+          );
+        })}
+      </When>
     </div>
   );
 }
