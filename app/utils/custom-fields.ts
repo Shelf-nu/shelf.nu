@@ -169,7 +169,7 @@ export const buildCustomFieldValue = (
 
     switch (def.type) {
       case "BOOLEAN":
-        return { raw, valueBoolean: Boolean(raw) };
+        return { raw, valueBoolean: raw === "yes" };
       case "DATE": {
         // Store raw date as entered by user
         // But format valueDate as ISO string with UTC midnight to satisfy DB constraint
