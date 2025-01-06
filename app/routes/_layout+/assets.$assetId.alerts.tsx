@@ -2,11 +2,13 @@ import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { DateTime } from "luxon";
+import colors from "tailwindcss/colors";
 import { z } from "zod";
 import ActionsDropdown from "~/components/asset-reminder/actions-dropdown";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
+import { Badge } from "~/components/shared/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -210,7 +212,15 @@ function ListContent({
       <Td>{item.name}</Td>
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <Td>{item.displayDate}</Td>
-      <Td>{status}</Td>
+      <Td>
+        <Badge
+          color={
+            status === "Pending" ? colors.yellow["500"] : colors.green["500"]
+          }
+        >
+          {status}
+        </Badge>
+      </Td>
       <Td className="flex shrink-0 items-center">
         {item.teamMembers.map((teamMember) => (
           <TooltipProvider key={teamMember.id}>
