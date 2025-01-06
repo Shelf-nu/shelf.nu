@@ -77,7 +77,7 @@ export default function AssetCustomFields({
           name={`cf-${field.id}`}
           disabled={disabled}
           defaultChecked={
-            getCustomFieldVal(field.id) === "true" || field.required
+            getCustomFieldVal(field.id) === "Yes" || field.required
           }
         />
         <label className="font-medium text-gray-700 lg:hidden">

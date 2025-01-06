@@ -1,8 +1,10 @@
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
+import { InviteStatuses } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { data, parseData } from "~/utils/http.server";
@@ -169,12 +171,14 @@ export async function resolveUserAction(
         email: inviteeEmail,
         name: teamMemberName,
         teamMemberId,
+        userFriendlyRole,
       } = parseData(
         formData,
         z.object({
           email: z.string(),
           name: z.string(),
           teamMemberId: z.string(),
+          userFriendlyRole: z.string(),
         }),
         {
           additionalData: {
@@ -184,15 +188,53 @@ export async function resolveUserAction(
         }
       );
 
-      const invite = await createInvite({
-        organizationId,
-        inviteeEmail,
-        teamMemberName,
-        teamMemberId,
-        inviterId: userId,
-        roles: [OrganizationRoles.ADMIN],
-        userId,
-      });
+      /** Find the Role based on its user friendly name */
+      const role = Object.keys(organizationRolesMap).find(
+        (key) => organizationRolesMap[key] === userFriendlyRole
+      ) as OrganizationRoles | undefined;
+
+      if (!role) {
+        throw new ShelfError({
+          cause: null,
+          message: "Invalid role",
+          additionalData: { userFriendlyRole },
+          label: "Team",
+        });
+      }
+
+      /** Invalidate all previous invites for current user for current organization */
+
+      const [_invalidatedInvites, invite] = await Promise.all([
+        await db.invite
+          .updateMany({
+            where: {
+              inviteeEmail,
+              organizationId,
+            },
+            data: {
+              status: InviteStatuses.INVALIDATED,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to invalidate previous invites",
+              additionalData: { userId, organizationId, inviteeEmail },
+              label: "Team",
+            });
+          }),
+
+        /** Create a new invite, based on the prev invite's role */
+        createInvite({
+          organizationId,
+          inviteeEmail,
+          teamMemberName,
+          teamMemberId,
+          inviterId: userId,
+          roles: [role],
+          userId,
+        }),
+      ]);
 
       if (invite) {
         sendNotification({

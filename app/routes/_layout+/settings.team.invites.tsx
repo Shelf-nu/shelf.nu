@@ -17,8 +17,8 @@ import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
 
+import { getPaginatedAndFilterableSettingInvites } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
-import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -64,7 +64,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     const { page, perPage, search, items, totalItems, totalPages } =
-      await getPaginatedAndFilterableSettingUsers({
+      await getPaginatedAndFilterableSettingInvites({
         organizationId,
         request,
       });
@@ -74,8 +74,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     };
 
     const modelName = {
-      singular: "user",
-      plural: "users",
+      singular: "pending invite",
+      plural: "pending invites",
     };
 
     return {
@@ -123,7 +123,7 @@ export const handle = {
   breadcrumb: () => <Link to="/settings/team">Team</Link>,
 };
 
-export default function UserTeamSetting() {
+export default function UserInvitesSetting() {
   /**
    * We have 4 cases when we should render index:
    * 1. When we are on the index route
@@ -135,6 +135,7 @@ export default function UserTeamSetting() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
   const allowedRoutes = [
     "settings.team.users", // users index
+    "settings.team.invites", // users index
     "settings.team.users.invite-user", // invite user modal
   ];
 
@@ -161,7 +162,7 @@ export default function UserTeamSetting() {
         <Filters>
           <Button
             variant="primary"
-            to="../invites/invite-user"
+            to="invite-user"
             className="mt-2 w-full md:mt-0 md:w-max"
           >
             <span className=" whitespace-nowrap">Invite a user</span>
@@ -196,13 +197,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        {item.status === "ACCEPTED" ? (
-          <Link to={`${item.id}/assets`}>
-            <TeamMemberDetails details={item} />
-          </Link>
-        ) : (
-          <TeamMemberDetails details={item} />
-        )}
+        <TeamMemberDetails details={item} />
       </Td>
       <Td>{item.custodies || 0}</Td>
       <Td>{item.role}</Td>
@@ -270,11 +265,3 @@ const TeamMemberDetails = ({
     </div>
   </div>
 );
-
-// // export const shouldRevalidate = () => false;
-
-// export default function UserTeamPage() {
-//   return <Outlet />;
-// }
-
-// export const ErrorBoundary = () => <ErrorContent />;

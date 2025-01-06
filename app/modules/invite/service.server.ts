@@ -1,15 +1,19 @@
-import type { Invite, TeamMember } from "@prisma/client";
+import type { Invite, Organization, Prisma, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
-import type { AppLoadContext } from "@remix-run/node";
+import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
+import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
 import { createTeamMember } from "../team-member/service.server";
@@ -416,6 +420,117 @@ export async function checkUserAndInviteMatch({
       message:
         "Your user's email doesn't match with the invited user so you cannot accept the invite. If you already have a user, make sure that you are logged in with the correct user. If the issue persists, feel free to contact support.",
       label: "Invite",
+    });
+  }
+}
+
+/** Gets invites for settings.team.invites page */
+export async function getPaginatedAndFilterableSettingInvites({
+  organizationId,
+  request,
+}: {
+  organizationId: Organization["id"];
+  request: LoaderFunctionArgs["request"];
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+
+  const { page, perPageParam, search } = paramsValues;
+
+  const inviteStatus =
+    searchParams.get("inviteStatus") === "ALL"
+      ? null
+      : (searchParams.get("inviteStatus") as InviteStatuses);
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    const inviteWhere: Prisma.InviteWhereInput = {
+      organizationId,
+      status: InviteStatuses.PENDING,
+      inviteeEmail: { not: "" },
+    };
+
+    if (search) {
+      /** Or search the input against input user/teamMember */
+      inviteWhere.OR = [
+        {
+          inviteeTeamMember: {
+            name: { contains: search, mode: "insensitive" },
+          },
+        },
+        {
+          inviteeUser: {
+            OR: [
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    if (inviteStatus) {
+      inviteWhere.status = inviteStatus;
+    }
+
+    const [invites, totalItemsGrouped] = await Promise.all([
+      /** Get the invites */
+      db.invite.findMany({
+        where: inviteWhere,
+        distinct: ["inviteeEmail"],
+        skip,
+        take,
+        select: {
+          id: true,
+          teamMemberId: true,
+          inviteeEmail: true,
+          status: true,
+          inviteeTeamMember: { select: { name: true } },
+          roles: true,
+        },
+      }),
+
+      db.invite.groupBy({
+        by: ["inviteeEmail"],
+        where: inviteWhere,
+      }),
+    ]);
+
+    /**
+     * Create the same structure for the invites
+     */
+    const items = invites.map((invite) => ({
+      id: invite.id,
+      name: invite.inviteeTeamMember.name,
+      img: "/static/images/default_pfp.jpg",
+      email: invite.inviteeEmail,
+      status: invite.status,
+      role: organizationRolesMap[invite?.roles[0]],
+      userId: null,
+      sso: false,
+    }));
+    const totalItems = totalItemsGrouped.length;
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return {
+      page,
+      perPage,
+      totalPages,
+      search,
+      items,
+      totalItems,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting registered users",
+      additionalData: { organizationId },
+      label,
     });
   }
 }
