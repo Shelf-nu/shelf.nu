@@ -135,7 +135,7 @@ export default function UserTeamSetting() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
   const allowedRoutes = [
     "settings.team.users", // users index
-    "settings.team.users.invite-user", // invite user modal
+    "settings.team.invites.invite-user", // invite user modal
   ];
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);

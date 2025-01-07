@@ -52,7 +52,7 @@ export function TeamMembersActionsDropdown({
         <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
           <Button
             icon="send"
-            to={`/settings/team/users/invite-user?teamMemberId=${teamMember.id}`}
+            to={`/settings/team/invites/invite-user?teamMemberId=${teamMember.id}`}
             role="link"
             variant="link"
             width="full"
