@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
 import { ASSETS_QUEUE_KEY } from "./scheduler.server";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
