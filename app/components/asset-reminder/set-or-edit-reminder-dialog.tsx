@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { Link } from "react-router-dom";
+import { Form, useNavigation } from "@remix-run/react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -18,6 +18,7 @@ export const setReminderSchema = z.object({
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),
+  redirectTo: z.string().optional(),
 });
 
 type SetOrEditReminderDialogProps = {
@@ -33,7 +34,15 @@ export default function SetOrEditReminderDialog({
 }: SetOrEditReminderDialogProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const actionData = useActionData<{ success: boolean }>();
+
+  const pathname = useLocation().pathname;
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const redirectTo = `${pathname}${
+    searchParams.size > 0
+      ? `?${searchParams.toString()}&success=true`
+      : "?success=true"
+  }`;
 
   const zo = useZorm("SetOrEditReminder", setReminderSchema);
 
@@ -41,11 +50,16 @@ export default function SetOrEditReminderDialog({
 
   useEffect(
     function handleOnSuccess() {
-      if (actionData?.success) {
+      if (searchParams.get("success") === "true") {
         onClose && onClose();
+
+        setSearchParams((prev) => {
+          prev.delete("success");
+          return prev;
+        });
       }
     },
-    [actionData, onClose]
+    [onClose, searchParams, setSearchParams]
   );
 
   return (
@@ -76,6 +90,7 @@ export default function SetOrEditReminderDialog({
               name="intent"
               value={isEdit ? "edit-reminder" : "set-reminder"}
             />
+            <input type="hidden" name="redirectTo" value={redirectTo} />
             {isEdit ? (
               <input type="hidden" name="id" value={reminder.id} />
             ) : (
