@@ -160,6 +160,7 @@ export async function signInWithSSO(domain: string) {
     // @ts-expect-error
     if (cause?.code === "sso_provider_not_found") {
       message = "No SSO provider assigned for your organization's domain";
+      shouldBeCaptured = false;
     }
 
     throw new ShelfError({

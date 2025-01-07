@@ -62,6 +62,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
+
     throw json(error(reason), { status: reason.status });
   }
 }

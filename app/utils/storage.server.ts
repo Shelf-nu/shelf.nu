@@ -226,6 +226,7 @@ export async function uploadImageFromUrl(
         message: "Failed to fetch image from URL",
         additionalData: { imageUrl },
         label,
+        shouldBeCaptured: false,
       });
     });
 
@@ -233,6 +234,7 @@ export async function uploadImageFromUrl(
       throw new ShelfError({
         cause: null,
         message: "Failed to fetch image from URL",
+        shouldBeCaptured: false,
         additionalData: { imageUrl, status: response.status },
         label,
       });
@@ -245,6 +247,7 @@ export async function uploadImageFromUrl(
         message: "URL does not point to a valid image",
         additionalData: { imageUrl, contentType: actualContentType },
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -257,6 +260,7 @@ export async function uploadImageFromUrl(
         }MB`,
         additionalData: { imageUrl, size: imageBlob.size },
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -308,6 +312,7 @@ export async function uploadImageFromUrl(
         : "Failed to process and upload image from URL",
       additionalData: { imageUrl, filename, contentType, bucketName },
       label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
     });
   }
 }

@@ -77,6 +77,7 @@ export const loader = async ({
         label: "QR",
         status: 403,
         cause: null,
+        shouldBeCaptured: false,
       });
     }
 

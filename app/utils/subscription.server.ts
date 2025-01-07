@@ -309,6 +309,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
       message: "You cannot create more workspaces with your current plan.",
       additionalData: { userId, tierLimit },
       label,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -360,6 +361,7 @@ export async function assertUserCanInviteUsersToWorkspace({
         "You cannot invite other users to a personal workspace. Please create a Team workspace.",
       status: 403,
       label,
+      shouldBeCaptured: false,
     });
   }
 }
