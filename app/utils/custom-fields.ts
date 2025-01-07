@@ -204,6 +204,7 @@ export const buildCustomFieldValue = (
           : "Invalid custom field value",
       message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: YYYY-MM-DD`,
       label: "Custom fields",
+      shouldBeCaptured: false,
     });
   }
 };

@@ -324,6 +324,7 @@ export async function upsertCustomField(
               },
             },
             label,
+            shouldBeCaptured: false,
           });
         }
         if (existingCustomField.type === "OPTION") {
