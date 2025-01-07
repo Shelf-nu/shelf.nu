@@ -1,5 +1,9 @@
 import { Roles } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -24,6 +28,7 @@ import { config } from "~/config/shelf.config";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   installPwaPromptCookie,
   initializePerPageCookieOnLayout,
@@ -136,6 +141,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw json(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ error }) => [
+  /** This will make sure that if we have an error its visible in the title of the browser tab */
+  // @ts-expect-error
+  { title: error ? appendToMetaTitle(error.data.error.title) : "" },
+];
 
 export default function App() {
   useCrisp();
