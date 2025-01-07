@@ -27,7 +27,13 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getParams,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -120,7 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "edit-reminder": {
-        const payload = parseData(
+        const { redirectTo, ...payload } = parseData(
           formData,
           setReminderSchema.extend({ id: z.string() })
         );
@@ -150,7 +156,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(safeRedirect(redirectTo));
       }
 
       case "delete-reminder": {

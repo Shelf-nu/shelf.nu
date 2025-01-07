@@ -1,5 +1,4 @@
-import { Link, useLoaderData } from "@remix-run/react";
-import { EllipsisIcon } from "lucide-react";
+import { useLoaderData } from "@remix-run/react";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";

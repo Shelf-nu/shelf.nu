@@ -79,7 +79,11 @@ function AssetAlertEmailTemplate({
       </Head>
 
       <Container
-        style={{ padding: "32px 16px", maxWidth: "100%", textAlign: "center" }}
+        style={{
+          padding: "32px 16px",
+          maxWidth: "600px",
+          textAlign: "center",
+        }}
       >
         <LogoForEmail />
 
@@ -148,7 +152,6 @@ function AssetAlertEmailTemplate({
               ...styles.button,
               textAlign: "center",
               marginBottom: "30px",
-              width: "100%",
             }}
           >
             Open asset page
@@ -158,8 +161,10 @@ function AssetAlertEmailTemplate({
             This email was sent to{" "}
             <span style={{ fontWeight: "bold" }}>{user.email}</span> because it
             is part of the Shelf workspace{" "}
-            <span style={{ fontWeight: "bold" }}>{workspaceName}</span>. If you
-            think you weren't supposed to have received this email please
+            <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
+          </Text>
+          <Text>
+            If you think you weren't supposed to have received this email please
             contact the owner of the workspace.
           </Text>
 
