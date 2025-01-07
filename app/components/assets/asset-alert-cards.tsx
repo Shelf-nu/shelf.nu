@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { EllipsisIcon } from "lucide-react";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
@@ -17,11 +17,8 @@ type AssetAlertCardsProps = {
   style?: React.CSSProperties;
 };
 
-export default function AssetAlertCards({
-  className,
-  style,
-}: AssetAlertCardsProps) {
-  const { alerts } = useLoaderData<typeof loader>();
+export function AssetAlertCards({ className, style }: AssetAlertCardsProps) {
+  const { asset, alerts } = useLoaderData<typeof loader>();
 
   if (!alerts.length) {
     return;
@@ -32,8 +29,8 @@ export default function AssetAlertCards({
       <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <h5>Reminders</h5>
 
-        <Button variant="block-link-gray" className="text-gray-400">
-          <EllipsisIcon />
+        <Button to={`/assets/${asset.id}/alerts`} variant="link">
+          View all
         </Button>
       </div>
 

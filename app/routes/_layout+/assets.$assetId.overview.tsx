@@ -9,7 +9,7 @@ import { json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import AssetAlertCards from "~/components/assets/asset-alert-cards";
+import { AssetAlertCards } from "~/components/assets/asset-alert-cards";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";

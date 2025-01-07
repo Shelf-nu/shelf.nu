@@ -57,7 +57,6 @@ import {
   AvailableIcon,
   UnavailableIcon,
   ChangeIcon,
-  AlarmClockIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -121,8 +120,7 @@ export type IconType =
   | "available"
   | "unavailable"
   | "change"
-  | "booking-exist"
-  | "alarm-clock";
+  | "booking-exist";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -189,7 +187,6 @@ export const iconsMap: IconsMap = {
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
-  "alarm-clock": <AlarmClockIcon />,
 };
 
 export default iconsMap;

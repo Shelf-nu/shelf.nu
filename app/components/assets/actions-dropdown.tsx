@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
+import { AlarmClockIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -224,7 +225,7 @@ const ConditionalActionsDropdown = () => {
                     }}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon="alarm-clock" />
+                      <AlarmClockIcon className="size-5" />
                       Set reminder
                     </span>
                   </Button>
