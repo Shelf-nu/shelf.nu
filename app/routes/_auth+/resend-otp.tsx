@@ -32,7 +32,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    //@ts-expect-error
+    const isRateLimitError = cause.code === "over_email_send_rate_limit";
+
+    const reason = makeShelfError(cause, {}, !isRateLimitError);
     return json(error(reason), { status: reason.status });
   }
 }

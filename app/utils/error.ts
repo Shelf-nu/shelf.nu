@@ -235,7 +235,8 @@ export function makeShelfError(
         ...cause.additionalData,
         ...additionalData,
       },
-      shouldBeCaptured: cause.shouldBeCaptured || shouldBeCaptured,
+      shouldBeCaptured:
+        "shouldBeCaptured" in cause ? cause.shouldBeCaptured : shouldBeCaptured,
     });
   }
 
@@ -312,7 +313,7 @@ export function maybeUniqueConstraintViolation(
   options?: Options
 ) {
   let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
-  let shouldBeCaptured = true;
+  let shouldBeCaptured = false;
   const validationErrors = {} as ValidationError<any>;
 
   if (

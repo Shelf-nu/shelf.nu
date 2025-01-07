@@ -46,6 +46,7 @@ async function validateInvite(
         "This email domain uses SCIM SSO for this workspace. Users are managed automatically through your identity provider.",
       label: "Invite",
       status: 400,
+      shouldBeCaptured: false,
     });
   }
 
@@ -59,6 +60,7 @@ async function validateInvite(
           "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
         label: "Invite",
         status: 400,
+        shouldBeCaptured: false,
       });
     }
   }
