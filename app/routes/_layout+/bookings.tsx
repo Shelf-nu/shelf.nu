@@ -7,7 +7,9 @@ import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
+import { ChevronRight } from "~/components/icons/library";
 
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
@@ -19,10 +21,13 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -38,7 +43,9 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -104,18 +111,31 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       };
     }
 
-    const { bookings, bookingCount } = await getBookings({
-      organizationId,
-      page,
-      perPage,
-      search,
-      userId: authSession?.userId,
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: authSession?.userId,
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
+        }),
+        ...selfServiceData,
       }),
-      ...selfServiceData,
-    });
+
+      // team members/custodian
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        // selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        userId,
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -161,6 +181,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        ...teamMembersData,
       }),
       {
         headers: [
@@ -211,7 +232,7 @@ export default function BookingsIndexPage({
   const navigate = useNavigate();
   const matches = useMatches();
 
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -270,7 +291,38 @@ export default function BookingsIndexPage({
           slots={{
             "left-of-search": <StatusFilter statusItems={BookingStatus} />,
           }}
-        />
+        >
+          <When
+            truthy={userHasPermission({
+              roles,
+              entity: PermissionEntity.custody,
+              action: PermissionAction.read,
+            })}
+          >
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+              }}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+              withoutValueItem={{
+                id: "without-custody",
+                name: "Without custody",
+              }}
+            />
+          </When>
+        </Filters>
         <List
           bulkActions={
             disableBulkActions || isBaseOrSelfService ? undefined : (
