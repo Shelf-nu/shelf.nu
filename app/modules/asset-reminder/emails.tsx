@@ -85,7 +85,15 @@ function AssetAlertEmailTemplate({
           textAlign: "center",
         }}
       >
-        <LogoForEmail />
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <LogoForEmail />
+        </div>
 
         <div style={{ paddingTop: "8px" }}>
           <Text style={styles.h1}>Asset Reminder Notice</Text>
@@ -168,7 +176,15 @@ function AssetAlertEmailTemplate({
             contact the owner of the workspace.
           </Text>
 
-          <LogoForEmail />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <LogoForEmail />
+          </div>
         </div>
       </Container>
     </Html>
