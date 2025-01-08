@@ -106,6 +106,7 @@ export async function getPaginatedAndFilterableReminders({
         take,
         skip,
         include: ASSET_REMINDER_INCLUDE_FIELDS,
+        orderBy: { alertDateTime: "desc" },
       }),
       db.assetReminder.count({
         where: { assetId, organizationId },
@@ -235,11 +236,12 @@ export async function getRemindersForOverviewPage({
   organizationId: AssetReminder["organizationId"];
 }) {
   try {
-    return await db.assetReminder.findMany({
+    const reminders = await db.assetReminder.findMany({
       where: { assetId, organizationId },
       take: 2,
       include: ASSET_REMINDER_INCLUDE_FIELDS,
     });
+    return reminders;
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -28,7 +28,11 @@ export function AssetAlertCards({ className, style }: AssetAlertCardsProps) {
       <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <h5>Reminders</h5>
 
-        <Button to={`/assets/${asset.id}/alerts`} variant="link">
+        <Button
+          to={`/assets/${asset.id}/alerts`}
+          variant="block-link-gray"
+          className="!mt-0"
+        >
           View all
         </Button>
       </div>

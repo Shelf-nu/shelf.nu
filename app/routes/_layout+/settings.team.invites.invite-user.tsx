@@ -149,7 +149,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         senderId: userId,
       });
 
-      return redirect("/settings/team/users");
+      return redirect("/settings/team/invites");
     }
 
     return json(data(null));
@@ -163,7 +163,7 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 export const handle = {
-  name: "settings.team.users.invite-user",
+  name: "settings.team.invites.invite-user",
 };
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
