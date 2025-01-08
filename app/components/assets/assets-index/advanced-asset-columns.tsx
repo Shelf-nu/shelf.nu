@@ -51,6 +51,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
+import QrIdColumn from "./qr-id-column";
 
 export function AdvancedIndexColumn({
   column,
@@ -158,8 +159,10 @@ export function AdvancedIndexColumn({
       );
 
     case "id":
-    case "qrId":
       return <TextColumn value={item[column]} />;
+
+    case "qrId":
+      return <QrIdColumn asset={item} />;
 
     case "status":
       return <StatusColumn status={item.status} />;

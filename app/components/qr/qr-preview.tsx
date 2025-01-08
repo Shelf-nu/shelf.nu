@@ -4,9 +4,11 @@ import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
+import { tw } from "~/utils/tw";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 interface ObjectType {
+  className?: string;
   item: {
     name: string;
     type: "asset" | "kit";
@@ -20,7 +22,7 @@ interface ObjectType {
   };
 }
 
-export const QrPreview = ({ qrObj, item }: ObjectType) => {
+export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
@@ -67,32 +69,35 @@ export const QrPreview = ({ qrObj, item }: ObjectType) => {
     content: () => captureDivRef.current,
   });
   return (
-    <div className="">
-      <div className="mb-4 w-auto rounded border border-solid bg-white">
-        <div className="flex w-full justify-center pt-6">
-          <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
-        </div>
-        <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
-          <Button
-            icon="download"
-            onClick={downloadQr}
-            download={`${slugify(item.name)}-${qrObj?.qr
-              ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
-            ref={downloadQrBtnRef}
-            variant="secondary"
-            className="w-full"
-          >
-            Download
-          </Button>
-          <Button
-            icon="print"
-            variant="secondary"
-            className="w-full"
-            onClick={printQr}
-          >
-            Print
-          </Button>
-        </div>
+    <div
+      className={tw(
+        "mb-4 w-auto rounded border border-solid bg-white",
+        className
+      )}
+    >
+      <div className="flex w-full justify-center pt-6">
+        <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
+      </div>
+      <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
+        <Button
+          icon="download"
+          onClick={downloadQr}
+          download={`${slugify(item.name)}-${qrObj?.qr
+            ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
+          ref={downloadQrBtnRef}
+          variant="secondary"
+          className="w-full"
+        >
+          Download
+        </Button>
+        <Button
+          icon="print"
+          variant="secondary"
+          className="w-full"
+          onClick={printQr}
+        >
+          Print
+        </Button>
       </div>
     </div>
   );
