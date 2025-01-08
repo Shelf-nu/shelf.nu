@@ -1,6 +1,9 @@
 import type { Prisma } from "@prisma/client";
 
 export const ASSET_REMINDER_INCLUDE_FIELDS = {
+  asset: {
+    select: { id: true, title: true },
+  },
   teamMembers: {
     select: {
       id: true,

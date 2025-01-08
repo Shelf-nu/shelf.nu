@@ -1,0 +1,84 @@
+import { json } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import RemindersTable from "~/components/asset-reminder/reminders-table";
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
+import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getDateTimeFormat } from "~/utils/client-hints";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.assetReminders,
+      action: PermissionAction.read,
+    });
+
+    const { page, perPage, reminders, totalPages, totalReminders } =
+      await getPaginatedAndFilterableReminders({
+        organizationId,
+        request,
+      });
+
+    const header: HeaderData = { title: "Reminders" };
+    const modelName = {
+      singular: "reminder",
+      plural: "reminders",
+    };
+
+    const assetReminders = reminders.map((reminder) => ({
+      ...reminder,
+      displayDate: getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(reminder.alertDateTime),
+    }));
+
+    return json(
+      data({
+        header,
+        modelName,
+        items: assetReminders,
+        totalItems: totalReminders,
+        page,
+        perPage,
+        totalPages,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
+
+export default function Reminders() {
+  return (
+    <>
+      <Header />
+
+      <ListContentWrapper className="mb-4">
+        <Filters />
+      </ListContentWrapper>
+
+      <RemindersTable />
+    </>
+  );
+}

@@ -1,28 +1,15 @@
-import type { Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { DateTime } from "luxon";
-import colors from "tailwindcss/colors";
 import { z } from "zod";
-import ActionsDropdown from "~/components/asset-reminder/actions-dropdown";
+import RemindersTable from "~/components/asset-reminder/reminders-table";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
-import { List } from "~/components/list";
-import { Badge } from "~/components/shared/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
-import { Td, Th } from "~/components/table";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import {
   deleteAssetReminder,
   editAssetReminder,
   getPaginatedAndFilterableReminders,
 } from "~/modules/asset-reminder/service.server";
-import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -39,7 +26,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -59,9 +45,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { reminders, totalReminders, page, perPage, totalPages } =
       await getPaginatedAndFilterableReminders({
-        assetId,
         organizationId,
         request,
+        where: { assetId },
       });
 
     const header: HeaderData = { title: "Reminders" };
@@ -78,14 +64,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }).format(reminder.alertDateTime),
     }));
 
-    /** We need teamMembers in SetReminderForm */
-    const { teamMembers, totalTeamMembers } =
-      await getPaginatedAndFilterableTeamMembers({
-        request,
-        organizationId,
-        where: { user: { isNot: null } },
-      });
-
     return json(
       data({
         header,
@@ -95,8 +73,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         page,
         perPage,
         totalPages,
-        teamMembers,
-        totalTeamMembers,
       })
     );
   } catch (cause) {
@@ -186,71 +162,5 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function AssetReminders() {
-  return (
-    <List
-      className="overflow-x-visible md:overflow-x-auto"
-      ItemComponent={ListContent}
-      headerChildren={
-        <>
-          <Th>Message</Th>
-          <Th>Alert Date</Th>
-          <Th>Status</Th>
-          <Th>Users</Th>
-        </>
-      }
-    />
-  );
-}
-
-function ListContent({
-  item,
-}: {
-  item: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }> & { displayDate: string };
-}) {
-  const now = new Date();
-  const status =
-    now < new Date(item.alertDateTime) ? "Pending" : "Reminder sent";
-
-  return (
-    <>
-      <Td>{item.name}</Td>
-      <Td className="max-w-62 md:max-w-96">{item.message}</Td>
-      <Td>{item.displayDate}</Td>
-      <Td>
-        <Badge
-          color={
-            status === "Pending" ? colors.yellow["500"] : colors.green["500"]
-          }
-        >
-          {status}
-        </Badge>
-      </Td>
-      <Td className="flex shrink-0 items-center">
-        {item.teamMembers.map((teamMember) => (
-          <TooltipProvider key={teamMember.id}>
-            <Tooltip>
-              <TooltipTrigger>
-                <img
-                  alt={teamMember.name}
-                  className="-ml-1 size-6 rounded border border-white object-cover"
-                  src={
-                    teamMember?.user?.profilePicture ??
-                    "/static/images/default_pfp.jpg"
-                  }
-                />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {resolveTeamMemberName(teamMember)}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ))}
-      </Td>
-      <Td>
-        <ActionsDropdown reminder={item} />
-      </Td>
-    </>
-  );
+  return <RemindersTable hideAssetColumn />;
 }

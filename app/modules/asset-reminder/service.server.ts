@@ -1,4 +1,4 @@
-import type { AssetReminder, TeamMember } from "@prisma/client";
+import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -87,30 +87,40 @@ async function validateTeamMembersForReminder(teamMembers: TeamMember["id"][]) {
 }
 
 export async function getPaginatedAndFilterableReminders({
-  assetId,
   organizationId,
   request,
-}: Pick<AssetReminder, "assetId" | "organizationId"> & { request: Request }) {
+  where,
+}: Pick<AssetReminder, "organizationId"> & {
+  request: Request;
+  where?: Prisma.AssetReminderWhereInput;
+}) {
   try {
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam } = getParamsValues(searchParams);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
+    const finalWhere: Prisma.AssetReminderWhereInput = {
+      organizationId,
+      ...where,
+    };
+
+    if (search) {
+      finalWhere.name = { contains: search.trim(), mode: "insensitive" };
+    }
+
     const [reminders, totalReminders] = await Promise.all([
       db.assetReminder.findMany({
-        where: { assetId, organizationId },
+        where: finalWhere,
         take,
         skip,
         include: ASSET_REMINDER_INCLUDE_FIELDS,
         orderBy: { alertDateTime: "desc" },
       }),
-      db.assetReminder.count({
-        where: { assetId, organizationId },
-      }),
+      db.assetReminder.count({ where: finalWhere }),
     ]);
 
     const totalPages = Math.ceil(totalReminders / perPageParam);
