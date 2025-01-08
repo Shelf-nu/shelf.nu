@@ -125,7 +125,7 @@ export async function getPaginatedAndFilterableReminders({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while getting asset alerts.",
+      message: "Something went wrong while getting asset reminders.",
       label,
     });
   }
@@ -245,7 +245,7 @@ export async function getRemindersForOverviewPage({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while getting asset alerts.",
+      message: "Something went wrong while getting asset reminders.",
       label,
     });
   }

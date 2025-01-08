@@ -22,7 +22,7 @@ const TEAM_MEMBER_INCLUDE = {
   },
 } satisfies Prisma.TeamMemberInclude;
 
-export type AlertTeamMember = Prisma.TeamMemberGetPayload<{
+export type ReminderTeamMember = Prisma.TeamMemberGetPayload<{
   include: typeof TEAM_MEMBER_INCLUDE;
 }>;
 

@@ -3,7 +3,7 @@ import { CheckIcon, UserIcon } from "lucide-react";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
-import type { AlertTeamMember } from "~/routes/api+/alerts.team-members";
+import type { ReminderTeamMember } from "~/routes/api+/reminders.team-members";
 import { tw } from "~/utils/tw";
 
 type TeamMembersSelectorProps = {
@@ -25,9 +25,9 @@ export default function TeamMembersSelector({
   );
 
   const { isLoading, data } = useApiQuery<{
-    teamMembers: AlertTeamMember[];
+    teamMembers: ReminderTeamMember[];
   }>({
-    api: "/api/alerts/team-members",
+    api: "/api/reminders/team-members",
   });
 
   const teamMembers = useMemo(() => {

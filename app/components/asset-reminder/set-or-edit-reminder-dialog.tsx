@@ -144,7 +144,7 @@ export default function SetOrEditReminderDialog({
                 type="datetime-local"
                 name={zo.fields.alertDateTime()}
                 error={zo.errors.alertDateTime()?.message}
-                label="Alert Date"
+                label="Reminder Date"
                 disabled={disabled}
                 autoFocus
                 required

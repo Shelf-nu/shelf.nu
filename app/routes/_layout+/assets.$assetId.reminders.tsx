@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { DateTime } from "luxon";
 import colors from "tailwindcss/colors";
@@ -64,10 +64,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
       });
 
-    const header: HeaderData = { title: "Alerts" };
+    const header: HeaderData = { title: "Reminders" };
     const modelName = {
-      signular: "alert",
-      plural: "alerts",
+      signular: "reminder",
+      plural: "reminders",
     };
 
     const assetReminders = reminders.map((reminder) => ({
@@ -156,7 +156,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(safeRedirect(redirectTo));
+        return redirect(safeRedirect(redirectTo));
       }
 
       case "delete-reminder": {
@@ -185,7 +185,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-export default function AssetAlerts() {
+export default function AssetReminders() {
   return (
     <List
       className="overflow-x-visible md:overflow-x-auto"

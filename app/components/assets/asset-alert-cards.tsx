@@ -11,15 +11,18 @@ import {
 } from "../shared/tooltip";
 import When from "../when/when";
 
-type AssetAlertCardsProps = {
+type AssetReminderCardsProps = {
   className?: string;
   style?: React.CSSProperties;
 };
 
-export function AssetAlertCards({ className, style }: AssetAlertCardsProps) {
-  const { asset, alerts } = useLoaderData<typeof loader>();
+export function AssetReminderCards({
+  className,
+  style,
+}: AssetReminderCardsProps) {
+  const { asset, reminders } = useLoaderData<typeof loader>();
 
-  if (!alerts.length) {
+  if (!reminders.length) {
     return;
   }
 
@@ -29,7 +32,7 @@ export function AssetAlertCards({ className, style }: AssetAlertCardsProps) {
         <h5>Reminders</h5>
 
         <Button
-          to={`/assets/${asset.id}/alerts`}
+          to={`/assets/${asset.id}/reminders`}
           variant="block-link-gray"
           className="!mt-0"
         >
@@ -37,15 +40,15 @@ export function AssetAlertCards({ className, style }: AssetAlertCardsProps) {
         </Button>
       </div>
 
-      {alerts.map((alert) => {
-        const slicedTeamMembers = alert.teamMembers.slice(0, 10);
+      {reminders.map((reminder) => {
+        const slicedTeamMembers = reminder.teamMembers.slice(0, 10);
         const remainingTeamMembers =
-          alert.teamMembers.length - slicedTeamMembers.length;
+          reminder.teamMembers.length - slicedTeamMembers.length;
 
         return (
-          <div key={alert.id} className="border-b px-4 py-3">
-            <h5 className="text-gray-700">{alert.name}</h5>
-            <p className="mb-2 text-xs text-gray-600">{alert.message}</p>
+          <div key={reminder.id} className="border-b px-4 py-3">
+            <h5 className="text-gray-700">{reminder.name}</h5>
+            <p className="mb-2 text-xs text-gray-600">{reminder.message}</p>
 
             <div className="flex shrink-0 items-center">
               {slicedTeamMembers.map((teamMember) => (
