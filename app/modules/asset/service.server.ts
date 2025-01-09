@@ -249,7 +249,8 @@ async function getAssets(params: {
       const searchTerms = search
         .toLowerCase()
         .trim()
-        .split(/\s+/)
+        .split(",")
+        .map((term) => term.trim())
         .filter(Boolean);
       /**
        * Search terms are searching with AND so if you have 2 terms, it will search for both
