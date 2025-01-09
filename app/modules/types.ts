@@ -22,3 +22,8 @@ export interface SearchableIndexResponse {
     text: string;
   };
 }
+
+export type RouteHandleWithName = {
+  name?: string;
+  [key: string]: any;
+};

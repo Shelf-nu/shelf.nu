@@ -19,6 +19,7 @@ import { db } from "~/database/db.server";
 
 import { getPaginatedAndFilterableSettingInvites } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -29,7 +30,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import type { RouteHandleWithName } from "./bookings";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();

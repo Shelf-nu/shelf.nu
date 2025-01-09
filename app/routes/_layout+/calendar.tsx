@@ -33,6 +33,7 @@ import When from "~/components/when/when";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import {
   getStatusClasses,
   isOneDayEvent,
@@ -48,7 +49,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { bookingStatusColorMap } from "./bookings";
 
 export function links() {
   return [{ rel: "stylesheet", href: calendarStyles }];
