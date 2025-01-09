@@ -1,27 +1,14 @@
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { DateTime } from "luxon";
 import { z } from "zod";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters } from "~/components/list/filters";
-import {
-  deleteAssetReminder,
-  editAssetReminder,
-  getPaginatedAndFilterableReminders,
-} from "~/modules/asset-reminder/service.server";
-import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat, getHints } from "~/utils/client-hints";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
+import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import {
-  data,
-  error,
-  getParams,
-  parseData,
-  safeRedirect,
-} from "~/utils/http.server";
+import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -87,13 +74,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const formData = await request.formData();
-
-    const { intent } = parseData(
-      formData,
-      z.object({ intent: z.enum(["edit-reminder", "delete-reminder"]) })
-    );
-
     const { organizationId } = await requirePermission({
       userId,
       request,
@@ -101,61 +81,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    switch (intent) {
-      case "edit-reminder": {
-        const { redirectTo, ...payload } = parseData(
-          formData,
-          setReminderSchema.extend({ id: z.string() })
-        );
-
-        const hints = getHints(request);
-        const fmt = "yyyy-MM-dd'T'HH:mm";
-
-        const alertDateTime = DateTime.fromFormat(
-          formData.get("alertDateTime")!.toString()!,
-          fmt,
-          { zone: hints.timeZone }
-        ).toJSDate();
-
-        await editAssetReminder({
-          id: payload.id,
-          name: payload.name,
-          message: payload.message,
-          teamMembers: payload.teamMembers,
-          alertDateTime,
-          organizationId,
-        });
-
-        sendNotification({
-          title: "Reminder updated",
-          message: "Your asset reminder has been updated successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return redirect(safeRedirect(redirectTo));
-      }
-
-      case "delete-reminder": {
-        const { id } = parseData(formData, z.object({ id: z.string().min(1) }));
-
-        await deleteAssetReminder({ id, organizationId });
-
-        sendNotification({
-          title: "Reminder deleted",
-          message: "Your asset reminder has been deleted successfully",
-          icon: { name: "trash", variant: "error" },
-          senderId: authSession.userId,
-        });
-
-        return json(data({ success: true }));
-      }
-
-      default: {
-        checkExhaustiveSwitch(intent);
-        return json(data(null));
-      }
-    }
+    return await resolveRemindersActions({
+      request,
+      organizationId,
+      userId,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
