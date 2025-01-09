@@ -4,9 +4,11 @@ import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -19,11 +21,16 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
   setCookie,
@@ -38,7 +45,9 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -65,14 +74,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status } =
+    const { page, perPageParam, search, status, teamMemberIds } =
       getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
     /**
      * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-     * Tis is to handle a case when a booking was assigned when there wasnt a user attached to a team member but they were later on linked.
+     * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
      * This is to ensure that the booking is still visible to the user that was assigned to it.
      * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
      * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
@@ -104,18 +113,32 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       };
     }
 
-    const { bookings, bookingCount } = await getBookings({
-      organizationId,
-      page,
-      perPage,
-      search,
-      userId: authSession?.userId,
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: authSession?.userId,
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
+        }),
+        custodianTeamMemberIds: teamMemberIds,
+        ...selfServiceData,
       }),
-      ...selfServiceData,
-    });
+
+      // team members/custodian
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        userId,
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -161,6 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        ...teamMembersData,
       }),
       {
         headers: [
@@ -196,11 +220,6 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-export type RouteHandleWithName = {
-  name?: string;
-  [key: string]: any;
-};
-
 export default function BookingsIndexPage({
   className,
   disableBulkActions = false,
@@ -211,7 +230,7 @@ export default function BookingsIndexPage({
   const navigate = useNavigate();
   const matches = useMatches();
 
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -270,7 +289,36 @@ export default function BookingsIndexPage({
           slots={{
             "left-of-search": <StatusFilter statusItems={BookingStatus} />,
           }}
-        />
+        >
+          <When
+            truthy={
+              userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              }) && !isBaseOrSelfService
+            }
+          >
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+              }}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+            />
+          </When>
+        </Filters>
         <List
           bulkActions={
             disableBulkActions || isBaseOrSelfService ? undefined : (
@@ -298,16 +346,6 @@ export default function BookingsIndexPage({
     <Outlet />
   );
 }
-
-export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
-  DRAFT: "#667085",
-  RESERVED: "#175CD3",
-  ONGOING: "#7A5AF8",
-  OVERDUE: "#B54708",
-  COMPLETE: "#17B26A",
-  ARCHIVED: "#667085",
-  CANCELLED: "#667085",
-};
 
 const ListAssetContent = ({
   item,
@@ -455,15 +493,5 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
     </span>
   );
 }
-
-export type BookingWithCustodians = Prisma.BookingGetPayload<{
-  include: {
-    assets: true;
-    from: true;
-    to: true;
-    custodianUser: true;
-    custodianTeamMember: true;
-  };
-}>;
 
 export const ErrorBoundary = () => <ErrorContent />;

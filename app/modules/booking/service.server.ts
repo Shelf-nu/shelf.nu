@@ -529,13 +529,13 @@ export async function getBookings(params: {
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
   custodianUserId?: Booking["custodianUserId"] | null;
-  custodianTeamMemberId?: Booking["custodianTeamMemberId"] | null;
+  /** Accepts an array of team member IDs instead of a single ID so it can be used for filtering of bookings on index */
+  custodianTeamMemberIds?: string[] | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
   extraInclude?: Prisma.BookingInclude;
-
   /** Controls whether entries should be paginated or not */
   takeAll?: boolean;
 }) {
@@ -546,7 +546,7 @@ export async function getBookings(params: {
     search,
     statuses,
     custodianUserId,
-    custodianTeamMemberId,
+    custodianTeamMemberIds,
     assetIds,
     bookingTo,
     excludeBookingIds,
@@ -596,20 +596,30 @@ export async function getBookings(params: {
       };
     }
 
-    /** In the case both are passed, we do an OR */
-    if (custodianTeamMemberId && custodianUserId) {
+    /** Handle combination of custodianTeamMemberIds and custodianUserId */
+    if (
+      custodianTeamMemberIds &&
+      custodianTeamMemberIds?.length &&
+      custodianUserId
+    ) {
       where.OR = [
         {
-          custodianTeamMemberId,
+          custodianTeamMemberId: {
+            in: custodianTeamMemberIds,
+          },
         },
         {
           custodianUserId,
         },
       ];
     } else {
-      if (custodianTeamMemberId) {
-        where.custodianTeamMemberId = custodianTeamMemberId;
+      /** Handle custodianTeamMemberIds if present */
+      if (custodianTeamMemberIds?.length) {
+        where.custodianTeamMemberId = {
+          in: custodianTeamMemberIds,
+        };
       }
+      /** Handle custodianUserId if present */
       if (custodianUserId) {
         where.custodianUserId = custodianUserId;
       }
@@ -638,6 +648,7 @@ export async function getBookings(params: {
     if (excludeBookingIds?.length) {
       where.id = { notIn: excludeBookingIds };
     }
+
     if (bookingFrom && bookingTo) {
       where.OR = [
         {

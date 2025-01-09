@@ -12,7 +12,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import type { BookingWithCustodians } from "~/modules/booking/types";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
