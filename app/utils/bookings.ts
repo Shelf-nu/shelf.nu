@@ -23,3 +23,13 @@ export function canUserManageBookingAssets(
     !cantManageAssetsAsSelfService
   );
 }
+
+export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
+  DRAFT: "#667085",
+  RESERVED: "#175CD3",
+  ONGOING: "#7A5AF8",
+  OVERDUE: "#B54708",
+  COMPLETE: "#17B26A",
+  ARCHIVED: "#667085",
+  CANCELLED: "#667085",
+};

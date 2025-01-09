@@ -4,10 +4,11 @@ import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
-import DynamicSelect from "~/components/dynamic-select/dynamic-select";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -29,6 +30,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
   setCookie,
@@ -45,7 +47,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -80,7 +81,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /**
      * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-     * Tis is to handle a case when a booking was assigned when there wasnt a user attached to a team member but they were later on linked.
+     * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
      * This is to ensure that the booking is still visible to the user that was assigned to it.
      * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
      * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
@@ -123,6 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           // If status is in the params, we filter based on it
           statuses: [status],
         }),
+        custodianTeamMemberIds: teamMemberIds,
         ...selfServiceData,
       }),
 
@@ -289,13 +291,15 @@ export default function BookingsIndexPage({
           }}
         >
           <When
-            truthy={userHasPermission({
-              roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
-            })}
+            truthy={
+              userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              }) && !isBaseOrSelfService
+            }
           >
-            {/* <DynamicDropdown
+            <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
                   Custodian{" "}
@@ -312,32 +316,6 @@ export default function BookingsIndexPage({
               placeholder="Search team members"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
-            /> */}
-            <DynamicSelect
-              // disabled={disabled}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Filter by custodian"
-              allowClear
-              closeOnSelect
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  //If there is a user, we use its name, otherwise we use the name of the team member
-                  name: resolveTeamMemberName(item),
-                }),
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-              triggerWrapperClassName={tw("[&_div]:border-none")}
-              className={tw("w-[300px]")}
             />
           </When>
         </Filters>
@@ -368,16 +346,6 @@ export default function BookingsIndexPage({
     <Outlet />
   );
 }
-
-export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
-  DRAFT: "#667085",
-  RESERVED: "#175CD3",
-  ONGOING: "#7A5AF8",
-  OVERDUE: "#B54708",
-  COMPLETE: "#17B26A",
-  ARCHIVED: "#667085",
-  CANCELLED: "#667085",
-};
 
 const ListAssetContent = ({
   item,

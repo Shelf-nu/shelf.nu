@@ -161,7 +161,7 @@ export default function DynamicDropdown({
                   <Button
                     icon="x"
                     variant="tertiary"
-                    disabled={Boolean(searchQuery)}
+                    disabled={!searchQuery || searchQuery === ""}
                     onClick={() => {
                       resetModelFiltersFetcher();
                       setSearchQuery("");
