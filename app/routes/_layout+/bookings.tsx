@@ -296,7 +296,12 @@ export default function BookingsIndexPage({
                 roles,
                 entity: PermissionEntity.custody,
                 action: PermissionAction.read,
-              }) && !isBaseOrSelfService
+              }) &&
+              !isBaseOrSelfService &&
+              !["$userId.bookings", "me.bookings"].includes(
+                // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
+                currentRoute?.handle?.name
+              )
             }
           >
             <DynamicDropdown
