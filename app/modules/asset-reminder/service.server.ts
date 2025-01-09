@@ -112,14 +112,11 @@ export async function getPaginatedAndFilterableReminders({
       const searchTerms = search
         .toLowerCase()
         .trim()
-        .split(/\s+/)
+        .split(",")
+        .map((term) => term.trim())
         .filter(Boolean);
 
-      /**
-       * Search terms are searching with AND so if you have 2 terms, it will search for both
-       * Within each term we are using OR to check multiple fields
-       */
-      finalWhere.AND = searchTerms.map((term) => ({
+      finalWhere.OR = searchTerms.map((term) => ({
         OR: [
           { name: { contains: term, mode: "insensitive" } },
           { message: { contains: term, mode: "insensitive" } },
@@ -171,6 +168,7 @@ export async function getPaginatedAndFilterableReminders({
       page,
       perPage,
       totalPages,
+      search,
     };
   } catch (cause) {
     throw new ShelfError({
