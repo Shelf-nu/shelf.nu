@@ -251,8 +251,11 @@ async function getAssets(params: {
         .trim()
         .split(/\s+/)
         .filter(Boolean);
-
-      where.OR = searchTerms.map((term) => ({
+      /**
+       * Search terms are searching with AND so if you have 2 terms, it will search for both
+       * Within each term we are using OR to check multiple fields
+       */
+      where.AND = searchTerms.map((term) => ({
         OR: [
           // Search in asset fields
           { title: { contains: term, mode: "insensitive" } },

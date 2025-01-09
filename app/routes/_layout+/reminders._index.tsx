@@ -62,6 +62,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page,
         perPage,
         totalPages,
+        searchFieldLabel: "Search reminders",
+        searchFieldTooltip: {
+          title: "Search reminders",
+          text: "You can search reminders by reminder name, message, asset name or team member name. Simply separate your keywords by a space: 'Laptop maintenance'.",
+        },
       })
     );
   } catch (cause) {

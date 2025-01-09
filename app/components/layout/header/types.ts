@@ -50,6 +50,7 @@ export type ButtonVariant =
   | "secondary"
   | "tertiary"
   | "link"
+  | "link-gray"
   | "block-link"
   | "block-link-gray"
   | "danger";

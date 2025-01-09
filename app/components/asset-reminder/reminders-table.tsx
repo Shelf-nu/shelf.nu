@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client";
-import { Link } from "@remix-run/react";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { resolveTeamMemberName } from "~/utils/user";
 import { List } from "../list";
 import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
 import {
   Tooltip,
   TooltipContent,
@@ -61,13 +61,14 @@ function ListContent({
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <When truthy={!extraProps.hideAssetColumn}>
         <Td>
-          <Link
+          <Button
             className="hover:underline"
             to={`/assets/${item.asset.id}/overview`}
             target="_blank"
+            variant={"link-gray"}
           >
             {item.asset.title}
-          </Link>
+          </Button>
         </Td>
       </When>
       <Td>{item.displayDate}</Td>

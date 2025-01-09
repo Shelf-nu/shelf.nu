@@ -109,7 +109,47 @@ export async function getPaginatedAndFilterableReminders({
     };
 
     if (search) {
-      finalWhere.name = { contains: search.trim(), mode: "insensitive" };
+      const searchTerms = search
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+      /**
+       * Search terms are searching with AND so if you have 2 terms, it will search for both
+       * Within each term we are using OR to check multiple fields
+       */
+      finalWhere.AND = searchTerms.map((term) => ({
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { message: { contains: term, mode: "insensitive" } },
+          {
+            teamMembers: {
+              some: {
+                user: {
+                  OR: [
+                    {
+                      firstName: {
+                        contains: term,
+                        mode: "insensitive",
+                      },
+                    },
+                    {
+                      lastName: {
+                        contains: term,
+                        mode: "insensitive",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            asset: { title: { contains: term, mode: "insensitive" } },
+          },
+        ],
+      }));
     }
 
     const [reminders, totalReminders] = await Promise.all([
