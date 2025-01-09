@@ -2,8 +2,10 @@ import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
   setCookie,
@@ -50,25 +52,39 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status } =
+    const { page, perPageParam, search, status, teamMemberIds } =
       getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { bookings, bookingCount } = await getBookings({
-      organizationId,
-      page,
-      perPage,
-      search,
-      userId: authSession?.userId,
-      assetIds: [assetId],
-      statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-      ...(isSelfServiceOrBase && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: authSession?.userId,
+    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: authSession?.userId,
+        assetIds: [assetId],
+        statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+        ...(isSelfServiceOrBase && {
+          // If the user is self service, we only show bookings that belong to that user)
+          custodianUserId: authSession?.userId,
+        }),
+        custodianTeamMemberIds: teamMemberIds,
       }),
-    });
+
+      // team members/custodian
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        userId,
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -114,6 +130,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        ...teamMembersData,
       }),
       {
         headers: [

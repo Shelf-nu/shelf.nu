@@ -39,7 +39,6 @@ import {
   type AssetIndexLoaderData,
 } from "~/routes/_layout+/assets._index";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
-import { markSubstring } from "~/utils/mark-substring";
 import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
@@ -149,7 +148,7 @@ export function AdvancedIndexColumn({
                   className="font-medium underline hover:text-gray-600"
                   title={item.title}
                 >
-                  {markSubstring(item.title)}
+                  {item.title}
                 </Link>
               </div>
             </div>

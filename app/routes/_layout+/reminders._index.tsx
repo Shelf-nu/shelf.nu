@@ -33,7 +33,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { page, perPage, reminders, totalPages, totalReminders } =
+    const { page, perPage, reminders, totalPages, totalReminders, search } =
       await getPaginatedAndFilterableReminders({
         organizationId,
         request,
@@ -65,8 +65,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         searchFieldLabel: "Search reminders",
         searchFieldTooltip: {
           title: "Search reminders",
-          text: "You can search reminders by reminder name, message, asset name or team member name. Simply separate your keywords by a space: 'Laptop maintenance'.",
+          text: "Search reminders by reminder name, message, asset name or team member name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, maintenance' will find reminders matching any of these terms.",
         },
+        search,
       })
     );
   } catch (cause) {

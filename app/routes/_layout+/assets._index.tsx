@@ -67,7 +67,6 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { markSubstring } from "~/utils/mark-substring";
 import {
   PermissionAction,
   PermissionEntity,
@@ -416,7 +415,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
-                {markSubstring(item.title)}
+                {item.title}
               </span>
               <div>
                 <AssetStatusBadge
