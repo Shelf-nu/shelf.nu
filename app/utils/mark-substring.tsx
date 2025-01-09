@@ -1,3 +1,7 @@
+/**
+ * This is temp deprecated until we find a better way to implement it.
+ */
+
 export function markSubstring(string: string) {
   const searchParams = new URLSearchParams(window.location.search);
 
@@ -5,7 +9,18 @@ export function markSubstring(string: string) {
 
   if (searchParams.has("s")) {
     const searchQuery = searchParams.get("s")?.toLowerCase() as string;
-    const searchIndex = string.toLowerCase().indexOf(searchQuery);
+    const searchTerms = searchQuery.split(",").map((term) => term.trim());
+    let searchIndex = -1;
+    let currentSearchTerm = "";
+
+    for (const term of searchTerms) {
+      const index = string.toLowerCase().indexOf(term);
+      if (index !== -1 && (searchIndex === -1 || index < searchIndex)) {
+        searchIndex = index;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        currentSearchTerm = term;
+      }
+    }
     if (searchIndex !== -1) {
       const searchLength = searchQuery.length;
       content = (
