@@ -96,7 +96,7 @@ export default function AssetReminders() {
   return (
     <>
       <Filters className="mb-4" />
-      <RemindersTable hideAssetColumn />
+      <RemindersTable isAssetReminderPage />
     </>
   );
 }

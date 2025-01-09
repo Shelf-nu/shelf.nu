@@ -65,7 +65,7 @@ export type ListProps = {
   className?: string;
   customEmptyStateContent?: {
     title: string;
-    text: string;
+    text: React.ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
