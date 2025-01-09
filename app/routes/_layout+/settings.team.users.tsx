@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
@@ -159,13 +160,16 @@ export default function UserTeamSetting() {
 
       <ListContentWrapper>
         <Filters>
-          <Button
-            variant="primary"
-            to="../invites/invite-user"
-            className="mt-2 w-full md:mt-0 md:w-max"
-          >
-            <span className=" whitespace-nowrap">Invite a user</span>
-          </Button>
+          <InviteUserDialog
+            trigger={
+              <Button
+                className="mt-2 w-full md:mt-0 md:w-max"
+                variant="primary"
+              >
+                <span className="whitespace-nowrap">Invite a user</span>
+              </Button>
+            }
+          />
         </Filters>
 
         <List
