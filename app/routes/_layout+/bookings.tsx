@@ -7,9 +7,8 @@ import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
-import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { ErrorContent } from "~/components/errors";
-import { ChevronRight } from "~/components/icons/library";
 
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
@@ -28,6 +27,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -45,6 +45,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -72,7 +73,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status } =
+    const { page, perPageParam, search, status, teamMemberIds } =
       getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
@@ -128,7 +129,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // team members/custodian
       getTeamMemberForCustodianFilter({
         organizationId,
-        // selectedTeamMembers: teamMemberIds,
+        selectedTeamMembers: teamMemberIds,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
@@ -217,11 +218,6 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-export type RouteHandleWithName = {
-  name?: string;
-  [key: string]: any;
-};
-
 export default function BookingsIndexPage({
   className,
   disableBulkActions = false,
@@ -299,7 +295,7 @@ export default function BookingsIndexPage({
               action: PermissionAction.read,
             })}
           >
-            <DynamicDropdown
+            {/* <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
                   Custodian{" "}
@@ -316,10 +312,32 @@ export default function BookingsIndexPage({
               placeholder="Search team members"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
-              withoutValueItem={{
-                id: "without-custody",
-                name: "Without custody",
+            /> */}
+            <DynamicSelect
+              // disabled={disabled}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
               }}
+              fieldName="custodian"
+              contentLabel="Team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+              placeholder="Filter by custodian"
+              allowClear
+              closeOnSelect
+              transformItem={(item) => ({
+                ...item,
+                id: JSON.stringify({
+                  id: item.id,
+                  //If there is a user, we use its name, otherwise we use the name of the team member
+                  name: resolveTeamMemberName(item),
+                }),
+              })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+              triggerWrapperClassName={tw("[&_div]:border-none")}
+              className={tw("w-[300px]")}
             />
           </When>
         </Filters>
@@ -507,15 +525,5 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
     </span>
   );
 }
-
-export type BookingWithCustodians = Prisma.BookingGetPayload<{
-  include: {
-    assets: true;
-    from: true;
-    to: true;
-    custodianUser: true;
-    custodianTeamMember: true;
-  };
-}>;
 
 export const ErrorBoundary = () => <ErrorContent />;
