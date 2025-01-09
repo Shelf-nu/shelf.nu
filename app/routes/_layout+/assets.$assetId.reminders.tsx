@@ -5,6 +5,7 @@ import { z } from "zod";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Filters } from "~/components/list/filters";
 import {
   deleteAssetReminder,
   editAssetReminder,
@@ -52,7 +53,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header: HeaderData = { title: "Reminders" };
     const modelName = {
-      signular: "reminder",
+      singular: "reminder",
       plural: "reminders",
     };
 
@@ -162,5 +163,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function AssetReminders() {
-  return <RemindersTable hideAssetColumn />;
+  return (
+    <>
+      <Filters className="mb-4" />
+      <RemindersTable hideAssetColumn />
+    </>
+  );
 }
