@@ -2,17 +2,11 @@ import { useState } from "react";
 import type { Prisma } from "@prisma/client";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
-import { resolveTeamMemberName } from "~/utils/user";
 import { List } from "../list";
+import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../shared/tooltip";
 import { Td, Th } from "../table";
 import ActionsDropdown from "./actions-dropdown";
 import When from "../when/when";
@@ -119,26 +113,8 @@ function ListContent({
           {status}
         </Badge>
       </Td>
-      <Td className="flex shrink-0 items-center">
-        {item.teamMembers.map((teamMember) => (
-          <TooltipProvider key={teamMember.id}>
-            <Tooltip>
-              <TooltipTrigger>
-                <img
-                  alt={teamMember.name}
-                  className="-ml-1 size-6 rounded border border-white object-cover"
-                  src={
-                    teamMember?.user?.profilePicture ??
-                    "/static/images/default_pfp.jpg"
-                  }
-                />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {resolveTeamMemberName(teamMember)}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ))}
+      <Td>
+        <ReminderTeamMembers teamMembers={item.teamMembers} />
       </Td>
       <Td>
         <ActionsDropdown reminder={item} />

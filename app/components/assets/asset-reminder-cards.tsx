@@ -1,14 +1,8 @@
 import { useLoaderData } from "@remix-run/react";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
+import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
 import { Button } from "../shared/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../shared/tooltip";
 import When from "../when/when";
 
 type AssetReminderCardsProps = {
@@ -50,33 +44,17 @@ export function AssetReminderCards({
             <h5 className="text-gray-700">{reminder.name}</h5>
             <p className="mb-2 text-xs text-gray-600">{reminder.message}</p>
 
-            <div className="flex shrink-0 items-center">
-              {slicedTeamMembers.map((teamMember) => (
-                <TooltipProvider key={teamMember.id}>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <img
-                        alt={teamMember.name}
-                        className="-ml-1 size-6 rounded-full border border-white object-cover"
-                        src={
-                          teamMember?.user?.profilePicture ??
-                          "/static/images/default_pfp.jpg"
-                        }
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {resolveTeamMemberName(teamMember)}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ))}
-
-              <When truthy={remainingTeamMembers > 0}>
-                <div className="flex size-6 items-center justify-center rounded-full border border-white bg-gray-100 text-xs font-medium">
-                  +{remainingTeamMembers}
-                </div>
-              </When>
-            </div>
+            <ReminderTeamMembers
+              imgClassName="rounded-full"
+              teamMembers={slicedTeamMembers}
+              extraContent={
+                <When truthy={remainingTeamMembers > 0}>
+                  <div className="flex size-6 items-center justify-center rounded-full border border-white bg-gray-100 text-xs font-medium">
+                    +{remainingTeamMembers}
+                  </div>
+                </When>
+              }
+            />
           </div>
         );
       })}
