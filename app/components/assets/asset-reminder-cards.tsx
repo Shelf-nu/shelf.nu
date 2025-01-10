@@ -38,6 +38,7 @@ export function AssetReminderCards({
         const slicedTeamMembers = reminder.teamMembers.slice(0, 10);
         const remainingTeamMembers =
           reminder.teamMembers.length - slicedTeamMembers.length;
+        const isAlreadySent = new Date() > new Date(reminder.alertDateTime);
 
         return (
           <div key={reminder.id} className="border-b px-4 py-3">
@@ -47,6 +48,7 @@ export function AssetReminderCards({
             <ReminderTeamMembers
               imgClassName="rounded-full"
               teamMembers={slicedTeamMembers}
+              isAlreadySent={isAlreadySent}
               extraContent={
                 <When truthy={remainingTeamMembers > 0}>
                   <div className="flex size-6 items-center justify-center rounded-full border border-white bg-gray-100 text-xs font-medium">

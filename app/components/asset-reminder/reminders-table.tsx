@@ -114,7 +114,10 @@ function ListContent({
         </Badge>
       </Td>
       <Td>
-        <ReminderTeamMembers teamMembers={item.teamMembers} />
+        <ReminderTeamMembers
+          teamMembers={item.teamMembers}
+          isAlreadySent={status === "Reminder sent"}
+        />
       </Td>
       <Td>
         <ActionsDropdown reminder={item} />

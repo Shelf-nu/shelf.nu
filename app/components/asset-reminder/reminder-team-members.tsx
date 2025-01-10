@@ -28,6 +28,7 @@ type ReminderTeamMembersProps = {
   }>[];
   imgClassName?: string;
   extraContent?: React.ReactNode;
+  isAlreadySent?: boolean;
 };
 
 export default function ReminderTeamMembers({
@@ -36,6 +37,7 @@ export default function ReminderTeamMembers({
   teamMembers,
   imgClassName,
   extraContent,
+  isAlreadySent = false,
 }: ReminderTeamMembersProps) {
   return (
     <div className={tw("flex items-center", className)} style={style}>
@@ -66,7 +68,7 @@ export default function ReminderTeamMembers({
               <TooltipContent side="top" className="max-w-72">
                 <p>{resolveTeamMemberName(teamMember, true)}</p>
 
-                <When truthy={isAccessRevoed}>
+                <When truthy={isAccessRevoed && !isAlreadySent}>
                   <p className="mt-2 text-error-500">
                     This team member has been removed from the workspace. As a
                     fallback the reminder email will be sent to the workspace
