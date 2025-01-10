@@ -1,6 +1,5 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
-import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
@@ -33,6 +32,10 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
   organization: { select: { name: true } },
 } satisfies Prisma.AssetReminderInclude;
 
+type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
+  isOwner?: boolean;
+};
+
 const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   AssetsEventType,
   (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
@@ -52,10 +55,45 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         });
       });
 
-    const usersToSendEmail = reminder.teamMembers.map((teamMember) => {
-      invariant(teamMember.user, "User is not associated with teamMember.");
-      return teamMember.user;
-    });
+    const usersToSendEmail = reminder.teamMembers
+      .filter((tm) => !!tm.user)
+      .map((teamMember) => teamMember.user! as UserToEmail);
+
+    const hasTeamMemberWithoutUser = reminder.teamMembers.some(
+      (tm) => !tm.user
+    );
+
+    /**
+     * If there is some teamMember without a user associated
+     * that means the access has been revoked to that teamMember.
+     * Then, in this case we have to send an email to the owner with special note.
+     */
+    if (hasTeamMemberWithoutUser) {
+      const owner = await db.user.findFirst({
+        where: {
+          userOrganizations: {
+            some: {
+              organizationId: reminder.organizationId,
+              roles: { has: "OWNER" },
+            },
+          },
+        },
+        select: { email: true, firstName: true, lastName: true },
+      });
+
+      if (!owner) {
+        throw new ShelfError({
+          cause: null,
+          message: "No owner found",
+          label: "Asset Scheduler",
+        });
+      }
+
+      usersToSendEmail.push({
+        ...owner,
+        isOwner: true,
+      });
+    }
 
     /** Sending alert mails to all associated users. */
     await Promise.all(
@@ -68,12 +106,14 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             user,
             reminder,
             workspaceName: reminder.organization.name,
+            isOwner: user.isOwner,
           }),
           html: assetAlertEmailHtmlString({
             asset: reminder.asset,
             user,
             reminder,
             workspaceName: reminder.organization.name,
+            isOwner: user.isOwner,
           }),
         })
       )

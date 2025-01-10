@@ -19,6 +19,7 @@ type AssetAlertEmailProps = {
   asset: Pick<Asset, "id" | "title" | "mainImage" | "mainImageExpiration">;
   reminder: AssetReminder;
   workspaceName: string;
+  isOwner?: boolean;
 };
 
 export function assetAlertEmailText({
@@ -26,8 +27,14 @@ export function assetAlertEmailText({
   asset,
   reminder,
   workspaceName,
+  isOwner,
 }: AssetAlertEmailProps) {
   const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+
+  const note = isOwner
+    ? `You are receiving this email because the original person was removed from workspace ${workspaceName}.`
+    : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}. 
+If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
 
   return `Asset reminder notice
 
@@ -43,8 +50,7 @@ ${reminder.message}
 
 ${SERVER_URL}/assets/${asset.id}
 
-This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}. 
-If you think you weren't supposed to have received this email please contact the owner of the workspace.
+${note}
 
 Thanks,
 The Shelf Team
@@ -67,6 +73,7 @@ function AssetAlertEmailTemplate({
   reminder,
   user,
   workspaceName,
+  isOwner,
 }: AssetAlertEmailProps) {
   const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
 
@@ -165,16 +172,26 @@ function AssetAlertEmailTemplate({
             Open asset page
           </Button>
 
-          <Text style={{ ...styles.p, marginBottom: "48px" }}>
-            This email was sent to{" "}
-            <span style={{ fontWeight: "bold" }}>{user.email}</span> because it
-            is part of the Shelf workspace{" "}
-            <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
-          </Text>
-          <Text>
-            If you think you weren't supposed to have received this email please
-            contact the owner of the workspace.
-          </Text>
+          {isOwner ? (
+            <Text style={{ ...styles.p, marginBottom: "48px" }}>
+              You are receiving this email because the original person was
+              removed from workspace{" "}
+              <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
+            </Text>
+          ) : (
+            <>
+              <Text style={{ ...styles.p, marginBottom: "10px" }}>
+                This email was sent to{" "}
+                <span style={{ fontWeight: "bold" }}>{user.email}</span> because
+                it is part of the Shelf workspace{" "}
+                <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
+              </Text>
+              <Text style={{ ...styles.p, marginBottom: "48px" }}>
+                If you think you weren't supposed to have received this email
+                please contact the owner of the workspace.
+              </Text>
+            </>
+          )}
 
           <div
             style={{
