@@ -285,9 +285,16 @@ export async function getRemindersForOverviewPage({
 }) {
   try {
     const reminders = await db.assetReminder.findMany({
-      where: { assetId, organizationId },
+      where: {
+        assetId,
+        organizationId,
+        alertDateTime: {
+          gte: new Date(),
+        },
+      },
       take: 2,
       include: ASSET_REMINDER_INCLUDE_FIELDS,
+      orderBy: { alertDateTime: "desc" },
     });
     return reminders;
   } catch (cause) {
