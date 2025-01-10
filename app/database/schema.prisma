@@ -80,6 +80,8 @@ model User {
   customTierLimit CustomTierLimit?
 
   @@unique([email, username])
+  @@index([firstName])
+  @@index([lastName])
 }
 
 model Asset {
@@ -786,4 +788,7 @@ model AssetReminder {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([message])
 }
