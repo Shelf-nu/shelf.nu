@@ -9,6 +9,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -103,13 +104,29 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
+export const REMINDERS_SORTING_OPTIONS = {
+  name: "Name",
+  alertDateTime: "Alert Time",
+  createdAt: "Date Created",
+  updatedAt: "Date Updated",
+} as const;
+
 export default function Reminders() {
   return (
     <>
       <Header />
 
       <ListContentWrapper className="mb-4">
-        <Filters />
+        <Filters
+          slots={{
+            "right-of-search": (
+              <SortBy
+                sortingOptions={REMINDERS_SORTING_OPTIONS}
+                defaultSortingBy="alertDateTime"
+              />
+            ),
+          }}
+        />
       </ListContentWrapper>
 
       <RemindersTable />

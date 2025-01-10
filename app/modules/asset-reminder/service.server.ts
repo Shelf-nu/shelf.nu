@@ -96,7 +96,8 @@ export async function getPaginatedAndFilterableReminders({
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const { page, perPageParam, search, orderBy, orderDirection } =
+      getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
@@ -155,7 +156,7 @@ export async function getPaginatedAndFilterableReminders({
         take,
         skip,
         include: ASSET_REMINDER_INCLUDE_FIELDS,
-        orderBy: { alertDateTime: "desc" },
+        orderBy: { [orderBy ?? "alertDateTime"]: orderDirection ?? "desc" },
       }),
       db.assetReminder.count({ where: finalWhere }),
     ]);
