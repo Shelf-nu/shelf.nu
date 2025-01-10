@@ -13,6 +13,7 @@ export const ASSET_REMINDER_INCLUDE_FIELDS = {
           firstName: true,
           lastName: true,
           profilePicture: true,
+          email: true,
           id: true,
         },
       },

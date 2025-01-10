@@ -64,7 +64,7 @@ export default function ReminderTeamMembers({
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-72">
-                <p>{resolveTeamMemberName(teamMember)}</p>
+                <p>{resolveTeamMemberName(teamMember, true)}</p>
 
                 <When truthy={isAccessRevoed}>
                   <p className="mt-2 text-error-500">

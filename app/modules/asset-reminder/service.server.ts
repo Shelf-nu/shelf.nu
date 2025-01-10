@@ -10,6 +10,8 @@ import {
   cancelAssetReminderScheduler,
   scheduleAssetReminder,
 } from "./scheduler.server";
+import { createNote } from "../note/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label = "Asset Reminder";
 
@@ -33,19 +35,29 @@ export async function createAssetReminder({
   try {
     await validateTeamMembersForReminder(teamMembers);
 
-    const assetReminder = await db.assetReminder.create({
-      data: {
-        name,
-        message,
-        alertDateTime,
-        assetId,
-        createdById,
-        organizationId,
-        teamMembers: {
-          connect: teamMembers.map((id) => ({ id })),
+    const user = await getUserByID(createdById);
+
+    const [assetReminder] = await Promise.all([
+      db.assetReminder.create({
+        data: {
+          name,
+          message,
+          alertDateTime,
+          assetId,
+          createdById,
+          organizationId,
+          teamMembers: {
+            connect: teamMembers.map((id) => ({ id })),
+          },
         },
-      },
-    });
+      }),
+      createNote({
+        assetId,
+        userId: createdById,
+        type: "UPDATE",
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has created a new reminder **${name}**.`,
+      }),
+    ]);
 
     await scheduleAssetReminder({
       data: {
