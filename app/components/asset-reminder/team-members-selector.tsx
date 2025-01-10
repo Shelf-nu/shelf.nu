@@ -5,6 +5,7 @@ import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
 import type { ReminderTeamMember } from "~/routes/api+/reminders.team-members";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 type TeamMembersSelectorProps = {
   className?: string;
@@ -44,7 +45,8 @@ export default function TeamMembersSelector({
       (tm) =>
         tm.name.toLowerCase().includes(normalizedQuery) ||
         tm.user?.firstName?.toLowerCase().includes(normalizedQuery) ||
-        tm.user?.lastName?.toLowerCase().includes(normalizedQuery)
+        tm.user?.lastName?.toLowerCase().includes(normalizedQuery) ||
+        tm.user?.email?.includes(normalizedQuery)
     );
   }, [data, searchQuery]);
 
@@ -117,7 +119,9 @@ export default function TeamMembersSelector({
                     "/static/images/default_pfp.jpg"
                   }
                 />
-                <p className="font-medium">{teamMember.name}</p>
+                <p className="font-medium">
+                  {resolveTeamMemberName(teamMember, true)}
+                </p>
               </div>
 
               <When truthy={isTeamMemberSelected}>

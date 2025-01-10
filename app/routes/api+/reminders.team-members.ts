@@ -15,6 +15,7 @@ const TEAM_MEMBER_INCLUDE = {
   user: {
     select: {
       id: true,
+      email: true,
       firstName: true,
       lastName: true,
       profilePicture: true,
