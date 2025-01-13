@@ -29,3 +29,13 @@ export type BookingUpdateIntent =
   | "checkIn"
   | "archive"
   | "cancel";
+
+export type BookingWithCustodians = Prisma.BookingGetPayload<{
+  include: {
+    assets: true;
+    from: true;
+    to: true;
+    custodianUser: true;
+    custodianTeamMember: true;
+  };
+}>;
