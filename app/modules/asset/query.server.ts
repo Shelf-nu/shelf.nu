@@ -1234,7 +1234,21 @@ export const assetQueryFragment = Prisma.sql`
       FROM public."AssetCustomFieldValue" acfv
       JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
       WHERE acfv."assetId" = a.id AND cf.active = true
-    ) AS "customFields"
+    ) AS "customFields",
+    (
+      SELECT
+       jsonb_build_object(
+        'id', ar.id,
+        'alertDateTime', ar."alertDateTime"
+       )
+      FROM public."AssetReminder" ar
+      WHERE
+       ar."assetId" = a.id
+       AND ar."alertDateTime" >= NOW()
+      ORDER BY
+       ar."alertDateTime" ASC
+      LIMIT 1
+    ) AS upcomingReminder 
 `;
 
 export const assetQueryJoins = Prisma.sql`
@@ -1283,7 +1297,8 @@ export const assetReturnFragment = Prisma.sql`
       'tags', aq.tags,
       'location', jsonb_build_object('name', aq."locationName"),
       'custody', aq.custody,
-      'customFields', COALESCE(aq."customFields", '[]'::jsonb)
+      'customFields', COALESCE(aq."customFields", '[]'::jsonb),
+      'upcomingReminder', aq.upcomingReminder
     )
   ) AS assets
 `;

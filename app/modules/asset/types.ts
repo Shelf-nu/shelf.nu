@@ -10,6 +10,7 @@ import type {
   Tag,
   User,
   CustomFieldType,
+  AssetReminder,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -140,6 +141,9 @@ export type AdvancedIndexAsset = Pick<
       categories: Pick<Category, "id" | "name">[] | null;
     };
   })[];
+  upcomingReminder?: Pick<AssetReminder, "id" | "alertDateTime"> & {
+    displayDate: string;
+  };
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{

@@ -227,6 +227,13 @@ export function AdvancedIndexColumn({
 
     case "availableToBook":
       return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+
+    case "upcomingReminder":
+      return (
+        <TextColumn
+          value={item?.upcomingReminder?.displayDate ?? "No upcoming reminder"}
+        />
+      );
   }
 }
 
