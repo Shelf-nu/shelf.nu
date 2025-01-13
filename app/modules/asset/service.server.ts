@@ -102,6 +102,7 @@ import {
   getLocationUpdateNoteContent,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
+import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -902,9 +903,16 @@ export async function deleteAsset({
   organizationId,
 }: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.asset.deleteMany({
+    const deletedAsset = await db.asset.delete({
       where: { id, organizationId },
+      select: {
+        reminders: {
+          select: { alertDateTime: true, activeSchedulerReference: true },
+        },
+      },
     });
+
+    await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
     throw new ShelfError({
       cause,

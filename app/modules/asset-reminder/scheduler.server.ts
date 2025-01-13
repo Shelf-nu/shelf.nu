@@ -54,7 +54,9 @@ export async function scheduleAssetReminder({
 /**
  * This function is used to cancel an asset reminder scheduler.
  */
-export async function cancelAssetReminderScheduler(reminder: AssetReminder) {
+export async function cancelAssetReminderScheduler(
+  reminder: Pick<AssetReminder, "alertDateTime" | "activeSchedulerReference">
+) {
   try {
     /**
      * If the reminder is already triggered, then we don't need to cancel the scheduler.
