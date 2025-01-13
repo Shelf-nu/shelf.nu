@@ -791,4 +791,5 @@ model AssetReminder {
 
   @@index([name])
   @@index([message])
+  @@index([alertDateTime])
 }
