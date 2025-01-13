@@ -29,10 +29,23 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search.trim().split(/\s+/).filter(Boolean);
+    const words = search
+      .trim()
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean);
+
     if (words.length > 0) {
-      const searchPattern = `%${words.join("%")}%`;
-      whereClause = Prisma.sql`${whereClause} AND a."title" ILIKE ${searchPattern}`;
+      // Create OR conditions for each search term
+      const searchConditions = words.map(
+        (term) => Prisma.sql`a.title ILIKE ${`%${term}%`}`
+      );
+
+      // Combine all search terms with OR
+      whereClause = Prisma.sql`${whereClause} AND (${Prisma.join(
+        searchConditions,
+        " OR "
+      )})`;
     }
   }
 

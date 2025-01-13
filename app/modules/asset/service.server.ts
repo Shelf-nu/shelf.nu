@@ -249,7 +249,8 @@ async function getAssets(params: {
       const searchTerms = search
         .toLowerCase()
         .trim()
-        .split(/\s+/)
+        .split(",")
+        .map((term) => term.trim())
         .filter(Boolean);
 
       where.OR = searchTerms.map((term) => ({
