@@ -1,3 +1,4 @@
+import { cloneElement } from "react";
 import type { Asset } from "@prisma/client";
 import { Button } from "~/components/shared/button";
 
@@ -16,24 +17,16 @@ import { TrashIcon } from "../icons/library";
 
 export const DeleteAsset = ({
   asset,
+  trigger,
 }: {
   asset: {
     title: Asset["title"];
     mainImage: Asset["mainImage"];
   };
+  trigger: React.ReactElement;
 }) => (
   <AlertDialog>
-    <AlertDialogTrigger asChild>
-      <Button
-        variant="link"
-        data-test-id="deleteAssetButton"
-        icon="trash"
-        className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-        width="full"
-      >
-        Delete
-      </Button>
-    </AlertDialogTrigger>
+    <AlertDialogTrigger asChild>{cloneElement(trigger)}</AlertDialogTrigger>
 
     <AlertDialogContent>
       <AlertDialogHeader>
