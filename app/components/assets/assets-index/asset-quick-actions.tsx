@@ -8,6 +8,7 @@ import {
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "../delete-asset";
+import QrPreviewDialog from "../qr-preview-dialog";
 
 type AssetQuickActionsProps = {
   className?: string;
@@ -40,9 +41,18 @@ export default function AssetQuickActions({
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button size="sm" variant="block-link-gray">
-            <QrCodeIcon className="size-4" />
-          </Button>
+          <QrPreviewDialog
+            asset={{
+              id: asset.id,
+              title: asset.title,
+              qrId: asset.qrCodes[0].id,
+            }}
+            trigger={
+              <Button size="sm" variant="block-link-gray">
+                <QrCodeIcon className="size-4" />
+              </Button>
+            }
+          />
         </TooltipTrigger>
 
         <TooltipContent>Show asset label</TooltipContent>
