@@ -145,7 +145,7 @@ export const AssetForm = ({
         encType="multipart/form-data"
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
-          <Actions disabled={disabled} />
+          <Actions assetId={id} disabled={disabled} />
         </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
@@ -157,7 +157,7 @@ export const AssetForm = ({
             <p>Basic information about your asset.</p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions disabled={disabled} />
+            <Actions assetId={id} disabled={disabled} />
           </div>
         </div>
 
@@ -420,10 +420,20 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({ disabled }: { disabled: boolean }) => (
+const Actions = ({
+  assetId,
+  disabled,
+}: {
+  assetId?: string;
+  disabled: boolean;
+}) => (
   <>
     <ButtonGroup>
-      <Button to=".." variant="secondary" disabled={disabled}>
+      <Button
+        to={assetId ? `/assets/${assetId}/overview` : ".."}
+        variant="secondary"
+        disabled={disabled}
+      >
         Cancel
       </Button>
       <AddAnother disabled={disabled} />

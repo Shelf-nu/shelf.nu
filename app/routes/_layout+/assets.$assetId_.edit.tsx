@@ -227,7 +227,7 @@ export default function AssetEditPage() {
   );
 
   return (
-    <>
+    <div className="relative">
       <Header title={hasTitle ? title : asset.title} />
       <div className=" items-top flex justify-between">
         <AssetForm
@@ -242,6 +242,6 @@ export default function AssetEditPage() {
           tags={tags}
         />
       </div>
-    </>
+    </div>
   );
 }
