@@ -4,6 +4,7 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useParams,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
@@ -145,7 +146,7 @@ export const AssetForm = ({
         encType="multipart/form-data"
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
-          <Actions assetId={id} disabled={disabled} />
+          <Actions disabled={disabled} />
         </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
@@ -157,7 +158,7 @@ export const AssetForm = ({
             <p>Basic information about your asset.</p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions assetId={id} disabled={disabled} />
+            <Actions disabled={disabled} />
           </div>
         </div>
 
@@ -420,30 +421,28 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({
-  assetId,
-  disabled,
-}: {
-  assetId?: string;
-  disabled: boolean;
-}) => (
-  <>
-    <ButtonGroup>
-      <Button
-        to={assetId ? `/assets/${assetId}/overview` : ".."}
-        variant="secondary"
-        disabled={disabled}
-      >
-        Cancel
-      </Button>
-      <AddAnother disabled={disabled} />
-    </ButtonGroup>
+const Actions = ({ disabled }: { disabled: boolean }) => {
+  const { assetId } = useParams<{ assetId?: string }>();
 
-    <Button type="submit" disabled={disabled}>
-      Save
-    </Button>
-  </>
-);
+  return (
+    <>
+      <ButtonGroup>
+        <Button
+          to={assetId ? `/assets/${assetId}/overview` : ".."}
+          variant="secondary"
+          disabled={disabled}
+        >
+          Cancel
+        </Button>
+        <AddAnother disabled={disabled} />
+      </ButtonGroup>
+
+      <Button type="submit" disabled={disabled}>
+        Save
+      </Button>
+    </>
+  );
+};
 
 const AddAnother = ({ disabled }: { disabled: boolean }) => (
   <TooltipProvider delayDuration={100}>
