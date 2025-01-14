@@ -7,12 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import {
-  useFetcher,
-  useFetchers,
-  useLoaderData,
-  useNavigate,
-} from "@remix-run/react";
+import { Link, useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -22,6 +17,7 @@ import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asse
 import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
 import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
 // eslint-disable-next-line import/no-cycle
+import AssetQuickActions from "~/components/assets/assets-index/asset-quick-actions";
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
@@ -284,7 +280,6 @@ export const AssetsList = ({
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
 }) => {
-  const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
   const { isMd } = useViewportHeight();
@@ -309,6 +304,7 @@ export const AssetsList = ({
     <>
       <Th>Category</Th>
       <Th>Tags</Th>
+      <Th>Actions</Th>
       <When
         truthy={userHasPermission({
           roles,
@@ -355,14 +351,6 @@ export const AssetsList = ({
             title="Assets"
             ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
             customPagination={<AssetIndexPagination />}
-            /**
-             * Using remix's navigate is the default behaviour, however it can also receive a custom function
-             */
-            navigate={
-              modeIsSimple
-                ? (itemId) => navigate(`/assets/${itemId}`)
-                : undefined
-            }
             bulkActions={
               disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
             }
@@ -384,7 +372,10 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
+        <Link
+          className="flex justify-between gap-3 p-4  md:justify-normal md:px-6"
+          to={`/assets/${item.id}`}
+        >
           <div className="flex items-center gap-3">
             <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
@@ -425,7 +416,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
               </div>
             </div>
           </div>
-        </div>
+        </Link>
       </Td>
 
       {/* Category */}
@@ -444,6 +435,10 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
       {/* Tags */}
       <Td className="text-left">
         <ListItemTagsColumn tags={tags} />
+      </Td>
+
+      <Td>
+        <AssetQuickActions asset={item} />
       </Td>
 
       {/* Custodian */}

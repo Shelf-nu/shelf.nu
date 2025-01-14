@@ -135,6 +135,10 @@ export const assetIndexFields = ({
         },
       },
     },
+    qrCodes: {
+      select: { id: true },
+      take: 1,
+    },
   } satisfies Prisma.AssetInclude;
 
   // Conditionally add bookings if date range is provided
