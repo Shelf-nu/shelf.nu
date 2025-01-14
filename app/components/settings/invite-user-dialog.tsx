@@ -1,15 +1,13 @@
 import { cloneElement, useCallback, useEffect, useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { useActionData, useLocation, useNavigation } from "@remix-run/react";
 import { UserIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { validEmail } from "~/utils/misc";
-import { Form } from "../custom-form";
 import Input from "../forms/input";
 import {
   Select,
@@ -41,8 +39,7 @@ export const InviteUserFormSchema = z.object({
       message: "Please enter a valid email",
     })),
   teamMemberId: z.string().optional(),
-  role: z.nativeEnum(OrganizationRoles),
-  redirectTo: z.string().optional(),
+  role: z.nativeEnum(OrganizationRoles, { message: "Please select a role." }),
 });
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
@@ -59,22 +56,16 @@ export default function InviteUserDialog({
   onClose,
 }: InviteUserDialogProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [searchParams, setSearchParams] = useSearchParams();
   const organization = useCurrentOrganization();
-  const navigation = useNavigation();
-  const { pathname } = useLocation();
 
-  const actionData = useActionData<{ error?: { message: string } }>();
+  const fetcher = useFetcherWithReset<{
+    error?: { message?: string };
+    success?: boolean;
+  }>();
 
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = isFormProcessing(fetcher.state);
 
   const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
-
-  const redirectTo = `${pathname}${
-    searchParams.size > 0
-      ? `?${searchParams.toString()}&success=true`
-      : "?success=true"
-  }`;
 
   function openDialog() {
     setIsDialogOpen(true);
@@ -88,16 +79,12 @@ export default function InviteUserDialog({
 
   useEffect(
     function handleSuccess() {
-      if (searchParams.get("success") === "true") {
+      if (fetcher.data?.success === true) {
         closeDialog();
-
-        setSearchParams((prev) => {
-          prev.delete("success");
-          return prev;
-        });
+        fetcher.reset();
       }
     },
-    [closeDialog, searchParams, setSearchParams]
+    [closeDialog, fetcher, fetcher.data?.success]
   );
 
   if (!organization) {
@@ -128,13 +115,13 @@ export default function InviteUserDialog({
               </p>
             </div>
 
-            <Form
+            <fetcher.Form
               ref={zo.ref}
               action="/api/settings/invite-user"
               method="post"
               className="flex flex-col gap-3"
             >
-              <input type="hidden" name="redirectTo" value={redirectTo} />
+              {/* <input type="hidden" name="redirectTo" value={redirectTo} /> */}
               <When truthy={!!teamMemberId}>
                 <input
                   type="hidden"
@@ -202,6 +189,11 @@ export default function InviteUserDialog({
                   </SelectContent>
                 </Select>
               </SelectGroup>
+              <When truthy={!!zo.errors.role()}>
+                <p className="-mt-1 text-sm text-error-500">
+                  {zo.errors?.role()?.message}
+                </p>
+              </When>
 
               <div className="pt-1.5">
                 <Input
@@ -217,14 +209,15 @@ export default function InviteUserDialog({
                 />
               </div>
 
-              <When truthy={!!actionData?.error}>
-                <div className="text-sm text-error-500">
-                  {actionData?.error?.message}
-                </div>
+              <When truthy={!!fetcher?.data?.error}>
+                <p className="text-sm text-error-500">
+                  {fetcher.data?.error?.message}
+                </p>
               </When>
 
               <div className="mt-7 flex gap-1">
                 <Button
+                  type="button"
                   variant="secondary"
                   size="sm"
                   width="full"
@@ -242,7 +235,7 @@ export default function InviteUserDialog({
                   Send Invite
                 </Button>
               </div>
-            </Form>
+            </fetcher.Form>
           </div>
         </Dialog>
       </DialogPortal>

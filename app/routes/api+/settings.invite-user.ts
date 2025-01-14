@@ -1,10 +1,10 @@
-import { json, redirect, type ActionFunctionArgs } from "@remix-run/node";
+import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
 import { createInvite } from "~/modules/invite/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData, safeRedirect } from "~/utils/http.server";
+import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -26,7 +26,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanInviteUsersToWorkspace({ organizationId });
 
-    const { email, teamMemberId, role, redirectTo } = parseData(
+    const { email, teamMemberId, role } = parseData(
       await request.formData(),
       InviteUserFormSchema
     );
@@ -81,19 +81,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
     });
 
-    if (invite) {
-      sendNotification({
-        title: "Successfully invited user",
-        message:
-          "They will receive an email in which they can complete their registration.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
-      });
-
-      return redirect(safeRedirect(redirectTo));
+    if (!invite) {
+      return json(data(null));
     }
 
-    return json(data(null));
+    sendNotification({
+      title: "Successfully invited user",
+      message:
+        "They will receive an email in which they can complete their registration.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
