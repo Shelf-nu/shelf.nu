@@ -166,9 +166,7 @@ export function AdvancedIndexColumn({
           asset={item}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-              <button className="underline hover:cursor-pointer">
-                {item.qrId}
-              </button>
+              <Button variant="link-gray">{item.qrId}</Button>
             </Td>
           }
         />
