@@ -109,6 +109,9 @@ const variants: Record<ButtonVariant, string> = {
   link: tw(
     `border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800`
   ),
+  "link-gray": tw(
+    "text-gray border-none p-0 text-text-sm font-normal underline hover:text-gray-500 "
+  ),
   "block-link": tw(
     "-mt-1 border-none px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
   ),

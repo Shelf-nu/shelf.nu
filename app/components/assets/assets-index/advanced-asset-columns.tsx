@@ -166,7 +166,9 @@ export function AdvancedIndexColumn({
           asset={item}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-              <button className="hover:underline">{item.qrId}</button>
+              <button className="underline hover:cursor-pointer">
+                {item.qrId}
+              </button>
             </Td>
           }
         />
@@ -201,13 +203,14 @@ export function AdvancedIndexColumn({
         <TextColumn
           value={
             item?.location?.name ? (
-              <Link
+              <Button
                 to={`/locations/${item.locationId}`}
-                className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
                 title={item.location.name}
+                target="_blank"
+                variant="link-gray"
               >
                 {item.location.name}
-              </Link>
+              </Button>
             ) : (
               ""
             )
