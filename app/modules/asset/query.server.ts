@@ -1236,19 +1236,20 @@ export const assetQueryFragment = Prisma.sql`
       WHERE acfv."assetId" = a.id AND cf.active = true
     ) AS "customFields",
     (
-      SELECT
-       jsonb_build_object(
+      SELECT jsonb_build_object(
         'id', ar.id,
+        'name', ar.name,
+        'message', ar.message,
         'alertDateTime', ar."alertDateTime"
-       )
+      )
       FROM public."AssetReminder" ar
-      WHERE
-       ar."assetId" = a.id
-       AND ar."alertDateTime" >= NOW()
-      ORDER BY
-       ar."alertDateTime" ASC
+      WHERE 
+        ar."assetId" = a.id 
+        AND ar."alertDateTime" >= NOW() AT TIME ZONE 'UTC'
+      ORDER BY 
+        ar."alertDateTime" ASC
       LIMIT 1
-    ) AS upcomingReminder 
+    ) AS upcomingReminder
 `;
 
 export const assetQueryJoins = Prisma.sql`

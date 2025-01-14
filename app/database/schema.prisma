@@ -80,8 +80,7 @@ model User {
   customTierLimit CustomTierLimit?
 
   @@unique([email, username])
-  @@index([firstName])
-  @@index([lastName])
+  @@index([firstName, lastName])
 }
 
 model Asset {
@@ -767,29 +766,27 @@ model KitCustody {
 }
 
 model AssetReminder {
-  id String @id @default(cuid())
-
-  name          String
-  message       String
+  id        String   @id @default(cuid())
+  name      String
+  message   String
   alertDateTime DateTime
-
   activeSchedulerReference String?
-
   organization   Organization @relation(fields: [organizationId], references: [id])
   organizationId String
-
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  assetId String
-
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId    String
   teamMembers TeamMember[]
-
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([name])
-  @@index([message])
-  @@index([alertDateTime])
+  // Optimized indexes
+  @@index([assetId, alertDateTime])
+  @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([organizationId, alertDateTime, assetId])
+
+  // For scheduler related queries
+  @@index([alertDateTime, activeSchedulerReference])
+
 }
