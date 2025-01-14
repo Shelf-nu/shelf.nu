@@ -50,6 +50,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
+import QrPreviewDialog from "../qr-preview-dialog";
 
 export function AdvancedIndexColumn({
   column,
@@ -157,8 +158,19 @@ export function AdvancedIndexColumn({
       );
 
     case "id":
-    case "qrId":
       return <TextColumn value={item[column]} />;
+
+    case "qrId":
+      return (
+        <QrPreviewDialog
+          asset={item}
+          trigger={
+            <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
+              <button className="hover:underline">{item.qrId}</button>
+            </Td>
+          }
+        />
+      );
 
     case "status":
       return <StatusColumn status={item.status} />;
