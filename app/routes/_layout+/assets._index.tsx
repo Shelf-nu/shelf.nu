@@ -7,13 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import {
-  Link,
-  useFetcher,
-  useFetchers,
-  useLoaderData,
-  useNavigate,
-} from "@remix-run/react";
+import { Link, useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -286,7 +280,6 @@ export const AssetsList = ({
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
 }) => {
-  const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
   const { isMd } = useViewportHeight();
