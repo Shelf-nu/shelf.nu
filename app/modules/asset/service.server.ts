@@ -518,24 +518,25 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
 
-    const assetsWithFormattedDate: AdvancedIndexAsset[] = assets.map(
-      (asset) => {
-        if (!asset.upcomingReminder) {
-          return asset;
-        }
+    const assetsWithFormattedDate: AdvancedIndexAsset[] =
+      assets?.length > 0
+        ? assets.map((asset) => {
+            if (!asset.upcomingReminder) {
+              return asset;
+            }
 
-        return {
-          ...asset,
-          upcomingReminder: {
-            ...asset.upcomingReminder,
-            displayDate: getDateTimeFormat(request, {
-              dateStyle: "short",
-              timeStyle: "short",
-            }).format(new Date(asset.upcomingReminder.alertDateTime)),
-          },
-        };
-      }
-    );
+            return {
+              ...asset,
+              upcomingReminder: {
+                ...asset.upcomingReminder,
+                displayDate: getDateTimeFormat(request, {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                }).format(new Date(asset.upcomingReminder.alertDateTime)),
+              },
+            };
+          })
+        : assets;
 
     return {
       search,
