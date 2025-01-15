@@ -141,7 +141,10 @@ export type AdvancedIndexAsset = Pick<
       categories: Pick<Category, "id" | "name">[] | null;
     };
   })[];
-  upcomingReminder?: Pick<AssetReminder, "id" | "alertDateTime"> & {
+  upcomingReminder?: Pick<
+    AssetReminder,
+    "id" | "alertDateTime" | "name" | "message"
+  > & {
     displayDate: string;
   };
 };
