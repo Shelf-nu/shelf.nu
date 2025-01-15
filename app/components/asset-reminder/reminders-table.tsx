@@ -5,6 +5,9 @@ import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fie
 import { List } from "../list";
 import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
+import { ListContentWrapper } from "../list/content-wrapper";
+import { Filters } from "../list/filters";
+import { SortBy } from "../list/filters/sort-by";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { Td, Th } from "../table";
@@ -14,6 +17,13 @@ import When from "../when/when";
 type RemindersTableProps = {
   isAssetReminderPage?: boolean;
 };
+
+export const REMINDERS_SORTING_OPTIONS = {
+  name: "Name",
+  alertDateTime: "Alert Time",
+  createdAt: "Date Created",
+  updatedAt: "Date Updated",
+} as const;
 
 export default function RemindersTable({
   isAssetReminderPage,
@@ -25,7 +35,18 @@ export default function RemindersTable({
     : "No reminders created yet.";
 
   return (
-    <>
+    <ListContentWrapper className="mb-4">
+      <Filters
+        slots={{
+          "right-of-search": (
+            <SortBy
+              sortingOptions={REMINDERS_SORTING_OPTIONS}
+              defaultSortingBy="alertDateTime"
+            />
+          ),
+        }}
+      />
+
       <List
         className="overflow-x-visible md:overflow-x-auto"
         ItemComponent={ListContent}
@@ -70,7 +91,7 @@ export default function RemindersTable({
           setIsReminderDialogOpen(false);
         }}
       />
-    </>
+    </ListContentWrapper>
   );
 }
 

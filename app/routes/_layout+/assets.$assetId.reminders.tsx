@@ -3,7 +3,6 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters } from "~/components/list/filters";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -93,10 +92,5 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function AssetReminders() {
-  return (
-    <>
-      <Filters className="mb-4" />
-      <RemindersTable isAssetReminderPage />
-    </>
-  );
+  return <RemindersTable isAssetReminderPage />;
 }
