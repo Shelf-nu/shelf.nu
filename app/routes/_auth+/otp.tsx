@@ -209,7 +209,7 @@ export default function OtpPage() {
           >
             Did not receive a code?{" "}
             <span className="text-primary-500">
-              {fetcherDisabled || disabled ? "Sending code..." : "Send again"}
+              {fetcherDisabled ? "Sending code..." : "Send again"}
             </span>
           </button>
         </div>
