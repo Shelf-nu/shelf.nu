@@ -6,8 +6,10 @@ import type {
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
+import { DateTime } from "luxon";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
+import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -24,14 +26,21 @@ import {
   getAsset,
   relinkQrCode,
 } from "~/modules/asset/service.server";
+import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import {
+  error,
+  getParams,
+  data,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -108,12 +117,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete", "relink-qr-code"]) })
+      z.object({ intent: z.enum(["delete", "relink-qr-code", "set-reminder"]) })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
       "relink-qr-code": PermissionAction.update,
+      "set-reminder": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -174,6 +184,41 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
 
+      case "set-reminder": {
+        const { redirectTo, ...payload } = parseData(
+          formData,
+          setReminderSchema
+        );
+        const hints = getHints(request);
+
+        const fmt = "yyyy-MM-dd'T'HH:mm";
+
+        const alertDateTime = DateTime.fromFormat(
+          formData.get("alertDateTime")!.toString()!,
+          fmt,
+          {
+            zone: hints.timeZone,
+          }
+        ).toJSDate();
+
+        await createAssetReminder({
+          ...payload,
+          assetId: id,
+          alertDateTime,
+          organizationId,
+          createdById: userId,
+        });
+
+        sendNotification({
+          title: "Reminder created",
+          message: "A reminder for you asset has been created successfully.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect(safeRedirect(redirectTo));
+      }
+
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
@@ -205,6 +250,7 @@ export default function AssetDetailsPage() {
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },
+    { to: "reminders", content: "Reminders" },
   ];
 
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type

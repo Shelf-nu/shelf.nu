@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { Crisp } from "crisp-sdk-web";
 import {
+  AlarmClockIcon,
   BoxesIcon,
   BriefcaseConveyorBeltIcon,
   CalendarRangeIcon,
@@ -155,6 +156,13 @@ export function useSidebarNavItems() {
           disabled: bookingDisabled,
         },
       ],
+    },
+    {
+      type: "child",
+      title: "Reminders",
+      Icon: AlarmClockIcon,
+      hidden: isBaseOrSelfService,
+      to: "/reminders",
     },
     {
       type: "label",

@@ -43,6 +43,7 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -102,6 +103,7 @@ import {
   getLocationUpdateNoteContent,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
+import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -516,12 +518,32 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
 
+    const assetsWithFormattedDate: AdvancedIndexAsset[] =
+      assets?.length > 0
+        ? assets.map((asset) => {
+            if (!asset.upcomingReminder) {
+              return asset;
+            }
+
+            return {
+              ...asset,
+              upcomingReminder: {
+                ...asset.upcomingReminder,
+                displayDate: getDateTimeFormat(request, {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                }).format(new Date(asset.upcomingReminder.alertDateTime)),
+              },
+            };
+          })
+        : assets;
+
     return {
       search,
       totalAssets,
       perPage: take,
       page,
-      assets,
+      assets: assetsWithFormattedDate,
       totalPages,
       cookie,
     };
@@ -902,9 +924,16 @@ export async function deleteAsset({
   organizationId,
 }: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.asset.deleteMany({
+    const deletedAsset = await db.asset.delete({
       where: { id, organizationId },
+      select: {
+        reminders: {
+          select: { alertDateTime: true, activeSchedulerReference: true },
+        },
+      },
     });
+
+    await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
     throw new ShelfError({
       cause,
