@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { endOfDay } from "date-fns";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useZorm } from "react-zorm";
@@ -363,8 +362,9 @@ export function BookingForm({
                        */
                       const newStartDate = new Date(event.target.value);
                       if (endDate && newStartDate > new Date(endDate)) {
+                        const now = new Date();
                         const newEndDate = dateForDateTimeInputValue(
-                          endOfDay(newStartDate)
+                          new Date(now.setHours(18, 0, 0))
                         );
                         setEndDate(
                           newEndDate.substring(0, newEndDate.length - 3)
