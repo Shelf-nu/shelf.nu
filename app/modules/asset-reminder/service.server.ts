@@ -56,7 +56,7 @@ export async function createAssetReminder({
         assetId,
         userId: createdById,
         type: "UPDATE",
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has created a new reminder **${name}**.`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has created a new reminder **${name.trim()}**.`,
       }),
     ]);
 

@@ -8,6 +8,7 @@ import { scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
 import { ASSETS_QUEUE_KEY } from "./scheduler.server";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
+import { createNote } from "../note/service.server";
 
 const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
   teamMembers: {
@@ -96,8 +97,8 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     }
 
     /** Sending alert mails to all associated users. */
-    await Promise.all(
-      usersToSendEmail.map((user) =>
+    await Promise.all([
+      ...usersToSendEmail.map((user) =>
         sendEmail({
           subject: "Asset Reminder Notice - Shelf",
           to: user.email,
@@ -116,8 +117,14 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             isOwner: user.isOwner,
           }),
         })
-      )
-    );
+      ),
+      createNote({
+        assetId: reminder.assetId,
+        userId: reminder.createdById,
+        type: "UPDATE",
+        content: `**System** has sent **${reminder.name.trim()}** reminder.`,
+      }),
+    ]);
   },
 };
 
