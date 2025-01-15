@@ -124,6 +124,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const reminders = await getRemindersForOverviewPage({
       assetId: id,
       organizationId,
+      request,
     });
 
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;

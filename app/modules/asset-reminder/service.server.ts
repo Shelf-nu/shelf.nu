@@ -1,5 +1,6 @@
 import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -292,9 +293,11 @@ export async function deleteAssetReminder({
 export async function getRemindersForOverviewPage({
   assetId,
   organizationId,
+  request,
 }: {
   assetId: AssetReminder["assetId"];
   organizationId: AssetReminder["organizationId"];
+  request: Request;
 }) {
   try {
     const reminders = await db.assetReminder.findMany({
@@ -309,7 +312,14 @@ export async function getRemindersForOverviewPage({
       include: ASSET_REMINDER_INCLUDE_FIELDS,
       orderBy: { alertDateTime: "desc" },
     });
-    return reminders;
+
+    return reminders.map((reminder) => ({
+      ...reminder,
+      displayDate: getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(reminder.alertDateTime),
+    }));
   } catch (cause) {
     throw new ShelfError({
       cause,

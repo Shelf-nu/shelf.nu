@@ -42,8 +42,17 @@ export function AssetReminderCards({
 
         return (
           <div key={reminder.id} className="border-b px-4 py-3">
-            <h5 className="text-gray-700">{reminder.name}</h5>
-            <p className="mb-2 text-xs text-gray-600">{reminder.message}</p>
+            <Button
+              to={`/assets/${asset.id}/reminders`}
+              className="mb-2 text-gray-700"
+              variant="link"
+            >
+              {reminder.name}
+            </Button>
+            <p className="mb-2 text-sm text-gray-600">
+              {reminder.message.substring(0, 1000)}
+            </p>
+            <p className="mb-2">{reminder.displayDate}</p>
 
             <ReminderTeamMembers
               imgClassName="rounded-full"
