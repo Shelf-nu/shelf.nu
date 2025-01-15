@@ -43,7 +43,6 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -99,6 +98,7 @@ import type {
   UpdateAssetPayload,
 } from "./types";
 import {
+  formatAssetsRemindersDates,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
@@ -518,32 +518,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
 
-    const assetsWithFormattedDate: AdvancedIndexAsset[] =
-      assets?.length > 0
-        ? assets.map((asset) => {
-            if (!asset.upcomingReminder) {
-              return asset;
-            }
-
-            return {
-              ...asset,
-              upcomingReminder: {
-                ...asset.upcomingReminder,
-                displayDate: getDateTimeFormat(request, {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                }).format(new Date(asset.upcomingReminder.alertDateTime)),
-              },
-            };
-          })
-        : assets;
-
     return {
       search,
       totalAssets,
       perPage: take,
       page,
-      assets: assetsWithFormattedDate,
+      assets: formatAssetsRemindersDates({ assets, request }),
       totalPages,
       cookie,
     };
