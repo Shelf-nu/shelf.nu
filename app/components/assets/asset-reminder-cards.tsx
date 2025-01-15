@@ -49,10 +49,11 @@ export function AssetReminderCards({
             >
               {reminder.name}
             </Button>
+            <p className="mb-2">{reminder.displayDate}</p>
+
             <p className="mb-2 text-sm text-gray-600">
               {reminder.message.substring(0, 1000)}
             </p>
-            <p className="mb-2">{reminder.displayDate}</p>
 
             <ReminderTeamMembers
               imgClassName="rounded-full"
