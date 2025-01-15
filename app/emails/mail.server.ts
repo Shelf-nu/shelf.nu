@@ -11,6 +11,7 @@ export const sendEmail = async ({
   html,
   attachments,
   from,
+  replyTo,
 }: {
   /** Email address of recipient */
   to: string;
@@ -28,6 +29,9 @@ export const sendEmail = async ({
 
   /** Override the default sender */
   from?: string;
+
+  /** Override the default reply to email address */
+  replyTo?: string;
 }) => {
   const { logoPath } = config;
 
@@ -35,6 +39,7 @@ export const sendEmail = async ({
     // send mail with defined transport object
     await transporter.sendMail({
       from: from || SMTP_FROM || `"Shelf" <no-reply@emails.shelf.nu>`, // sender address
+      ...(replyTo && { replyTo }), // reply to
       to, // list of receivers
       subject, // Subject line
       text, // plain text body
