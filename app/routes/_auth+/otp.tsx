@@ -12,6 +12,7 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
@@ -118,7 +119,8 @@ export default function OtpPage() {
   const fetcher = useFetcher<resendAction>();
 
   const zo = useZorm("otpForm", OtpSchema);
-  const disabled = isFormProcessing(fetcher.state);
+  const fetcherDisabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled();
 
   const email = searchParams.get("email") || "";
   const mode = searchParams.get("mode") as OtpVerifyMode;
@@ -195,7 +197,7 @@ export default function OtpPage() {
               data-test-id="create-account"
               type="submit"
               className="w-full "
-              disabled={disabled}
+              disabled={fetcherDisabled || disabled}
             >
               {pageData.buttonTitle}
             </Button>
@@ -207,7 +209,7 @@ export default function OtpPage() {
           >
             Did not receive a code?{" "}
             <span className="text-primary-500">
-              {disabled ? "Sending code..." : "Send again"}
+              {fetcherDisabled ? "Sending code..." : "Send again"}
             </span>
           </button>
         </div>
