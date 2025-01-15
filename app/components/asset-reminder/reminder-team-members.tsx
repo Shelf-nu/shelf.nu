@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -48,7 +49,8 @@ export default function ReminderTeamMembers({
           <TooltipProvider key={teamMember.id}>
             <Tooltip>
               <TooltipTrigger>
-                <div
+                <Link
+                  to={`/settings/team/users/${teamMember?.user?.id}/assets`}
                   className={tw(
                     "-ml-1 flex size-6 shrink-0 items-center justify-center overflow-hidden rounded border border-white",
                     imgClassName,
@@ -63,7 +65,7 @@ export default function ReminderTeamMembers({
                       "/static/images/default_pfp.jpg"
                     }
                   />
-                </div>
+                </Link>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-72">
                 <p>{resolveTeamMemberName(teamMember, true)}</p>
