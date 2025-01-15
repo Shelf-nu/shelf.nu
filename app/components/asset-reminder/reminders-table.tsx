@@ -48,7 +48,7 @@ export default function RemindersTable({
       />
 
       <List
-        className="overflow-x-visible md:overflow-x-auto"
+        className="overflow-x-hidden"
         ItemComponent={ListContent}
         customEmptyStateContent={{
           title: emptyStateTitle,
