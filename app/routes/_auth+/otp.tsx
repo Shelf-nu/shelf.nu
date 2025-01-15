@@ -32,6 +32,7 @@ import { validEmail } from "~/utils/misc";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
 import type { action as resendOtpAction } from "./resend-otp";
+import { useDisabled } from "~/hooks/use-disabled";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
@@ -118,7 +119,8 @@ export default function OtpPage() {
   const fetcher = useFetcher<resendAction>();
 
   const zo = useZorm("otpForm", OtpSchema);
-  const disabled = isFormProcessing(fetcher.state);
+  const fetcherDisabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled();
 
   const email = searchParams.get("email") || "";
   const mode = searchParams.get("mode") as OtpVerifyMode;
@@ -195,7 +197,7 @@ export default function OtpPage() {
               data-test-id="create-account"
               type="submit"
               className="w-full "
-              disabled={disabled}
+              disabled={fetcherDisabled || disabled}
             >
               {pageData.buttonTitle}
             </Button>
@@ -207,7 +209,7 @@ export default function OtpPage() {
           >
             Did not receive a code?{" "}
             <span className="text-primary-500">
-              {disabled ? "Sending code..." : "Send again"}
+              {fetcherDisabled || disabled ? "Sending code..." : "Send again"}
             </span>
           </button>
         </div>
