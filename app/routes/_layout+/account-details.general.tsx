@@ -182,7 +182,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         }
 
         void sendEmail({
-          to: ADMIN_EMAIL || "support@shelf.nu",
+          to: ADMIN_EMAIL || `"Shelf" <no-reply@emails.shelf.nu>`,
           subject: "Delete account request",
           text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
         });
