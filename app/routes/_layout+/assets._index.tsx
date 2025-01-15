@@ -304,7 +304,6 @@ export const AssetsList = ({
     <>
       <Th>Category</Th>
       <Th>Tags</Th>
-      <Th>Actions</Th>
       <When
         truthy={userHasPermission({
           roles,
@@ -315,6 +314,7 @@ export const AssetsList = ({
         <Th>Custodian</Th>
       </When>
       <Th>Location</Th>
+      <Th>Actions</Th>
     </>
   ) : (
     <AdvancedTableHeader columns={columns} />
@@ -437,10 +437,6 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
         <ListItemTagsColumn tags={tags} />
       </Td>
 
-      <Td>
-        <AssetQuickActions asset={item} />
-      </Td>
-
       {/* Custodian */}
       <When
         truthy={userHasPermission({
@@ -485,6 +481,11 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
 
       {/* Location */}
       <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+
+      {/* Quick Actions */}
+      <Td>
+        <AssetQuickActions asset={item} />
+      </Td>
     </>
   );
 };
