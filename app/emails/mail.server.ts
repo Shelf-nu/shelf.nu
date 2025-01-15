@@ -34,7 +34,7 @@ export const sendEmail = async ({
   try {
     // send mail with defined transport object
     await transporter.sendMail({
-      from: from || SMTP_FROM || `"Shelf" <no-reply@shelf.nu>`, // sender address
+      from: from || SMTP_FROM || `"Shelf" <no-reply@emails.shelf.nu>`, // sender address
       to, // list of receivers
       subject, // Subject line
       text, // plain text body
