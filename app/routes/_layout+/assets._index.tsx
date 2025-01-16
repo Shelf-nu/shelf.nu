@@ -484,7 +484,12 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
 
       {/* Quick Actions */}
       <Td>
-        <AssetQuickActions asset={item} />
+        <AssetQuickActions
+          asset={{
+            ...item,
+            qrId: item.qrCodes[0].id,
+          }}
+        />
       </Td>
     </>
   );

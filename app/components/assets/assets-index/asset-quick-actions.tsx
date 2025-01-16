@@ -13,7 +13,9 @@ import QrPreviewDialog from "../qr-preview-dialog";
 type AssetQuickActionsProps = {
   className?: string;
   style?: React.CSSProperties;
-  asset: AssetsFromViewItem;
+  asset: Pick<AssetsFromViewItem, "id" | "title" | "mainImage"> & {
+    qrId: string;
+  };
 };
 
 export default function AssetQuickActions({
@@ -45,7 +47,7 @@ export default function AssetQuickActions({
             asset={{
               id: asset.id,
               title: asset.title,
-              qrId: asset.qrCodes[0].id,
+              qrId: asset.qrId,
             }}
             trigger={
               <Button size="sm" variant="block-link-gray">
