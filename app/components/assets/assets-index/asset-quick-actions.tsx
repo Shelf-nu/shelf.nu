@@ -8,7 +8,7 @@ import {
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "../delete-asset";
-import QrPreviewDialog from "../qr-preview-dialog";
+import { QrPreviewDialog } from "../qr-preview-dialog";
 
 type AssetQuickActionsProps = {
   className?: string;
@@ -42,20 +42,20 @@ export default function AssetQuickActions({
       </Tooltip>
 
       <Tooltip>
-        <TooltipTrigger>
-          <QrPreviewDialog
-            asset={{
-              id: asset.id,
-              title: asset.title,
-              qrId: asset.qrId,
-            }}
-            trigger={
+        <QrPreviewDialog
+          asset={{
+            id: asset.id,
+            title: asset.title,
+            qrId: asset.qrId,
+          }}
+          trigger={
+            <TooltipTrigger asChild>
               <Button size="sm" variant="block-link-gray">
                 <QrCodeIcon className="size-4" />
               </Button>
-            }
-          />
-        </TooltipTrigger>
+            </TooltipTrigger>
+          }
+        />
 
         <TooltipContent align="center" side="top">
           Show asset label
@@ -78,16 +78,16 @@ export default function AssetQuickActions({
         </TooltipContent>
       </Tooltip>
       <Tooltip>
-        <TooltipTrigger>
-          <DeleteAsset
-            asset={asset}
-            trigger={
+        <DeleteAsset
+          asset={asset}
+          trigger={
+            <TooltipTrigger asChild>
               <Button size="sm" variant="block-link-gray">
                 <Trash2Icon className="size-4" />
               </Button>
-            }
-          />
-        </TooltipTrigger>
+            </TooltipTrigger>
+          }
+        />
 
         <TooltipContent align="center" side="top">
           Delete asset

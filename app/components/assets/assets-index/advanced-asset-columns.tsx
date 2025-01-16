@@ -50,7 +50,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
-import QrPreviewDialog from "../qr-preview-dialog";
+import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
 
 export function AdvancedIndexColumn({
