@@ -10,7 +10,7 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
-import { sendEmail } from "~/emails/mail.server";
+import { sendEmail, sendEmailsWithRateLimit } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
@@ -1317,38 +1317,31 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    /** Sending mails to required users  */
-    await Promise.all(
-      bookingsToSendEmail.map((b) => {
-        const subject = `Booking deleted (${b.name}) - shelf.nu`;
-        const text = deletedBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b.assets.length,
-          custodian:
-            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-            (b.custodianTeamMember?.name as string),
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-        });
+    const emailConfigs = bookingsToSendEmail.map((b) => ({
+      to: b.custodianUser?.email ?? "",
+      subject: `Booking deleted (${b.name}) - shelf.nu`,
+      text: deletedBookingEmailContent({
+        bookingName: b.name,
+        assetsCount: b.assets.length,
+        custodian:
+          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+          (b.custodianTeamMember?.name as string),
+        from: b.from as Date,
+        to: b.to as Date,
+        bookingId: b.id,
+        hints,
+      }),
+      html: bookingUpdatesTemplateString({
+        booking: b,
+        heading: `Your booking as been deleted: "${b.name}"`,
+        assetCount: b.assets.length,
+        hints,
+        hideViewButton: true,
+      }),
+    }));
 
-        const html = bookingUpdatesTemplateString({
-          booking: b,
-          heading: `Your booking as been deleted: "${b.name}"`,
-          assetCount: b.assets.length,
-          hints,
-          hideViewButton: true,
-        });
-
-        return sendEmail({
-          to: b.custodianUser?.email ?? "",
-          subject,
-          text,
-          html,
-        });
-      })
-    );
+    // Send emails with rate limiting
+    return await sendEmailsWithRateLimit(emailConfigs);
   } catch (cause) {
     const message =
       cause instanceof ShelfError

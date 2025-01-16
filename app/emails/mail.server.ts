@@ -80,3 +80,37 @@ export const sendEmail = async ({
   // Preview only available when sending through an Ethereal account
   // console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
 };
+
+/** Utility function to add delay between operations */
+async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Process emails in batches with rate limiting
+ * @param emails - Array of email configurations to send
+ * @param batchSize - Number of emails to process per batch (default: 2)
+ * @param delayMs - Milliseconds to wait between batches (default: 1000ms)
+ */
+export async function sendEmailsWithRateLimit(
+  emails: Array<{
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+  }>,
+  batchSize = 2,
+  delayMs = 1100
+): Promise<void> {
+  for (let i = 0; i < emails.length; i += batchSize) {
+    // Process emails in batches of specified size
+    const batch = emails.slice(i, i + batchSize);
+
+    // Send emails in current batch concurrently
+    await Promise.all(batch.map((email) => sendEmail(email)));
+
+    // If there are more emails to process, add delay before next batch
+    if (i + batchSize < emails.length) {
+      await delay(delayMs);
+    }
+  }
+}
