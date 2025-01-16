@@ -42,7 +42,7 @@ export default function AssetQuickActions({
       </Tooltip>
 
       <Tooltip>
-        <TooltipTrigger asChild>
+        <TooltipTrigger>
           <QrPreviewDialog
             asset={{
               id: asset.id,
@@ -57,7 +57,9 @@ export default function AssetQuickActions({
           />
         </TooltipTrigger>
 
-        <TooltipContent>Show asset label</TooltipContent>
+        <TooltipContent align="center" side="top">
+          Show asset label
+        </TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -76,7 +78,7 @@ export default function AssetQuickActions({
         </TooltipContent>
       </Tooltip>
       <Tooltip>
-        <TooltipTrigger asChild>
+        <TooltipTrigger>
           <DeleteAsset
             asset={asset}
             trigger={
