@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -15,7 +15,6 @@ import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import {
   PermissionAction,
@@ -130,7 +129,7 @@ export function BookingForm({
   id,
   name,
   startDate,
-  endDate: incomingEndDate,
+  endDate,
   custodianRef,
   bookingStatus,
   bookingFlags,
@@ -139,8 +138,6 @@ export function BookingForm({
 }: BookingFormData) {
   const navigation = useNavigation();
   const { teamMembers } = useLoaderData<typeof loader>();
-
-  const [endDate, setEndDate] = useState(incomingEndDate);
 
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
@@ -355,22 +352,6 @@ export function BookingForm({
                     defaultValue={startDate}
                     placeholder="Booking"
                     required
-                    onChange={(event) => {
-                      /**
-                       * When user changes the startDate and the new startDate is greater than the endDate
-                       * in that case, we have to update endDate to be the endDay date of startDate.
-                       */
-                      const newStartDate = new Date(event.target.value);
-                      if (endDate && newStartDate > new Date(endDate)) {
-                        const now = new Date();
-                        const newEndDate = dateForDateTimeInputValue(
-                          new Date(now.setHours(18, 0, 0))
-                        );
-                        setEndDate(
-                          newEndDate.substring(0, newEndDate.length - 3)
-                        );
-                      }
-                    }}
                   />
                 </FormRow>
                 <FormRow
@@ -389,7 +370,6 @@ export function BookingForm({
                     defaultValue={endDate}
                     placeholder="Booking"
                     required
-                    value={endDate ? endDate : undefined}
                   />
                 </FormRow>
                 <p className="text-[14px] text-gray-600">
