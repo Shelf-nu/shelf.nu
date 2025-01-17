@@ -1,9 +1,10 @@
-import { cloneElement, useState } from "react";
+import { cloneElement, forwardRef, useState } from "react";
 import type { Asset } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { QrPreview } from "../qr/qr-preview";
+import type { HTMLButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import When from "../when/when";
 
@@ -12,14 +13,16 @@ type QrPreviewDialogProps = {
   asset: Pick<Asset, "id" | "title"> & {
     qrId: string;
   };
-  trigger: React.ReactElement<{ onClick: () => void }>;
+  trigger: React.ReactElement<{
+    onClick: () => void;
+    ref: React.ForwardedRef<HTMLButtonProps>;
+  }>;
 };
 
-export default function QrPreviewDialog({
-  className,
-  asset,
-  trigger,
-}: QrPreviewDialogProps) {
+export const QrPreviewDialog = forwardRef<
+  HTMLButtonProps,
+  QrPreviewDialogProps
+>(function ({ className, asset, trigger }, ref) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const { isLoading, data, error } = useApiQuery<{
@@ -39,7 +42,7 @@ export default function QrPreviewDialog({
 
   return (
     <>
-      {cloneElement(trigger, { onClick: openDialog })}
+      {cloneElement(trigger, { onClick: openDialog, ref })}
 
       <DialogPortal>
         <Dialog
@@ -88,4 +91,6 @@ export default function QrPreviewDialog({
       </DialogPortal>
     </>
   );
-}
+});
+
+QrPreviewDialog.displayName = "QrPreviewDialog";
