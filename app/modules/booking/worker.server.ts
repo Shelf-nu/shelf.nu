@@ -40,7 +40,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (email && booking.from && booking.to) {
     await sendEmail({
       to: email,
-      subject: `Checkout reminder (${booking.name}) - shelf.nu`,
+      subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
       text: checkoutReminderEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,

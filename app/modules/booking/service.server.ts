@@ -374,7 +374,7 @@ export async function upsertBooking(
             const custodian =
               `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
               (res.custodianTeamMember?.name as string);
-            let subject = `Booking reserved (${res.name}) - shelf.nu`;
+            let subject = `✅ Booking reserved (${res.name}) - shelf.nu`;
             let text = assetReservedEmailContent({
               bookingName: res.name,
               assetsCount: res.assets.length,
@@ -823,7 +823,7 @@ export async function deleteBooking(
 
     const email = b.custodianUser?.email;
     if (email) {
-      const subject = `Booking deleted (${b.name}) - shelf.nu`;
+      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
       const text = deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b._count.assets,
@@ -1319,7 +1319,7 @@ export async function bulkDeleteBookings({
 
     const emailConfigs = bookingsToSendEmail.map((b) => ({
       to: b.custodianUser?.email ?? "",
-      subject: `Booking deleted (${b.name}) - shelf.nu`,
+      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
       text: deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b.assets.length,
@@ -1540,7 +1540,7 @@ export async function bulkCancelBookings({
     /** Sending cancellation emails */
     await Promise.all(
       bookingsToSendEmail.map((b) => {
-        const subject = `Booking cancelled (${b.name}) - shelf.nu`;
+        const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
           assetsCount: b._count.assets,
