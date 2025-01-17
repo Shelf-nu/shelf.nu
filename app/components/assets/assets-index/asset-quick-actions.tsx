@@ -24,12 +24,13 @@ export default function AssetQuickActions({
   asset,
 }: AssetQuickActionsProps) {
   return (
-    <div className={tw("flex items-center", className)} style={style}>
+    <div className={tw("flex items-center gap-2", className)} style={style}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size="sm"
-            variant="block-link-gray"
+            variant="secondary"
+            className={"p-2"}
             to={`/assets/${asset.id}/edit`}
           >
             <PencilIcon className="size-4" />
@@ -50,7 +51,7 @@ export default function AssetQuickActions({
           }}
           trigger={
             <TooltipTrigger asChild>
-              <Button size="sm" variant="block-link-gray">
+              <Button size="sm" variant="secondary" className={"p-2"}>
                 <QrCodeIcon className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -66,7 +67,8 @@ export default function AssetQuickActions({
         <TooltipTrigger asChild>
           <Button
             size="sm"
-            variant="block-link-gray"
+            variant="secondary"
+            className={"p-2"}
             to={`/assets/${asset.id}/overview/duplicate`}
           >
             <CopyIcon className="size-4" />
@@ -82,7 +84,7 @@ export default function AssetQuickActions({
           asset={asset}
           trigger={
             <TooltipTrigger asChild>
-              <Button size="sm" variant="block-link-gray">
+              <Button size="sm" variant="secondary" className={"p-2"}>
                 <Trash2Icon className="size-4" />
               </Button>
             </TooltipTrigger>
