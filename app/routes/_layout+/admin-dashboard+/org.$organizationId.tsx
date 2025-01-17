@@ -20,6 +20,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
+import { importAssetsSchema } from "~/modules/asset/utils.server";
 import { toggleOrganizationSso } from "~/modules/organization/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -154,7 +155,11 @@ export const action = async ({
             label: "Assets",
           });
         }
-        const contentData = extractCSVDataFromContentImport(csvData);
+
+        const contentData = extractCSVDataFromContentImport(
+          csvData,
+          importAssetsSchema.array()
+        );
         await createAssetsFromContentImport({
           data: contentData,
           userId,
