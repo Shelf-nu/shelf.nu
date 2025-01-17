@@ -218,4 +218,4 @@ export const importAssetsSchema = z
     bookable: z.enum(["yes", "no"]).optional(),
     imageUrl: z.string().url().optional(),
   })
-  .and(z.record(z.string().startsWith("cf"), z.any()));
+  .and(z.record(z.string(), z.any()));

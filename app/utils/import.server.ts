@@ -54,8 +54,8 @@ export function extractCSVDataFromContentImport<Schema extends ZodSchema>(
     )
   );
 
-  const parseResult = schema.safeParse(rawData);
-  if (!parseResult.success) {
+  const parsedResult = schema.safeParse(rawData);
+  if (!parsedResult.success) {
     throw new ShelfError({
       cause: null,
       message:
@@ -64,7 +64,7 @@ export function extractCSVDataFromContentImport<Schema extends ZodSchema>(
     });
   }
 
-  return parseResult.data as Schema["_output"];
+  return parsedResult.data as Schema["_output"];
 }
 
 /** Takes the CSV data from a `backup` import and parses it into an object that we can then use to create the entries */
