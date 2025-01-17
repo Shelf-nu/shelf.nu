@@ -10,6 +10,7 @@ import type {
   Tag,
   User,
   CustomFieldType,
+  Organization,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { z } from "zod";
@@ -44,6 +45,7 @@ export interface UpdateAssetPayload {
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   valuation?: Asset["valuation"];
+  organizationId: Organization["id"];
 }
 
 export type CreateAssetFromContentImportPayload = z.infer<
