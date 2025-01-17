@@ -2,7 +2,6 @@ import {
   Button,
   Html,
   Text,
-  Link,
   Head,
   render,
   Container,
@@ -49,34 +48,17 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             the workspace and start exploring features like Asset Explorer,
             Location Tracking, Collaboration, Custom fields and more. If you
             have any questions or need assistance, please don't hesitate to
-            contact our support team at{" "}
-            <Link
-              style={{ color: emailPrimaryColor }}
-              href="mailto:support@shelf.nu"
-            >
-              support@shelf.nu
-            </Link>
-            .
+            contact our support team at support@shelf.nu.
           </Text>
           <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />
             The Shelf team
           </Text>
           <Text style={{ fontSize: "14px", color: "#344054" }}>
-            This is an automatic email sent from{" "}
-            <Link
-              style={{ color: emailPrimaryColor }}
-              href="https://www.shelf.nu/"
-            >
-              shelf.nu
-            </Link>{" "}
-            to{" "}
-            <Link
-              style={{ color: emailPrimaryColor }}
-              href={`mailto:${invite.inviteeEmail}`}
-            >
+            This is an automatic email sent from shelf.nu to{" "}
+            <span style={{ color: emailPrimaryColor }}>
               {invite.inviteeEmail}
-            </Link>
+            </span>
             .
           </Text>
         </div>
