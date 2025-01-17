@@ -1,7 +1,10 @@
 import type { CustomField } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
-import type { Column } from "~/modules/asset-index-settings/helpers";
+import type {
+  Column,
+  ColumnLabelKey,
+} from "~/modules/asset-index-settings/helpers";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
@@ -165,6 +168,8 @@ export function getDefaultValueForFieldType(
   }
 }
 
+export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = ["actions"];
+
 /**
  * Determines what columns are available based on already used columns and operation type
  * @param columns - All available columns
@@ -193,6 +198,14 @@ export function getAvailableColumns(
   return availableColumns.filter((column) => {
     // Common exclusions for both operations
     if (!column.visible) return false;
+
+    /**
+     * Some columns like `actions` does not support filtering,
+     * so we have to skip them to be availableColumns.
+     */
+    if (COLUMNS_WITHOUT_FILTER.includes(column.name)) {
+      return false;
+    }
 
     if (operation === "sort") {
       // Columns that can't be sorted
