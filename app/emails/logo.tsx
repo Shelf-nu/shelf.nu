@@ -19,6 +19,7 @@ export function LogoForEmail() {
             color: "#101828",
             fontWeight: "600",
             margin: "0",
+            marginLeft: "6px",
           }}
         >
           shelf
