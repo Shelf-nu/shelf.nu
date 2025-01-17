@@ -38,8 +38,8 @@ export const sendEmail = async ({
   try {
     // send mail with defined transport object
     await transporter.sendMail({
-      from: from || SMTP_FROM || `"Shelf" <no-reply@emails.shelf.nu>`, // sender address
-      ...(replyTo && { replyTo }), // reply to
+      from: from || SMTP_FROM || `"Shelf" <updates@emails.shelf.nu>`, // sender address
+      replyTo: replyTo || "support@shelf.nu", // reply to
       to, // list of receivers
       subject, // Subject line
       text, // plain text body
