@@ -285,7 +285,7 @@ export async function action({ request }: ActionFunctionArgs) {
               });
             });
 
-          await sendEmail({
+          sendEmail({
             to: user.email,
             subject: "Your shelf.nu free trial is ending soon",
             text: trialEndsSoonText({

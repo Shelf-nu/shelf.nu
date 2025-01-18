@@ -10,7 +10,7 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
-import { sendEmail, sendEmailsWithRateLimit } from "~/emails/mail.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
@@ -21,9 +21,9 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
-import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
+import { bookingSchedulerEventsEnum } from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -82,7 +82,7 @@ export async function scheduleNextBookingJob({
 }) {
   try {
     const id = await scheduler.sendAfter(
-      schedulerKeys.bookingQueue,
+      QueueNames.bookingQueue,
       data,
       {},
       when
@@ -843,7 +843,7 @@ export async function deleteBooking(
         hideViewButton: true,
       });
 
-      await sendEmail({
+      sendEmail({
         to: email,
         subject,
         text,
@@ -1341,7 +1341,7 @@ export async function bulkDeleteBookings({
     }));
 
     // Send emails with rate limiting
-    return await sendEmailsWithRateLimit(emailConfigs);
+    return emailConfigs.map(sendEmail);
   } catch (cause) {
     const message =
       cause instanceof ShelfError
