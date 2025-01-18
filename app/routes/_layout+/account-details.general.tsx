@@ -244,7 +244,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         }
 
         // Send email with OTP using our email service
-        await sendEmail({
+        sendEmail({
           to: newEmail,
           subject: `🔐 Shelf verification code: ${linkData.properties.email_otp}`,
           text: changeEmailAddressTextEmail({
