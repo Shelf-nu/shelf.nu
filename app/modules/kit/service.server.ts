@@ -124,10 +124,11 @@ export async function updateKit({
   imageExpiration,
   status,
   createdById,
+  organizationId,
 }: UpdateKitPayload) {
   try {
     return await db.kit.update({
-      where: { id },
+      where: { id, organizationId },
       data: {
         name,
         description,
@@ -147,10 +148,12 @@ export async function updateKitImage({
   request,
   kitId,
   userId,
+  organizationId,
 }: {
   request: Request;
   kitId: string;
   userId: string;
+  organizationId: Kit["organizationId"];
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -176,6 +179,7 @@ export async function updateKitImage({
       image: signedUrl,
       imageExpiration: oneDayFromNow(),
       createdById: userId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
