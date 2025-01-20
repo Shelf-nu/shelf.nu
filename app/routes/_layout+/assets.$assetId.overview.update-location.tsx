@@ -72,7 +72,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -92,6 +92,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       newLocationId,
       currentLocationId,
       userId: authSession.userId,
+      organizationId,
     });
 
     sendNotification({

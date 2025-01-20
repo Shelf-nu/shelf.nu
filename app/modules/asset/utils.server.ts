@@ -236,3 +236,17 @@ export function formatAssetsRemindersDates({
     };
   });
 }
+
+export const importAssetsSchema = z
+  .object({
+    title: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    kit: z.string().optional(),
+    tags: z.string().array(),
+    location: z.string().optional(),
+    custodian: z.string().optional(),
+    bookable: z.enum(["yes", "no"]).optional(),
+    imageUrl: z.string().url().optional(),
+  })
+  .and(z.record(z.string(), z.any()));

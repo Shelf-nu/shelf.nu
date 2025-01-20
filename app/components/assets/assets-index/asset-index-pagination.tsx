@@ -160,23 +160,28 @@ export const SwitchToAdvancedMode = ({
             </span>
           </div>
           <AlertDialogTitle>Advanced Mode (Beta)</AlertDialogTitle>
-          <AlertDialogDescription className="space-y-2 text-center text-gray-500 md:text-left">
-            <p>
-              You are about to switch to Advanced Mode. This feature is
-              currently in beta and includes:
-            </p>
-            <ul className="list-inside list-disc text-left">
-              <li>Advanced filtering capabilities</li>
-              <li>Custom column management</li>
-              <li>Enhanced sorting options</li>
-              <li>Custom field support</li>
-            </ul>
-            <p>
-              While we've thoroughly tested this feature, you may encounter
-              occasional issues. Your feedback helps us improve! If you face any
-              issues, please report them to our support team so we can resolve
-              them asap.
-            </p>
+          <AlertDialogDescription
+            className="space-y-2 text-center text-gray-500 md:text-left"
+            asChild
+          >
+            <div>
+              <p>
+                You are about to switch to Advanced Mode. This feature is
+                currently in beta and includes:
+              </p>
+              <ul className="list-inside list-disc text-left">
+                <li>Advanced filtering capabilities</li>
+                <li>Custom column management</li>
+                <li>Enhanced sorting options</li>
+                <li>Custom field support</li>
+              </ul>
+              <p>
+                While we've thoroughly tested this feature, you may encounter
+                occasional issues. Your feedback helps us improve! If you face
+                any issues, please report them to our support team so we can
+                resolve them asap.
+              </p>
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -363,6 +363,9 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.upcomingReminder?.displayDate;
             break;
           }
+          case "actions":
+            value = "";
+            break;
           default:
             checkExhaustiveSwitch(fieldName);
             value = "";

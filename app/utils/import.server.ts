@@ -1,4 +1,6 @@
+import type { ZodSchema } from "zod";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
+import { ShelfError } from "./error";
 
 /* This function receives an array of object and a key name
  * It then extracts all the values of that key and makes sure there are no duplicates
@@ -25,7 +27,10 @@ export function getUniqueValuesFromArrayOfObjects({
 }
 
 /** Takes the CSV data from a `content` import and parses it into an object that we can then use to create the entries */
-export function extractCSVDataFromContentImport(data: string[][]) {
+export function extractCSVDataFromContentImport<Schema extends ZodSchema>(
+  data: string[][],
+  schema: Schema
+) {
   /**
    * The first row of the CSV contains the keys for the data
    * We need to trim the keys to remove any whitespace and special characters and Non-printable characters as it already causes issues with in the past
@@ -33,7 +38,7 @@ export function extractCSVDataFromContentImport(data: string[][]) {
    */
   const keys = data[0].map((key) => key.trim()); // Trim the keys
   const values = data.slice(1) as string[][];
-  return values.map((entry) =>
+  const rawData = values.map((entry) =>
     Object.fromEntries(
       entry.map((value, index) => {
         switch (keys[index]) {
@@ -48,6 +53,18 @@ export function extractCSVDataFromContentImport(data: string[][]) {
       })
     )
   );
+
+  const parsedResult = schema.safeParse(rawData);
+  if (!parsedResult.success) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Received invalid data, please update the file with proper headers and data.",
+      label: "Assets",
+    });
+  }
+
+  return parsedResult.data as Schema["_output"];
 }
 
 /** Takes the CSV data from a `backup` import and parses it into an object that we can then use to create the entries */

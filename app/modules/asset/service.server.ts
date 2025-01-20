@@ -737,6 +737,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  organizationId,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -841,7 +842,7 @@ export async function updateAsset({
     }
 
     const asset = await db.asset.update({
-      where: { id },
+      where: { id, organizationId },
       data,
       include: { location: true, tags: true },
     });
@@ -894,7 +895,7 @@ export async function updateAsset({
     return asset;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Asset", {
-      additionalData: { userId, id },
+      additionalData: { userId, id, organizationId },
     });
   }
 }
@@ -928,10 +929,12 @@ export async function updateAssetMainImage({
   request,
   assetId,
   userId,
+  organizationId,
 }: {
   request: Request;
   assetId: string;
   userId: User["id"];
+  organizationId: Organization["id"];
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -959,6 +962,7 @@ export async function updateAssetMainImage({
       mainImage: signedUrl,
       mainImageExpiration: oneDayFromNow(),
       userId,
+      organizationId,
     });
     await deleteOtherImages({ userId, assetId, data: { path: image } });
   } catch (cause) {

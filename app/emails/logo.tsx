@@ -6,11 +6,11 @@ export function LogoForEmail() {
   return (
     <div style={{ margin: "0 auto", display: "flex" }}>
       <Img
-        src="cid:shelf-logo"
+        src="https://app.shelf.nu/static/images/logo-full-color(x2).png"
         alt="Shelf's logo"
-        width="32"
+        width="auto"
         height="32"
-        style={{ marginRight: "6px", width: "32px", height: "32px" }}
+        style={{ marginRight: "6px", width: "auto", height: "32px" }}
       />
       {logoPath?.fullLogo ? null : (
         <Heading

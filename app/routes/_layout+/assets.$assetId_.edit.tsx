@@ -171,6 +171,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       assetId: id,
       userId: authSession.userId,
+      organizationId,
     });
 
     const {
@@ -197,6 +198,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: authSession.userId,
       customFieldsValues,
       valuation,
+      organizationId,
     });
 
     sendNotification({

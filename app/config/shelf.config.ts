@@ -12,10 +12,10 @@ export const config: Config = {
   disableSignup: DISABLE_SIGNUP || false,
   disableSSO: DISABLE_SSO || false,
 
-  // logoPath: {
-  //   fullLogo: "/static/images/logo-full-color(x2).png",
-  //   symbol: "/static/images/shelf-symbol.png",
-  // },
+  logoPath: {
+    fullLogo: "/static/images/logo-full-color(x2).png",
+    symbol: "/static/images/shelf-symbol.png",
+  },
   faviconPath: "/static/favicon.ico",
   emailPrimaryColor: "#EF6820",
 };

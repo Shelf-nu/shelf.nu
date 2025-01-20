@@ -252,7 +252,7 @@ export async function createInvite(
 
     await sendEmail({
       to: inviteeEmail,
-      subject: `You have been invited to ${invite.organization.name}`,
+      subject: `✉️ You have been invited to ${invite.organization.name}`,
       text: inviteEmailText({ invite, token }),
       html: invitationTemplateString({ invite, token }),
     });
