@@ -5,6 +5,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import When from "~/components/when/when";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "../delete-asset";
@@ -23,24 +25,28 @@ export default function AssetQuickActions({
   style,
   asset,
 }: AssetQuickActionsProps) {
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={"p-2"}
-            to={`/assets/${asset.id}/edit`}
-          >
-            <PencilIcon className="size-4" />
-          </Button>
-        </TooltipTrigger>
+      <When truthy={!isBaseOrSelfService}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              to={`/assets/${asset.id}/edit`}
+            >
+              <PencilIcon className="size-4" />
+            </Button>
+          </TooltipTrigger>
 
-        <TooltipContent align="center" side="top">
-          Edit asset information
-        </TooltipContent>
-      </Tooltip>
+          <TooltipContent align="center" side="top">
+            Edit asset information
+          </TooltipContent>
+        </Tooltip>
+      </When>
 
       <Tooltip>
         <QrPreviewDialog
@@ -63,38 +69,41 @@ export default function AssetQuickActions({
         </TooltipContent>
       </Tooltip>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={"p-2"}
-            to={`/assets/${asset.id}/overview/duplicate`}
-          >
-            <CopyIcon className="size-4" />
-          </Button>
-        </TooltipTrigger>
+      <When truthy={!isBaseOrSelfService}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              to={`/assets/${asset.id}/overview/duplicate`}
+            >
+              <CopyIcon className="size-4" />
+            </Button>
+          </TooltipTrigger>
 
-        <TooltipContent align="center" side="top">
-          Duplicate asset
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <DeleteAsset
-          asset={asset}
-          trigger={
-            <TooltipTrigger asChild>
-              <Button size="sm" variant="secondary" className={"p-2"}>
-                <Trash2Icon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-          }
-        />
+          <TooltipContent align="center" side="top">
+            Duplicate asset
+          </TooltipContent>
+        </Tooltip>
 
-        <TooltipContent align="center" side="top">
-          Delete asset
-        </TooltipContent>
-      </Tooltip>
+        <Tooltip>
+          <DeleteAsset
+            asset={asset}
+            trigger={
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="secondary" className={"p-2"}>
+                  <Trash2Icon className="size-4" />
+                </Button>
+              </TooltipTrigger>
+            }
+          />
+
+          <TooltipContent align="center" side="top">
+            Delete asset
+          </TooltipContent>
+        </Tooltip>
+      </When>
     </div>
   );
 }
