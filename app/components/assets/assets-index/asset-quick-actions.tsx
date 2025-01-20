@@ -8,6 +8,11 @@ import {
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "../delete-asset";
 import { QrPreviewDialog } from "../qr-preview-dialog";
@@ -25,11 +30,17 @@ export default function AssetQuickActions({
   style,
   asset,
 }: AssetQuickActionsProps) {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
 
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>
-      <When truthy={!isBaseOrSelfService}>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.update,
+        })}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -69,7 +80,13 @@ export default function AssetQuickActions({
         </TooltipContent>
       </Tooltip>
 
-      <When truthy={!isBaseOrSelfService}>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.update,
+        })}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -86,7 +103,15 @@ export default function AssetQuickActions({
             Duplicate asset
           </TooltipContent>
         </Tooltip>
+      </When>
 
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.delete,
+        })}
+      >
         <Tooltip>
           <DeleteAsset
             asset={asset}
