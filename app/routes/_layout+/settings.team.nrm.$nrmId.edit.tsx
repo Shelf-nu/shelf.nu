@@ -60,7 +60,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -70,7 +70,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { name } = parseData(await request.formData(), NewOrEditMemberSchema);
 
     await db.teamMember.update({
-      where: { id: nrmId },
+      where: { id: nrmId, organizationId },
       data: { name: name.trim() },
     });
 
