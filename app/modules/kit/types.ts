@@ -9,10 +9,10 @@ export type UpdateKitPayload = Partial<
     | "image"
     | "imageExpiration"
     | "createdById"
-    | "organizationId"
   >
 > & {
   id: Kit["id"];
+  organizationId: Kit["organizationId"];
 };
 
 // Define the static includes

@@ -394,6 +394,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Update and save the booking
         const booking = await upsertBooking(
           upsertBookingData,
+          organizationId,
           getClientHint(request),
           isSelfServiceOrBase
         );
@@ -488,6 +489,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "archive": {
         await upsertBooking(
           { id, status: BookingStatus.ARCHIVED },
+          organizationId,
           getClientHint(request)
         );
 
@@ -507,6 +509,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "cancel": {
         const cancelledBooking = await upsertBooking(
           { id, status: BookingStatus.CANCELLED },
+          organizationId,
           getClientHint(request)
         );
 
@@ -564,6 +567,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "revert-to-draft": {
         await upsertBooking(
           { id, status: BookingStatus.DRAFT },
+          organizationId,
           getClientHint(request)
         );
 

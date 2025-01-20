@@ -35,14 +35,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    const teamMember = await getTeamMember({ id: nrmId });
+    const teamMember = await getTeamMember({ id: nrmId, organizationId });
 
     return json(data({ showModal: true, teamMember }));
   } catch (cause) {
