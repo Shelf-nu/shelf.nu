@@ -175,6 +175,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       baseUserGroupId,
     } = payload;
 
+    /** User is allowed to edit his/her current organization only not other organizations. */
+    if (currentOrganization.id !== id) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not allowed to edit this organization.",
+        label: "Organization",
+      });
+    }
+
     const formDataFile = await unstable_parseMultipartFormData(
       request,
       unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
