@@ -133,6 +133,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         custodianTeamMemberId: custodian?.id,
         name,
         description,
+        organizationId,
         from,
         to,
         assetIds,
