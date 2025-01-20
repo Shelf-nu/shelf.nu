@@ -585,13 +585,15 @@ export async function deleteKitImage({
 export async function releaseCustody({
   kitId,
   userId,
+  organizationId,
 }: {
   kitId: Kit["id"];
   userId: string;
+  organizationId: Kit["organizationId"];
 }) {
   try {
     const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId },
+      where: { id: kitId, organizationId },
       select: {
         id: true,
         name: true,
@@ -603,7 +605,7 @@ export async function releaseCustody({
 
     await Promise.all([
       db.kit.update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           status: KitStatus.AVAILABLE,
           custody: { delete: true },
@@ -611,7 +613,7 @@ export async function releaseCustody({
       }),
       ...kit.assets.map((asset) =>
         db.asset.update({
-          where: { id: asset.id },
+          where: { id: asset.id, organizationId },
           data: {
             status: AssetStatus.AVAILABLE,
             custody: { delete: true },
