@@ -230,7 +230,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: bookingId,
           assetIds,
         },
-        organizationId,
         getClientHint(request)
       );
 

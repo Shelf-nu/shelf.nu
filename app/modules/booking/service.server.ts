@@ -158,6 +158,7 @@ export async function upsertBooking(
       | "id"
       | "creatorId"
       | "name"
+      | "organizationId"
       | "status"
       | "to"
       | "custodianTeamMemberId"
@@ -168,7 +169,6 @@ export async function upsertBooking(
       isExpired: boolean;
     }
   >,
-  organizationId: Organization["id"],
   hints: ClientHint,
   isBaseOrSelfService: boolean = false
 ) {
@@ -176,6 +176,7 @@ export async function upsertBooking(
     const {
       assetIds,
       creatorId,
+      organizationId,
       custodianTeamMemberId,
       custodianUserId,
       id,
@@ -246,7 +247,7 @@ export async function upsertBooking(
         };
       } else if (id) {
         const b = await db.booking.findFirst({
-          where: { id, organizationId },
+          where: { id },
           select: { custodianUserId: true },
         });
 
@@ -274,7 +275,7 @@ export async function upsertBooking(
 
       //no need to fetch old booking always, we need only for this case(for now)
       const oldBooking = isTerminalState
-        ? await db.booking.findFirst({ where: { id, organizationId } })
+        ? await db.booking.findFirst({ where: { id } })
         : null;
 
       if (isTerminalState) {
@@ -299,7 +300,7 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id, organizationId },
+          where: { id },
           data,
           include: {
             ...BOOKING_COMMON_INCLUDE,
@@ -487,9 +488,12 @@ export async function upsertBooking(
         connect: { id: creatorId },
       };
     }
-    data.organization = {
-      connect: { id: organizationId },
-    };
+    if (organizationId) {
+      data.organization = {
+        connect: { id: organizationId },
+      };
+    }
+
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },

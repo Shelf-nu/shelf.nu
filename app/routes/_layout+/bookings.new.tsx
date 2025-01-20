@@ -141,7 +141,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           custodianUserId: authSession.userId,
         }),
       },
-      organizationId,
       getClientHint(request)
     );
 
