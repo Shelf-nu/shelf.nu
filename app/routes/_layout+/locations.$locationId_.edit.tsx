@@ -145,15 +145,15 @@ export default function LocationEditPage() {
   const { location } = useLoaderData<typeof loader>();
 
   return (
-    <>
+    <div className="relative">
       <Header title={hasName ? name : location.name} />
-      <div className=" items-top flex justify-between">
+      <div className="items-top flex justify-between">
         <LocationForm
           name={location.name}
           description={location.description}
           address={location.address}
         />
       </div>
-    </>
+    </div>
   );
 }

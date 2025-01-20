@@ -113,11 +113,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         createdById: userId,
         name: payload.name,
         description: payload.description,
+        organizationId,
       }),
       updateKitImage({
         request,
         kitId,
         userId,
+        organizationId,
       }),
     ]);
 

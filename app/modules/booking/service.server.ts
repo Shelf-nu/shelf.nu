@@ -158,14 +158,17 @@ export async function upsertBooking(
       | "id"
       | "creatorId"
       | "name"
-      | "organizationId"
       | "status"
       | "to"
       | "custodianTeamMemberId"
       | "custodianUserId"
       | "description"
-    > & { assetIds: Asset["id"][]; isExpired: boolean }
+    > & {
+      assetIds: Asset["id"][];
+      isExpired: boolean;
+    }
   >,
+  organizationId: Organization["id"],
   hints: ClientHint,
   isBaseOrSelfService: boolean = false
 ) {
@@ -173,7 +176,6 @@ export async function upsertBooking(
     const {
       assetIds,
       creatorId,
-      organizationId,
       custodianTeamMemberId,
       custodianUserId,
       id,
@@ -244,7 +246,7 @@ export async function upsertBooking(
         };
       } else if (id) {
         const b = await db.booking.findFirst({
-          where: { id },
+          where: { id, organizationId },
           select: { custodianUserId: true },
         });
 
@@ -272,7 +274,7 @@ export async function upsertBooking(
 
       //no need to fetch old booking always, we need only for this case(for now)
       const oldBooking = isTerminalState
-        ? await db.booking.findFirst({ where: { id } })
+        ? await db.booking.findFirst({ where: { id, organizationId } })
         : null;
 
       if (isTerminalState) {
@@ -297,7 +299,7 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id },
+          where: { id, organizationId },
           data,
           include: {
             ...BOOKING_COMMON_INCLUDE,
@@ -485,11 +487,9 @@ export async function upsertBooking(
         connect: { id: creatorId },
       };
     }
-    if (organizationId) {
-      data.organization = {
-        connect: { id: organizationId },
-      };
-    }
+    data.organization = {
+      connect: { id: organizationId },
+    };
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -782,15 +782,16 @@ export async function removeAssets({
 }
 
 export async function deleteBooking(
-  booking: Pick<Booking, "id">,
+  booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
   try {
-    const { id } = booking;
-    const activeBooking = await db.booking.findFirst({
+    const { id, organizationId } = booking;
+    const activeBooking = await db.booking.findFirstOrThrow({
       where: {
         id,
         status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
+        organizationId,
       },
       include: {
         assets: {

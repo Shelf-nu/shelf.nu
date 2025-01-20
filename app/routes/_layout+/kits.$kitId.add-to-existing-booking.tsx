@@ -133,7 +133,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -177,6 +177,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: bookingId,
         assetIds: finalAssetIds,
       },
+      organizationId,
       getClientHint(request)
     );
     await createNotes({

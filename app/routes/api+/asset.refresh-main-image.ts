@@ -16,6 +16,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // This is kind of a special case. Even tho we are editing the asset by updating the image
+    // we should still use "read" permission because we need base and self-service users to be able to see the images
     const { organizationId } = await requirePermission({
       userId,
       request,
