@@ -297,7 +297,7 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id },
+          where: { id, organizationId },
           data,
           include: {
             ...BOOKING_COMMON_INCLUDE,
@@ -782,15 +782,16 @@ export async function removeAssets({
 }
 
 export async function deleteBooking(
-  booking: Pick<Booking, "id">,
+  booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
   try {
-    const { id } = booking;
-    const activeBooking = await db.booking.findFirst({
+    const { id, organizationId } = booking;
+    const activeBooking = await db.booking.findFirstOrThrow({
       where: {
         id,
         status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
+        organizationId,
       },
       include: {
         assets: {

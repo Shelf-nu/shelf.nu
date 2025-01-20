@@ -432,7 +432,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
 
         const deletedBooking = await deleteBooking(
-          { id },
+          { id, organizationId },
           getClientHint(request)
         );
 
