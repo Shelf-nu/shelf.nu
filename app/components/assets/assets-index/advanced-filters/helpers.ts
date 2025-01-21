@@ -231,3 +231,35 @@ export function getAvailableColumns(
     return true;
   });
 }
+
+/**
+ * Extracts the QR ID from a URL or returns the original value if it's not a URL
+ * Removes any query parameters and returns the last path segment
+ *
+ * @example
+ * localhost:3000/qr/abc123?hello=world -> abc123
+ * https://example.com/abc123 -> abc123
+ * abc123 -> abc123
+ *
+ * @param value - The input value (URL or QR ID)
+ * @returns The extracted QR ID or original value
+ */
+export function extractQrIdFromValue(value: string): string {
+  try {
+    // Try to parse as URL first
+    const url = new URL(value);
+
+    // Remove leading and trailing slashes and split path
+    const pathParts = url.pathname.split("/").filter(Boolean);
+
+    // Get the last part of the path (if exists)
+    if (pathParts.length > 0) {
+      return pathParts[pathParts.length - 1];
+    }
+
+    return value;
+  } catch (e) {
+    // If URL parsing fails, return original value
+    return value;
+  }
+}
