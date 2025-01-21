@@ -129,6 +129,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       required,
       options,
       categories,
+      organizationId,
     });
 
     sendNotification({
