@@ -300,7 +300,7 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id },
+          where: { id, organizationId },
           data,
           include: {
             ...BOOKING_COMMON_INCLUDE,
@@ -715,6 +715,7 @@ export async function removeAssets({
   lastName,
   userId,
   kitIds = [],
+  organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
     assetIds: Asset["id"][];
@@ -723,12 +724,13 @@ export async function removeAssets({
   lastName: string;
   userId: string;
   kitIds?: Kit["id"][];
+  organizationId: Booking["organizationId"];
 }) {
   try {
     const { assetIds, id } = booking;
     const b = await db.booking.update({
       // First, disconnect the assets from the booking
-      where: { id },
+      where: { id, organizationId },
       data: {
         assets: {
           disconnect: assetIds.map((id) => ({ id })),
@@ -752,13 +754,13 @@ export async function removeAssets({
       b.status === BookingStatus.OVERDUE
     ) {
       await db.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assetIds }, organizationId },
         data: { status: AssetStatus.AVAILABLE },
       });
 
       if (kitIds.length > 0) {
         await db.kit.updateMany({
-          where: { id: { in: kitIds } },
+          where: { id: { in: kitIds }, organizationId },
           data: { status: KitStatus.AVAILABLE },
         });
       }
@@ -791,7 +793,7 @@ export async function deleteBooking(
 ) {
   try {
     const { id, organizationId } = booking;
-    const activeBooking = await db.booking.findFirstOrThrow({
+    const activeBooking = await db.booking.findFirst({
       where: {
         id,
         status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
@@ -814,7 +816,7 @@ export async function deleteBooking(
     const hasKits = uniqueKitIds.size > 0;
 
     const b = await db.booking.delete({
-      where: { id },
+      where: { id, organizationId },
       include: {
         ...BOOKING_COMMON_INCLUDE,
         ...bookingIncludeForEmails,
