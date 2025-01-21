@@ -3,10 +3,16 @@ import { AssetStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
-export async function releaseCustody({ assetId }: { assetId: Asset["id"] }) {
+export async function releaseCustody({
+  assetId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  organizationId: Asset["organizationId"];
+}) {
   try {
     return await db.asset.update({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       data: {
         status: AssetStatus.AVAILABLE,
         custody: {

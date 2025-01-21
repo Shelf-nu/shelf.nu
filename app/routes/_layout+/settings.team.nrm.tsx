@@ -136,6 +136,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           .update({
             where: {
               id: teamMemberId,
+              organizationId,
             },
             data: {
               deletedAt: new Date(),

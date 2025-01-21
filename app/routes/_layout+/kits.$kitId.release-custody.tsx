@@ -76,7 +76,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -108,6 +108,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const kit = await releaseCustody({
       kitId,
       userId,
+      organizationId,
     });
 
     const { custodianName } = parseData(
