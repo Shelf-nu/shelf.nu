@@ -251,6 +251,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
         userId: authSession.userId,
+        organizationId,
       });
     }
 
