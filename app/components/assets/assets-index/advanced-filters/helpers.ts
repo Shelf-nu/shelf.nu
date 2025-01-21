@@ -168,7 +168,10 @@ export function getDefaultValueForFieldType(
   }
 }
 
-export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = ["actions"];
+export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = [
+  "actions",
+  "upcomingReminder",
+];
 
 /**
  * Determines what columns are available based on already used columns and operation type
