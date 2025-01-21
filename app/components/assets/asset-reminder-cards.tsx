@@ -3,7 +3,6 @@ import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
 import { Button } from "../shared/button";
-import When from "../when/when";
 
 type AssetReminderCardsProps = {
   className?: string;
@@ -60,11 +59,11 @@ export function AssetReminderCards({
               teamMembers={slicedTeamMembers}
               isAlreadySent={isAlreadySent}
               extraContent={
-                <When truthy={remainingTeamMembers > 0}>
+                remainingTeamMembers > 0 ? (
                   <div className="flex size-6 items-center justify-center rounded-full border border-white bg-gray-100 text-xs font-medium">
                     +{remainingTeamMembers}
                   </div>
-                </When>
+                ) : null
               }
             />
           </div>

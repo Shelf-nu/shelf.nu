@@ -163,14 +163,6 @@ export async function getTeamMembers(params: {
         orderBy: { createdAt: "desc" },
         include: {
           custodies: true,
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              profilePicture: true,
-            },
-          },
         },
       }),
 

@@ -34,7 +34,7 @@ export async function createAssetReminder({
   | "organizationId"
 > & { teamMembers: TeamMember["id"][] }) {
   try {
-    await validateTeamMembersForReminder(teamMembers);
+    await validateTeamMembersForReminder(teamMembers, organizationId);
 
     const user = await getUserByID(createdById);
 
@@ -81,11 +81,15 @@ export async function createAssetReminder({
   }
 }
 
-async function validateTeamMembersForReminder(teamMembers: TeamMember["id"][]) {
+async function validateTeamMembersForReminder(
+  teamMembers: TeamMember["id"][],
+  organizationId: TeamMember["organizationId"]
+) {
   const teamMembersWithUserCount = await db.teamMember.count({
     where: {
       id: { in: teamMembers },
       user: { isNot: null },
+      organizationId,
     },
   });
 
@@ -169,7 +173,7 @@ export async function getPaginatedAndFilterableReminders({
         take,
         skip,
         include: ASSET_REMINDER_INCLUDE_FIELDS,
-        orderBy: { [orderBy ?? "alertDateTime"]: orderDirection ?? "desc" },
+        orderBy: { [orderBy ?? "alertDateTime"]: orderDirection },
       }),
       db.assetReminder.count({ where: finalWhere }),
     ]);
@@ -205,7 +209,7 @@ export async function editAssetReminder({
   "id" | "name" | "message" | "alertDateTime" | "organizationId"
 > & { teamMembers: TeamMember["id"][] }) {
   try {
-    await validateTeamMembersForReminder(teamMembers);
+    await validateTeamMembersForReminder(teamMembers, organizationId);
 
     /** This will act as a validation to check if reminder exists */
     const reminder = await db.assetReminder.findFirstOrThrow({
