@@ -134,11 +134,11 @@ export default function NewLocationPage() {
   const title = useAtomValue(dynamicTitleAtom);
 
   return (
-    <>
+    <div className="relative">
       <Header title={title ? title : "Untitled location"} />
       <div>
         <LocationForm />
       </div>
-    </>
+    </div>
   );
 }

@@ -236,6 +236,7 @@ export async function updateCustomField(payload: {
   active?: CustomField["active"];
   options?: CustomField["options"];
   categories?: string[];
+  organizationId: CustomField["organizationId"];
 }) {
   const { id, name, helpText, required, active, options, categories } = payload;
 
@@ -339,6 +340,7 @@ export async function upsertCustomField(
             const updatedCustomField = await updateCustomField({
               id: existingCustomField.id,
               options,
+              organizationId: def.organizationId,
             });
             existingCustomField = updatedCustomField;
             newOrUpdatedFields.push(updatedCustomField);
@@ -531,7 +533,7 @@ export async function bulkActivateOrDeactivateCustomFields({
     const customFieldsIds = customFields.map((field) => field.id);
 
     const updatedFields = await db.customField.updateMany({
-      where: { id: { in: customFieldsIds } },
+      where: { id: { in: customFieldsIds }, organizationId },
       data: { active },
     });
 
