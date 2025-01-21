@@ -13,15 +13,28 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
 
-import { CheckIcon, ChevronRight, PlusIcon } from "~/components/icons/library";
+import {
+  CheckIcon,
+  ChevronRight,
+  HelpIcon,
+  PlusIcon,
+} from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
 import { adjustDateToUTC, isDateString } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { extractQrIdFromValue } from "./helpers";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
+import { SearchFieldTooltip } from "~/components/list/filters/search-field-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 
 export function ValueField({
   filter,
@@ -156,6 +169,63 @@ export function ValueField({
   switch (filter.type) {
     case "string":
     case "text":
+      if (filter.name === "qrId") {
+        return (
+          <div className={tw("flex w-full md:w-auto")}>
+            <div className="relative flex-1">
+              <Input
+                {...commonInputProps}
+                type="text"
+                value={filter.value as string}
+                onChange={(e) => {
+                  setFilter(e.target.value);
+                }}
+                placeholder={placeholder(filter.operator)}
+                onKeyUp={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === "Enter") {
+                    setTimeout(() => {
+                      // Assert the target as HTMLInputElement to access value
+                      const input = e.target as HTMLInputElement;
+                      const cleanValue = extractQrIdFromValue(input.value);
+                      setFilter(cleanValue);
+                      // Create a new keyboard event for submitOnEnter
+                      submitOnEnter(e as React.KeyboardEvent<HTMLInputElement>);
+                    }, 10);
+                  }
+                }}
+                error={error}
+                name={fieldName}
+              />
+              {!["contains", "containsAny", "matchesAny"].includes(
+                filter.operator
+              ) ? (
+                <TooltipProvider delayDuration={100}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-700">
+                        <HelpIcon />
+                      </i>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="z-[9999999]">
+                      <div className="max-w-[260px] sm:max-w-[320px]">
+                        <h6 className="mb-1 text-xs font-semibold text-gray-700">
+                          Barcode scanner ready
+                        </h6>
+                        <p className="text-xs font-medium text-gray-500">
+                          This fields supports barcode scanners. Simply place
+                          your cursor in the field and scan a Shelf QR code with
+                          your barcode scanner. The value will be automatically
+                          filled in for you.
+                        </p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </div>
+          </div>
+        );
+      }
       return (
         <Input
           {...commonInputProps}
