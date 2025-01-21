@@ -20,6 +20,12 @@ import {
   PlusIcon,
 } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
 import { adjustDateToUTC, isDateString } from "~/utils/date-fns";
@@ -28,13 +34,6 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { extractQrIdFromValue } from "./helpers";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
-import { SearchFieldTooltip } from "~/components/list/filters/search-field-tooltip";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
 
 export function ValueField({
   filter,
