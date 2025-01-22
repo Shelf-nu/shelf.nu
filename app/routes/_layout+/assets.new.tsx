@@ -182,6 +182,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       assetId: asset.id,
       userId: authSession.userId,
       organizationId,
+      isNewAsset: true,
     });
 
     sendNotification({
