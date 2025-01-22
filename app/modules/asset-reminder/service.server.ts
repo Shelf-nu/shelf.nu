@@ -113,8 +113,13 @@ export async function getPaginatedAndFilterableReminders({
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, orderBy, orderDirection } =
+    const { page, perPageParam, search, orderDirection } =
       getParamsValues(searchParams);
+    /**
+     * We dont use orderBy from getParamsValues because in our case we need the default value to be alertDateTime whgen orderBy is not present
+     */
+    const orderBy = searchParams.get("orderBy") || "alertDateTime";
+
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
@@ -173,7 +178,7 @@ export async function getPaginatedAndFilterableReminders({
         take,
         skip,
         include: ASSET_REMINDER_INCLUDE_FIELDS,
-        orderBy: { [orderBy ?? "alertDateTime"]: orderDirection },
+        orderBy: [{ [orderBy]: orderDirection }, { createdAt: "desc" }],
       }),
       db.assetReminder.count({ where: finalWhere }),
     ]);
