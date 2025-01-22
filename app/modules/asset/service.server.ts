@@ -921,11 +921,13 @@ export async function updateAssetMainImage({
   assetId,
   userId,
   organizationId,
+  isNewAsset = false,
 }: {
   request: Request;
   assetId: string;
   userId: User["id"];
   organizationId: Organization["id"];
+  isNewAsset?: boolean;
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -955,7 +957,14 @@ export async function updateAssetMainImage({
       userId,
       organizationId,
     });
-    await deleteOtherImages({ userId, assetId, data: { path: image } });
+
+    /**
+     * If updateAssetMainImage is called from new asset route, then we don't have to delete other images
+     * bcause no others images for this assets exists yet.
+     */
+    if (!isNewAsset) {
+      await deleteOtherImages({ userId, assetId, data: { path: image } });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
