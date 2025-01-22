@@ -51,6 +51,7 @@ export default function ReminderTeamMembers({
               <TooltipTrigger>
                 <Link
                   to={`/settings/team/users/${teamMember?.user?.id}/assets`}
+                  style={{ pointerEvents: isAccessRevoed ? "none" : "auto" }}
                   className={tw(
                     "-ml-1 flex size-6 shrink-0 items-center justify-center overflow-hidden rounded border border-white",
                     imgClassName,
