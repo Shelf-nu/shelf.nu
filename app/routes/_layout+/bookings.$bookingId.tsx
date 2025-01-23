@@ -432,7 +432,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
 
         const deletedBooking = await deleteBooking(
-          { id },
+          { id, organizationId },
           getClientHint(request)
         );
 
@@ -472,6 +472,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId: authSession.userId,
+          organizationId,
         });
 
         sendNotification({
@@ -548,6 +549,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId: authSession.userId,
+          organizationId,
         });
 
         sendNotification({

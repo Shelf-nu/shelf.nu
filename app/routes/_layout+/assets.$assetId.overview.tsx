@@ -188,6 +188,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
     const formData = await request.formData();
     const { intent } = parseData(
       formData,
@@ -200,7 +207,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         AvailabilityForBookingFormSchema
       );
 
-      await updateAssetBookingAvailability(id, availableToBook);
+      await updateAssetBookingAvailability({
+        id,
+        organizationId,
+        availableToBook,
+      });
 
       sendNotification({
         title: "Asset availability status updated successfully",

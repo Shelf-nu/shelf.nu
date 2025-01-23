@@ -305,9 +305,17 @@ export async function getTeamMemberForCustodianFilter({
   }
 }
 
-export async function getTeamMember({ id }: { id: TeamMember["id"] }) {
+export async function getTeamMember({
+  id,
+  organizationId,
+}: {
+  id: TeamMember["id"];
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.teamMember.findUniqueOrThrow({ where: { id } });
+    return await db.teamMember.findUniqueOrThrow({
+      where: { id, organizationId },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -258,10 +258,13 @@ export async function createLocation({
   }
 }
 
-export async function deleteLocation({ id }: Pick<Location, "id">) {
+export async function deleteLocation({
+  id,
+  organizationId,
+}: Pick<Location, "id" | "organizationId">) {
   try {
     const location = await db.location.delete({
-      where: { id },
+      where: { id, organizationId },
     });
 
     if (location.imageId) {
@@ -330,8 +333,8 @@ export async function updateLocation(payload: {
     }
 
     return await db.location.update({
-      where: { id },
-      data: data,
+      where: { id, organizationId },
+      data,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {

@@ -124,10 +124,11 @@ export async function updateKit({
   imageExpiration,
   status,
   createdById,
+  organizationId,
 }: UpdateKitPayload) {
   try {
     return await db.kit.update({
-      where: { id },
+      where: { id, organizationId },
       data: {
         name,
         description,
@@ -147,10 +148,12 @@ export async function updateKitImage({
   request,
   kitId,
   userId,
+  organizationId,
 }: {
   request: Request;
   kitId: string;
   userId: string;
+  organizationId: Kit["organizationId"];
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -176,6 +179,7 @@ export async function updateKitImage({
       image: signedUrl,
       imageExpiration: oneDayFromNow(),
       createdById: userId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -581,13 +585,15 @@ export async function deleteKitImage({
 export async function releaseCustody({
   kitId,
   userId,
+  organizationId,
 }: {
   kitId: Kit["id"];
   userId: string;
+  organizationId: Kit["organizationId"];
 }) {
   try {
     const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId },
+      where: { id: kitId, organizationId },
       select: {
         id: true,
         name: true,
@@ -599,7 +605,7 @@ export async function releaseCustody({
 
     await Promise.all([
       db.kit.update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           status: KitStatus.AVAILABLE,
           custody: { delete: true },
@@ -607,7 +613,7 @@ export async function releaseCustody({
       }),
       ...kit.assets.map((asset) =>
         db.asset.update({
-          where: { id: asset.id },
+          where: { id: asset.id, organizationId },
           data: {
             status: AssetStatus.AVAILABLE,
             custody: { delete: true },
@@ -1177,7 +1183,7 @@ export async function updateKitQrCode({
     // Disconnect all existing QR codes
     await db.kit
       .update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           qrCodes: {
             set: [],
@@ -1196,7 +1202,7 @@ export async function updateKitQrCode({
     // Connect the new QR code
     return await db.kit
       .update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           qrCodes: {
             connect: { id: newQrId },
@@ -1220,6 +1226,7 @@ export async function updateKitQrCode({
     });
   }
 }
+
 export async function getAvailableKitAssetForBooking(
   kitIds: Kit["id"][]
 ): Promise<string[]> {

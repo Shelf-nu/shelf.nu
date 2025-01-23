@@ -145,14 +145,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.delete,
     });
 
-    await deleteLocation({ id });
+    await deleteLocation({ id, organizationId });
 
     sendNotification({
       title: "Location deleted",

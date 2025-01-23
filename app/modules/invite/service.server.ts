@@ -278,12 +278,8 @@ export async function updateInviteStatus({
 }: Pick<Invite, "id" | "status"> & { password: string }) {
   try {
     const invite = await db.invite.findFirst({
-      where: {
-        id,
-      },
-      include: {
-        inviteeTeamMember: true,
-      },
+      where: { id },
+      include: { inviteeTeamMember: true },
     });
 
     if (!invite || invite.status !== InviteStatuses.PENDING) {
