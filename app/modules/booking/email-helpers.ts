@@ -4,7 +4,6 @@ import type { BookingForEmail } from "~/emails/types";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
-import { ShelfError } from "~/utils/error";
 import type { ClientHint } from "./types";
 
 /**

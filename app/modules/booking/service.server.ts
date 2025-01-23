@@ -1347,7 +1347,6 @@ export async function bulkDeleteBookings({
       }),
     }));
 
-    // Send emails with rate limiting
     return emailConfigs.map(sendEmail);
   } catch (cause) {
     const message =

@@ -4,10 +4,14 @@ import type { EmailPayloadType } from "./types";
 import { SMTP_FROM } from "../utils/env";
 import { ShelfError } from "../utils/error";
 
+// every node will execute 5 jobs(teamSize) every 3 minutes(newJobCheckIntervalSeconds),
+// increase teamSize if you need better concurrency
+// but keep email provider rate limiting and a potential n/w throughput load on postgress in mind
+// teamSize of 20-25 is a good limit if we need to scale email throughput in the future
 export const registerEmailWorkers = async () => {
   await scheduler.work<EmailPayloadType>(
     QueueNames.emailQueue,
-    { newJobCheckIntervalSeconds: 60 * 3, teamSize: 2 },
+    { newJobCheckIntervalSeconds: 60 * 3, teamSize: 5 },
     async (job) => {
       await triggerEmail(job.data);
     }
