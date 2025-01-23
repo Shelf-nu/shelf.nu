@@ -1183,7 +1183,7 @@ export async function updateKitQrCode({
     // Disconnect all existing QR codes
     await db.kit
       .update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           qrCodes: {
             set: [],
@@ -1202,7 +1202,7 @@ export async function updateKitQrCode({
     // Connect the new QR code
     return await db.kit
       .update({
-        where: { id: kitId },
+        where: { id: kitId, organizationId },
         data: {
           qrCodes: {
             connect: { id: newQrId },
@@ -1226,6 +1226,7 @@ export async function updateKitQrCode({
     });
   }
 }
+
 export async function getAvailableKitAssetForBooking(
   kitIds: Kit["id"][]
 ): Promise<string[]> {
