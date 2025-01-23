@@ -47,6 +47,8 @@ export function extractCSVDataFromContentImport<Schema extends ZodSchema>(
           case "imageUrl":
             // Return empty string if URL is empty/undefined, otherwise trim
             return [keys[index], value?.trim() || ""];
+          case "bookable":
+            return [keys[index], !value ? null : value];
           default:
             return [keys[index], value];
         }

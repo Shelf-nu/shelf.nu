@@ -246,7 +246,7 @@ export const importAssetsSchema = z
     tags: z.string().array(),
     location: z.string().optional(),
     custodian: z.string().optional(),
-    bookable: z.enum(["yes", "no"]).optional(),
+    bookable: z.enum(["yes", "no"]).optional().nullable(),
     imageUrl: z.string().url().optional(),
   })
   .and(z.record(z.string(), z.any()));
