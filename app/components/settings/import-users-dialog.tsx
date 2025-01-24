@@ -1,6 +1,6 @@
-import { cloneElement, useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import { cloneElement, useCallback, useEffect, useState } from "react";
 import { UploadIcon } from "lucide-react";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Input from "../forms/input";
@@ -22,7 +22,7 @@ export default function ImportUsersDialog({
   const [selectedFile, setSelectedFile] = useState<File>();
   const [error, setError] = useState<string>("");
 
-  const fetcher = useFetcher<{
+  const fetcher = useFetcherWithReset<{
     error?: { message?: string };
     success?: boolean;
   }>();
@@ -32,9 +32,9 @@ export default function ImportUsersDialog({
     setIsDialogOpen(true);
   }
 
-  function closeDialog() {
+  const closeDialog = useCallback(() => {
     setIsDialogOpen(false);
-  }
+  }, []);
 
   function handleSelectFile(event: React.ChangeEvent<HTMLInputElement>) {
     setError("");
@@ -48,13 +48,23 @@ export default function ImportUsersDialog({
     setSelectedFile(file);
   }
 
+  useEffect(
+    function handleSuccess() {
+      if (fetcher.data?.success === true) {
+        closeDialog();
+        fetcher.reset();
+      }
+    },
+    [closeDialog, fetcher, fetcher.data?.success]
+  );
+
   return (
     <>
       {trigger ? (
         cloneElement(trigger, { onClick: openDialog })
       ) : (
         <Button
-          variant="primary"
+          variant="secondary"
           className="mt-2 w-full md:mt-0 md:w-max"
           onClick={openDialog}
         >
