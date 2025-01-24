@@ -1,11 +1,19 @@
-import type { Invite, Organization, Prisma, TeamMember } from "@prisma/client";
+import type {
+  Invite,
+  Organization,
+  Prisma,
+  TeamMember,
+  User,
+} from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
+import type { z } from "zod";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
+import type { importUsersSchema } from "~/routes/api+/settings.import-users";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -529,6 +537,49 @@ export async function getPaginatedAndFilterableSettingInvites({
       message: "Something went wrong while getting registered users",
       additionalData: { organizationId },
       label,
+    });
+  }
+}
+
+export async function bulkInviteUsers({
+  users,
+  userId,
+  organizationId,
+}: {
+  users: z.infer<typeof importUsersSchema>[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    for (const user of users) {
+      const existingInvite = await db.invite.count({
+        where: {
+          status: "PENDING",
+          inviteeEmail: user.email,
+          organizationId,
+        },
+      });
+
+      /** If user is already invited, then we do not invite him/her again. */
+      if (existingInvite) {
+        continue;
+      }
+
+      await createInvite({
+        organizationId,
+        inviteeEmail: user.email,
+        inviterId: userId,
+        roles: [user.role],
+        teamMemberName: user.email.split("@")[0],
+        userId,
+      });
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while inviting users.",
+      label,
+      additionalData: { users },
     });
   }
 }

@@ -121,7 +121,6 @@ export default function InviteUserDialog({
               method="post"
               className="flex flex-col gap-3"
             >
-              {/* <input type="hidden" name="redirectTo" value={redirectTo} /> */}
               <When truthy={!!teamMemberId}>
                 <input
                   type="hidden"

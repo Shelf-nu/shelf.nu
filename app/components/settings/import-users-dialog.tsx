@@ -1,11 +1,13 @@
 import { cloneElement, useState } from "react";
 import { useFetcher } from "@remix-run/react";
 import { UploadIcon } from "lucide-react";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { WarningBox } from "../shared/warning-box";
+import When from "../when/when";
 
 type ImportUsersDialogProps = {
   className?: string;
@@ -20,7 +22,11 @@ export default function ImportUsersDialog({
   const [selectedFile, setSelectedFile] = useState<File>();
   const [error, setError] = useState<string>("");
 
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{
+    error?: { message?: string };
+    success?: boolean;
+  }>();
+  const disabled = isFormProcessing(fetcher.state);
 
   function openDialog() {
     setIsDialogOpen(true);
@@ -74,7 +80,7 @@ export default function ImportUsersDialog({
               file. To get started,{" "}
               <Button
                 variant="link"
-                to="/static/example-user-invite.csv"
+                to="/static/shelf.nu-example-import-users-from-content.csv"
                 target="_blank"
                 download
               >
@@ -92,6 +98,10 @@ export default function ImportUsersDialog({
             <ul className="list-inside list-disc">
               <li>
                 You must use <b>, (comma)</b> as a delimiter in your CSV file.
+              </li>
+              <li>
+                Only valid roles are <b>ADMIN</b>, <b>BASE</b> and{" "}
+                <b>SELF_SERVICE</b>. Role column is case-sensitive.
               </li>
               <li>
                 Each row represents a new user to be invited. Ensure the email
@@ -122,7 +132,11 @@ export default function ImportUsersDialog({
               invitations will be displayed, along with any errors encountered.
             </p>
 
-            <fetcher.Form action="/api/settings/import-users" method="POST">
+            <fetcher.Form
+              action="/api/settings/import-users"
+              method="POST"
+              encType="multipart/form-data"
+            >
               <Input
                 type="file"
                 name="file"
@@ -132,9 +146,16 @@ export default function ImportUsersDialog({
                 className="mb-2"
                 error={error}
                 onChange={handleSelectFile}
+                disabled={disabled}
               />
 
-              <Button disabled={!selectedFile}>Import now</Button>
+              <When truthy={!!fetcher?.data?.error}>
+                <p className="mb-2 text-sm  text-error-500">
+                  {fetcher.data?.error?.message}
+                </p>
+              </When>
+
+              <Button disabled={!selectedFile || disabled}>Import now</Button>
             </fetcher.Form>
           </div>
         </Dialog>
