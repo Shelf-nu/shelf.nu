@@ -162,7 +162,7 @@ export function sendCheckinReminder(
 ) {
   sendEmail({
     to: booking.custodianUser!.email,
-    subject: `Checkin reminder (${booking.name}) - shelf.nu`,
+    subject: `🔔 Checkin reminder (${booking.name}) - shelf.nu`,
     text: checkinReminderEmailContent({
       hints,
       bookingName: booking.name,

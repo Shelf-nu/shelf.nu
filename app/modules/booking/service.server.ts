@@ -421,7 +421,7 @@ export async function upsertBooking(
             }
 
             if (data.status === BookingStatus.COMPLETE) {
-              subject = `Booking completed (${res.name}) - shelf.nu`;
+              subject = `🎉 Booking completed (${res.name}) - shelf.nu`;
               text = completedBookingEmailContent({
                 bookingName: res.name,
                 assetsCount: res._count.assets,
@@ -858,7 +858,6 @@ export async function deleteBooking(
       });
     }
 
-    // FIXME: if sendEmail fails updateBookinAssetStates will not be called
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);

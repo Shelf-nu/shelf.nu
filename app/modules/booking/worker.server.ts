@@ -173,7 +173,7 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (email) {
     sendEmail({
       to: email,
-      subject: `Overdue booking (${booking.name}) - shelf.nu`,
+      subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
       text: overdueBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
