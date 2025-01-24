@@ -1,36 +1,18 @@
-import { OrganizationRoles } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { bulkInviteUsers } from "~/modules/team-member/service.server";
+import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
+import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
-import { validEmail } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
-
-export const importUsersSchema = z.object({
-  role: z.preprocess(
-    (value) => String(value).trim().toUpperCase(),
-    z.enum([
-      OrganizationRoles.ADMIN,
-      OrganizationRoles.BASE,
-      OrganizationRoles.SELF_SERVICE,
-    ])
-  ),
-  email: z
-    .string()
-    .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
-});
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -61,7 +43,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const users = extractCSVDataFromContentImport(
       csvData,
-      importUsersSchema.array()
+      InviteUserFormSchema.array()
     );
 
     await bulkInviteUsers({

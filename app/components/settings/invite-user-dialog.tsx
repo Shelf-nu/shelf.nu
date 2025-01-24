@@ -39,7 +39,17 @@ export const InviteUserFormSchema = z.object({
       message: "Please enter a valid email",
     })),
   teamMemberId: z.string().optional(),
-  role: z.nativeEnum(OrganizationRoles, { message: "Please select a role." }),
+  role: z.preprocess(
+    (value) => String(value).trim().toUpperCase(),
+    z.enum(
+      [
+        OrganizationRoles.ADMIN,
+        OrganizationRoles.BASE,
+        OrganizationRoles.SELF_SERVICE,
+      ],
+      { message: "Please select a role" }
+    )
+  ),
 });
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {

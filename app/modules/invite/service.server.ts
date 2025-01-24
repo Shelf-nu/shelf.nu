@@ -9,11 +9,11 @@ import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import type { z } from "zod";
+import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
-import type { importUsersSchema } from "~/routes/api+/settings.import-users";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -546,7 +546,7 @@ export async function bulkInviteUsers({
   userId,
   organizationId,
 }: {
-  users: z.infer<typeof importUsersSchema>[];
+  users: z.infer<typeof InviteUserFormSchema>[];
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
