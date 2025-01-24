@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import ImportUsersDialog from "~/components/settings/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -160,10 +161,11 @@ export default function UserTeamSetting() {
 
       <ListContentWrapper>
         <Filters>
+          <ImportUsersDialog />
           <InviteUserDialog
             trigger={
               <Button
-                className="mt-2 w-full md:mt-0 md:w-max"
+                className="ml-2 mt-2 w-full md:mt-0 md:w-max"
                 variant="primary"
               >
                 <span className="whitespace-nowrap">Invite a user</span>
