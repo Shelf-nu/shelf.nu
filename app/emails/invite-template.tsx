@@ -15,9 +15,14 @@ import { styles } from "./styles";
 interface Props {
   invite: InviteWithInviterAndOrg;
   token: string;
+  extraMessage?: string | null;
 }
 
-export function InvitationEmailTemplate({ invite, token }: Props) {
+export function InvitationEmailTemplate({
+  invite,
+  token,
+  extraMessage,
+}: Props) {
   const { emailPrimaryColor } = config;
 
   return (
@@ -50,6 +55,13 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             have any questions or need assistance, please don't hesitate to
             contact our support team at support@shelf.nu.
           </Text>
+
+          {extraMessage ? (
+            <Text style={{ ...styles.p, marginBottom: "24px" }}>
+              {extraMessage}
+            </Text>
+          ) : null}
+
           <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />
             The Shelf team
@@ -71,5 +83,15 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
  *The HTML content of an email will be accessed by a server file to send email,
   we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
  */
-export const invitationTemplateString = ({ token, invite }: Props) =>
-  render(<InvitationEmailTemplate token={token} invite={invite} />);
+export const invitationTemplateString = ({
+  token,
+  invite,
+  extraMessage,
+}: Props) =>
+  render(
+    <InvitationEmailTemplate
+      token={token}
+      invite={invite}
+      extraMessage={extraMessage}
+    />
+  );

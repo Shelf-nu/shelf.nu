@@ -112,6 +112,7 @@ export async function createInvite(
     teamMemberName: TeamMember["name"];
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
+    extraMessage?: string | null;
   }
 ) {
   let {
@@ -122,6 +123,7 @@ export async function createInvite(
     teamMemberName,
     teamMemberId,
     userId,
+    extraMessage,
   } = payload;
 
   try {
@@ -261,8 +263,8 @@ export async function createInvite(
     sendEmail({
       to: inviteeEmail,
       subject: `✉️ You have been invited to ${invite.organization.name}`,
-      text: inviteEmailText({ invite, token }),
-      html: invitationTemplateString({ invite, token }),
+      text: inviteEmailText({ invite, token, extraMessage }),
+      html: invitationTemplateString({ invite, token, extraMessage }),
     });
 
     return invite;
@@ -574,6 +576,7 @@ export async function bulkInviteUsers({
         roles: [user.role],
         teamMemberName: user.email.split("@")[0],
         userId,
+        extraMessage: message,
       });
     }
   } catch (cause) {
