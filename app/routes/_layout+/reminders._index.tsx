@@ -104,7 +104,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function Reminders() {
   return (
     <>
-      <Header />
+      <Header
+        subHeading={
+          <>
+            To create a new reminder, navigate to the asset of your choice and
+            use <b>{"Actions > Set Reminder"}</b>
+          </>
+        }
+      />
       <RemindersTable />
     </>
   );

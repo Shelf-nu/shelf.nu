@@ -99,7 +99,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     await Promise.all([
       ...usersToSendEmail.map((user) =>
         sendEmail({
-          subject: "Asset Reminder Notice - Shelf",
+          subject: "⏰ Asset Reminder Notice - Shelf",
           to: user.email,
           text: assetAlertEmailText({
             asset: reminder.asset,
