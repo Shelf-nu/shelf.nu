@@ -545,10 +545,12 @@ export async function bulkInviteUsers({
   users,
   userId,
   organizationId,
+  message,
 }: {
   users: z.infer<typeof InviteUserFormSchema>[];
   userId: User["id"];
   organizationId: Organization["id"];
+  message?: string | null;
 }) {
   try {
     for (const user of users) {

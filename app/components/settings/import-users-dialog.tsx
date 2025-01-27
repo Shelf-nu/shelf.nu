@@ -68,13 +68,16 @@ export default function ImportUsersDialog({
           className="mt-2 w-full md:mt-0 md:w-max"
           onClick={openDialog}
         >
-          <span className=" whitespace-nowrap">Import Users</span>
+          <span className="whitespace-nowrap">Import Users</span>
         </Button>
       )}
 
       <DialogPortal>
         <Dialog
-          className={tw("overflow-auto md:w-[calc(100vw_-_200px)]", className)}
+          className={tw(
+            "h-[calc(100vh_-_50px)] overflow-auto md:w-[calc(100vw_-_200px)]",
+            className
+          )}
           open={isDialogOpen}
           onClose={closeDialog}
           title={
@@ -147,6 +150,15 @@ export default function ImportUsersDialog({
               method="POST"
               encType="multipart/form-data"
             >
+              <Input
+                inputType="textarea"
+                label="Enter your message to user"
+                name="message"
+                className="mb-2"
+                disabled={disabled}
+                rows={5}
+              />
+
               <Input
                 type="file"
                 name="file"

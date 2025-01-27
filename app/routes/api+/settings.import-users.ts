@@ -29,6 +29,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanInviteUsersToWorkspace({ organizationId });
 
+    const formData = await request.clone().formData();
+
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length < 2) {
       throw new ShelfError({
@@ -49,6 +51,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       userId,
       users,
+      message: formData.get("message") as string,
     });
 
     sendNotification({

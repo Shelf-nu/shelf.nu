@@ -14,32 +14,32 @@ import * as schedulerService from "./utils/scheduler.server";
 export * from "../server";
 
 // === start: register scheduler and workers ===
-schedulerService
-  .init()
-  .then(async () => {
-    await registerBookingWorkers().catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while registering booking workers.",
-          label: "Scheduler",
-        })
-      );
-    });
-  })
-  .finally(() => {
-    // eslint-disable-next-line no-console
-    console.log("Scheduler and workers registration completed");
-  })
-  .catch((cause) => {
-    Logger.error(
-      new ShelfError({
-        cause,
-        message: "Scheduler crash",
-        label: "Scheduler",
-      })
-    );
-  });
+// schedulerService
+//   .init()
+//   .then(async () => {
+//     await registerBookingWorkers().catch((cause) => {
+//       Logger.error(
+//         new ShelfError({
+//           cause,
+//           message: "Something went wrong while registering booking workers.",
+//           label: "Scheduler",
+//         })
+//       );
+//     });
+//   })
+//   .finally(() => {
+//     // eslint-disable-next-line no-console
+//     console.log("Scheduler and workers registration completed");
+//   })
+//   .catch((cause) => {
+//     Logger.error(
+//       new ShelfError({
+//         cause,
+//         message: "Scheduler crash",
+//         label: "Scheduler",
+//       })
+//     );
+//   });
 // === end: register scheduler and workers ===
 
 /**
