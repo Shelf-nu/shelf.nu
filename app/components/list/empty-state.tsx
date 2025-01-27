@@ -8,7 +8,7 @@ export interface CustomEmptyState {
   className?: string;
   customContent?: {
     title: string;
-    text: string;
+    text: React.ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
@@ -53,7 +53,7 @@ export const EmptyState = ({
             <div className="text-text-lg font-semibold text-gray-900">
               {customContent.title}
             </div>
-            <p>{customContent.text}</p>
+            <div>{customContent.text}</div>
           </div>
         ) : (
           <div>

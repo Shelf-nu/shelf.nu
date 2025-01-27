@@ -65,7 +65,7 @@ export type ListProps = {
   className?: string;
   customEmptyStateContent?: {
     title: string;
-    text: string;
+    text: React.ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
@@ -80,6 +80,8 @@ export type ListProps = {
   customPagination?: React.ReactElement;
   /** Any extra content to the right in Header */
   headerExtraContent?: React.ReactNode;
+  /** Any extra props directly passed to ItemComponent */
+  extraItemComponentProps?: Record<string, unknown>;
 };
 
 /**
@@ -98,6 +100,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     bulkActions,
     customPagination,
     headerExtraContent,
+    extraItemComponentProps,
   }: ListProps,
   ref
 ) {
@@ -233,7 +236,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   navigate={navigate}
                 >
                   {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
-                  <ItemComponent item={item} />
+                  <ItemComponent
+                    item={item}
+                    extraProps={extraItemComponentProps}
+                  />
                 </ListItem>
               ))}
             </tbody>

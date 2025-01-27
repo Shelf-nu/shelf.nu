@@ -10,6 +10,7 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -33,6 +34,7 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
@@ -119,6 +121,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
+    const reminders = await getRemindersForOverviewPage({
+      assetId: id,
+      organizationId,
+      request,
+    });
+
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     let currentBooking: any = null;
 
@@ -164,6 +172,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         locale,
         timeZone,
         qrObj,
+        reminders,
       })
     );
   } catch (cause) {
@@ -459,6 +468,8 @@ export default function AssetOverview() {
               </fetcher.Form>
             </Card>
           </When>
+
+          <AssetReminderCards className="my-2" />
 
           {asset?.kit?.name ? (
             <Card className="my-3 py-3 md:border">

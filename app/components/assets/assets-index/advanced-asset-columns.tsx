@@ -242,6 +242,14 @@ export function AdvancedIndexColumn({
     case "availableToBook":
       return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
 
+    case "upcomingReminder":
+      return (
+        <UpcomingReminderColumn
+          assetId={item.id}
+          upcomingReminder={item.upcomingReminder}
+        />
+      );
+
     case "actions":
       return (
         <Td>
@@ -409,4 +417,33 @@ function CustodyColumn({
 
 function Td({ className, ...rest }: React.ComponentProps<typeof BaseTd>) {
   return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
+}
+
+function UpcomingReminderColumn({
+  assetId,
+  upcomingReminder,
+}: {
+  assetId: string;
+  upcomingReminder: AdvancedIndexAsset["upcomingReminder"];
+}) {
+  if (!upcomingReminder) {
+    return <Td>No upcoming reminder</Td>;
+  }
+
+  return (
+    <Td>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
+            {upcomingReminder.displayDate}
+          </Button>
+        </TooltipTrigger>
+
+        <TooltipContent className="max-w-[400px]">
+          <p className="mb-1 font-bold">{upcomingReminder.name}</p>
+          <p>{upcomingReminder.message.substring(0, 1000)}</p>
+        </TooltipContent>
+      </Tooltip>
+    </Td>
+  );
 }

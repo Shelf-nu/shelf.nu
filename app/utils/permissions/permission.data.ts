@@ -33,6 +33,7 @@ export enum PermissionEntity {
   note = "note",
   scan = "scan",
   custody = "custody",
+  assetReminders = "assetReminders",
 }
 
 //this will come from DB eventually
@@ -64,6 +65,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
+    [PermissionEntity.assetReminders]: [],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -94,5 +96,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.assetReminders]: [],
   },
 };
