@@ -23,7 +23,7 @@ import { TrashIcon } from "../icons/library";
 
 const Schema = z.object({
   email: z.string().email(),
-  reason: z.string().min(10, "Reason is a required field"),
+  reason: z.string().min(3, "Reason is a required field"),
 });
 
 export const RequestDeleteUser = () => {

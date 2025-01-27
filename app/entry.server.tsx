@@ -7,6 +7,7 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerEmailWorkers } from "./emails/email.worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
@@ -14,32 +15,41 @@ import * as schedulerService from "./utils/scheduler.server";
 export * from "../server";
 
 // === start: register scheduler and workers ===
-// schedulerService
-//   .init()
-//   .then(async () => {
-//     await registerBookingWorkers().catch((cause) => {
-//       Logger.error(
-//         new ShelfError({
-//           cause,
-//           message: "Something went wrong while registering booking workers.",
-//           label: "Scheduler",
-//         })
-//       );
-//     });
-//   })
-//   .finally(() => {
-//     // eslint-disable-next-line no-console
-//     console.log("Scheduler and workers registration completed");
-//   })
-//   .catch((cause) => {
-//     Logger.error(
-//       new ShelfError({
-//         cause,
-//         message: "Scheduler crash",
-//         label: "Scheduler",
-//       })
-//     );
-//   });
+schedulerService
+  .init()
+  .then(async () => {
+    await registerBookingWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+    await registerEmailWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering email workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+  })
+  .finally(() => {
+    // eslint-disable-next-line no-console
+    console.log("Scheduler and workers registration completed");
+  })
+  .catch((cause) => {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Scheduler crash",
+        label: "Scheduler",
+      })
+    );
+  });
 // === end: register scheduler and workers ===
 
 /**
