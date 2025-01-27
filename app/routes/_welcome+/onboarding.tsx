@@ -167,7 +167,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     if (config.sendOnboardingEmail) {
       /** Send onboarding email */
-      await sendEmail({
+      sendEmail({
         from: SMTP_FROM || `"Carlos from shelf.nu" <carlos@emails.shelf.nu>`,
         replyTo: "carlos@shelf.nu",
         to: user.email,

@@ -7,6 +7,7 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerEmailWorkers } from "./emails/email.worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
@@ -22,6 +23,15 @@ schedulerService
         new ShelfError({
           cause,
           message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+    await registerEmailWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering email workers.",
           label: "Scheduler",
         })
       );

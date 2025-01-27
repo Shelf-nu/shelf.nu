@@ -108,7 +108,7 @@ export async function resolveUserAction(
           });
         });
 
-      await sendEmail({
+      sendEmail({
         to: user.email,
         subject: `Access to ${org.name} has been revoked`,
         text: revokeAccessEmailText({ orgName: org.name }),
