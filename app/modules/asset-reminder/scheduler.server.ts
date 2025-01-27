@@ -3,9 +3,7 @@ import { isBefore } from "date-fns";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
-
-export const ASSETS_QUEUE_KEY = "assets-queue";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
 
 export const ASSETS_EVENT_TYPE_MAP = {
   REMINDER: "REMINDER",
@@ -31,7 +29,7 @@ export async function scheduleAssetReminder({
 }) {
   try {
     const reference = await scheduler.sendAfter(
-      ASSETS_QUEUE_KEY,
+      QueueNames.assetsQueue,
       data,
       {},
       when

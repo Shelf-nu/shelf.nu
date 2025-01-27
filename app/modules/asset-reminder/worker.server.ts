@@ -4,9 +4,8 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
-import { ASSETS_QUEUE_KEY } from "./scheduler.server";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
 import { createNote } from "../note/service.server";
 
@@ -133,20 +132,23 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
  * Workers are used to process scheduled events.
  */
 export async function regierAssetWorkers() {
-  await scheduler.work<AssetsSchedulerData>(ASSETS_QUEUE_KEY, async (job) => {
-    const handler = ASSET_SCHEDULER_EVENT_HANDLERS[job.data.eventType];
+  await scheduler.work<AssetsSchedulerData>(
+    QueueNames.assetsQueue,
+    async (job) => {
+      const handler = ASSET_SCHEDULER_EVENT_HANDLERS[job.data.eventType];
 
-    try {
-      await handler(job);
-    } catch (cause) {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while executing scheduled work.",
-          additionalData: { data: job.data, work: job.data.eventType },
-          label: "Asset Scheduler",
-        })
-      );
+      try {
+        await handler(job);
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Something went wrong while executing scheduled work.",
+            additionalData: { data: job.data, work: job.data.eventType },
+            label: "Asset Scheduler",
+          })
+        );
+      }
     }
-  });
+  );
 }
