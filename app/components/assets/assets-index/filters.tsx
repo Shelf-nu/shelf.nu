@@ -23,6 +23,12 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
+const ASSET_INDEX_SORTING_OPTIONS = {
+  title: "Name",
+  createdAt: "Date created",
+  updatedAt: "Date updated",
+} as const;
+
 export function AssetIndexFilters({
   disableTeamMemberFilter,
 }: {
@@ -44,7 +50,12 @@ export function AssetIndexFilters({
       <Filters
         slots={{
           "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          "right-of-search": <SortBy />,
+          "right-of-search": (
+            <SortBy
+              sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+              defaultSortingBy="createdAt"
+            />
+          ),
         }}
       >
         <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">

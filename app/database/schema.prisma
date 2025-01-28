@@ -25,7 +25,7 @@ model Image {
   ownerOrg   Organization @relation("owner", fields: [ownerOrgId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   ownerOrgId String
 
-  user   User   @relation(fields: [userId], references: [id],  onUpdate: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 }
 
@@ -71,14 +71,16 @@ model User {
   createdKits       Kit[]
   tierId            TierId             @default(free)
   tier              Tier               @relation(fields: [tierId], references: [id])
+  assetReminders    AssetReminder[]
 
   // A user can have multiple asset index settings, 1 for each organization
-  assetIndexSettings    AssetIndexSettings[]
+  assetIndexSettings AssetIndexSettings[]
 
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
   @@unique([email, username])
+  @@index([firstName, lastName])
 }
 
 model Asset {
@@ -107,18 +109,17 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody         Custody?
-  notes           Note[]
-  qrCodes         Qr[]
-  reports         ReportFound[]
-  tags            Tag[]
-  customFields    AssetCustomFieldValue[]
-  bookings        Booking[]
+  custody      Custody?
+  notes        Note[]
+  qrCodes      Qr[]
+  reports      ReportFound[]
+  tags         Tag[]
+  customFields AssetCustomFieldValue[]
+  bookings     Booking[]
+  reminders    AssetReminder[]
 
-  
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
-
   // Indexes for optimization of queries
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
@@ -129,13 +130,11 @@ model Asset {
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
 }
 
-
 enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   CHECKED_OUT
 }
-
 
 model AssetIndexSettings {
   id String @id @default(cuid())
@@ -156,10 +155,9 @@ model AssetIndexSettings {
   // Format is {name: string, visible: boolean, position: number}[] where name is the name of the column, visible is whether the column is visible or not and position is the position of the column
   // The shape of the JSON includes both some fixed entries that will always be present and some dynamic entries for the custom fields
   // The fixed entries are: id, status, description, valuation, createdAt, category, tags, location, kit, custody
-  columns   Json @default("[ {\"name\": \"id\", \"visible\": true, \"position\": 0}, {\"name\": \"status\", \"visible\": true, \"position\": 1}, {\"name\": \"description\", \"visible\": true, \"position\": 2}, {\"name\": \"valuation\", \"visible\": true, \"position\": 3}, {\"name\": \"createdAt\", \"visible\": true, \"position\": 4}, {\"name\": \"category\", \"visible\": true, \"position\": 5}, {\"name\": \"tags\", \"visible\": true, \"position\": 6}, {\"name\": \"location\", \"visible\": true, \"position\": 7}, {\"name\": \"kit\", \"visible\": true, \"position\": 8}, {\"name\": \"custody\", \"visible\": true, \"position\": 9} ]")
+  columns Json @default("[ {\"name\": \"id\", \"visible\": true, \"position\": 0}, {\"name\": \"status\", \"visible\": true, \"position\": 1}, {\"name\": \"description\", \"visible\": true, \"position\": 2}, {\"name\": \"valuation\", \"visible\": true, \"position\": 3}, {\"name\": \"createdAt\", \"visible\": true, \"position\": 4}, {\"name\": \"category\", \"visible\": true, \"position\": 5}, {\"name\": \"tags\", \"visible\": true, \"position\": 6}, {\"name\": \"location\", \"visible\": true, \"position\": 7}, {\"name\": \"kit\", \"visible\": true, \"position\": 8}, {\"name\": \"custody\", \"visible\": true, \"position\": 9} ]")
 
-
-  freezeColumn Boolean @default(true)
+  freezeColumn   Boolean @default(true)
   showAssetImage Boolean @default(true)
 
   // Datetime
@@ -167,17 +165,12 @@ model AssetIndexSettings {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, organizationId])
-
 }
 
 enum AssetIndexMode {
   SIMPLE
   ADVANCED
 }
-
-
-
-
 
 model Category {
   id          String  @id @default(cuid())
@@ -234,7 +227,7 @@ model Note {
   // Relationships
   user    User?   @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   userId  String?
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 }
 
@@ -397,11 +390,12 @@ model TeamMember {
   userId          String?
   kitCustodies    KitCustody[]
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  bookings  Booking[]
-  
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+  bookings       Booking[]
+  assetReminders AssetReminder[]
+
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
@@ -427,7 +421,7 @@ model Organization {
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
-  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade) 
+  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId   String
   currency Currency @default(USD)
 
@@ -450,13 +444,14 @@ model Organization {
   invites           Invite[]
   userOrganizations UserOrganization[]
 
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  customFields CustomField[]
-  images       Image[]       @relation("owner")
-  bookings     Booking[]
-  kits         Kit[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customFields       CustomField[]
+  images             Image[]              @relation("owner")
+  bookings           Booking[]
+  kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
+  assetReminders     AssetReminder[]
 }
 
 model UserOrganization {
@@ -768,4 +763,30 @@ model KitCustody {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AssetReminder {
+  id        String   @id @default(cuid())
+  name      String
+  message   String
+  alertDateTime DateTime
+  activeSchedulerReference String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId    String
+  teamMembers TeamMember[]
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Optimized indexes
+  @@index([assetId, alertDateTime])
+  @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([organizationId, alertDateTime, assetId])
+
+  // For scheduler related queries
+  @@index([alertDateTime, activeSchedulerReference])
+
 }
