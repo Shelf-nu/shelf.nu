@@ -317,6 +317,7 @@ const ConditionalActionsDropdown = () => {
       </When>
       <When truthy={isSetReminderDialogOpen && isAdministratorOrOwner}>
         <SetOrEditReminderDialog
+          action={`/assets/${asset.id}`}
           open={isSetReminderDialogOpen}
           onClose={() => {
             setIsSetReminderDialogOpen(false);

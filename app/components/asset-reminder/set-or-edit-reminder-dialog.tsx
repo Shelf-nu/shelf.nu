@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Form, useNavigation } from "@remix-run/react";
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -25,16 +25,17 @@ type SetOrEditReminderDialogProps = {
   open: boolean;
   onClose: () => void;
   reminder?: z.infer<typeof setReminderSchema> & { id: string };
+  action?: string;
 };
 
 export default function SetOrEditReminderDialog({
   open,
   onClose,
   reminder,
+  action,
 }: SetOrEditReminderDialogProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { assetId } = useParams<{ assetId: string }>();
 
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -84,7 +85,7 @@ export default function SetOrEditReminderDialog({
           method="POST"
           encType="multipart/form-data"
           className="grid grid-cols-1 divide-x md:grid-cols-2"
-          action={`/assets/${assetId}`}
+          action={action}
         >
           <div className="px-6 py-4">
             <input
