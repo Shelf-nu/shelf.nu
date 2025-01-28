@@ -459,6 +459,28 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
+        } else if (desiredRole) {
+          // First create the org association
+          await createUserOrgAssociation(db, {
+            userId: user.id,
+            organizationIds: [org.id],
+            roles: [desiredRole],
+          });
+
+          await createTeamMember({
+            name: `${firstName} ${lastName}`,
+            organizationId: org.id,
+            userId,
+          });
+
+          // Then handle it as a transition from no roles to the desired role
+          const transition = await handleSCIMTransition(
+            userId,
+            org,
+            [], // No previous roles
+            desiredRole
+          );
+          transitions.push(transition);
         }
       }
     }
