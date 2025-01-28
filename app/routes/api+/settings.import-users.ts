@@ -51,7 +51,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       userId,
       users,
-      message: formData.get("message") as string,
+      extraMessage: formData.get("message") as string,
     });
 
     sendNotification({

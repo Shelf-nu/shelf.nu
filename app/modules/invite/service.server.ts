@@ -8,6 +8,7 @@ import type {
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
+import { uniqBy } from "lodash";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
@@ -543,42 +544,138 @@ export async function getPaginatedAndFilterableSettingInvites({
   }
 }
 
+type InviteUserSchema = z.infer<typeof InviteUserFormSchema>;
+
 export async function bulkInviteUsers({
   users,
   userId,
   organizationId,
-  message,
+  extraMessage,
 }: {
-  users: z.infer<typeof InviteUserFormSchema>[];
+  users: Omit<InviteUserSchema, "teamMemberId">[];
   userId: User["id"];
   organizationId: Organization["id"];
-  message?: string | null;
+  extraMessage?: string | null;
 }) {
   try {
-    for (const user of users) {
-      const existingInvite = await db.invite.count({
-        where: {
-          status: "PENDING",
-          inviteeEmail: user.email,
-          organizationId,
+    // Filter out duplicate emails
+    const uniquePayloads = uniqBy(users, (user) => user.email);
+
+    // Batch validate all emails against SS
+    await Promise.all(
+      uniquePayloads.map((payload) =>
+        validateInvite(payload.email, organizationId)
+      )
+    );
+
+    // Batch check for existing users
+    const emails = uniquePayloads.map((p) => p.email);
+    const existingUsers = await db.user.findMany({
+      where: {
+        email: { in: emails },
+        userOrganizations: {
+          some: { organizationId },
         },
+      },
+      select: { email: true },
+    });
+
+    const existingEmailsInOrg = new Set(existingUsers.map((u) => u.email));
+
+    // Batch check for existing invites in one query
+    const existingInvites = await db.invite.findMany({
+      where: {
+        organizationId,
+        inviteeEmail: { in: emails },
+        status: InviteStatuses.PENDING,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        inviteeEmail: true,
+        inviteeTeamMember: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
+
+    /**
+     * We only have to send invite to the
+     * - users who have not PENDING invitation and
+     * - users who are not part of organization already
+     */
+    const validPayloads = uniquePayloads.filter(
+      (p) =>
+        !existingInviteEmails.includes(p.email) &&
+        !existingEmailsInOrg.has(p.email)
+    );
+
+    const validPayloadsWithName = validPayloads.map((p) => ({
+      ...p,
+      name: p.email.split("@")[0],
+    }));
+
+    const createdTeamMembers = await db.teamMember.createManyAndReturn({
+      data: validPayloadsWithName.map((p) => ({
+        name: p.name,
+        organizationId,
+      })),
+    });
+
+    // Prepare invite data
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
+
+    const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      inviterId: userId,
+      organizationId,
+      inviteeEmail: payload.email,
+      teamMemberId:
+        createdTeamMembers.find((tm) => tm.name === payload.name)?.id ?? "",
+      roles: [payload.role],
+      expiresAt,
+      inviteCode: generateRandomCode(6),
+      status: InviteStatuses.PENDING,
+    }));
+
+    // Bulk create invites
+    const createdInvites = await db.invite.createManyAndReturn({
+      data: invitesToCreate,
+      include: {
+        inviter: { select: { firstName: true, lastName: true } },
+        organization: true,
+      },
+    });
+
+    // Queue emails for sending - no need to await since it's handled by queue
+    createdInvites.forEach((invite) => {
+      const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
+        expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
       });
 
-      /** If user is already invited, then we do not invite him/her again. */
-      if (existingInvite) {
-        continue;
-      }
+      sendEmail({
+        to: invite.inviteeEmail,
+        subject: `✉️ You have been invited to ${invite.organization.name}`,
+        text: inviteEmailText({ invite, token, extraMessage }),
+        html: invitationTemplateString({ invite, token, extraMessage }),
+      });
+    });
 
-      await createInvite({
-        organizationId,
-        inviteeEmail: user.email,
-        inviterId: userId,
-        roles: [user.role],
-        teamMemberName: user.email.split("@")[0],
-        userId,
-        extraMessage: message,
+    // Notify about skipped invites due to existing users
+    if (existingEmailsInOrg.size > 0) {
+      sendNotification({
+        title: "Some invites were skipped",
+        message: `${existingEmailsInOrg.size} email(s) are already part of the organization`,
+        icon: { name: "success", variant: "primary" },
+        senderId: userId,
       });
     }
+
+    return createdInvites;
   } catch (cause) {
     throw new ShelfError({
       cause,
