@@ -353,7 +353,7 @@ const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
     <main
       ref={ref}
       className={tw(
-        "h-screen w-full overflow-auto bg-gray-25 px-4 pb-10",
+        "h-dvh w-full overflow-auto bg-gray-25 px-4 pb-10",
         className
       )}
       {...props}
