@@ -5,6 +5,8 @@ import {
   Head,
   render,
   Container,
+  Section,
+  Img,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
@@ -40,8 +42,50 @@ export function InvitationEmailTemplate({
             <br />
             {invite.inviter.firstName} {invite.inviter.lastName} invites you to
             join Shelf as a member of {invite.organization.name}
-            ’s workspace. Click the link to accept the invite:
+            's workspace. Click the link to accept the invite:
           </Text>
+
+          {extraMessage ? (
+            <Section
+              style={{
+                padding: "10px",
+                borderRadius: "5px",
+                border: "1px solid #FEC84B",
+                backgroundColor: "#FFFCF5",
+                marginBottom: "24px",
+              }}
+            >
+              <Img
+                src={`${SERVER_URL}/static/images/circle-alert.png`}
+                alt="alert-icon"
+                width="auto"
+                height="32"
+                style={{ width: "16px", height: "16px", marginBottom: "10px" }}
+              />
+
+              <Text
+                style={{
+                  fontSize: "16px",
+                  fontWeight: "bold",
+                  color: "#FDB022",
+                  margin: "0px",
+                }}
+              >
+                Message from sender, please read carefully.
+              </Text>
+
+              <Text
+                style={{
+                  fontSize: "16px",
+                  color: "#FDB022",
+                  margin: "0px",
+                }}
+              >
+                {extraMessage}
+              </Text>
+            </Section>
+          ) : null}
+
           <Button
             href={`${SERVER_URL}/accept-invite/${invite.id}?token=${token}`}
             style={{ ...styles.button, textAlign: "center" }}
@@ -55,12 +99,6 @@ export function InvitationEmailTemplate({
             have any questions or need assistance, please don't hesitate to
             contact our support team at support@shelf.nu.
           </Text>
-
-          {extraMessage ? (
-            <Text style={{ ...styles.p, marginBottom: "24px" }}>
-              {extraMessage}
-            </Text>
-          ) : null}
 
           <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />

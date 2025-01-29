@@ -2,7 +2,6 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
@@ -52,14 +51,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       users,
       extraMessage: formData.get("message") as string,
-    });
-
-    sendNotification({
-      title: "Successfully invited users",
-      message:
-        "They will receive an email in which they can complete their registration.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
     });
 
     return json(data({ success: true }));

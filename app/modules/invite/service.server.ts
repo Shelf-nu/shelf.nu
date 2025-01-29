@@ -8,7 +8,7 @@ import type {
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
-import { uniqBy } from "lodash";
+import lodash from "lodash";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
@@ -559,7 +559,7 @@ export async function bulkInviteUsers({
 }) {
   try {
     // Filter out duplicate emails
-    const uniquePayloads = uniqBy(users, (user) => user.email);
+    const uniquePayloads = lodash.uniqBy(users, (user) => user.email);
 
     // Batch validate all emails against SS
     await Promise.all(
@@ -600,6 +600,31 @@ export async function bulkInviteUsers({
         },
       },
     });
+
+    /* All emails are already invited */
+    if (existingInvites.length === emails.length) {
+      sendNotification({
+        title: "Users already invited",
+        message:
+          "All users in csv file are already invited to the organization.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return;
+    }
+
+    /* All emails are already in organization */
+    if (existingUsers.length === emails.length) {
+      sendNotification({
+        title: "Users already member of organization",
+        message: "All user in csv file are already part of your organization.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return;
+    }
 
     const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
 
@@ -665,15 +690,12 @@ export async function bulkInviteUsers({
       });
     });
 
-    // Notify about skipped invites due to existing users
-    if (existingEmailsInOrg.size > 0) {
-      sendNotification({
-        title: "Some invites were skipped",
-        message: `${existingEmailsInOrg.size} email(s) are already part of the organization`,
-        icon: { name: "success", variant: "primary" },
-        senderId: userId,
-      });
-    }
+    sendNotification({
+      title: "Successfully invited users",
+      message: `${createdInvites.length} user(s) have been invited successfully. They will receive an email in which they can complete their registration.`,
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
 
     return createdInvites;
   } catch (cause) {

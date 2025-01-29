@@ -127,18 +127,12 @@ export default function ImportUsersDialog({
             </ul>
 
             <h4 className="mt-2">Extra Considerations</h4>
-            <div>
-              <ul className="list-inside list-disc pl-4">
-                <li>
-                  The first row of the sheet will be ignored. Use it for column
-                  headers as in the provided template.
-                </li>
-                <li>
-                  If any of the rows contain invalid data, they will be skipped,
-                  but the valid rows will still be processed.
-                </li>
-              </ul>
-            </div>
+            <ul className="mb-4 list-inside list-disc">
+              <li>
+                The first row of the sheet will be ignored. Use it for column
+                headers as in the provided template.
+              </li>
+            </ul>
 
             <p className="mb-4">
               Once you've uploaded your file, a summary of the processed
