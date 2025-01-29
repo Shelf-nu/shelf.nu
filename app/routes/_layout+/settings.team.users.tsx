@@ -13,7 +13,14 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -269,7 +276,31 @@ const TeamMemberDetails = ({
         <span className="word-break mb-1 block font-medium">
           {details.name}
         </span>
-        <div>{details.email}</div>
+
+        <div>
+          {details.email}
+          {details.sso && (
+            <TooltipProvider key={details.id}>
+              <Tooltip>
+                <TooltipTrigger>
+                  <GrayBadge className="ml-2">SSO</GrayBadge>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-72">
+                  <h4>SSO user</h4>
+
+                  <p className="mt-2">
+                    This user is using Single Sign-On (SSO) to log in to Shelf.
+                    Their access is managed by an external identity provider. On
+                    every login attempt, their permissions and access will be
+                    revalidated. If you want to remove them immediately, use the
+                    revoke access action. You will still need to remove them
+                    from the IDP to make this complete.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
       </div>
     </div>
   </div>
