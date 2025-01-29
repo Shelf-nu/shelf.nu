@@ -484,7 +484,7 @@ enum OrganizationRoles {
 model SsoDetails {
   id String @id @default(cuid())
 
-  // The domain of the organization
+  // The domains of the organization. Comma separated for multiple domains
   domain String
 
   organizations Organization[]

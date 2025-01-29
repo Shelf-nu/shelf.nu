@@ -65,45 +65,59 @@ export const getOrganizationByUserId = async ({
   }
 };
 
-export const getOrganizationsBySsoDomain = async (domain: string) => {
+/**
+ * Gets organizations that use the email domain for SSO
+ * Supports multiple domains per organization via comma-separated domain strings
+ * @param emailDomain - Email domain to check
+ * @returns Array of organizations that use this domain for SSO
+ */
+export async function getOrganizationsBySsoDomain(emailDomain: string) {
   try {
-    const orgs = await db.organization
-      .findMany({
-        // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
-        where: {
-          ssoDetails: {
-            is: {
-              domain: domain,
+    if (!emailDomain) {
+      throw new ShelfError({
+        cause: null,
+        message: "Email domain is required",
+        additionalData: { emailDomain },
+        label: "SSO",
+      });
+    }
+
+    // Query for organizations where the domain field contains the email domain
+    const organizations = await db.organization.findMany({
+      where: {
+        ssoDetails: {
+          isNot: null,
+        },
+        AND: [
+          {
+            ssoDetails: {
+              domain: {
+                contains: emailDomain,
+              },
             },
           },
-          type: "TEAM",
-        },
-        include: {
-          ssoDetails: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Organization not found",
-          message:
-            "It looks like the organization you're trying to log in to is not found. Please contact our support team to get access to your organization.",
-          additionalData: { domain },
-          label,
-        });
-      });
+        ],
+      },
+      include: {
+        ssoDetails: true,
+      },
+    });
 
-    return orgs;
+    // Filter to ensure exact domain matches
+    return organizations.filter((org) =>
+      org.ssoDetails?.domain
+        ? emailMatchesDomains(emailDomain, org.ssoDetails.domain)
+        : false
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong with fetching the organizations related to your domain",
-      additionalData: { domain },
-      label,
+      message: "Failed to get organizations by SSO domain",
+      additionalData: { emailDomain },
+      label: "SSO",
     });
   }
-};
+}
 
 export async function createOrganization({
   name,
@@ -361,4 +375,31 @@ export async function toggleOrganizationSso({
       label,
     });
   }
+}
+
+/**
+ * Utility function to parse and validate domains from a comma-separated string
+ * @param domainsString - Comma-separated string of domains
+ * @returns Array of cleaned domain strings
+ */
+export function parseDomains(domainsString: string): string[] {
+  return domainsString
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Checks if a given email matches any of the provided comma-separated domains
+ * @param email - Email address to check
+ * @param domainsString - Comma-separated string of domains
+ * @returns boolean indicating if email matches any domain
+ */
+export function emailMatchesDomains(
+  emailDomain: string,
+  domainsString: string | null
+): boolean {
+  if (!emailDomain || !domainsString) return false;
+  const domains = parseDomains(domainsString);
+  return domains.includes(emailDomain.toLowerCase());
 }
