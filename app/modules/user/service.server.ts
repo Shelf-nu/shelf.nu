@@ -414,7 +414,6 @@ export async function updateUserFromSSO(
     // getOrganizationsBySsoDomain now handles multiple domains per org
     const domainOrganizations = await getOrganizationsBySsoDomain(emailDomain);
     const existingUserOrganizations = user.userOrganizations;
-    console.log("domainOrganizations", domainOrganizations);
 
     const transitions: UserOrgTransition[] = [];
 
