@@ -11,7 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
-import ImportUsersDialog from "~/components/settings/import-users-dialog";
+import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";

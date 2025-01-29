@@ -46,14 +46,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       InviteUserFormSchema.array()
     );
 
-    await bulkInviteUsers({
+    const response = await bulkInviteUsers({
       organizationId,
       userId,
       users,
       extraMessage: formData.get("message") as string,
     });
 
-    return json(data({ success: true }));
+    if (!response) {
+      return json(data({ success: true }));
+    }
+
+    return json(data({ success: true, ...response }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

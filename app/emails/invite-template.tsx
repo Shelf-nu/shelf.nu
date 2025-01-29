@@ -49,7 +49,7 @@ export function InvitationEmailTemplate({
             <Section
               style={{
                 padding: "10px",
-                borderRadius: "5px",
+                borderRadius: "12px",
                 border: "1px solid #FEC84B",
                 backgroundColor: "#FFFCF5",
                 marginBottom: "24px",
@@ -58,8 +58,6 @@ export function InvitationEmailTemplate({
               <Img
                 src={`${SERVER_URL}/static/images/circle-alert.png`}
                 alt="alert-icon"
-                width="auto"
-                height="32"
                 style={{ width: "16px", height: "16px", marginBottom: "10px" }}
               />
 
@@ -67,7 +65,7 @@ export function InvitationEmailTemplate({
                 style={{
                   fontSize: "16px",
                   fontWeight: "bold",
-                  color: "#FDB022",
+                  color: "#B54708",
                   margin: "0px",
                 }}
               >
@@ -77,7 +75,7 @@ export function InvitationEmailTemplate({
               <Text
                 style={{
                   fontSize: "16px",
-                  color: "#FDB022",
+                  color: "#B54708",
                   margin: "0px",
                 }}
               >

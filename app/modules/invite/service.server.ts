@@ -611,7 +611,12 @@ export async function bulkInviteUsers({
         senderId: userId,
       });
 
-      return;
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All users in csv file are already invited to the organization.",
+      };
     }
 
     /* All emails are already in organization */
@@ -623,7 +628,30 @@ export async function bulkInviteUsers({
         senderId: userId,
       });
 
-      return;
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All user in csv file are already part of your organization.",
+      };
+    }
+
+    /* All emails are either in organization already or invited already */
+    if (existingInvites.length + existingUsers.length === emails.length) {
+      sendNotification({
+        title: "0 users invited",
+        message:
+          "All users in file are either in organization or already invited.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All users in file are either in organization or already invited.",
+      };
     }
 
     const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
@@ -697,7 +725,20 @@ export async function bulkInviteUsers({
       senderId: userId,
     });
 
-    return createdInvites;
+    const skippedUsers = users.filter(
+      (user) =>
+        existingInviteEmails.includes(user.email) ||
+        existingEmailsInOrg.has(user.email)
+    );
+
+    return {
+      inviteSentUsers: validPayloads,
+      skippedUsers,
+      extraMessage:
+        createdInvites.length > 10
+          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasnt received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
+          : undefined,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

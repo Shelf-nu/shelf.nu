@@ -1,20 +1,31 @@
 import { cloneElement, useState } from "react";
 import { useNavigate } from "@remix-run/react";
 import { UploadIcon } from "lucide-react";
-import { ClientOnly } from "remix-utils/client-only";
+import type { z } from "zod";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import Input from "../forms/input";
-import { Dialog, DialogPortal } from "../layout/dialog";
-import { Button } from "../shared/button";
-import { WarningBox } from "../shared/warning-box";
-import When from "../when/when";
-import SuccessAnimation from "../zxing-scanner/success-animation";
+import Input from "../../forms/input";
+import { Dialog, DialogPortal } from "../../layout/dialog";
+import { Button } from "../../shared/button";
+import { WarningBox } from "../../shared/warning-box";
+import When from "../../when/when";
+import type { InviteUserFormSchema } from "../invite-user-dialog";
+import ImportUsersSuccessContent from "./import-users-success-content";
 
 type ImportUsersDialogProps = {
   className?: string;
   trigger?: React.ReactElement<{ onClick: () => void }>;
+};
+
+type ImportUser = z.infer<typeof InviteUserFormSchema>;
+
+export type FetcherData = {
+  error?: { message?: string };
+  success?: boolean;
+  inviteSentUsers?: ImportUser[];
+  skippedUsers?: ImportUser[];
+  extraMessage?: string;
 };
 
 export default function ImportUsersDialog({
@@ -27,10 +38,7 @@ export default function ImportUsersDialog({
 
   const navigate = useNavigate();
 
-  const fetcher = useFetcherWithReset<{
-    error?: { message?: string };
-    success?: boolean;
-  }>();
+  const fetcher = useFetcherWithReset<FetcherData>();
   const disabled = isFormProcessing(fetcher.state);
 
   function openDialog() {
@@ -76,9 +84,8 @@ export default function ImportUsersDialog({
       <DialogPortal>
         <Dialog
           className={tw(
-            "overflow-auto",
-            !fetcher.data?.success &&
-              "h-[calc(100vh_-_50px)] md:w-[calc(100vw_-_200px)]",
+            "h-[calc(100vh_-_50px)] overflow-auto",
+            !fetcher.data?.success && "md:w-[calc(100vw_-_200px)]",
             className
           )}
           open={isDialogOpen}
@@ -89,26 +96,12 @@ export default function ImportUsersDialog({
             </div>
           }
         >
-          {fetcher.data?.success || true ? (
-            <div className="flex flex-col items-center justify-center px-6 pb-4 pt-2 text-center">
-              <div className="mb-4 ">
-                <ClientOnly fallback={null}>
-                  {() => <SuccessAnimation />}
-                </ClientOnly>
-              </div>
-
-              <h4>Successfully invited users</h4>
-              <p className="mb-4">
-                Users from the csv file has been invited successfully.
-              </p>
-
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={closeDialog}>
-                  Close
-                </Button>
-                <Button onClick={goToInvites}>View Invites</Button>
-              </div>
-            </div>
+          {fetcher.data?.success ? (
+            <ImportUsersSuccessContent
+              data={fetcher.data}
+              onClose={closeDialog}
+              onViewInvites={goToInvites}
+            />
           ) : (
             <div className="px-6 pb-4 pt-2">
               <h3>Invite Users via CSV Upload</h3>
