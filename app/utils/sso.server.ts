@@ -1,16 +1,21 @@
-import type { Organization } from "@prisma/client";
+import type { Organization, SsoDetails } from "@prisma/client";
 import type { AuthSession } from "server/session";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
 } from "~/modules/auth/service.server";
+import {
+  emailMatchesDomains,
+  parseDomains,
+} from "~/modules/organization/service.server";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "~/modules/user/fields";
 import {
   createUserFromSSO,
   updateUserFromSSO,
 } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
+import { isValidDomain } from "./misc";
 
 /**
  * This resolves the correct org we should redirect the user to
@@ -113,10 +118,13 @@ interface SSODomainConfig {
   domain: string;
 }
 
+/**
+ * Type for domain check response
+ */
 interface DomainCheckResult {
-  isConfiguredForSSO: boolean; // Domain exists in auth.sso_domains
-  linkedOrganization: Organization | null; // Organization that uses this SSO provider
-  ssoProviderId: string | null; // The SSO provider ID if domain is configured
+  isConfiguredForSSO: boolean;
+  linkedOrganization: (Organization & { ssoDetails: SsoDetails | null }) | null;
+  ssoProviderId: string | null;
 }
 
 /**
@@ -145,6 +153,7 @@ export async function getConfiguredSSODomains(): Promise<SSODomainConfig[]> {
 
 /**
  * Checks domain's SSO status and organization linkage
+ * Handles multiple domains per organization and multiple SSO providers per domain
  * @param email - Email to check domain for
  */
 export async function checkDomainSSOStatus(
@@ -153,15 +162,14 @@ export async function checkDomainSSOStatus(
   try {
     const domain = email.split("@")[1].toLowerCase();
 
-    // First check if domain is configured in auth.sso_domains
-    const ssoConfig = await db.$queryRaw<{ ssoProviderId: string }[]>`
+    // Check all SSO providers configured for this domain
+    const ssoConfigs = await db.$queryRaw<{ ssoProviderId: string }[]>`
       SELECT sso_provider_id::text as "ssoProviderId"
       FROM auth.sso_domains
       WHERE lower(domain) = ${domain}
-      LIMIT 1
     `;
 
-    if (ssoConfig.length === 0) {
+    if (ssoConfigs.length === 0) {
       return {
         isConfiguredForSSO: false,
         linkedOrganization: null,
@@ -169,12 +177,16 @@ export async function checkDomainSSOStatus(
       };
     }
 
-    // If domain is configured for SSO, check if any org uses this SSO provider
-    const ssoProviderId = ssoConfig[0].ssoProviderId;
+    // Get all SSO provider IDs for this domain
+    const ssoProviderIds = ssoConfigs.map((config) => config.ssoProviderId);
+
+    // Find organization where this domain is included in their comma-separated domains
     const linkedOrg = await db.organization.findFirst({
       where: {
         ssoDetails: {
-          domain,
+          domain: {
+            contains: domain,
+          },
         },
       },
       include: {
@@ -182,10 +194,17 @@ export async function checkDomainSSOStatus(
       },
     });
 
+    // If we found an org, verify the domain is actually in their list
+    const isValidDomain = linkedOrg?.ssoDetails
+      ? emailMatchesDomains(email, linkedOrg.ssoDetails.domain)
+      : false;
+
+    // Return the first SSO provider ID if we found multiple
+    // This maintains backward compatibility while we handle multiple domains
     return {
       isConfiguredForSSO: true,
-      linkedOrganization: linkedOrg,
-      ssoProviderId,
+      linkedOrganization: isValidDomain ? linkedOrg : null,
+      ssoProviderId: ssoProviderIds[0] || null,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -236,4 +255,26 @@ export async function validateNonSSOSignup(email: string): Promise<void> {
       shouldBeCaptured: false,
     });
   }
+}
+
+/**
+ * Validates multiple comma-separated domains
+ * @param domainsString Comma-separated string of domains
+ * @returns Array of validated domains
+ * @throws Error if any domain is invalid
+ */
+export function validateDomains(domainsString: string): string[] {
+  const domains = parseDomains(domainsString);
+
+  if (domains.length === 0) {
+    throw new Error("At least one domain is required");
+  }
+
+  // Validate each domain
+  const invalidDomains = domains.filter((domain) => !isValidDomain(domain));
+  if (invalidDomains.length > 0) {
+    throw new Error(`Invalid domain(s): ${invalidDomains.join(", ")}`);
+  }
+
+  return domains;
 }

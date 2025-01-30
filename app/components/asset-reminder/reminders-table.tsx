@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
+import { useParams } from "@remix-run/react";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { List } from "../list";
@@ -29,6 +30,7 @@ export default function RemindersTable({
   isAssetReminderPage,
 }: RemindersTableProps) {
   const [isReminderDialogOpen, setIsReminderDialogOpen] = useState(false);
+  const { assetId } = useParams<{ assetId: string }>();
 
   const emptyStateTitle = isAssetReminderPage
     ? "No reminders for this asset"
@@ -86,6 +88,7 @@ export default function RemindersTable({
       />
 
       <SetOrEditReminderDialog
+        action={isAssetReminderPage ? `/assets/${assetId}` : undefined}
         open={isReminderDialogOpen}
         onClose={() => {
           setIsReminderDialogOpen(false);
