@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils/tw";
 import type { InviteUserFormSchema } from "../invite-user-dialog";
 
@@ -40,7 +41,7 @@ export default function ImportUsersTable({
           {users.map((user) => (
             <tr key={user.email}>
               <td className="px-6 py-4">{user.email}</td>
-              <td className="px-6 py-4">{user.role}</td>
+              <td className="px-6 py-4">{organizationRolesMap[user.role]}</td>
             </tr>
           ))}
         </tbody>

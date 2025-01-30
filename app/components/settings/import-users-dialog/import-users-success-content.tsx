@@ -29,9 +29,10 @@ export default function ImportUsersSuccessContent({
     >
       <ClientOnly fallback={null}>{() => <SuccessAnimation />}</ClientOnly>
 
-      <h4>Successfully invited users</h4>
+      <h4>Import completed</h4>
       <p className="mb-4">
-        Users from the csv file has been invited successfully.
+        Users from the csv file has been invited. Below you can find a summary
+        of the invited users.
       </p>
 
       <When truthy={!!data.extraMessage}>
