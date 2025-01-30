@@ -32,6 +32,7 @@ import {
 } from "../shared/dropdown";
 import When from "../when/when";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
+import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -127,6 +128,7 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
+        <BulkDownloadQrDialog />
       </When>
 
       <When
@@ -248,6 +250,14 @@ function ConditionalDropdown() {
                 />
               </DropdownMenuItem>
             </When>
+
+            <DropdownMenuItem className="py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="download-qr"
+                label="Download QR Codes"
+                onClick={closeMenu}
+              />
+            </DropdownMenuItem>
 
             <When
               truthy={userHasPermission({

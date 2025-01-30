@@ -5,7 +5,7 @@ import type { BulkDialogType } from "~/components/bulk-update-dialog/bulk-update
  * This atom is responsible for holding the open state for dialogs
  * Open Dialog must be open at a time
  */
-const DEFAULT_STATE = {
+const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   location: false,
   category: false,
   "assign-custody": false,
@@ -21,6 +21,7 @@ const DEFAULT_STATE = {
   unavailable: false,
   bookings: false,
   "booking-exist": false,
+  "download-qr": false,
 };
 
 export const bulkDialogAtom =

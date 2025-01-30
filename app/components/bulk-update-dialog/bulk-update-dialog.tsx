@@ -44,7 +44,8 @@ type BulkDialogType =
   | "available"
   | "unavailable"
   | "bookings"
-  | "booking-exist";
+  | "booking-exist"
+  | "download-qr";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
