@@ -5,6 +5,8 @@ import {
   Head,
   render,
   Container,
+  Section,
+  Img,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
@@ -15,9 +17,14 @@ import { styles } from "./styles";
 interface Props {
   invite: InviteWithInviterAndOrg;
   token: string;
+  extraMessage?: string | null;
 }
 
-export function InvitationEmailTemplate({ invite, token }: Props) {
+export function InvitationEmailTemplate({
+  invite,
+  token,
+  extraMessage,
+}: Props) {
   const { emailPrimaryColor } = config;
 
   return (
@@ -35,8 +42,48 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             <br />
             {invite.inviter.firstName} {invite.inviter.lastName} invites you to
             join Shelf as a member of {invite.organization.name}
-            ’s workspace. Click the link to accept the invite:
+            's workspace. Click the link to accept the invite:
           </Text>
+
+          {extraMessage ? (
+            <Section
+              style={{
+                padding: "10px",
+                borderRadius: "12px",
+                border: "1px solid #FEC84B",
+                backgroundColor: "#FFFCF5",
+                marginBottom: "24px",
+              }}
+            >
+              <Img
+                src={`${SERVER_URL}/static/images/circle-alert.png`}
+                alt="alert-icon"
+                style={{ width: "16px", height: "16px", marginBottom: "10px" }}
+              />
+
+              <Text
+                style={{
+                  fontSize: "16px",
+                  fontWeight: "bold",
+                  color: "#B54708",
+                  margin: "0px",
+                }}
+              >
+                Message from sender, please read carefully.
+              </Text>
+
+              <Text
+                style={{
+                  fontSize: "16px",
+                  color: "#B54708",
+                  margin: "0px",
+                }}
+              >
+                {extraMessage}
+              </Text>
+            </Section>
+          ) : null}
+
           <Button
             href={`${SERVER_URL}/accept-invite/${invite.id}?token=${token}`}
             style={{ ...styles.button, textAlign: "center" }}
@@ -50,6 +97,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             have any questions or need assistance, please don't hesitate to
             contact our support team at support@shelf.nu.
           </Text>
+
           <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />
             The Shelf team
@@ -71,5 +119,15 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
  *The HTML content of an email will be accessed by a server file to send email,
   we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
  */
-export const invitationTemplateString = ({ token, invite }: Props) =>
-  render(<InvitationEmailTemplate token={token} invite={invite} />);
+export const invitationTemplateString = ({
+  token,
+  invite,
+  extraMessage,
+}: Props) =>
+  render(
+    <InvitationEmailTemplate
+      token={token}
+      invite={invite}
+      extraMessage={extraMessage}
+    />
+  );

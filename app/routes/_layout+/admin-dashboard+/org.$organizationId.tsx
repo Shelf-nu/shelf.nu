@@ -27,8 +27,8 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getParams, data, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
-import { isValidDomain } from "~/utils/misc";
 import { requireAdmin } from "~/utils/roles.server";
+import { validateDomains } from "~/utils/sso.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -117,10 +117,21 @@ export const action = async ({
             selfServiceGroupId: z.string(),
             domain: z
               .string()
-              .transform((email) => email.toLowerCase())
-              .refine(isValidDomain, () => ({
-                message: "Please enter a valid domain name",
-              })),
+              .transform((domains) => domains.toLowerCase())
+              .transform((domains, ctx) => {
+                try {
+                  return validateDomains(domains).join(", ");
+                } catch (error) {
+                  ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Invalid domains",
+                  });
+                  return z.NEVER;
+                }
+              }),
           })
         );
 
