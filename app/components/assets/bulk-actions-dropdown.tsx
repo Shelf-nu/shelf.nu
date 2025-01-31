@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -33,6 +34,7 @@ import {
 import When from "../when/when";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
+import Icon from "../icons/icon";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -58,6 +60,7 @@ export default function BulkActionsDropdown() {
 function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
+  const [isBulkDownloadQrOpen, setIsBulkDownloadQrOpen] = useState(false);
 
   const {
     ref: dropdownRef,
@@ -129,6 +132,13 @@ function ConditionalDropdown() {
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
       </When>
+
+      <BulkDownloadQrDialog
+        isDialogOpen={isBulkDownloadQrOpen}
+        onClose={() => {
+          setIsBulkDownloadQrOpen(false);
+        }}
+      />
 
       <When
         truthy={userHasPermission({
@@ -250,8 +260,22 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
             </When>
 
-            <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkDownloadQrDialog />
+            <DropdownMenuItem
+              onClick={() => {
+                closeMenu();
+                setIsBulkDownloadQrOpen(true);
+              }}
+              className="py-1 lg:p-0"
+            >
+              <Button
+                variant="link"
+                className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span className="flex items-center gap-2">
+                  <Icon icon="download" /> Download QR Codes
+                </span>
+              </Button>
             </DropdownMenuItem>
 
             <When
