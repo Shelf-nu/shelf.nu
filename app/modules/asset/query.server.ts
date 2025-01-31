@@ -1273,33 +1273,39 @@ export const assetQueryJoins = Prisma.sql`
   LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
 `;
 
-// 4. Return
+/**
+ * Returns SQL fragment for building assets array, ensuring proper handling of empty results
+ * @returns Prisma.Sql fragment that safely handles no results
+ */
 export const assetReturnFragment = Prisma.sql`
-  json_agg(
-    jsonb_build_object(
-      'id', aq."assetId",
-      'qrId', aq."qrId",
-      'title', aq."assetTitle",
-      'description', aq."assetDescription",
-      'createdAt', aq."assetCreatedAt",
-      'updatedAt', aq."assetUpdatedAt",
-      'userId', aq."assetUserId",
-      'mainImage', aq."assetMainImage",
-      'mainImageExpiration', aq."assetMainImageExpiration",
-      'categoryId', aq."assetCategoryId",
-      'locationId', aq."assetLocationId",
-      'organizationId', aq."assetOrganizationId",
-      'status', aq."assetStatus",
-      'valuation', aq."assetValue",
-      'availableToBook', aq."assetAvailableToBook",
-      'kitId', aq."assetKitId",
-      'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
-      'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
-      'tags', aq.tags,
-      'location', jsonb_build_object('name', aq."locationName"),
-      'custody', aq.custody,
-      'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-      'upcomingReminder', aq.upcomingReminder
-    )
+  COALESCE(
+    json_agg(
+      jsonb_build_object(
+        'id', aq."assetId",
+        'qrId', aq."qrId",
+        'title', aq."assetTitle",
+        'description', aq."assetDescription",
+        'createdAt', aq."assetCreatedAt",
+        'updatedAt', aq."assetUpdatedAt",
+        'userId', aq."assetUserId", 
+        'mainImage', aq."assetMainImage",
+        'mainImageExpiration', aq."assetMainImageExpiration",
+        'categoryId', aq."assetCategoryId",
+        'locationId', aq."assetLocationId",
+        'organizationId', aq."assetOrganizationId",
+        'status', aq."assetStatus",
+        'valuation', aq."assetValue",
+        'availableToBook', aq."assetAvailableToBook",
+        'kitId', aq."assetKitId",
+        'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
+        'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
+        'tags', aq.tags,
+        'location', jsonb_build_object('name', aq."locationName"),
+        'custody', aq.custody,
+        'customFields', COALESCE(aq."customFields", '[]'::jsonb),
+        'upcomingReminder', aq.upcomingReminder
+      )
+    ) FILTER (WHERE aq."assetId" IS NOT NULL),
+    '[]'
   ) AS assets
 `;
