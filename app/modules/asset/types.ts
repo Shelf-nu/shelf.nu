@@ -147,7 +147,7 @@ export type AdvancedIndexAsset = Pick<
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
   total_count: number;
-  assets: AdvancedIndexAsset[];
+  assets: AdvancedIndexAsset[]; // This is now guaranteed to be an array, never null
 }>;
 
 export interface CustomFieldSorting {
