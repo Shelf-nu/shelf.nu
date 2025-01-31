@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   TierId,
   type Asset,
@@ -5,7 +6,11 @@ import {
   type User,
   type CustomTierLimit,
 } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  SerializeFrom,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Link, useFetcher } from "@remix-run/react";
 
@@ -211,10 +216,47 @@ export const action = async ({
 };
 
 export default function Area51UserPage() {
-  const { user, organizations } = useLoaderData<typeof loader>();
+  // Get the loader data type
+  type LoaderData = SerializeFrom<typeof loader>;
+
+  const { user, organizations } = useLoaderData<LoaderData>();
 
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
+  // Extract user type from loader data
+  type User = NonNullable<LoaderData["user"]>;
+
+  const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
+    switch (key) {
+      case "tierId":
+        return <TierUpdateForm tierId={user.tierId} />;
+      case "customerId":
+        return !value ? (
+          <Form className="inline-block" method="POST">
+            <input type="hidden" name="intent" value="createCustomerId" />
+            <Button type="submit" variant="link" size="sm">
+              Create customer ID
+            </Button>
+          </Form>
+        ) : (
+          <>
+            <Button
+              to={`https://dashboard.stripe.com/customers/${value}`}
+              target="_blank"
+              variant={"block-link"}
+            >
+              {value}
+            </Button>
+          </>
+        );
+      default:
+        return typeof value === "string"
+          ? value
+          : typeof value === "boolean"
+          ? String(value)
+          : null;
+    }
+  };
 
   return user ? (
     <div>
@@ -234,25 +276,7 @@ export default function Area51UserPage() {
                     .map(([key, value]) => (
                       <li key={key}>
                         <span className="font-semibold">{key}</span>:{" "}
-                        {key === "tierId" ? (
-                          <TierUpdateForm tierId={user.tierId} />
-                        ) : key === "customerId" && !value ? (
-                          <Form className="inline-block" method="POST">
-                            <input
-                              type="hidden"
-                              name="intent"
-                              value="createCustomerId"
-                            />
-                            <Button type="submit" variant="link" size="sm">
-                              Create customer ID
-                            </Button>
-                          </Form>
-                        ) : (
-                          <>
-                            {typeof value === "string" ? value : null}
-                            {typeof value === "boolean" ? String(value) : null}
-                          </>
-                        )}
+                        {renderValue(key as keyof User, value)}
                       </li>
                     ))
                 : null}
