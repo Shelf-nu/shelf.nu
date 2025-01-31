@@ -12,7 +12,7 @@ export function WarningBox({
   return (
     <div
       className={tw(
-        " b-warning-300 relative rounded border bg-warning-25 p-4 text-sm text-warning-700",
+        "relative rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700",
         visible ? "block" : "hidden",
         rest?.className || ""
       )}
