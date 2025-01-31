@@ -104,20 +104,22 @@ export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
   );
 };
 
+export type QrDef = {
+  id: string;
+  size: SizeKeys;
+  src: string;
+};
+
 interface QrLabelProps {
-  data?: {
-    qr?: {
-      id: string;
-      size: SizeKeys;
-      src: string;
-    };
-  };
+  className?: string;
+  data?: { qr?: QrDef };
   title: string;
 }
 
-const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
+export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
     const { data, title } = props ?? {};
+
     return (
       <div
         className="flex aspect-square w-[300px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white px-6 py-[17px]"

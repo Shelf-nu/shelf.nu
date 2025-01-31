@@ -128,7 +128,6 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
-        <BulkDownloadQrDialog />
       </When>
 
       <When
@@ -252,11 +251,7 @@ function ConditionalDropdown() {
             </When>
 
             <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="download-qr"
-                label="Download QR Codes"
-                onClick={closeMenu}
-              />
+              <BulkDownloadQrDialog />
             </DropdownMenuItem>
 
             <When
