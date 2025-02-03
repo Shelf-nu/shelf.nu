@@ -6,7 +6,7 @@ datasource db {
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearch"]
+  previewFeatures = ["fullTextSearchPostgres"]
 }
 
 model Image {
@@ -766,27 +766,25 @@ model KitCustody {
 }
 
 model AssetReminder {
-  id        String   @id @default(cuid())
-  name      String
-  message   String
-  alertDateTime DateTime
+  id                       String       @id @default(cuid())
+  name                     String
+  message                  String
+  alertDateTime            DateTime
   activeSchedulerReference String?
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  organizationId String
-  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  assetId    String
-  teamMembers TeamMember[]
-  createdBy   User   @relation(fields: [createdById], references: [id])
-  createdById String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  organization             Organization @relation(fields: [organizationId], references: [id])
+  organizationId           String
+  asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId                  String
+  teamMembers              TeamMember[]
+  createdBy                User         @relation(fields: [createdById], references: [id])
+  createdById              String
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
 
   // Optimized indexes
   @@index([assetId, alertDateTime])
   @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
   @@index([organizationId, alertDateTime, assetId])
-
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
-
 }
