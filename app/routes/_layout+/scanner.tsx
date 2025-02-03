@@ -54,7 +54,7 @@ const QRScanner = () => {
 
   const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 132 : vh - 158;
+  const height = isMd ? vh - 124 : vh - 158;
 
   function handleQrDetectionSuccess(qrId: string) {
     sendNotification({
