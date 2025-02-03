@@ -9,6 +9,7 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
+import { JsQRScanner } from "~/components/zxing-scanner/js-scanner";
 import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
@@ -76,7 +77,7 @@ const QRScanner = () => {
         }}
       >
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
-          <ZXingScanner
+          <JsQRScanner
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
           />

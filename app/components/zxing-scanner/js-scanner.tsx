@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import {
   Link,
@@ -5,8 +6,7 @@ import {
   useNavigation,
   useRouteLoaderData,
 } from "@remix-run/react";
-import { useZxing } from "react-zxing";
-
+import jsQR from "jsqr";
 import { ClientOnly } from "remix-utils/client-only";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { ShelfError } from "~/utils/error";
@@ -24,7 +24,7 @@ import {
 import Icon from "../icons/icon";
 import { Spinner } from "../shared/spinner";
 
-type ZXingScannerProps = {
+type JsQRScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
   videoMediaDevices?: MediaDeviceInfo[];
   isLoading?: boolean;
@@ -36,7 +36,7 @@ type ZXingScannerProps = {
   paused?: boolean;
 };
 
-export const ZXingScanner = ({
+export const JsQRScanner = ({
   videoMediaDevices,
   onQrDetectionSuccess,
   isLoading: incomingIsLoading,
@@ -46,7 +46,7 @@ export const ZXingScanner = ({
   className,
   overlayClassName,
   paused = false,
-}: ZXingScannerProps) => {
+}: JsQRScannerProps) => {
   const scannerCameraId = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   )?.scannerCameraId;
@@ -57,22 +57,18 @@ export const ZXingScanner = ({
   const fetcher = useFetcher();
   const isSwitchingCamera = isFormProcessing(fetcher.state);
 
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
   // Function to decode the QR code
   const decodeQRCodes = (result: string) => {
-    console.log("result", result);
+    console.log("Decoding QR code:", result);
     if (result != null && !isLoading && !incomingIsLoading) {
-      /**
-       * - ^(https?:\/\/[^\/]+\/ matches the protocol, domain, and the initial slash.
-       * - (?:qr\/)? optionally matches the /qr/ part.
-       * - ([a-zA-Z0-9]+))$ matches the QR ID which is the last segment of the URL.
-       * - $ ensures that there are no additional parts after the QR ID.
-       */
-      // Regex to match both old and new QR code structures
       const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-
-      /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
       if (!match) {
+        console.log("QR code does not match expected format");
         onQrDetectionSuccess &&
           void onQrDetectionSuccess(
             result,
@@ -81,10 +77,10 @@ export const ZXingScanner = ({
         return;
       }
 
-      const qrId = match[2]; // Get the QR id from the URL
+      const qrId = match[2];
       if (!isQrId(qrId)) {
-        /** If we allow nonShelf codes, we just run the callback with the result from the scanner and pass an optional error to the callback function */
         if (allowNonShelfCodes) {
+          console.log("Non-Shelf QR code detected");
           onQrDetectionSuccess &&
             void onQrDetectionSuccess(
               result,
@@ -94,41 +90,70 @@ export const ZXingScanner = ({
         return;
       }
 
-      /** At this point, a QR is successfully detected, so we can vibrate user's device for feedback */
       if (typeof navigator.vibrate === "function") {
         navigator.vibrate(200);
       }
 
+      console.log("Valid Shelf QR code detected:", qrId);
       onQrDetectionSuccess && void onQrDetectionSuccess(qrId);
     }
   };
-  const { ref } = useZxing({
-    deviceId: scannerCameraId,
-    constraints: {
+
+  // Start the camera and QR code scanning
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+
+    if (!video || !canvas || !context) return;
+
+    const constraints = {
       video: {
         facingMode: "environment",
-        deviceId: scannerCameraId,
+        deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
       },
-      audio: false,
-    },
-    timeBetweenDecodingAttempts: 200,
-    paused,
-    onDecodeResult(result) {
-      console.log("result", result);
-      void decodeQRCodes(result.getText());
-    },
-    // onDecodeError(error) {
-    //   console.error("Error decoding QR code", error);
-    // },
-    onError(cause) {
-      throw new ShelfError({
-        message: "Unable to access media devices permission",
-        status: 403,
-        label: "Scanner",
-        cause,
+    };
+
+    navigator.mediaDevices
+      .getUserMedia(constraints)
+      .then(async (stream) => {
+        video.srcObject = stream;
+        await video.play();
+        requestAnimationFrame(tick);
+      })
+      .catch((err) => {
+        console.error("Error accessing camera:", err);
+        setError("Unable to access camera. Please check permissions.");
       });
-    },
-  });
+
+    const tick = () => {
+      if (paused || !video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+      if (code) {
+        console.log("QR code detected:", code.data);
+        decodeQRCodes(code.data);
+      }
+
+      requestAnimationFrame(tick);
+    };
+
+    return () => {
+      if (video.srcObject) {
+        (video.srcObject as MediaStream)
+          .getTracks()
+          .forEach((track) => track.stop());
+      }
+    };
+  }, [scannerCameraId, paused]);
 
   return (
     <div
@@ -202,7 +227,7 @@ export const ZXingScanner = ({
             </div>
 
             <video
-              ref={ref}
+              ref={videoRef}
               width="100%"
               autoPlay={true}
               controls={false}
@@ -210,6 +235,7 @@ export const ZXingScanner = ({
               playsInline={true}
               className="pointer-events-none size-full object-cover object-center"
             />
+            <canvas ref={canvasRef} style={{ display: "none" }} />
 
             {/* Overlay */}
             <div
