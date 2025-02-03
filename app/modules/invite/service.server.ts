@@ -1,7 +1,16 @@
-import type { Invite, Organization, Prisma, TeamMember } from "@prisma/client";
+import type {
+  Invite,
+  Organization,
+  Prisma,
+  TeamMember,
+  User,
+} from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
+import lodash from "lodash";
+import type { z } from "zod";
+import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
@@ -104,6 +113,7 @@ export async function createInvite(
     teamMemberName: TeamMember["name"];
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
+    extraMessage?: string | null;
   }
 ) {
   let {
@@ -114,6 +124,7 @@ export async function createInvite(
     teamMemberName,
     teamMemberId,
     userId,
+    extraMessage,
   } = payload;
 
   try {
@@ -253,8 +264,8 @@ export async function createInvite(
     sendEmail({
       to: inviteeEmail,
       subject: `✉️ You have been invited to ${invite.organization.name}`,
-      text: inviteEmailText({ invite, token }),
-      html: invitationTemplateString({ invite, token }),
+      text: inviteEmailText({ invite, token, extraMessage }),
+      html: invitationTemplateString({ invite, token, extraMessage }),
     });
 
     return invite;
@@ -529,6 +540,211 @@ export async function getPaginatedAndFilterableSettingInvites({
       message: "Something went wrong while getting registered users",
       additionalData: { organizationId },
       label,
+    });
+  }
+}
+
+type InviteUserSchema = z.infer<typeof InviteUserFormSchema>;
+
+export async function bulkInviteUsers({
+  users,
+  userId,
+  organizationId,
+  extraMessage,
+}: {
+  users: Omit<InviteUserSchema, "teamMemberId">[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+  extraMessage?: string | null;
+}) {
+  try {
+    // Filter out duplicate emails
+    const uniquePayloads = lodash.uniqBy(users, (user) => user.email);
+
+    // Batch validate all emails against SS
+    await Promise.all(
+      uniquePayloads.map((payload) =>
+        validateInvite(payload.email, organizationId)
+      )
+    );
+
+    // Batch check for existing users
+    const emails = uniquePayloads.map((p) => p.email);
+    const existingUsers = await db.user.findMany({
+      where: {
+        email: { in: emails },
+        userOrganizations: {
+          some: { organizationId },
+        },
+      },
+      select: { email: true },
+    });
+
+    const existingEmailsInOrg = new Set(existingUsers.map((u) => u.email));
+
+    // Batch check for existing invites in one query
+    const existingInvites = await db.invite.findMany({
+      where: {
+        organizationId,
+        inviteeEmail: { in: emails },
+        status: InviteStatuses.PENDING,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        inviteeEmail: true,
+        inviteeTeamMember: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    /* All emails are already invited */
+    if (existingInvites.length === emails.length) {
+      sendNotification({
+        title: "Users already invited",
+        message:
+          "All users in csv file are already invited to the organization.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All users in csv file are already invited to the organization.",
+      };
+    }
+
+    /* All emails are already in organization */
+    if (existingUsers.length === emails.length) {
+      sendNotification({
+        title: "Users already member of organization",
+        message: "All user in csv file are already part of your organization.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All user in csv file are already part of your organization.",
+      };
+    }
+
+    /* All emails are either in organization already or invited already */
+    if (existingInvites.length + existingUsers.length === emails.length) {
+      sendNotification({
+        title: "0 users invited",
+        message:
+          "All users in file are either in organization or already invited.",
+        icon: { name: "success", variant: "error" },
+        senderId: userId,
+      });
+
+      return {
+        inviteSentUsers: [],
+        skippedUsers: users,
+        extraMessage:
+          "All users in file are either in organization or already invited.",
+      };
+    }
+
+    const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
+
+    /**
+     * We only have to send invite to the
+     * - users who have not PENDING invitation and
+     * - users who are not part of organization already
+     */
+    const validPayloads = uniquePayloads.filter(
+      (p) =>
+        !existingInviteEmails.includes(p.email) &&
+        !existingEmailsInOrg.has(p.email)
+    );
+
+    const validPayloadsWithName = validPayloads.map((p) => ({
+      ...p,
+      name: p.email.split("@")[0],
+    }));
+
+    const createdTeamMembers = await db.teamMember.createManyAndReturn({
+      data: validPayloadsWithName.map((p) => ({
+        name: p.name,
+        organizationId,
+      })),
+    });
+
+    // Prepare invite data
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
+
+    const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      inviterId: userId,
+      organizationId,
+      inviteeEmail: payload.email,
+      teamMemberId:
+        createdTeamMembers.find((tm) => tm.name === payload.name)?.id ?? "",
+      roles: [payload.role],
+      expiresAt,
+      inviteCode: generateRandomCode(6),
+      status: InviteStatuses.PENDING,
+    }));
+
+    // Bulk create invites
+    const createdInvites = await db.invite.createManyAndReturn({
+      data: invitesToCreate,
+      include: {
+        inviter: { select: { firstName: true, lastName: true } },
+        organization: true,
+      },
+    });
+
+    // Queue emails for sending - no need to await since it's handled by queue
+    createdInvites.forEach((invite) => {
+      const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
+        expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
+      });
+
+      sendEmail({
+        to: invite.inviteeEmail,
+        subject: `✉️ You have been invited to ${invite.organization.name}`,
+        text: inviteEmailText({ invite, token, extraMessage }),
+        html: invitationTemplateString({ invite, token, extraMessage }),
+      });
+    });
+
+    sendNotification({
+      title: "Successfully invited users",
+      message: `${createdInvites.length} user(s) have been invited successfully. They will receive an email in which they can complete their registration.`,
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    const skippedUsers = users.filter(
+      (user) =>
+        existingInviteEmails.includes(user.email) ||
+        existingEmailsInOrg.has(user.email)
+    );
+
+    return {
+      inviteSentUsers: validPayloads,
+      skippedUsers,
+      extraMessage:
+        createdInvites.length > 10
+          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasnt received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
+          : undefined,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while inviting users.",
+      label,
+      additionalData: { users },
     });
   }
 }
