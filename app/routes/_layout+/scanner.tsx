@@ -8,8 +8,7 @@ import { Link, useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Spinner } from "~/components/shared/spinner";
-import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
+import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -52,7 +51,6 @@ const QRScanner = () => {
   const [sendNotification] = useClientNotification();
   const navigate = useNavigate();
 
-  const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
 
@@ -70,21 +68,10 @@ const QRScanner = () => {
     <>
       <Header title="QR code scanner" />
       <div
-        className={` -mx-4 flex flex-col`}
-        style={{
-          height: `${height}px`,
-        }}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={{ height: `${height}px` }}
       >
-        {videoMediaDevices && videoMediaDevices.length > 0 ? (
-          <ZXingScanner
-            videoMediaDevices={videoMediaDevices}
-            onQrDetectionSuccess={handleQrDetectionSuccess}
-          />
-        ) : (
-          <div className="mt-4 flex flex-col items-center justify-center">
-            <Spinner /> Waiting for permission to access camera.
-          </div>
-        )}
+        <WasmScanner onQrDetectionSuccess={handleQrDetectionSuccess} />
       </div>
     </>
   );
