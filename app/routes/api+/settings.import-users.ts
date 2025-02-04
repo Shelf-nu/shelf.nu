@@ -1,6 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { bulkInviteUsers } from "~/modules/invite/service.server";
+import { IMPORT_USERS_CSV_HEADERS } from "~/modules/invite/utils.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error } from "~/utils/http.server";
@@ -43,7 +43,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const users = extractCSVDataFromContentImport(
       csvData,
-      InviteUserFormSchema.array()
+      IMPORT_USERS_CSV_HEADERS
     );
 
     const response = await bulkInviteUsers({
