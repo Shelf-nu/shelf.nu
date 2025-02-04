@@ -64,7 +64,7 @@
     "@remix-run/node": "2.13.1",
     "@remix-run/react": "2.13.1",
     "@remix-run/serve": "2.13.1",
-    "@sentry/remix": "^8.33.1",
+    "@sentry/remix": "^8.53.0",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
     "@supabase/supabase-js": "^2.43.4",
