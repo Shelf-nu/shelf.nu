@@ -77,6 +77,10 @@ const QRScanner = () => {
         }}
       >
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
+          // <ZXingScanner
+          //   videoMediaDevices={videoMediaDevices}
+          //   onQrDetectionSuccess={handleQrDetectionSuccess}
+          // />
           <JsQRScanner
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
