@@ -245,8 +245,8 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
           <When truthy={!!data?.error}>
             <div>
-              <h5 className="text-red-500">{data?.error.title}</h5>
-              <p className="text-red-500">{data?.error.message}</p>
+              <h5 className="text-red-500">{data?.error?.title}</h5>
+              <p className="text-red-500">{data?.error?.message}</p>
               {data?.error?.additionalData?.duplicateCodes ? (
                 <BrokenQrCodesTable
                   title="Duplicate codes"
