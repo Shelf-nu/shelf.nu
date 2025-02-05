@@ -89,9 +89,8 @@ export const WasmScanner = ({
         const constraints = {
           video: {
             deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
-            width: { min: 1280, ideal: 1920 }, // Higher resolution
-            height: { min: 720, ideal: 1080 }, // Higher resolution
-            facingMode: "environment", // Prefer back camera
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         };
 
@@ -99,22 +98,9 @@ export const WasmScanner = ({
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          const track = stream.getVideoTracks()[0];
-          const capabilities = track.getCapabilities();
-          const settings = track.getSettings();
-
-          console.log("Video capabilities:", capabilities);
-          console.log("Current settings:", settings);
-
           await videoRef.current.play();
           videoRef.current.onloadedmetadata = () => {
             if (videoRef.current) {
-              console.log("Video dimensions:", {
-                videoWidth: videoRef.current.videoWidth,
-                videoHeight: videoRef.current.videoHeight,
-                offsetWidth: videoRef.current.offsetWidth,
-                offsetHeight: videoRef.current.offsetHeight,
-              });
               updateCanvasSize();
             }
           };
@@ -151,18 +137,60 @@ export const WasmScanner = ({
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
 
       try {
-        // Clear previous drawings
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Get video's natural dimensions
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        const videoAspectRatio = videoWidth / videoHeight;
 
-        // Draw the current video frame
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Get container dimensions
+        const container = canvas.parentElement;
+        const containerWidth = container?.clientWidth || 640;
+        const containerHeight = container?.clientHeight || 480;
 
-        // Get image data for QR detection
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Calculate scaled dimensions (cover)
+        let drawWidth = containerWidth;
+        let drawHeight = containerWidth / videoAspectRatio;
+
+        if (drawHeight < containerHeight) {
+          drawHeight = containerHeight;
+          drawWidth = containerHeight * videoAspectRatio;
+        }
+
+        // Set canvas dimensions to match container
+        canvas.width = containerWidth;
+        canvas.height = containerHeight;
+
+        // Calculate centering offsets
+        const offsetX = (containerWidth - drawWidth) / 2;
+        const offsetY = (containerHeight - drawHeight) / 2;
+
+        // Clear entire canvas
+        ctx.clearRect(0, 0, containerWidth, containerHeight);
+
+        // Draw video frame centered
+        ctx.drawImage(
+          video,
+          0,
+          0,
+          videoWidth,
+          videoHeight,
+          offsetX,
+          offsetY,
+          drawWidth,
+          drawHeight
+        );
+
+        // Get image data for QR detection - only from the drawn area
+        const imageData = ctx.getImageData(
+          0,
+          0,
+          containerWidth,
+          containerHeight
+        );
 
         // Attempt to read QR code
         const results = await readBarcodes(imageData, {
@@ -173,7 +201,31 @@ export const WasmScanner = ({
 
         if (results.length > 0) {
           const result = results[0];
-          drawDetectionBox(ctx, result.position, canvas.width, canvas.height);
+          // Adjust the box position relative to the centered video
+          const adjustedPosition = {
+            topLeft: {
+              x: result.position.topLeft.x + offsetX,
+              y: result.position.topLeft.y + offsetY,
+            },
+            topRight: {
+              x: result.position.topRight.x + offsetX,
+              y: result.position.topRight.y + offsetY,
+            },
+            bottomRight: {
+              x: result.position.bottomRight.x + offsetX,
+              y: result.position.bottomRight.y + offsetY,
+            },
+            bottomLeft: {
+              x: result.position.bottomLeft.x + offsetX,
+              y: result.position.bottomLeft.y + offsetY,
+            },
+          };
+          drawDetectionBox(
+            ctx,
+            adjustedPosition,
+            containerWidth,
+            containerHeight
+          );
           handleDetection(result.text);
         }
       } catch (error) {

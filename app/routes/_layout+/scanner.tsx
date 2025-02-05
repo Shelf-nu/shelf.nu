@@ -50,7 +50,7 @@ export const meta: MetaFunction<typeof loader> = () => [
 const QRScanner = () => {
   const [sendNotification] = useClientNotification();
   const navigate = useNavigate();
-
+  const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
 
