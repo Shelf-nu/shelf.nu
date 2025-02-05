@@ -215,6 +215,24 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            <DropdownMenuItem
+              onClick={() => {
+                closeMenu();
+                setIsBulkDownloadQrOpen(true);
+              }}
+              className="border-b py-1 lg:p-0"
+            >
+              <Button
+                variant="link"
+                className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span className="flex items-center gap-2">
+                  <Icon icon="download" /> Download QR Codes
+                </span>
+              </Button>
+            </DropdownMenuItem>
+
             <When
               truthy={userHasPermission({
                 roles,
@@ -259,24 +277,6 @@ function ConditionalDropdown() {
                 />
               </DropdownMenuItem>
             </When>
-
-            <DropdownMenuItem
-              onClick={() => {
-                closeMenu();
-                setIsBulkDownloadQrOpen(true);
-              }}
-              className="py-1 lg:p-0"
-            >
-              <Button
-                variant="link"
-                className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
-                width="full"
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon="download" /> Download QR Codes
-                </span>
-              </Button>
-            </DropdownMenuItem>
 
             <When
               truthy={userHasPermission({

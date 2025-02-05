@@ -1,4 +1,5 @@
-import { cloneElement, useState } from "react";
+import { useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import domtoimage from "dom-to-image";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
@@ -6,13 +7,13 @@ import { DownloadIcon } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
+import { type loader } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
-import { tw } from "~/utils/tw";
-import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { QrDef } from "../qr/qr-preview";
-import { QrLabel } from "../qr/qr-preview";
+import { QrPreview } from "../qr/qr-preview";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type BulkDownloadQrDialogProps = {
@@ -23,7 +24,7 @@ type BulkDownloadQrDialogProps = {
 
 type DownloadState =
   | { status: "idle" }
-  | { status: "loading" }
+  | { status: "loading"; generatedQrCount: number }
   | { status: "success" }
   | { status: "error"; error: string };
 
@@ -32,6 +33,8 @@ export default function BulkDownloadQrDialog({
   isDialogOpen,
   onClose,
 }: BulkDownloadQrDialogProps) {
+  const { totalItems } = useLoaderData<typeof loader>();
+
   const [downloadState, setDownloadState] = useState<DownloadState>({
     status: "idle",
   });
@@ -42,6 +45,8 @@ export default function BulkDownloadQrDialog({
 
   const disabled =
     selectedAssets.length === 0 || downloadState.status === "loading";
+
+  const selectedCount = allAssetsSelected ? totalItems : selectedAssets.length;
 
   function handleClose() {
     setDownloadState({ status: "idle" });
@@ -55,7 +60,7 @@ export default function BulkDownloadQrDialog({
       query.append("assetIds", asset.id);
     });
 
-    setDownloadState({ status: "loading" });
+    setDownloadState({ status: "loading", generatedQrCount: 0 });
 
     try {
       /* Getting all validated assets with qr object */
@@ -74,13 +79,20 @@ export default function BulkDownloadQrDialog({
       const qrFolder = zip.folder("qr-codes");
 
       for (const asset of assets) {
-        const filename = `${asset.id}.jpg`;
+        const filename = `${asset.title}_${asset.qr.id}.jpg`;
 
         /* Converting our React compoentn to html so that we can later convert it into an image */
         const qrCodeContent = renderToStaticMarkup(
-          <div className="flex w-full items-center justify-center p-6 text-center">
-            <QrLabel data={{ qr: asset.qr }} title={asset.title} />
-          </div>
+          <QrPreview
+            style={{
+              border: `3px solid #e5e7eb`,
+              borderRadius: "4px",
+              padding: "16px",
+            }}
+            hideButton
+            qrObj={{ qr: asset.qr }}
+            item={{ name: asset.title, type: "asset" }}
+          />
         );
 
         /* Creating div element to convert it into image because domtoimage expects an Html node */
@@ -89,8 +101,8 @@ export default function BulkDownloadQrDialog({
 
         /* Converting html to image */
         const qrBlob = await domtoimage.toBlob(div, {
-          height: 600,
-          width: 600,
+          height: 700,
+          width: 700,
           bgcolor: "white",
           style: {
             display: "flex",
@@ -110,6 +122,17 @@ export default function BulkDownloadQrDialog({
         } else {
           zip.file(filename, qrImageFile);
         }
+
+        setDownloadState((prev) => {
+          if (prev.status !== "loading") {
+            return prev;
+          }
+
+          return {
+            status: "loading",
+            generatedQrCount: prev.generatedQrCount + 1,
+          };
+        });
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
@@ -146,42 +169,54 @@ export default function BulkDownloadQrDialog({
         }
       >
         <div className="px-6 py-4">
-          <h4 className="mb-1">
-            Download qr codes for{" "}
-            {allAssetsSelected ? "all" : selectedAssets.length} asset(s).
-          </h4>
-          <p className="mb-4">
-            {allAssetsSelected ? "All" : selectedAssets.length} qr code(s) will
-            be downloaded in a zip file.
-          </p>
-          <When truthy={downloadState.status === "success"}>
-            <p className="mb-4 text-success-500">
-              Successfully downloaded qr codes.
-            </p>
-          </When>
+          {downloadState.status === "loading" ? (
+            <div className="mb-6 flex flex-col items-center gap-4">
+              <Spinner />
+              <h3>
+                Generating Zip file [{downloadState.generatedQrCount}/
+                {selectedCount}]
+              </h3>
+            </div>
+          ) : (
+            <>
+              <h4 className="mb-1">
+                Download qr codes for{" "}
+                {allAssetsSelected ? "all" : selectedAssets.length} asset(s).
+              </h4>
+              <p className="mb-4">
+                {allAssetsSelected ? "All" : selectedAssets.length} qr code(s)
+                will be downloaded in a zip file.
+              </p>
+              <When truthy={downloadState.status === "success"}>
+                <p className="mb-4 text-success-500">
+                  Successfully downloaded qr codes.
+                </p>
+              </When>
 
-          {downloadState.status === "error" ? (
-            <p className="mb-4 text-error-500">{downloadState.error}</p>
-          ) : null}
+              {downloadState.status === "error" ? (
+                <p className="mb-4 text-error-500">{downloadState.error}</p>
+              ) : null}
 
-          <div className="flex w-full items-center justify-center gap-4">
-            <Button
-              className="flex-1"
-              variant="secondary"
-              onClick={handleClose}
-              disabled={disabled}
-            >
-              Close
-            </Button>
+              <div className="flex w-full items-center justify-center gap-4">
+                <Button
+                  className="flex-1"
+                  variant="secondary"
+                  onClick={handleClose}
+                  disabled={disabled}
+                >
+                  Close
+                </Button>
 
-            <Button
-              className="flex-1"
-              onClick={handleBulkDownloadQr}
-              disabled={disabled}
-            >
-              Download
-            </Button>
-          </div>
+                <Button
+                  className="flex-1"
+                  onClick={handleBulkDownloadQr}
+                  disabled={disabled}
+                >
+                  Download
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Dialog>
     </DialogPortal>

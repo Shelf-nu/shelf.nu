@@ -5,11 +5,14 @@ import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
+import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 interface ObjectType {
   className?: string;
+  style?: React.CSSProperties;
+  hideButton?: boolean;
   item: {
     name: string;
     type: "asset" | "kit";
@@ -23,7 +26,13 @@ interface ObjectType {
   };
 }
 
-export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
+export const QrPreview = ({
+  className,
+  style,
+  qrObj,
+  item,
+  hideButton = false,
+}: ObjectType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
@@ -66,40 +75,40 @@ export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
     }
   }
 
-  const printQr = useReactToPrint({
-    content: () => captureDivRef.current,
-  });
+  const printQr = useReactToPrint({ content: () => captureDivRef.current });
+
   return (
     <div
-      className={tw(
-        "mb-4 w-auto rounded border border-solid bg-white",
-        className
-      )}
+      className={tw("mb-4 w-auto rounded border-2 bg-white", className)}
+      style={style}
     >
       <div className="flex w-full justify-center pt-6">
         <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
       </div>
-      <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
-        <Button
-          icon="download"
-          onClick={downloadQr}
-          download={`${slugify(item.name)}-${qrObj?.qr
-            ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
-          ref={downloadQrBtnRef}
-          variant="secondary"
-          className="w-full"
-        >
-          Download
-        </Button>
-        <Button
-          icon="print"
-          variant="secondary"
-          className="w-full"
-          onClick={printQr}
-        >
-          Print
-        </Button>
-      </div>
+
+      <When truthy={!hideButton}>
+        <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
+          <Button
+            icon="download"
+            onClick={downloadQr}
+            download={`${slugify(item.name)}-${qrObj?.qr
+              ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
+            ref={downloadQrBtnRef}
+            variant="secondary"
+            className="w-full"
+          >
+            Download
+          </Button>
+          <Button
+            icon="print"
+            variant="secondary"
+            className="w-full"
+            onClick={printQr}
+          >
+            Print
+          </Button>
+        </div>
+      </When>
     </div>
   );
 };
@@ -134,14 +143,17 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
             alt={`${data?.qr?.size}-shelf-qr-code.png`}
           />
         </figure>
-        <div className="w-full text-center text-[12px]">
-          <span className="block  font-semibold text-black">
-            {data?.qr?.id}
-          </span>
-          <span className="block text-black">
+        <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
+          <div style={{ fontWeight: 600 }}>{data?.qr?.id}</div>
+          <div>
             Powered by{" "}
-            <span className="font-semibold text-black">shelf.nu</span>
-          </span>
+            <span
+              className="font-semibold text-black"
+              style={{ fontWeight: 600, color: "black" }}
+            >
+              shelf.nu
+            </span>
+          </div>
         </div>
       </div>
     );
