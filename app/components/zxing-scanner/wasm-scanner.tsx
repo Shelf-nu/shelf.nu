@@ -42,6 +42,8 @@ export const WasmScanner = ({
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const [isInitializing, setIsInitializing] = useState(true);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
+  // Add containerRef to measure container dimensions
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const scannerCameraId = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
@@ -80,21 +82,42 @@ export const WasmScanner = ({
       }
     };
 
+    // Enhanced camera setup with proper constraints
     const setupCamera = async () => {
       setIsCameraLoading(true);
       try {
         const constraints = {
           video: {
             deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { min: 1280, ideal: 1920 }, // Higher resolution
+            height: { min: 720, ideal: 1080 }, // Higher resolution
+            facingMode: "environment", // Prefer back camera
           },
         };
 
         stream = await navigator.mediaDevices.getUserMedia(constraints);
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          const track = stream.getVideoTracks()[0];
+          const capabilities = track.getCapabilities();
+          const settings = track.getSettings();
+
+          console.log("Video capabilities:", capabilities);
+          console.log("Current settings:", settings);
+
           await videoRef.current.play();
+          videoRef.current.onloadedmetadata = () => {
+            if (videoRef.current) {
+              console.log("Video dimensions:", {
+                videoWidth: videoRef.current.videoWidth,
+                videoHeight: videoRef.current.videoHeight,
+                offsetWidth: videoRef.current.offsetWidth,
+                offsetHeight: videoRef.current.offsetHeight,
+              });
+              updateCanvasSize();
+            }
+          };
         }
       } catch (error) {
         throw new ShelfError({
@@ -107,6 +130,22 @@ export const WasmScanner = ({
       }
     };
 
+    // Function to update canvas size to match video display size
+    const updateCanvasSize = () => {
+      if (!videoRef.current || !canvasRef.current) return;
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      // Get the video's display dimensions (affected by object-fit: cover)
+      const videoRect = video.getBoundingClientRect();
+
+      // Set canvas size to match video's display size
+      canvas.width = videoRect.width;
+      canvas.height = videoRect.height;
+    };
+
+    // Enhanced frame processing with proper scaling
     const processFrame = async () => {
       if (!videoRef.current || !canvasRef.current || paused) return;
 
@@ -116,73 +155,26 @@ export const WasmScanner = ({
       if (!ctx) return;
 
       try {
-        // Get video's natural dimensions
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
-        const videoAspectRatio = videoWidth / videoHeight;
+        // Clear previous drawings
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Get container dimensions (parent element)
-        const container = canvas.parentElement;
-        const containerWidth = container?.clientWidth || 640;
-        const containerHeight = container?.clientHeight || 480;
+        // Draw the current video frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Calculate scaled dimensions to maintain aspect ratio (cover)
-        let drawWidth = containerWidth;
-        let drawHeight = containerWidth / videoAspectRatio;
+        // Get image data for QR detection
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // If the calculated height is too tall for containerHeight
-        if (drawHeight > containerHeight) {
-          drawHeight = containerHeight;
-          drawWidth = containerHeight * videoAspectRatio;
-        }
-
-        // Center the video in the container
-        const offsetX = (containerWidth - drawWidth) / 2;
-        const offsetY = (containerHeight - drawHeight) / 2;
-
-        // Set canvas dimensions to match video aspect ratio
-        canvas.width = drawWidth;
-        canvas.height = drawHeight;
-
-        // Clear and draw video frame
-        ctx.clearRect(0, 0, drawWidth, drawHeight);
-        ctx.drawImage(
-          video,
-          0,
-          0,
-          videoWidth,
-          videoHeight, // Source dimensions
-          offsetX,
-          offsetY,
-          drawWidth,
-          drawHeight // Destination dimensions
-        );
-
-        // Get image data from CENTERED video area
-        const imageData = ctx.getImageData(0, 0, drawWidth, drawHeight);
-
-        // Read barcodes from the properly scaled video frame
-        const results = await readBarcodes(
-          new ImageData(
-            new Uint8ClampedArray(imageData.data),
-            imageData.width,
-            imageData.height
-          ),
-          {
-            tryHarder: true,
-            formats: ["QRCode"],
-            maxNumberOfSymbols: 1,
-          }
-        );
-
-        const scale = {
-          x: videoRef.current.offsetWidth / videoWidth,
-          y: videoRef.current.offsetHeight / videoHeight,
-        };
+        // Attempt to read QR code
+        const results = await readBarcodes(imageData, {
+          tryHarder: true,
+          formats: ["QRCode"],
+          maxNumberOfSymbols: 1,
+        });
 
         if (results.length > 0) {
-          handleDetection(results[0].text);
-          drawBoundingBox(results[0].position, scale);
+          const result = results[0];
+          drawDetectionBox(ctx, result.position, canvas.width, canvas.height);
+          handleDetection(result.text);
         }
       } catch (error) {
         console.error("Frame processing error:", error);
@@ -191,19 +183,52 @@ export const WasmScanner = ({
       animationFrame = requestAnimationFrame(processFrame);
     };
 
+    // Initialize scanner
     void initScanner();
+
+    // Add resize observer for responsive canvas
+    const resizeObserver = new ResizeObserver(updateCanvasSize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
       cancelAnimationFrame(animationFrame);
       stream?.getTracks().forEach((track) => track.stop());
+      resizeObserver.disconnect();
     };
   }, [scannerCameraId, paused]);
+
+  // Simple box drawing function
+  const drawDetectionBox = (
+    ctx: CanvasRenderingContext2D,
+    position: ReadResult["position"],
+    canvasWidth: number,
+    canvasHeight: number
+  ) => {
+    if (!position) return;
+
+    // Set drawing styles
+    ctx.beginPath();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#22c55e"; // Green color for visibility
+
+    // Draw the detection box
+    ctx.moveTo(position.topLeft.x, position.topLeft.y);
+    ctx.lineTo(position.topRight.x, position.topRight.y);
+    ctx.lineTo(position.bottomRight.x, position.bottomRight.y);
+    ctx.lineTo(position.bottomLeft.x, position.bottomLeft.y);
+    ctx.closePath();
+
+    // Stroke the path
+    ctx.stroke();
+  };
 
   const handleDetection = (result: string) => {
     if (!result || incomingIsLoading) return;
     console.log(result);
     return;
-
+    // // QR code validation logic...
     // const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
     // const match = result.match(regex);
 
@@ -229,49 +254,6 @@ export const WasmScanner = ({
     // void onQrDetectionSuccess?.(qrId);
   };
 
-  const drawBoundingBox = (
-    position: ReadResult["position"] | undefined,
-    scale: { x: number; y: number }
-  ) => {
-    const ctx = canvasRef.current?.getContext("2d");
-    const video = videoRef.current;
-    if (!ctx || !position || !video) return;
-
-    // Get actual video display dimensions
-    const videoRect = video.getBoundingClientRect();
-
-    // Calculate scaling factors based on rendered video size
-    const renderedWidth = videoRect.width;
-    const renderedHeight = videoRect.height;
-    const scaleX = renderedWidth / video.videoWidth;
-    const scaleY = renderedHeight / video.videoHeight;
-
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.beginPath();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "#00ff00";
-
-    // Adjust position points with actual rendered scaling
-    const { topLeft, topRight, bottomRight, bottomLeft } = position;
-
-    // Create adjusted points array
-    const points = [
-      { x: topLeft.x * scaleX, y: topLeft.y * scaleY },
-      { x: topRight.x * scaleX, y: topRight.y * scaleY },
-      { x: bottomRight.x * scaleX, y: bottomRight.y * scaleY },
-      { x: bottomLeft.x * scaleX, y: bottomLeft.y * scaleY },
-    ];
-
-    // Draw polygon
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-
-    ctx.closePath();
-    ctx.stroke();
-  };
-
   const handleDeviceChange = (deviceId: string) => {
     fetcher.submit(
       { scannerCameraId: deviceId },
@@ -289,22 +271,17 @@ export const WasmScanner = ({
   }
 
   return (
-    <div className={tw("relative aspect-video size-full", className)}>
+    <div className={tw("scanner-container", className)}>
       <div className="relative size-full overflow-hidden rounded-lg">
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className="pointer-events-none size-full object-cover object-center"
-          style={{ objectFit: "cover" }} // Explicit CSS fallback
+          className="pointer-events-none size-full object-cover"
+          style={{ objectFit: "cover" }}
         />
-        <canvas
-          ref={canvasRef}
-          className="absolute left-0 top-0 size-full"
-          width={640}
-          height={480}
-        />
+        <canvas ref={canvasRef} className="canvas-overlay size-full" />
         {/* Camera controls overlay */}
         <div className="absolute inset-x-0 top-0 z-10 flex w-full items-center justify-between bg-transparent text-white">
           <div>
