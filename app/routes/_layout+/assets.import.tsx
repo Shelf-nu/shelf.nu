@@ -18,7 +18,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
-import { importAssetsSchema } from "~/modules/asset/utils.server";
+import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -65,7 +65,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     const contentData = extractCSVDataFromContentImport(
       csvData,
-      importAssetsSchema.array()
+      ASSET_CSV_HEADERS
     );
 
     await createAssetsFromContentImport({

@@ -18,8 +18,8 @@ export default defineConfig({
   server: {
     port: 3000,
     // https: {
-    //   key: "./server/dev/key.pem",
-    //   cert: "./server/dev/cert.pem",
+    //   key: "./.cert/key.pem",
+    //   cert: "./.cert/cert.pem",
     // },
     warmup: {
       clientFiles: [
