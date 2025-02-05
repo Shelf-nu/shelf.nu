@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import domtoimage from "dom-to-image";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
@@ -7,7 +6,6 @@ import { DownloadIcon } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
-import { type loader } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { QrDef } from "../qr/qr-preview";
@@ -24,7 +22,7 @@ type BulkDownloadQrDialogProps = {
 
 type DownloadState =
   | { status: "idle" }
-  | { status: "loading"; generatedQrCount: number }
+  | { status: "loading" }
   | { status: "success" }
   | { status: "error"; error: string };
 
@@ -33,8 +31,6 @@ export default function BulkDownloadQrDialog({
   isDialogOpen,
   onClose,
 }: BulkDownloadQrDialogProps) {
-  const { totalItems } = useLoaderData<typeof loader>();
-
   const [downloadState, setDownloadState] = useState<DownloadState>({
     status: "idle",
   });
@@ -45,8 +41,6 @@ export default function BulkDownloadQrDialog({
 
   const disabled =
     selectedAssets.length === 0 || downloadState.status === "loading";
-
-  const selectedCount = allAssetsSelected ? totalItems : selectedAssets.length;
 
   function handleClose() {
     setDownloadState({ status: "idle" });
@@ -60,7 +54,7 @@ export default function BulkDownloadQrDialog({
       query.append("assetIds", asset.id);
     });
 
-    setDownloadState({ status: "loading", generatedQrCount: 0 });
+    setDownloadState({ status: "loading" });
 
     try {
       /* Getting all validated assets with qr object */
@@ -78,10 +72,8 @@ export default function BulkDownloadQrDialog({
       const zip = new JSZip();
       const qrFolder = zip.folder("qr-codes");
 
-      for (const asset of assets) {
-        const filename = `${asset.title}_${asset.qr.id}.jpg`;
-
-        /* Converting our React compoentn to html so that we can later convert it into an image */
+      /* Converting our React compoentn to html so that we can later convert it into an image */
+      const qrNodes = assets.map((asset) => {
         const qrCodeContent = renderToStaticMarkup(
           <QrPreview
             style={{
@@ -99,41 +91,39 @@ export default function BulkDownloadQrDialog({
         const div = document.createElement("div");
         div.innerHTML = qrCodeContent;
 
-        /* Converting html to image */
-        const qrBlob = await domtoimage.toBlob(div, {
-          height: 700,
-          width: 700,
-          bgcolor: "white",
-          style: {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            transform: "scale(2)",
-            transformOrigin: "center",
-          },
-        });
+        return div;
+      });
 
-        const qrImageFile = new File([qrBlob], filename);
+      /* Converting all qr nodes into images */
+      const qrImages = await Promise.all(
+        qrNodes.map(async (qrNode) =>
+          /* Converting html to image */
+          domtoimage.toBlob(qrNode, {
+            height: 700,
+            width: 700,
+            bgcolor: "white",
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              transform: "scale(2)",
+              transformOrigin: "center",
+            },
+          })
+        )
+      );
 
-        /* Appending qr code image to zip file */
+      /* Appending qr code image to zip file */
+      qrImages.forEach((qrImage, index) => {
+        const asset = assets[index];
+        const filename = `${asset.title}_${asset.qr.id}.jpg`;
         if (qrFolder) {
-          qrFolder.file(filename, qrImageFile);
+          qrFolder.file(filename, qrImage);
         } else {
-          zip.file(filename, qrImageFile);
+          zip.file(filename, qrImage);
         }
-
-        setDownloadState((prev) => {
-          if (prev.status !== "loading") {
-            return prev;
-          }
-
-          return {
-            status: "loading",
-            generatedQrCount: prev.generatedQrCount + 1,
-          };
-        });
-      }
+      });
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const downloadLink = document.createElement("a");
@@ -172,10 +162,7 @@ export default function BulkDownloadQrDialog({
           {downloadState.status === "loading" ? (
             <div className="mb-6 flex flex-col items-center gap-4">
               <Spinner />
-              <h3>
-                Generating Zip file [{downloadState.generatedQrCount}/
-                {selectedCount}]
-              </h3>
+              <h3>Generating Zip file ...</h3>
             </div>
           ) : (
             <>
