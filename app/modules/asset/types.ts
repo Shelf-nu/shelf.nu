@@ -14,9 +14,7 @@ import type {
   Organization,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
-import type { z } from "zod";
 import type { assetIndexFields } from "./fields";
-import type { importAssetsSchema } from "./utils.server";
 
 export interface ICustomFieldValueJson {
   raw: string | number | boolean;
@@ -49,9 +47,18 @@ export interface UpdateAssetPayload {
   organizationId: Organization["id"];
 }
 
-export type CreateAssetFromContentImportPayload = z.infer<
-  typeof importAssetsSchema
->;
+export interface CreateAssetFromContentImportPayload
+  extends Record<string, any> {
+  title: string;
+  description?: string;
+  category?: string;
+  kit?: string;
+  tags: string[];
+  location?: string;
+  custodian?: string;
+  bookable?: "yes" | "no";
+  imageUrl?: string; // URL of the image to import
+}
 
 export interface CreateAssetFromBackupImportPayload
   extends Record<string, any> {
