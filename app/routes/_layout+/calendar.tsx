@@ -14,6 +14,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
+import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
 import { ArrowRightIcon } from "~/components/icons/library";
@@ -30,7 +31,9 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { UserBadge } from "~/components/shared/user-badge";
 import When from "~/components/when/when";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { bookingStatusColorMap } from "~/utils/bookings";
@@ -41,7 +44,8 @@ import {
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -77,12 +81,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { isSelfServiceOrBase, currentOrganization, organizationId } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -107,7 +112,20 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const title = `${currentMonth} ${currentYear}`;
 
-    return json(data({ header, title }));
+    const searchParams = getCurrentSearchParams(request);
+    const { teamMemberIds } = getParamsValues(searchParams);
+
+    const teamMembersData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: teamMemberIds,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
+      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      userId,
+    });
+
+    return json(data({ header, title, ...teamMembersData }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -252,7 +270,12 @@ export default function Calendar() {
 
   return (
     <>
-      <Header hidePageDescription={true} />
+      <Header hidePageDescription>
+        <CreateBookingDialog
+          trigger={<Button aria-label="new booking">New booking</Button>}
+        />
+      </Header>
+
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
           <div>
