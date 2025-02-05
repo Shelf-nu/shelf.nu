@@ -11,6 +11,14 @@ import { ShelfError } from "~/utils/error";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../forms/select";
+import Icon from "../icons/icon";
 import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
@@ -38,171 +46,170 @@ export const WasmScanner = ({
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<string>();
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [isCameraLoading, setIsCameraLoading] = useState(false);
-  // Add containerRef to measure container dimensions
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // States for managing camera and scanner
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Get the saved camera ID from route loader
   const scannerCameraId = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   )?.scannerCameraId;
 
   const fetcher = useFetcher();
+  const isSwitchingCamera = fetcher.state === "submitting";
 
-  // Initialize WASM and camera
+  // Initialize WASM and request camera permissions
   useEffect(() => {
-    let animationFrame: number;
-    let stream: MediaStream;
-
     const initScanner = async () => {
       try {
+        setError(null);
         // Initialize WASM module
         await initializeScanner();
 
-        // Get available video devices
-        const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = mediaDevices.filter(
-          (d) => d.kind === "videoinput"
-        );
-        setDevices(videoDevices);
+        // Setup camera with saved preference
+        if (scannerCameraId) {
+          await setupCamera(scannerCameraId);
+        } else if (videoMediaDevices && videoMediaDevices.length > 0) {
+          await setupCamera(videoMediaDevices[0].deviceId);
+        }
 
-        // Set up camera stream
-        await setupCamera();
         setIsInitializing(false);
-        void processFrame();
-      } catch (error) {
-        console.error("Scanner initialization failed:", error);
-        throw new ShelfError({
-          message: "Failed to initialize scanner",
-          cause: error,
-          label: "QR",
-        });
+      } catch (err) {
+        console.error("Scanner initialization failed:", err);
+        setError(
+          "Failed to access camera. Please try another camera or check your permissions."
+        );
+        setIsInitializing(false);
       }
     };
 
-    // Enhanced camera setup with proper constraints
-    const setupCamera = async () => {
-      setIsCameraLoading(true);
-      try {
-        const constraints = {
-          video: {
-            deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        };
+    void initScanner();
+  }, [scannerCameraId, videoMediaDevices]);
 
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+  // Camera setup function
+  const setupCamera = async (deviceId: string) => {
+    setIsCameraLoading(true);
+    setError(null);
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          videoRef.current.onloadedmetadata = () => {
-            if (videoRef.current) {
-              updateCanvasSize();
-            }
-          };
-        }
-      } catch (error) {
-        throw new ShelfError({
-          message: "Camera access failed",
-          cause: error,
-          label: "QR",
-        });
-      } finally {
-        setIsCameraLoading(false);
+    try {
+      // Stop any existing streams first
+      if (videoRef.current?.srcObject) {
+        const existingStream = videoRef.current.srcObject as MediaStream;
+        existingStream.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject = null;
       }
-    };
 
-    // Function to update canvas size to match video display size
-    const updateCanvasSize = () => {
-      if (!videoRef.current || !canvasRef.current) return;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
 
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
+      if (!videoRef.current) {
+        throw new Error("Video element not initialized");
+      }
 
-      // Get the video's display dimensions (affected by object-fit: cover)
-      const videoRect = video.getBoundingClientRect();
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
 
-      // Set canvas size to match video's display size
-      canvas.width = videoRect.width;
-      canvas.height = videoRect.height;
-    };
+      // Start frame processing only after successful camera setup
+      void processFrame();
 
-    // Enhanced frame processing with proper scaling
-    const processFrame = async () => {
-      if (!videoRef.current || !canvasRef.current || paused) return;
+      // Update camera preference via form submission
+      const formData = new FormData();
+      formData.append("scannerCameraId", deviceId);
+      fetcher.submit(formData, {
+        method: "post",
+        action: "/api/user/prefs/scanner-camera",
+      });
+    } catch (error) {
+      console.error("Camera setup failed:", error);
+      setError(
+        "Failed to access camera. Please try another camera or check your permissions."
+      );
+      throw new ShelfError({
+        message: "Camera access failed",
+        cause: error,
+        label: "QR",
+      });
+    } finally {
+      setIsCameraLoading(false);
+    }
+  };
 
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return;
+  // Frame processing for QR detection
+  const processFrame = async () => {
+    if (!videoRef.current || !canvasRef.current || paused) return;
 
-      try {
-        // Get video's natural dimensions
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
-        const videoAspectRatio = videoWidth / videoHeight;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
 
-        // Get container dimensions
-        const container = canvas.parentElement;
-        const containerWidth = container?.clientWidth || 640;
-        const containerHeight = container?.clientHeight || 480;
+    try {
+      // Get video dimensions
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      const videoAspectRatio = videoWidth / videoHeight;
 
-        // Calculate scaled dimensions (cover)
-        let drawWidth = containerWidth;
-        let drawHeight = containerWidth / videoAspectRatio;
+      // Get container dimensions
+      const container = containerRef.current;
+      const containerWidth = container?.clientWidth || 640;
+      const containerHeight = container?.clientHeight || 480;
 
-        if (drawHeight < containerHeight) {
-          drawHeight = containerHeight;
-          drawWidth = containerHeight * videoAspectRatio;
-        }
+      // Calculate dimensions to maintain aspect ratio
+      let drawWidth = containerWidth;
+      let drawHeight = containerWidth / videoAspectRatio;
 
-        // Set canvas dimensions to match container
-        canvas.width = containerWidth;
-        canvas.height = containerHeight;
+      if (drawHeight < containerHeight) {
+        drawHeight = containerHeight;
+        drawWidth = containerHeight * videoAspectRatio;
+      }
 
-        // Calculate centering offsets
-        const offsetX = (containerWidth - drawWidth) / 2;
-        const offsetY = (containerHeight - drawHeight) / 2;
+      // Update canvas size
+      canvas.width = containerWidth;
+      canvas.height = containerHeight;
 
-        // Clear entire canvas
-        ctx.clearRect(0, 0, containerWidth, containerHeight);
+      // Center the video frame
+      const offsetX = (containerWidth - drawWidth) / 2;
+      const offsetY = (containerHeight - drawHeight) / 2;
 
-        // Draw video frame centered
-        ctx.drawImage(
-          video,
-          0,
-          0,
-          videoWidth,
-          videoHeight,
-          offsetX,
-          offsetY,
-          drawWidth,
-          drawHeight
-        );
+      // Clear and draw frame
+      ctx.clearRect(0, 0, containerWidth, containerHeight);
+      ctx.drawImage(
+        video,
+        0,
+        0,
+        videoWidth,
+        videoHeight,
+        offsetX,
+        offsetY,
+        drawWidth,
+        drawHeight
+      );
 
-        // Get image data for QR detection - only from the drawn area
-        const imageData = ctx.getImageData(
-          0,
-          0,
-          containerWidth,
-          containerHeight
-        );
+      // Get image data for QR scanning
+      const imageData = ctx.getImageData(0, 0, containerWidth, containerHeight);
 
-        // Attempt to read QR code
-        const results = await readBarcodes(imageData, {
-          tryHarder: true,
-          formats: ["QRCode"],
-          maxNumberOfSymbols: 1,
-        });
+      // Scan for QR codes
+      const results = await readBarcodes(imageData, {
+        tryHarder: true,
+        formats: ["QRCode"],
+        maxNumberOfSymbols: 1,
+      });
 
-        if (results.length > 0) {
-          const result = results[0];
-          // Adjust the box position relative to the centered video
-          const adjustedPosition = {
+      // Process results
+      if (results.length > 0) {
+        const result = results[0];
+        drawDetectionBox(
+          ctx,
+          {
+            ...result.position,
             topLeft: {
               x: result.position.topLeft.x + offsetX,
               y: result.position.topLeft.y + offsetY,
@@ -219,39 +226,22 @@ export const WasmScanner = ({
               x: result.position.bottomLeft.x + offsetX,
               y: result.position.bottomLeft.y + offsetY,
             },
-          };
-          drawDetectionBox(
-            ctx,
-            adjustedPosition,
-            containerWidth,
-            containerHeight
-          );
-          handleDetection(result.text);
-        }
-      } catch (error) {
-        console.error("Frame processing error:", error);
+          },
+          containerWidth,
+          containerHeight
+        );
+
+        void handleDetection(result.text);
       }
-
-      animationFrame = requestAnimationFrame(processFrame);
-    };
-
-    // Initialize scanner
-    void initScanner();
-
-    // Add resize observer for responsive canvas
-    const resizeObserver = new ResizeObserver(updateCanvasSize);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
+    } catch (error) {
+      console.error("Frame processing error:", error);
     }
 
-    return () => {
-      cancelAnimationFrame(animationFrame);
-      stream?.getTracks().forEach((track) => track.stop());
-      resizeObserver.disconnect();
-    };
-  }, [scannerCameraId, paused]);
+    // Continue processing frames
+    requestAnimationFrame(processFrame);
+  };
 
-  // Simple box drawing function
+  // Draw detection box around QR code
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
     position: ReadResult["position"],
@@ -260,59 +250,47 @@ export const WasmScanner = ({
   ) => {
     if (!position) return;
 
-    // Set drawing styles
     ctx.beginPath();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = "#22c55e"; // Green color for visibility
-
-    // Draw the detection box
+    ctx.strokeStyle = "#22c55e";
     ctx.moveTo(position.topLeft.x, position.topLeft.y);
     ctx.lineTo(position.topRight.x, position.topRight.y);
     ctx.lineTo(position.bottomRight.x, position.bottomRight.y);
     ctx.lineTo(position.bottomLeft.x, position.bottomLeft.y);
     ctx.closePath();
-
-    // Stroke the path
     ctx.stroke();
   };
 
+  // Handle QR code detection
   const handleDetection = (result: string) => {
     if (!result || incomingIsLoading) return;
-    console.log(result);
-    return;
-    // // QR code validation logic...
-    // const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-    // const match = result.match(regex);
 
-    // if (!match && !allowNonShelfCodes) {
-    //   void onQrDetectionSuccess?.(
-    //     result,
-    //     "Scanned code is not a valid Shelf QR code."
-    //   );
-    //   return;
-    // }
+    const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+    const match = result.match(regex);
 
-    // // Vibrate on successful scan
-    // if (typeof navigator.vibrate === "function") {
-    //   navigator.vibrate(200);
-    // }
+    if (!match && !allowNonShelfCodes) {
+      void onQrDetectionSuccess?.(
+        result,
+        "Scanned code is not a valid Shelf QR code."
+      );
+      return;
+    }
 
-    // const qrId = match ? match[2] : result;
-    // if (match && !isQrId(qrId)) {
-    //   void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
-    //   return;
-    // }
+    // Provide haptic feedback
+    if (typeof navigator.vibrate === "function") {
+      navigator.vibrate(200);
+    }
 
-    // void onQrDetectionSuccess?.(qrId);
+    const qrId = match ? match[2] : result;
+    if (match && !isQrId(qrId)) {
+      void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+      return;
+    }
+
+    void onQrDetectionSuccess?.(qrId);
   };
 
-  const handleDeviceChange = (deviceId: string) => {
-    fetcher.submit(
-      { scannerCameraId: deviceId },
-      { method: "post", action: "/api/user/prefs/scanner-camera" }
-    );
-  };
-
+  // Loading states
   if (isInitializing || isCameraLoading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -322,20 +300,70 @@ export const WasmScanner = ({
     );
   }
 
+  // Show loading state while initializing
+  if (isInitializing) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Spinner />
+        Initializing scanner...
+      </div>
+    );
+  }
+
+  // Show error state with retry option
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-4 text-center">
+        <p className="text-sm text-gray-700">{error}</p>
+        {videoMediaDevices && videoMediaDevices.length > 1 && (
+          <div className="text-sm text-gray-500">
+            Available cameras:
+            <div className="mt-2 flex flex-col gap-2">
+              {videoMediaDevices.map((device, index) => (
+                <button
+                  key={device.deviceId}
+                  onClick={() => {
+                    setError(null);
+                    void setupCamera(device.deviceId);
+                  }}
+                  className="rounded-md bg-gray-100 px-4 py-2 text-sm hover:bg-gray-200"
+                >
+                  {device.label || `Camera ${index + 1}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Show loading state while switching camera
+  if (isCameraLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Spinner />
+        Loading camera...
+      </div>
+    );
+  }
+
   return (
-    <div className={tw("scanner-container", className)}>
+    <div ref={containerRef} className={tw("scanner-container", className)}>
       <div className="relative size-full overflow-hidden rounded-lg">
+        {/* Video and Canvas Elements */}
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           className="pointer-events-none size-full object-cover"
-          style={{ objectFit: "cover" }}
         />
         <canvas ref={canvasRef} className="canvas-overlay size-full" />
-        {/* Camera controls overlay */}
+
+        {/* Controls Overlay */}
         <div className="absolute inset-x-0 top-0 z-10 flex w-full items-center justify-between bg-transparent text-white">
+          {/* Back Button */}
           <div>
             {!hideBackButtonText && (
               <Link
@@ -348,30 +376,48 @@ export const WasmScanner = ({
             )}
           </div>
 
+          {/* Camera Selector */}
           <div>
             <fetcher.Form
               method="post"
               action="/api/user/prefs/scanner-camera"
               onChange={(e) => fetcher.submit(e.currentTarget)}
             >
-              <select
-                value={selectedDevice}
-                onChange={(e) => handleDeviceChange(e.target.value)}
-                className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
-              >
-                {devices.map((device, index) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label || `Camera ${index + 1}`}
-                  </option>
-                ))}
-              </select>
+              {videoMediaDevices && videoMediaDevices.length > 0 && (
+                <Select name="scannerCameraId" defaultValue={scannerCameraId}>
+                  <SelectTrigger
+                    hideArrow
+                    className="z-10 size-12 overflow-hidden rounded-full border-none bg-transparent pb-1 text-gray-25/50 focus:border-none focus:ring-0 focus:ring-offset-0"
+                  >
+                    <SelectValue placeholder={<Icon icon="settings" />}>
+                      <Icon icon="settings" />
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent
+                    position="popper"
+                    alignOffset={10}
+                    className="mt-1 max-w-96 md:min-w-80"
+                  >
+                    {videoMediaDevices.map((device, index) => (
+                      <SelectItem
+                        key={device.deviceId}
+                        value={device.deviceId}
+                        className="cursor-pointer"
+                      >
+                        {device.label || `Camera ${index + 1}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </fetcher.Form>
           </div>
         </div>
-        {/* Scanning overlay */}
+
+        {/* Scanning Overlay */}
         <div
           className={tw(
-            "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded border-4 border-white shadow-camera-overlay",
+            "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]",
             overlayClassName
           )}
         >

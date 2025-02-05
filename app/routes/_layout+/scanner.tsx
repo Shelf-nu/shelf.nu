@@ -8,6 +8,7 @@ import { Link, useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Spinner } from "~/components/shared/spinner";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
@@ -71,7 +72,16 @@ const QRScanner = () => {
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}
       >
-        <WasmScanner onQrDetectionSuccess={handleQrDetectionSuccess} />
+        {videoMediaDevices && videoMediaDevices.length > 0 ? (
+          <WasmScanner
+            videoMediaDevices={videoMediaDevices}
+            onQrDetectionSuccess={handleQrDetectionSuccess}
+          />
+        ) : (
+          <div className="mt-4 flex flex-col items-center justify-center">
+            <Spinner /> Waiting for permission to access camera.
+          </div>
+        )}
       </div>
     </>
   );
