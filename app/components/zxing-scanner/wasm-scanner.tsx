@@ -89,9 +89,8 @@ export const WasmScanner = ({
         const constraints = {
           video: {
             deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
-            width: { min: 1280, ideal: 1920 }, // Higher resolution
-            height: { min: 720, ideal: 1080 }, // Higher resolution
-            facingMode: "environment", // Prefer back camera
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         };
 
@@ -99,22 +98,9 @@ export const WasmScanner = ({
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          const track = stream.getVideoTracks()[0];
-          const capabilities = track.getCapabilities();
-          const settings = track.getSettings();
-
-          console.log("Video capabilities:", capabilities);
-          console.log("Current settings:", settings);
-
           await videoRef.current.play();
           videoRef.current.onloadedmetadata = () => {
             if (videoRef.current) {
-              console.log("Video dimensions:", {
-                videoWidth: videoRef.current.videoWidth,
-                videoHeight: videoRef.current.videoHeight,
-                offsetWidth: videoRef.current.offsetWidth,
-                offsetHeight: videoRef.current.offsetHeight,
-              });
               updateCanvasSize();
             }
           };
@@ -151,18 +137,23 @@ export const WasmScanner = ({
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
 
       try {
-        // Clear previous drawings
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Get dimensions
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
 
-        // Draw the current video frame
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Set canvas size to match video size directly
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+
+        // Draw video frame directly without scaling
+        ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
 
         // Get image data for QR detection
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
 
         // Attempt to read QR code
         const results = await readBarcodes(imageData, {
@@ -173,8 +164,22 @@ export const WasmScanner = ({
 
         if (results.length > 0) {
           const result = results[0];
-          drawDetectionBox(ctx, result.position, canvas.width, canvas.height);
+          // Draw the box directly using the position from the QR detection
+          drawDetectionBox(ctx, result.position, videoWidth, videoHeight);
           handleDetection(result.text);
+
+          // Debug: draw point at each corner
+          const corners = [
+            result.position.topLeft,
+            result.position.topRight,
+            result.position.bottomRight,
+            result.position.bottomLeft,
+          ];
+
+          corners.forEach((corner) => {
+            ctx.fillStyle = "red";
+            ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
+          });
         }
       } catch (error) {
         console.error("Frame processing error:", error);
