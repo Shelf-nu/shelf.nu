@@ -181,13 +181,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           reason = payload?.reason;
         }
 
-        void sendEmail({
-          to: ADMIN_EMAIL || "support@shelf.nu",
+        sendEmail({
+          to: ADMIN_EMAIL || `"Shelf" <updates@emails.shelf.nu>`,
           subject: "Delete account request",
           text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
         });
 
-        void sendEmail({
+        sendEmail({
           to: payload.email,
           subject: "Delete account request received",
           text: `We have received your request to delete your account. It will be processed within 72 hours.\n\n Kind regards,\nthe Shelf team \n\n`,
@@ -244,7 +244,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         }
 
         // Send email with OTP using our email service
-        await sendEmail({
+        sendEmail({
           to: newEmail,
           subject: `🔐 Shelf verification code: ${linkData.properties.email_otp}`,
           text: changeEmailAddressTextEmail({

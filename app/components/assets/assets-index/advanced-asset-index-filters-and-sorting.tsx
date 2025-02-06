@@ -289,6 +289,14 @@ function AdvancedFilter() {
                 </div>
                 <span className="inline-block align-middle">Add filter</span>
               </Button>
+              <Button
+                variant="block-link-gray"
+                size="xs"
+                className="ml-1"
+                to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
+              >
+                Need more filtering options?
+              </Button>
             </div>
             <div className="flex items-center justify-between gap-4">
               {filters.length > 0 && (

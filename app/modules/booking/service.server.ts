@@ -21,9 +21,9 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
-import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
+import { bookingSchedulerEventsEnum } from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -82,7 +82,7 @@ export async function scheduleNextBookingJob({
 }) {
   try {
     const id = await scheduler.sendAfter(
-      schedulerKeys.bookingQueue,
+      QueueNames.bookingQueue,
       data,
       {},
       when
@@ -164,7 +164,10 @@ export async function upsertBooking(
       | "custodianTeamMemberId"
       | "custodianUserId"
       | "description"
-    > & { assetIds: Asset["id"][]; isExpired: boolean }
+    > & {
+      assetIds: Asset["id"][];
+      isExpired: boolean;
+    }
   >,
   hints: ClientHint,
   isBaseOrSelfService: boolean = false
@@ -297,7 +300,7 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id },
+          where: { id, organizationId },
           data,
           include: {
             ...BOOKING_COMMON_INCLUDE,
@@ -374,7 +377,7 @@ export async function upsertBooking(
             const custodian =
               `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
               (res.custodianTeamMember?.name as string);
-            let subject = `Booking reserved (${res.name}) - shelf.nu`;
+            let subject = `✅ Booking reserved (${res.name}) - shelf.nu`;
             let text = assetReservedEmailContent({
               bookingName: res.name,
               assetsCount: res.assets.length,
@@ -418,7 +421,7 @@ export async function upsertBooking(
             }
 
             if (data.status === BookingStatus.COMPLETE) {
-              subject = `Booking completed (${res.name}) - shelf.nu`;
+              subject = `🎉 Booking completed (${res.name}) - shelf.nu`;
               text = completedBookingEmailContent({
                 bookingName: res.name,
                 assetsCount: res._count.assets,
@@ -490,6 +493,7 @@ export async function upsertBooking(
         connect: { id: organizationId },
       };
     }
+
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -529,13 +533,13 @@ export async function getBookings(params: {
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
   custodianUserId?: Booking["custodianUserId"] | null;
-  custodianTeamMemberId?: Booking["custodianTeamMemberId"] | null;
+  /** Accepts an array of team member IDs instead of a single ID so it can be used for filtering of bookings on index */
+  custodianTeamMemberIds?: string[] | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
   extraInclude?: Prisma.BookingInclude;
-
   /** Controls whether entries should be paginated or not */
   takeAll?: boolean;
 }) {
@@ -546,7 +550,7 @@ export async function getBookings(params: {
     search,
     statuses,
     custodianUserId,
-    custodianTeamMemberId,
+    custodianTeamMemberIds,
     assetIds,
     bookingTo,
     excludeBookingIds,
@@ -596,20 +600,30 @@ export async function getBookings(params: {
       };
     }
 
-    /** In the case both are passed, we do an OR */
-    if (custodianTeamMemberId && custodianUserId) {
+    /** Handle combination of custodianTeamMemberIds and custodianUserId */
+    if (
+      custodianTeamMemberIds &&
+      custodianTeamMemberIds?.length &&
+      custodianUserId
+    ) {
       where.OR = [
         {
-          custodianTeamMemberId,
+          custodianTeamMemberId: {
+            in: custodianTeamMemberIds,
+          },
         },
         {
           custodianUserId,
         },
       ];
     } else {
-      if (custodianTeamMemberId) {
-        where.custodianTeamMemberId = custodianTeamMemberId;
+      /** Handle custodianTeamMemberIds if present */
+      if (custodianTeamMemberIds?.length) {
+        where.custodianTeamMemberId = {
+          in: custodianTeamMemberIds,
+        };
       }
+      /** Handle custodianUserId if present */
       if (custodianUserId) {
         where.custodianUserId = custodianUserId;
       }
@@ -638,6 +652,7 @@ export async function getBookings(params: {
     if (excludeBookingIds?.length) {
       where.id = { notIn: excludeBookingIds };
     }
+
     if (bookingFrom && bookingTo) {
       where.OR = [
         {
@@ -700,6 +715,7 @@ export async function removeAssets({
   lastName,
   userId,
   kitIds = [],
+  organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
     assetIds: Asset["id"][];
@@ -708,12 +724,13 @@ export async function removeAssets({
   lastName: string;
   userId: string;
   kitIds?: Kit["id"][];
+  organizationId: Booking["organizationId"];
 }) {
   try {
     const { assetIds, id } = booking;
     const b = await db.booking.update({
       // First, disconnect the assets from the booking
-      where: { id },
+      where: { id, organizationId },
       data: {
         assets: {
           disconnect: assetIds.map((id) => ({ id })),
@@ -737,13 +754,13 @@ export async function removeAssets({
       b.status === BookingStatus.OVERDUE
     ) {
       await db.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assetIds }, organizationId },
         data: { status: AssetStatus.AVAILABLE },
       });
 
       if (kitIds.length > 0) {
         await db.kit.updateMany({
-          where: { id: { in: kitIds } },
+          where: { id: { in: kitIds }, organizationId },
           data: { status: KitStatus.AVAILABLE },
         });
       }
@@ -771,15 +788,16 @@ export async function removeAssets({
 }
 
 export async function deleteBooking(
-  booking: Pick<Booking, "id">,
+  booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
   try {
-    const { id } = booking;
+    const { id, organizationId } = booking;
     const activeBooking = await db.booking.findFirst({
       where: {
         id,
         status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
+        organizationId,
       },
       include: {
         assets: {
@@ -798,7 +816,7 @@ export async function deleteBooking(
     const hasKits = uniqueKitIds.size > 0;
 
     const b = await db.booking.delete({
-      where: { id },
+      where: { id, organizationId },
       include: {
         ...BOOKING_COMMON_INCLUDE,
         ...bookingIncludeForEmails,
@@ -812,7 +830,7 @@ export async function deleteBooking(
 
     const email = b.custodianUser?.email;
     if (email) {
-      const subject = `Booking deleted (${b.name}) - shelf.nu`;
+      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
       const text = deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b._count.assets,
@@ -832,7 +850,7 @@ export async function deleteBooking(
         hideViewButton: true,
       });
 
-      await sendEmail({
+      sendEmail({
         to: email,
         subject,
         text,
@@ -840,7 +858,6 @@ export async function deleteBooking(
       });
     }
 
-    // FIXME: if sendEmail fails updateBookinAssetStates will not be called
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
@@ -1306,38 +1323,30 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    /** Sending mails to required users  */
-    await Promise.all(
-      bookingsToSendEmail.map((b) => {
-        const subject = `Booking deleted (${b.name}) - shelf.nu`;
-        const text = deletedBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b.assets.length,
-          custodian:
-            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-            (b.custodianTeamMember?.name as string),
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-        });
+    const emailConfigs = bookingsToSendEmail.map((b) => ({
+      to: b.custodianUser?.email ?? "",
+      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+      text: deletedBookingEmailContent({
+        bookingName: b.name,
+        assetsCount: b.assets.length,
+        custodian:
+          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+          (b.custodianTeamMember?.name as string),
+        from: b.from as Date,
+        to: b.to as Date,
+        bookingId: b.id,
+        hints,
+      }),
+      html: bookingUpdatesTemplateString({
+        booking: b,
+        heading: `Your booking as been deleted: "${b.name}"`,
+        assetCount: b.assets.length,
+        hints,
+        hideViewButton: true,
+      }),
+    }));
 
-        const html = bookingUpdatesTemplateString({
-          booking: b,
-          heading: `Your booking as been deleted: "${b.name}"`,
-          assetCount: b.assets.length,
-          hints,
-          hideViewButton: true,
-        });
-
-        return sendEmail({
-          to: b.custodianUser?.email ?? "",
-          subject,
-          text,
-          html,
-        });
-      })
-    );
+    return emailConfigs.map(sendEmail);
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -1536,7 +1545,7 @@ export async function bulkCancelBookings({
     /** Sending cancellation emails */
     await Promise.all(
       bookingsToSendEmail.map((b) => {
-        const subject = `Booking cancelled (${b.name}) - shelf.nu`;
+        const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
           assetsCount: b._count.assets,

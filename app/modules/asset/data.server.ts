@@ -175,7 +175,7 @@ export async function simpleModeLoader({
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
       },
       totalCategories,
       totalTags,
@@ -357,7 +357,7 @@ export async function advancedModeLoader({
       searchFieldLabel: "Search by asset name",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        text: "Search assets based on asset name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
       },
       filters,
       organizationId,

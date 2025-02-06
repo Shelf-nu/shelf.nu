@@ -131,9 +131,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       {
         custodianUserId: custodian?.userId,
         custodianTeamMemberId: custodian?.id,
-        organizationId,
         name,
         description,
+        organizationId,
         from,
         to,
         assetIds,

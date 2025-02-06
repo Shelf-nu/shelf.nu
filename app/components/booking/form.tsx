@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -15,6 +15,7 @@ import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import {
   PermissionAction,
@@ -123,21 +124,29 @@ type BookingFormData = {
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
   description?: string | null;
+
+  /**
+   * In case if the form is rendered outside of /edit or /new booking,
+   * then we can pass `action` to submit form
+   */
+  action?: string;
 };
 
 export function BookingForm({
   id,
   name,
   startDate,
-  endDate,
+  endDate: incomingEndDate,
   custodianRef,
   bookingStatus,
   bookingFlags,
   assetIds,
   description,
+  action,
 }: BookingFormData) {
   const navigation = useNavigation();
   const { teamMembers } = useLoaderData<typeof loader>();
+  const [endDate, setEndDate] = useState(incomingEndDate);
 
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
@@ -189,7 +198,7 @@ export function BookingForm({
 
   return (
     <div>
-      <Form ref={zo.ref} method="post">
+      <Form ref={zo.ref} method="post" action={action}>
         {/* Hidden input for expired state. Helps is know what status we should set on the server, when the booking is getting checked out */}
         {isExpired && <input type="hidden" name="isExpired" value="true" />}
 
@@ -337,7 +346,7 @@ export function BookingForm({
               </Card>
               <Card className="m-0">
                 <FormRow
-                  rowLabel={"Start Date"}
+                  rowLabel="Start Date"
                   className="mobile-styling-only border-b-0 pb-[10px] pt-0"
                   required
                 >
@@ -352,10 +361,25 @@ export function BookingForm({
                     defaultValue={startDate}
                     placeholder="Booking"
                     required
+                    onChange={(event) => {
+                      /**
+                       * When user changes the startDate and the new startDate is greater than the endDate
+                       * in that case, we have to update endDate to be the endDay date of startDate.
+                       */
+                      const newStartDate = new Date(event.target.value);
+                      if (endDate && newStartDate > new Date(endDate)) {
+                        const newEndDate = dateForDateTimeInputValue(
+                          new Date(newStartDate.setHours(18, 0, 0))
+                        );
+                        setEndDate(
+                          newEndDate.substring(0, newEndDate.length - 3)
+                        );
+                      }
+                    }}
                   />
                 </FormRow>
                 <FormRow
-                  rowLabel={"End Date"}
+                  rowLabel="End Date"
                   className="mobile-styling-only mb-2.5 border-b-0 p-0"
                   required
                 >
@@ -370,6 +394,10 @@ export function BookingForm({
                     defaultValue={endDate}
                     placeholder="Booking"
                     required
+                    value={endDate}
+                    onChange={(event) => {
+                      setEndDate(event.target.value);
+                    }}
                   />
                 </FormRow>
                 <p className="text-[14px] text-gray-600">

@@ -33,6 +33,7 @@ export enum PermissionEntity {
   note = "note",
   scan = "scan",
   custody = "custody",
+  assetReminders = "assetReminders",
 }
 
 //this will come from DB eventually
@@ -49,7 +50,7 @@ export const Role2PermissionMap: {
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
       PermissionAction.manageAssets,
     ],
-    [PermissionEntity.qr]: [],
+    [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
     [PermissionEntity.location]: [],
@@ -64,6 +65,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
+    [PermissionEntity.assetReminders]: [],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -79,7 +81,7 @@ export const Role2PermissionMap: {
       PermissionAction.manageAssets,
       PermissionAction.cancel,
     ],
-    [PermissionEntity.qr]: [],
+    [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
     [PermissionEntity.location]: [],
@@ -94,5 +96,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.assetReminders]: [],
   },
 };

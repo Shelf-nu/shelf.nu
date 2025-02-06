@@ -121,6 +121,7 @@ export async function getLocation(
         },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
@@ -128,9 +129,12 @@ export async function getLocation(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching location",
+      title: "Location not found",
+      message:
+        "The location you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
-        ...params,
+        id,
+        organizationId,
         ...(isLikeShelfError(cause) ? cause.additionalData : {}),
       },
       label,
@@ -254,10 +258,13 @@ export async function createLocation({
   }
 }
 
-export async function deleteLocation({ id }: Pick<Location, "id">) {
+export async function deleteLocation({
+  id,
+  organizationId,
+}: Pick<Location, "id" | "organizationId">) {
   try {
     const location = await db.location.delete({
-      where: { id },
+      where: { id, organizationId },
     });
 
     if (location.imageId) {
@@ -326,8 +333,8 @@ export async function updateLocation(payload: {
     }
 
     return await db.location.update({
-      where: { id },
-      data: data,
+      where: { id, organizationId },
+      data,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {

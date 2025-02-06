@@ -7,8 +7,8 @@ import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
-import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { bookingSchedulerEventsEnum } from "./constants";
 import {
   checkoutReminderEmailContent,
   overdueBookingEmailContent,
@@ -38,9 +38,9 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const email = booking.custodianUser?.email;
 
   if (email && booking.from && booking.to) {
-    await sendEmail({
+    sendEmail({
       to: email,
-      subject: `Checkout reminder (${booking.name}) - shelf.nu`,
+      subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
       text: checkoutReminderEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
@@ -61,16 +61,6 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         assetCount: booking._count.assets,
         hints: data.hints,
       }),
-    }).catch((cause) => {
-      //lets not fail the process because of email failure
-      Logger.warn(
-        new ShelfError({
-          cause,
-          message: "Failed to send checkout reminder email",
-          additionalData: { data, work: data.eventType },
-          label: "Booking",
-        })
-      );
     });
   }
 
@@ -114,11 +104,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     booking.to &&
     booking.status === BookingStatus.ONGOING
   ) {
-    await sendCheckinReminder(booking, booking._count.assets, data.hints).catch(
-      (err) => {
-        Logger.warn(err);
-      }
-    );
+    sendCheckinReminder(booking, booking._count.assets, data.hints);
   }
 
   //schedule the next job
@@ -185,9 +171,9 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const email = booking.custodianUser?.email;
 
   if (email) {
-    await sendEmail({
+    sendEmail({
       to: email,
-      subject: `Overdue booking (${booking.name}) - shelf.nu`,
+      subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
       text: overdueBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
@@ -222,33 +208,30 @@ const event2HandlerMap: Record<
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 export const registerBookingWorkers = async () => {
   /** Check-out reminder */
-  await scheduler.work<SchedulerData>(
-    schedulerKeys.bookingQueue,
-    async (job) => {
-      const handler = event2HandlerMap[job.data.eventType];
-      if (typeof handler != "function") {
-        Logger.error(
-          new ShelfError({
-            cause: null,
-            message: "Wrong event type received for the scheduled worker",
-            additionalData: { job },
-            label: "Booking",
-          })
-        );
-        return;
-      }
-      try {
-        await handler(job);
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Something went wrong while executing scheduled work.",
-            additionalData: { data: job.data, work: job.data.eventType },
-            label: "Booking",
-          })
-        );
-      }
+  await scheduler.work<SchedulerData>(QueueNames.bookingQueue, async (job) => {
+    const handler = event2HandlerMap[job.data.eventType];
+    if (typeof handler != "function") {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Wrong event type received for the scheduled worker",
+          additionalData: { job },
+          label: "Booking",
+        })
+      );
+      return;
     }
-  );
+    try {
+      await handler(job);
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while executing scheduled work.",
+          additionalData: { data: job.data, work: job.data.eventType },
+          label: "Booking",
+        })
+      );
+    }
+  });
 };

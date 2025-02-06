@@ -6,6 +6,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -24,6 +25,15 @@ export async function action({ request }: ActionFunctionArgs) {
       sig,
       process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET
     );
+
+    const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
+    const eventData = event.data.object as { customer: string };
+    const customerId = eventData.customer;
+
+    /** We don't have to do anything in case if the user is custom install. */
+    if (customInstallUsers.includes(customerId)) {
+      return new Response(null, { status: 200 });
+    }
 
     // Handle the event
     // Don't forget to enable the events in the Stripe dashboard
@@ -275,7 +285,7 @@ export async function action({ request }: ActionFunctionArgs) {
               });
             });
 
-          await sendEmail({
+          sendEmail({
             to: user.email,
             subject: "Your shelf.nu free trial is ending soon",
             text: trialEndsSoonText({

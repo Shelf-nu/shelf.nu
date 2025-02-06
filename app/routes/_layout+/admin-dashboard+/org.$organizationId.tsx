@@ -20,14 +20,15 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
+import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { toggleOrganizationSso } from "~/modules/organization/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getParams, data, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
-import { isValidDomain } from "~/utils/misc";
 import { requireAdmin } from "~/utils/roles.server";
+import { validateDomains } from "~/utils/sso.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -116,10 +117,21 @@ export const action = async ({
             selfServiceGroupId: z.string(),
             domain: z
               .string()
-              .transform((email) => email.toLowerCase())
-              .refine(isValidDomain, () => ({
-                message: "Please enter a valid domain name",
-              })),
+              .transform((domains) => domains.toLowerCase())
+              .transform((domains, ctx) => {
+                try {
+                  return validateDomains(domains).join(", ");
+                } catch (error) {
+                  ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Invalid domains",
+                  });
+                  return z.NEVER;
+                }
+              }),
           })
         );
 
@@ -154,7 +166,11 @@ export const action = async ({
             label: "Assets",
           });
         }
-        const contentData = extractCSVDataFromContentImport(csvData);
+
+        const contentData = extractCSVDataFromContentImport(
+          csvData,
+          ASSET_CSV_HEADERS
+        );
         await createAssetsFromContentImport({
           data: contentData,
           userId,

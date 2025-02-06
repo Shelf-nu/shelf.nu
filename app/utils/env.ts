@@ -139,6 +139,14 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
 });
 
 /**
+ * A comma separated list of customerIds that have custom install of shelf.
+ * We need this in order to make our webhook work properly.
+ */
+export const CUSTOM_INSTALL_CUSTOMERS = getEnv("CUSTOM_INSTALL_CUSTOMERS", {
+  isRequired: false,
+});
+
+/**
  * Shared envs
  */
 export const NODE_ENV = getEnv("NODE_ENV", {

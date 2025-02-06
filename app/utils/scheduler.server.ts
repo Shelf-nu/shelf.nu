@@ -1,6 +1,12 @@
 import PgBoss from "pg-boss";
 import { DATABASE_URL, NODE_ENV } from "../utils/env";
 
+export enum QueueNames {
+  emailQueue = "email-queue",
+  bookingQueue = "booking-queue",
+  assetsQueue = "assets-queue",
+}
+
 let scheduler!: PgBoss;
 
 declare global {

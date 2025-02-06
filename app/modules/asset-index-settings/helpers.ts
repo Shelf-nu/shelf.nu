@@ -21,6 +21,8 @@ export const fixedFields = [
   "location",
   "kit",
   "custody",
+  "upcomingReminder",
+  "actions",
 ] as const;
 
 export type FixedField = (typeof fixedFields)[number];
@@ -45,6 +47,8 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   location: "Location",
   kit: "Kit",
   custody: "Custody",
+  upcomingReminder: "Upcoming Reminder",
+  actions: "Actions",
 };
 
 export const defaultFields: Column[] = [
@@ -60,6 +64,8 @@ export const defaultFields: Column[] = [
   { name: "location", visible: true, position: 9 },
   { name: "kit", visible: true, position: 10 },
   { name: "custody", visible: true, position: 11 },
+  { name: "upcomingReminder", visible: true, position: 12 },
+  { name: "actions", visible: true, position: 12 },
 ];
 
 export const generateColumnsSchema = (customFields: string[]) => {

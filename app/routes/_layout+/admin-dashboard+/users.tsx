@@ -1,6 +1,6 @@
 import type { User } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -25,10 +25,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableUsers({
         request,
       });
-
-    if (page > totalPages) {
-      return redirect("/admin-dashboard");
-    }
 
     const header: HeaderData = {
       title: `Admin dashboard`,

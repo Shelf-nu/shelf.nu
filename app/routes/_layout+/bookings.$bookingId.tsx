@@ -30,8 +30,10 @@ import {
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import {
@@ -54,8 +56,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import type { RouteHandleWithName } from "./bookings";
-import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -432,7 +432,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
 
         const deletedBooking = await deleteBooking(
-          { id },
+          { id, organizationId },
           getClientHint(request)
         );
 
@@ -472,6 +472,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId: authSession.userId,
+          organizationId,
         });
 
         sendNotification({
@@ -548,6 +549,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId: authSession.userId,
+          organizationId,
         });
 
         sendNotification({

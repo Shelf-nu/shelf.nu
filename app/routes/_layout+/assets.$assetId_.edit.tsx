@@ -171,6 +171,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       assetId: id,
       userId: authSession.userId,
+      organizationId,
     });
 
     const {
@@ -197,6 +198,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: authSession.userId,
       customFieldsValues,
       valuation,
+      organizationId,
     });
 
     sendNotification({
@@ -227,7 +229,7 @@ export default function AssetEditPage() {
   );
 
   return (
-    <>
+    <div className="relative">
       <Header title={hasTitle ? title : asset.title} />
       <div className=" items-top flex justify-between">
         <AssetForm
@@ -242,6 +244,6 @@ export default function AssetEditPage() {
           tags={tags}
         />
       </div>
-    </>
+    </div>
   );
 }

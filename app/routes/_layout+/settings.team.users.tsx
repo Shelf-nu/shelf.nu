@@ -6,20 +6,29 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
-import { StatusFilter } from "~/components/booking/status-filter";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
+import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
 
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -30,7 +39,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import type { RouteHandleWithName } from "./bookings";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -119,11 +127,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-const STATUS_FILTERS = {
-  PENDING: "PENDING",
-  ACCEPTED: "ACCEPTED",
-};
-
 export const handle = {
   name: "settings.team.users",
   breadcrumb: () => <Link to="/settings/team">Team</Link>,
@@ -141,7 +144,7 @@ export default function UserTeamSetting() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
   const allowedRoutes = [
     "settings.team.users", // users index
-    "settings.team.users.invite-user", // invite user modal
+    "settings.team.invites.invite-user", // invite user modal
   ];
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
@@ -164,20 +167,18 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters
-          slots={{
-            "left-of-search": (
-              <StatusFilter statusItems={STATUS_FILTERS} name="inviteStatus" />
-            ),
-          }}
-        >
-          <Button
-            variant="primary"
-            to="invite-user"
-            className="mt-2 w-full md:mt-0 md:w-max"
-          >
-            <span className=" whitespace-nowrap">Invite a user</span>
-          </Button>
+        <Filters>
+          <ImportUsersDialog />
+          <InviteUserDialog
+            trigger={
+              <Button
+                className="ml-2 mt-2 w-full md:mt-0 md:w-max"
+                variant="primary"
+              >
+                <span className="whitespace-nowrap">Invite a user</span>
+              </Button>
+            }
+          />
         </Filters>
 
         <List
@@ -229,6 +230,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             name={item.name}
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
             isSSO={item.sso || false}
+            role={item.role}
           />
         ) : null}
       </Td>
@@ -276,7 +278,31 @@ const TeamMemberDetails = ({
         <span className="word-break mb-1 block font-medium">
           {details.name}
         </span>
-        <div>{details.email}</div>
+
+        <div>
+          {details.email}
+          {details.sso && (
+            <TooltipProvider key={details.id}>
+              <Tooltip>
+                <TooltipTrigger>
+                  <GrayBadge className="ml-2">SSO</GrayBadge>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-72">
+                  <h4>SSO user</h4>
+
+                  <p className="mt-2">
+                    This user is using Single Sign-On (SSO) to log in to Shelf.
+                    Their access is managed by an external identity provider. On
+                    every login attempt, their permissions and access will be
+                    revalidated. If you want to remove them immediately, use the
+                    revoke access user action in Shelf. You will still need to
+                    remove them from the IDP to make this complete.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
       </div>
     </div>
   </div>

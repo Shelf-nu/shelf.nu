@@ -1,7 +1,10 @@
 import type { CustomField } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
-import type { Column } from "~/modules/asset-index-settings/helpers";
+import type {
+  Column,
+  ColumnLabelKey,
+} from "~/modules/asset-index-settings/helpers";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
@@ -165,6 +168,11 @@ export function getDefaultValueForFieldType(
   }
 }
 
+export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = [
+  "actions",
+  "upcomingReminder",
+];
+
 /**
  * Determines what columns are available based on already used columns and operation type
  * @param columns - All available columns
@@ -194,6 +202,14 @@ export function getAvailableColumns(
     // Common exclusions for both operations
     if (!column.visible) return false;
 
+    /**
+     * Some columns like `actions` does not support filtering,
+     * so we have to skip them to be availableColumns.
+     */
+    if (COLUMNS_WITHOUT_FILTER.includes(column.name)) {
+      return false;
+    }
+
     if (operation === "sort") {
       // Columns that can't be sorted
       const unsortableColumns = ["tags"];
@@ -217,4 +233,36 @@ export function getAvailableColumns(
 
     return true;
   });
+}
+
+/**
+ * Extracts the QR ID from a URL or returns the original value if it's not a URL
+ * Removes any query parameters and returns the last path segment
+ *
+ * @example
+ * localhost:3000/qr/abc123?hello=world -> abc123
+ * https://example.com/abc123 -> abc123
+ * abc123 -> abc123
+ *
+ * @param value - The input value (URL or QR ID)
+ * @returns The extracted QR ID or original value
+ */
+export function extractQrIdFromValue(value: string): string {
+  try {
+    // Try to parse as URL first
+    const url = new URL(value);
+
+    // Remove leading and trailing slashes and split path
+    const pathParts = url.pathname.split("/").filter(Boolean);
+
+    // Get the last part of the path (if exists)
+    if (pathParts.length > 0) {
+      return pathParts[pathParts.length - 1];
+    }
+
+    return value;
+  } catch (e) {
+    // If URL parsing fails, return original value
+    return value;
+  }
 }

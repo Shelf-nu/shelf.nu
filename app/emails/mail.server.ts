@@ -1,77 +1,39 @@
-import type { Attachment } from "nodemailer/lib/mailer";
-import { config } from "~/config/shelf.config";
-import { transporter } from "~/emails/transporter.server";
-import { SMTP_FROM } from "../utils/env";
-import { ShelfError } from "../utils/error";
+import { Logger } from "~/utils/logger";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { triggerEmail } from "./email.worker.server";
+import type { EmailPayloadType } from "./types";
 
-export const sendEmail = async ({
-  to,
-  subject,
-  text,
-  html,
-  attachments,
-  from,
-}: {
-  /** Email address of recipient */
-  to: string;
-
-  /** Subject of email */
-  subject: string;
-
-  /** Text content of email */
-  text: string;
-
-  /** HTML content of email */
-  html?: string;
-
-  attachments?: Attachment[];
-
-  /** Override the default sender */
-  from?: string;
-}) => {
-  const { logoPath } = config;
-
-  try {
-    // send mail with defined transport object
-    await transporter.sendMail({
-      from: from || SMTP_FROM || `"Shelf" <no-reply@shelf.nu>`, // sender address
-      to, // list of receivers
-      subject, // Subject line
-      text, // plain text body
-      html: html || "", // html body
-      attachments: [
-        {
-          filename: "logo.png",
-          path: logoPath
-            ? `${process.env.SERVER_URL}${config.logoPath?.fullLogo}`
-            : `${process.env.SERVER_URL}/static/images/shelf-symbol.png`,
-          cid: "shelf-logo",
-        },
-        ...(attachments || []),
-      ],
+export const sendEmail = (payload: EmailPayloadType) => {
+  // attempt to send email, push to the queue if it fails
+  triggerEmail(payload).catch((err) => {
+    Logger.warn({
+      err,
+      details: {
+        to: payload.to,
+        subject: payload.subject,
+        from: payload.from,
+      },
+      message: "email sending failed, pushing to the queue",
     });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Unable to send email",
-      additionalData: { to, subject, from },
-      label: "Email",
+    void addToQueue(payload);
+  });
+};
+
+const addToQueue = async (payload: EmailPayloadType) => {
+  try {
+    await scheduler.send(QueueNames.emailQueue, payload, {
+      retryLimit: 5,
+      retryDelay: 5,
+    });
+  } catch (err) {
+    Logger.warn({
+      err,
+      details: {
+        to: payload.to,
+        subject: payload.subject,
+        from: payload.from,
+      },
+      message: "Failed to push email payload to queue",
     });
   }
-
-  // verify connection configuration
-  // transporter.verify(function (error) {
-  //   if (error) {
-  //     // eslint-disable-next-line no-console
-  //     console.log(error);
-  //   } else {
-  //     // eslint-disable-next-line no-console
-  //     console.log("Server is ready to take our messages");
-  //   }
-  // });
-
-  // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
-
-  // Preview only available when sending through an Ethereal account
-  // console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
 };

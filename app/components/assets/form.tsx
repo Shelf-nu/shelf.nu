@@ -4,6 +4,7 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useParams,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
@@ -420,20 +421,28 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({ disabled }: { disabled: boolean }) => (
-  <>
-    <ButtonGroup>
-      <Button to=".." variant="secondary" disabled={disabled}>
-        Cancel
-      </Button>
-      <AddAnother disabled={disabled} />
-    </ButtonGroup>
+const Actions = ({ disabled }: { disabled: boolean }) => {
+  const { assetId } = useParams<{ assetId?: string }>();
 
-    <Button type="submit" disabled={disabled}>
-      Save
-    </Button>
-  </>
-);
+  return (
+    <>
+      <ButtonGroup>
+        <Button
+          to={assetId ? `/assets/${assetId}/overview` : ".."}
+          variant="secondary"
+          disabled={disabled}
+        >
+          Cancel
+        </Button>
+        <AddAnother disabled={disabled} />
+      </ButtonGroup>
+
+      <Button type="submit" disabled={disabled}>
+        Save
+      </Button>
+    </>
+  );
+};
 
 const AddAnother = ({ disabled }: { disabled: boolean }) => (
   <TooltipProvider delayDuration={100}>

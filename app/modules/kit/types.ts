@@ -12,6 +12,7 @@ export type UpdateKitPayload = Partial<
   >
 > & {
   id: Kit["id"];
+  organizationId: Kit["organizationId"];
 };
 
 // Define the static includes

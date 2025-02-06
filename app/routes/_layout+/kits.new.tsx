@@ -86,6 +86,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       request,
       kitId: kit.id,
       userId,
+      organizationId,
     });
 
     sendNotification({

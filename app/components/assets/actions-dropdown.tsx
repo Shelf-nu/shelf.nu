@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
+import { AlarmClockIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -21,6 +22,7 @@ import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
+import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import When from "../when/when";
@@ -28,11 +30,12 @@ import When from "../when/when";
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
+  const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
 
   const assetCanBeReleased = asset.custody;
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
   const user = useUserData();
 
   const {
@@ -171,16 +174,14 @@ const ConditionalActionsDropdown = () => {
               })}
             >
               <DropdownMenuItem
-                className={tw("px-4 py-1 md:p-0")}
+                className="px-4 py-1 md:p-0"
                 disabled={assetIsCheckedOut}
               >
                 <Button
                   to="overview/update-location"
                   role="link"
                   variant="link"
-                  className={tw(
-                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                  )}
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={handleMenuClose}
                 >
@@ -196,7 +197,7 @@ const ConditionalActionsDropdown = () => {
                   callback={handleMenuClose}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="mb-1.5 border-b px-4 py-1 md:p-0">
+              <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
                 <Button
                   role="button"
                   variant="link"
@@ -212,6 +213,24 @@ const ConditionalActionsDropdown = () => {
                   </span>
                 </Button>
               </DropdownMenuItem>
+              <When truthy={isAdministratorOrOwner}>
+                <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
+                  <Button
+                    role="button"
+                    variant="link"
+                    className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsSetReminderDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <AlarmClockIcon className="size-5" />
+                      Set reminder
+                    </span>
+                  </Button>
+                </DropdownMenuItem>
+              </When>
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
                   to="edit"
@@ -246,7 +265,20 @@ const ConditionalActionsDropdown = () => {
                 }}
                 disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
               >
-                <DeleteAsset asset={asset} />
+                <DeleteAsset
+                  asset={asset}
+                  trigger={
+                    <Button
+                      variant="link"
+                      data-test-id="deleteAssetButton"
+                      icon="trash"
+                      className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                    >
+                      Delete
+                    </Button>
+                  }
+                />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
                 <Button
@@ -280,6 +312,15 @@ const ConditionalActionsDropdown = () => {
           open={isRelinkQrDialogOpen}
           onClose={() => {
             setIsRelinkQrDialogOpen(false);
+          }}
+        />
+      </When>
+      <When truthy={isSetReminderDialogOpen && isAdministratorOrOwner}>
+        <SetOrEditReminderDialog
+          action={`/assets/${asset.id}`}
+          open={isSetReminderDialogOpen}
+          onClose={() => {
+            setIsSetReminderDialogOpen(false);
           }}
         />
       </When>

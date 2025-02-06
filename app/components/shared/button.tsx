@@ -100,7 +100,8 @@ const variants: Record<ButtonVariant, string> = {
   secondary: tw(
     `border-gray-300 bg-white text-gray-700`,
     "disabled:text-gray-500",
-    "enabled:hover:bg-gray-50"
+    "[&:is(button:enabled)]:hover:bg-gray-50",
+    "[&:is(a)]:hover:bg-gray-50"
   ),
   tertiary: tw(
     `border-b border-primary/10 pb-1 leading-none`,
@@ -108,6 +109,9 @@ const variants: Record<ButtonVariant, string> = {
   ),
   link: tw(
     `border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800`
+  ),
+  "link-gray": tw(
+    "text-gray border-none p-0 text-text-sm font-normal underline hover:text-gray-500 "
   ),
   "block-link": tw(
     "-mt-1 border-none px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"

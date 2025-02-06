@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { Crisp } from "crisp-sdk-web";
 import {
+  AlarmClockIcon,
   BoxesIcon,
   BriefcaseConveyorBeltIcon,
   CalendarRangeIcon,
@@ -157,6 +158,13 @@ export function useSidebarNavItems() {
       ],
     },
     {
+      type: "child",
+      title: "Reminders",
+      Icon: AlarmClockIcon,
+      hidden: isBaseOrSelfService,
+      to: "/reminders",
+    },
+    {
       type: "label",
       title: "Organization",
       hidden: isBaseOrSelfService,
@@ -170,6 +178,11 @@ export function useSidebarNavItems() {
         {
           title: "Users",
           to: "/settings/team/users",
+          hidden: isPersonalOrganization,
+        },
+        {
+          title: "Pending invites",
+          to: "/settings/team/invites",
           hidden: isPersonalOrganization,
         },
         {

@@ -113,7 +113,7 @@ export const action = async ({
   });
 
   try {
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -145,7 +145,7 @@ export const action = async ({
       }
     }
 
-    const asset = await releaseCustody({ assetId });
+    const asset = await releaseCustody({ assetId, organizationId });
 
     if (!asset.custody) {
       const formData = await request.formData();
