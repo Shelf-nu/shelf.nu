@@ -120,7 +120,8 @@ export type IconType =
   | "available"
   | "unavailable"
   | "change"
-  | "booking-exist";
+  | "booking-exist"
+  | "download-qr";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -187,6 +188,7 @@ export const iconsMap: IconsMap = {
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
+  "download-qr": <DownloadIcon />,
 };
 
 export default iconsMap;
