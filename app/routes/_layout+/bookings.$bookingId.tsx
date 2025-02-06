@@ -603,7 +603,7 @@ export default function BookingEditPage() {
   return shouldRenderOutlet ? (
     <Outlet />
   ) : (
-    <>
+    <div className="relative">
       <Header
         title={hasName ? name : booking.name}
         subHeading={
@@ -621,6 +621,6 @@ export default function BookingEditPage() {
         <BookingPageContent />
         <ContextualModal />
       </div>
-    </>
+    </div>
   );
 }
