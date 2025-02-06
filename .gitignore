@@ -40,3 +40,5 @@ desktop-app/portable
 
 # Sentry Config File
 .sentryclirc
+
+.cert

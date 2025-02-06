@@ -20,6 +20,7 @@ import {
 } from "../shared/modal";
 import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
+import When from "../when/when";
 
 export const ImportBackup = () => (
   <>
@@ -241,10 +242,11 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               </>
             ) : null}
           </AlertDialogHeader>
-          {data?.error ? (
+
+          <When truthy={!!data?.error}>
             <div>
-              <h5 className="text-red-500">{data.error.title}</h5>
-              <p className="text-red-500">{data.error.message}</p>
+              <h5 className="text-red-500">{data?.error?.title}</h5>
+              <p className="text-red-500">{data?.error?.message}</p>
               {data?.error?.additionalData?.duplicateCodes ? (
                 <BrokenQrCodesTable
                   title="Duplicate codes"
@@ -282,19 +284,47 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 />
               ) : null}
 
+              {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (
+                <table className="mt-4 w-full rounded-md border text-left text-sm">
+                  <thead className="bg-error-100 text-xs">
+                    <tr>
+                      <th scope="col" className="px-2 py-1">
+                        Incorrect Header
+                      </th>
+                      <th scope="col" className="px-2 py-1">
+                        Error
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data?.error?.additionalData?.defectedHeaders?.map(
+                      (data: {
+                        incorrectHeader: string;
+                        errorMessage: string;
+                      }) => (
+                        <tr key={data.incorrectHeader}>
+                          <td className="px-2 py-1">{data.incorrectHeader}</td>
+                          <td className="px-2 py-1">{data.errorMessage}</td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              ) : null}
+
               <p className="mt-2">
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
               </p>
             </div>
-          ) : null}
+          </When>
 
-          {isSuccessful ? (
+          <When truthy={isSuccessful}>
             <div>
               <b className="text-green-500">Success!</b>
               <p>Your assets have been imported.</p>
             </div>
-          ) : null}
+          </When>
 
           <AlertDialogFooter>
             {isSuccessful ? (
