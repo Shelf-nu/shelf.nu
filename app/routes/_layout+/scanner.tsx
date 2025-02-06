@@ -5,12 +5,9 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
-import { useMediaDevices } from "react-media-devices";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Button } from "~/components/shared/button";
-import { Spinner } from "~/components/shared/spinner";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { useVideoDevices } from "~/hooks/use-video-devices";
@@ -20,7 +17,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },

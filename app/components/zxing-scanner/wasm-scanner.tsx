@@ -34,89 +34,81 @@ export const WasmScanner = ({
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const streamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number>();
 
-  /** Initialize WASM module on component mount */
+  // Initialize WASM and camera
   useEffect(() => {
-    void initializeScanner();
-  }, []);
+    let animationFrame: number;
 
-  /** Handle camera setup and cleanup */
-  useEffect(() => {
-    const setupCamera = async (deviceId?: string) => {
-      try {
-        // Clean up existing stream
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-        }
-
-        // Initialize new stream with selected device
-        const constraints: MediaStreamConstraints = {
-          video: deviceId
-            ? { deviceId: { exact: deviceId } } // if we have a deviceID, use that
-            : { facingMode: "environment" }, // else use the default back camera
-          audio: false,
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = stream;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        // Set initial selected device if not already set
-        if (!selectedDevice) {
-          const activeTrack = stream.getVideoTracks()[0];
-          const settings = activeTrack.getSettings();
-          setSelectedDevice(settings.deviceId);
-        }
-
-        return true;
-      } catch (error) {
-        console.error("Camera setup error:", error);
-        return false;
-      }
+    const initScanner = async () => {
+      await initializeScanner();
+      await setupCamera();
+      void processFrame();
     };
 
-    void setupCamera(selectedDevice);
-
-    // Cleanup function
-    return () => {
+    const setupCamera = async () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+
+      const constraints = {
+        video: selectedDevice
+          ? { deviceId: { exact: selectedDevice } }
+          : { facingMode: "environment" },
+        audio: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            updateCanvasSize();
+          }
+        };
+      }
+
+      // Set initial device if not set
+      if (!selectedDevice) {
+        const activeTrack = stream.getVideoTracks()[0];
+        const settings = activeTrack.getSettings();
+        setSelectedDevice(settings.deviceId);
       }
     };
-  }, [selectedDevice]);
 
-  /** Process video frames for QR detection */
-  useEffect(() => {
-    if (!videoRef.current || !canvasRef.current || paused) return;
+    const updateCanvasSize = () => {
+      if (!videoRef.current || !canvasRef.current) return;
 
-    const processFrame = async () => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || !video.videoWidth) return; // Wait for video to load
+      const videoRect = video.getBoundingClientRect();
+      canvas.width = videoRect.width;
+      canvas.height = videoRect.height;
+    };
 
+    const processFrame = async () => {
+      if (!videoRef.current || !canvasRef.current || paused) return;
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
 
       try {
-        // Set canvas dimensions to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
 
-        // Draw frame and get image data
-        ctx.drawImage(video, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+        ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
 
-        // Detect QR codes
+        const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+
         const results = await readBarcodes(imageData, {
           tryHarder: true,
           formats: ["QRCode"],
@@ -124,26 +116,45 @@ export const WasmScanner = ({
         });
 
         if (results.length > 0) {
-          drawDetectionBox(ctx, results[0].position);
-          handleDetection(results[0].text);
+          const result = results[0];
+          drawDetectionBox(ctx, result.position);
+          void handleDetection(result.text);
+
+          const corners = [
+            result.position.topLeft,
+            result.position.topRight,
+            result.position.bottomRight,
+            result.position.bottomLeft,
+          ];
+
+          corners.forEach((corner) => {
+            ctx.fillStyle = "red";
+            ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
+          });
         }
       } catch (error) {
         console.error("Frame processing error:", error);
       }
 
-      animationFrameRef.current = requestAnimationFrame(processFrame);
+      animationFrame = requestAnimationFrame(processFrame);
     };
 
-    void processFrame();
+    void initScanner();
+
+    const resizeObserver = new ResizeObserver(updateCanvasSize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      cancelAnimationFrame(animationFrame);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
+      resizeObserver.disconnect();
     };
-  }, [paused]);
+  }, [selectedDevice, paused]);
 
-  /** Draw detection box around QR code */
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
     position: ReadResult["position"]
@@ -161,14 +172,42 @@ export const WasmScanner = ({
     ctx.stroke();
   };
 
-  /** Handle QR code detection */
   const handleDetection = (result: string) => {
     if (!result || incomingIsLoading) return;
-    void onQrDetectionSuccess?.(result);
+    console.log(result);
+    return;
+    // // QR code validation logic...
+    // const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+    // const match = result.match(regex);
+
+    // if (!match && !allowNonShelfCodes) {
+    //   void onQrDetectionSuccess?.(
+    //     result,
+    //     "Scanned code is not a valid Shelf QR code."
+    //   );
+    //   return;
+    // }
+
+    // // Vibrate on successful scan
+    // if (typeof navigator.vibrate === "function") {
+    //   navigator.vibrate(200);
+    // }
+
+    // const qrId = match ? match[2] : result;
+    // if (match && !isQrId(qrId)) {
+    //   void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+    //   return;
+    // }
+
+    // void onQrDetectionSuccess?.(qrId);
+  };
+
+  const handleDeviceChange = (deviceId: string) => {
+    setSelectedDevice(deviceId);
   };
 
   return (
-    <div className={tw("scanner-container", className)}>
+    <div ref={containerRef} className={tw("scanner-container", className)}>
       <div className="relative size-full overflow-hidden">
         <video
           ref={videoRef}
@@ -179,7 +218,6 @@ export const WasmScanner = ({
         />
         <canvas ref={canvasRef} className="canvas-overlay size-full" />
 
-        {/* Camera controls */}
         <div className="absolute inset-x-0 top-0 z-10 flex w-full items-center justify-between bg-transparent text-white">
           <div>
             {!hideBackButtonText && (
@@ -196,7 +234,7 @@ export const WasmScanner = ({
           <div>
             <select
               value={selectedDevice}
-              onChange={(e) => setSelectedDevice(e.target.value)}
+              onChange={(e) => handleDeviceChange(e.target.value)}
               className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
             >
               {devices.map((device, index) => (
@@ -208,7 +246,6 @@ export const WasmScanner = ({
           </div>
         </div>
 
-        {/* Scanning overlay */}
         <div
           className={tw(
             "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded border-4 border-white shadow-camera-overlay",
