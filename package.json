@@ -64,7 +64,7 @@
     "@remix-run/node": "2.13.1",
     "@remix-run/react": "2.13.1",
     "@remix-run/serve": "2.13.1",
-    "@sentry/remix": "^8.33.1",
+    "@sentry/remix": "^8.53.0",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
     "@supabase/supabase-js": "^2.43.4",
@@ -146,7 +146,7 @@
     "@types/react-dom": "^18.2.19",
     "@types/ua-parser-js": "^0.7.39",
     "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/coverage-v8": "^2.1.4",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.19",
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.3.0",
@@ -173,7 +173,7 @@
     "vite": "^5.4.14",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=20"

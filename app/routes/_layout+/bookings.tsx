@@ -7,6 +7,7 @@ import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
+import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
@@ -185,6 +186,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...teamMembersData,
+        isSelfServiceOrBase,
       }),
       {
         headers: [
@@ -272,15 +274,17 @@ export default function BookingsIndexPage({
     >
       {!isChildBookingsPage ? (
         <Header>
-          <Button
-            to="new"
-            role="link"
-            aria-label={`new booking`}
-            data-test-id="createNewBooking"
-            prefetch="none"
-          >
-            New booking
-          </Button>
+          <CreateBookingDialog
+            trigger={
+              <Button
+                aria-label="new booking"
+                data-test-id="createNewBooking"
+                prefetch="none"
+              >
+                New booking
+              </Button>
+            }
+          />
         </Header>
       ) : null}
 
