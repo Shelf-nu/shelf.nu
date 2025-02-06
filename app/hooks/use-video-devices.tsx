@@ -29,8 +29,15 @@ export const useVideoDevices = () => {
     setLoading(true);
     setError(null);
     try {
-      // Request camera permissions first
-      await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      /**
+       * Request camera permissions first
+       * Here we are just requesting permissions so we dont care which camera we ask for.
+       * */
+      await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+
       // Get all media devices
       const allDevices = await navigator.mediaDevices.enumerateDevices();
       // Filter for video input devices only

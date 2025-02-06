@@ -1,21 +1,18 @@
 // app/components/scanner/wasm-scanner.tsx
 import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
-import { Link, useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import { readBarcodes } from "zxing-wasm";
 import type { ReadResult } from "zxing-wasm/reader";
-import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { initializeScanner } from "~/utils/barcode-scanner";
-import { ShelfError } from "~/utils/error";
-import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
-  videoMediaDevices?: MediaDeviceInfo[];
+  devices: MediaDeviceInfo[];
+
   isLoading?: boolean;
   backButtonText?: string;
   allowNonShelfCodes?: boolean;
@@ -26,7 +23,7 @@ type WasmScannerProps = {
 };
 
 export const WasmScanner = ({
-  videoMediaDevices,
+  devices,
   onQrDetectionSuccess,
   isLoading: incomingIsLoading,
   backButtonText = "Back",
@@ -39,79 +36,56 @@ export const WasmScanner = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedDevice, setSelectedDevice] = useState<string>();
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [isCameraLoading, setIsCameraLoading] = useState(false);
   // Add containerRef to measure container dimensions
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const scannerCameraId = useRouteLoaderData<LayoutLoaderResponse>(
-    "routes/_layout+/_layout"
-  )?.scannerCameraId;
-
-  const fetcher = useFetcher();
 
   // Initialize WASM and camera
   useEffect(() => {
     let animationFrame: number;
-    let stream: MediaStream;
 
     const initScanner = async () => {
-      try {
-        // Initialize WASM module
-        await initializeScanner();
+      // Initialize WASM module
+      await initializeScanner();
 
-        // Get available video devices
-        const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = mediaDevices.filter(
-          (d) => d.kind === "videoinput"
-        );
-        // setDevices(videoDevices);
-
-        // Set up camera stream
-        await setupCamera();
-        setIsInitializing(false);
-        void processFrame();
-      } catch (error) {
-        console.error("Scanner initialization failed:", error);
-        throw new ShelfError({
-          message: "Failed to initialize scanner",
-          cause: error,
-          label: "QR",
-        });
-      }
+      // Set up camera stream
+      await setupCamera();
+      void processFrame();
     };
 
     // Enhanced camera setup with proper constraints
     const setupCamera = async () => {
-      setIsCameraLoading(true);
-      try {
-        const constraints = {
-          video: {
-            deviceId: scannerCameraId ? { exact: scannerCameraId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+      /** Start a stream with the back camera as preference */
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+        },
+        audio: false,
+      });
+
+      // Get the active device ID from the stream
+      const activeTrack = stream.getVideoTracks()[0];
+      const settings = activeTrack.getSettings();
+      const activeDeviceId = settings.deviceId;
+
+      // Check if the stream device is available in the devices
+      const device = devices.find(
+        (device) => device.deviceId === activeDeviceId
+      );
+      if (device) {
+        setSelectedDevice(device.deviceId);
+      } else {
+        // @TODO not sure what will happen if that is false
+        setSelectedDevice(devices[0].deviceId);
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            updateCanvasSize();
+          }
         };
-
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          videoRef.current.onloadedmetadata = () => {
-            if (videoRef.current) {
-              updateCanvasSize();
-            }
-          };
-        }
-      } catch (error) {
-        throw new ShelfError({
-          message: "Camera access failed",
-          cause: error,
-          label: "QR",
-        });
-      } finally {
-        setIsCameraLoading(false);
       }
     };
 
@@ -164,7 +138,7 @@ export const WasmScanner = ({
         if (results.length > 0) {
           const result = results[0];
           // Draw the box directly using the position from the QR detection
-          drawDetectionBox(ctx, result.position, videoWidth, videoHeight);
+          drawDetectionBox(ctx, result.position);
           handleDetection(result.text);
 
           // Debug: draw point at each corner
@@ -198,17 +172,16 @@ export const WasmScanner = ({
 
     return () => {
       cancelAnimationFrame(animationFrame);
-      stream?.getTracks().forEach((track) => track.stop());
+      // @TODO we have to stop the tracks on cleanup
+      // stream?.getTracks().forEach((track) => track.stop());
       resizeObserver.disconnect();
     };
-  }, [scannerCameraId, paused]);
+  }, [devices, selectedDevice, paused]);
 
   // Simple box drawing function
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
-    position: ReadResult["position"],
-    canvasWidth: number,
-    canvasHeight: number
+    position: ReadResult["position"]
   ) => {
     if (!position) return;
 
@@ -259,20 +232,8 @@ export const WasmScanner = ({
   };
 
   const handleDeviceChange = (deviceId: string) => {
-    fetcher.submit(
-      { scannerCameraId: deviceId },
-      { method: "post", action: "/api/user/prefs/scanner-camera" }
-    );
+    setSelectedDevice(deviceId);
   };
-
-  if (isInitializing || isCameraLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Spinner />
-        {isInitializing ? "Initializing scanner..." : "Loading camera..."}
-      </div>
-    );
-  }
 
   return (
     <div className={tw("scanner-container", className)}>
@@ -301,23 +262,17 @@ export const WasmScanner = ({
           </div>
 
           <div>
-            <fetcher.Form
-              method="post"
-              action="/api/user/prefs/scanner-camera"
-              onChange={(e) => fetcher.submit(e.currentTarget)}
+            <select
+              value={selectedDevice}
+              onChange={(e) => handleDeviceChange(e.target.value)}
+              className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
             >
-              <select
-                value={selectedDevice}
-                onChange={(e) => handleDeviceChange(e.target.value)}
-                className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
-              >
-                {devices.map((device, index) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label || `Camera ${index + 1}`}
-                  </option>
-                ))}
-              </select>
-            </fetcher.Form>
+              {devices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Camera ${index + 1}`}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         {/* Scanning overlay */}

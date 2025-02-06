@@ -77,12 +77,11 @@ const QRScanner = () => {
         style={{ height: `${height}px` }}
       >
         {devices ? (
-          <>:)</>
+          <WasmScanner
+            onQrDetectionSuccess={handleQrDetectionSuccess}
+            devices={devices}
+          />
         ) : (
-          // <WasmScanner
-          //   onQrDetectionSuccess={handleQrDetectionSuccess}
-          //   videoMediaDevices={devices}
-          // />
           <DevicesPermissionComponent />
         )}
       </div>
