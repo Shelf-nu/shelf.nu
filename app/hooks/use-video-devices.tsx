@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { tw } from "~/utils/tw";
 
 /**
  * Custom hook for managing access to video input devices (cameras)
@@ -31,7 +30,7 @@ export const useVideoDevices = () => {
     setError(null);
     try {
       // Request camera permissions first
-      await navigator.mediaDevices.getUserMedia({ video: true });
+      await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       // Get all media devices
       const allDevices = await navigator.mediaDevices.enumerateDevices();
       // Filter for video input devices only
@@ -54,31 +53,46 @@ export const useVideoDevices = () => {
    * Displays error messages or loading state
    */
   function DevicesPermissionComponent() {
-    return (
-      <div className="mx-auto mt-[60px] flex h-full max-w-[90%] flex-col items-center text-center">
-        {error ? (
-          error?.name === "NotAllowedError" ? (
+    const renderContent = () => {
+      switch (true) {
+        case !error:
+          return (
+            <>
+              <Spinner /> Waiting for permission to access camera/s.
+            </>
+          );
+
+        case error?.name === "NotAllowedError":
+          return (
             <>
               <p>
                 Permissions have been denied. You need to allow shelf to use
                 your device's camera to scan QR codes.
               </p>
-              <Button
-                variant="secondary"
-                onClick={getDevices}
-                className={tw(`mt-4`)}
-              >
+              <Button variant="secondary" onClick={getDevices} className="mt-4">
                 Request permissions again
               </Button>
             </>
-          ) : (
-            <>{error.message}</>
-          )
-        ) : (
-          <>
-            <Spinner /> Waiting for permission to access camera/s.
-          </>
-        )}
+          );
+
+        case error?.name === "NotFoundError":
+          return (
+            <>
+              <p>
+                No media devices found. Please ensure you have a camera
+                connected to your device.
+              </p>
+            </>
+          );
+
+        default:
+          return <>{error.message}</>;
+      }
+    };
+
+    return (
+      <div className="mx-auto mt-16 flex h-full max-w-[90%] flex-col items-center text-center">
+        {renderContent()}
       </div>
     );
   }
@@ -106,9 +120,6 @@ export const useVideoDevices = () => {
       );
     };
   }, [getDevices]);
-
-  console.log("devices", devices);
-  console.log("error", error);
 
   // Return hook interface
   return {
