@@ -38,7 +38,6 @@ export const WasmScanner = ({
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const [isInitializing, setIsInitializing] = useState(true);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
@@ -66,7 +65,7 @@ export const WasmScanner = ({
         const videoDevices = mediaDevices.filter(
           (d) => d.kind === "videoinput"
         );
-        setDevices(videoDevices);
+        // setDevices(videoDevices);
 
         // Set up camera stream
         await setupCamera();

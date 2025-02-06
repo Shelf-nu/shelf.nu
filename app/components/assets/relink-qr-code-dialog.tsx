@@ -5,7 +5,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { useQrScanner } from "~/hooks/use-qr-scanner";
+import { useVideoDevices } from "~/hooks/use-video-devices";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
@@ -32,7 +32,7 @@ export default function RelinkQrCodeDialog({
     success: boolean;
     error?: { message: string };
   }>();
-  const { videoMediaDevices } = useQrScanner();
+  const { devices } = useVideoDevices();
 
   const [currentState, setCurrentState] = useState<CurrentState>("initial");
   const [newQrId, setNewQrId] = useState<string>();
@@ -110,12 +110,12 @@ export default function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
-            {videoMediaDevices && videoMediaDevices.length > 0 ? (
+            {devices && devices.length > 0 ? (
               <ZXingScanner
                 className="h-auto flex-1"
                 overlayClassName="md:h-[320px] max-w-xs"
                 isLoading={false}
-                videoMediaDevices={videoMediaDevices}
+                videoMediaDevices={devices}
                 onQrDetectionSuccess={handleQrDetectionSuccess}
                 allowNonShelfCodes
                 hideBackButtonText

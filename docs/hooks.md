@@ -102,38 +102,34 @@ const MyComponent = ({ booking }) => {
 };
 ```
 
-## useQrScanner
+## useVideoDevices
 
-The `useQrScanner` hook is a utility hook that retrieves available video input devices for use in applications that require video input, such as QR code scanners. This hook helps manage the state of video devices, making it easier to implement features that depend on accessing the user's camera.
+The `useVideoDevices` hook manages video device access and permissions for camera-dependent features like QR scanning. It provides device status, error handling, and permission management.
 
-The hook returns an object with one property:
-`videoMediaDevices`: An array of MediaDeviceInfo objects representing the available video input devices.
+### Returns
+
+- `devices`: Array of available video input devices (`MediaDeviceInfo[]`) or `null`
+- `error`: Error object if device access fails or `null`
+- `loading`: Boolean indicating if device enumeration is in progress
+- `requestPermissions`: Function to request device access
+- `DevicesPermissionComponent`: React component for rendering permission/error UI states
 
 ### Usage
 
-Here's an example of how to use the `useQrScanner` hook:
+````typescript
+const QRScanner = () => {
+ const { devices, DevicesPermissionComponent } = useVideoDevices();
 
-```typescript
-import { useQrScanner } from './useQrScanner';
-
-const QRScannerComponent = () => {
-  const { videoMediaDevices } = useQrScanner();
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 132 : vh - 167;
-
-  return (
-    <div style={{ height: `${height}px` }}>
-      {videoMediaDevices && videoMediaDevices.length > 0 ? (
-        <ZXingScanner videoMediaDevices={videoMediaDevices} />
-      ) : (
-        <div className="mt-4 flex flex-col items-center justify-center">
-          <Spinner /> Waiting for permission to access the camera.
-        </div>
-      )}
-    </div>
-  );
+ return (
+   <div>
+     {devices ? (
+       <Scanner videoMediaDevices={devices} />
+     ) : (
+       <DevicesPermissionComponent />
+     )}
+   </div>
+ );
 };
-```
 
 ## `useDisabled`
 
@@ -147,7 +143,7 @@ const isDisabled = useDisabled();
 
 /** Without fetcher */
 const isDisabled = useDisabled(fetcher);
-```
+````
 
 **Parameters:**
 

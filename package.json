@@ -106,7 +106,6 @@
     "react-dom": "18.2.0",
     "react-dropzone": "^14.2.3",
     "react-map-gl": "^7.1.7",
-    "react-media-devices": "^1.1.5",
     "react-microsoft-clarity": "^1.2.0",
     "react-router-hono-server": "^1.0.0",
     "react-tag-autocomplete": "^7.1.0",

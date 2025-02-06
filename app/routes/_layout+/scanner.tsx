@@ -5,18 +5,22 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
+import { useMediaDevices } from "react-media-devices";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
+import { Spinner } from "~/components/shared/spinner";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
-import { useQrScanner } from "~/hooks/use-qr-scanner";
+import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -53,6 +57,7 @@ const QRScanner = () => {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
+  const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   function handleQrDetectionSuccess(qrId: string) {
     sendNotification({
@@ -71,7 +76,15 @@ const QRScanner = () => {
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}
       >
-        <WasmScanner onQrDetectionSuccess={handleQrDetectionSuccess} />
+        {devices ? (
+          <>:)</>
+        ) : (
+          // <WasmScanner
+          //   onQrDetectionSuccess={handleQrDetectionSuccess}
+          //   videoMediaDevices={devices}
+          // />
+          <DevicesPermissionComponent />
+        )}
       </div>
     </>
   );
