@@ -17,7 +17,7 @@ import ScannedAssetsDrawer, {
 } from "~/components/scanner/drawer";
 import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
-import { useQrScanner } from "~/hooks/use-qr-scanner";
+import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -153,7 +153,7 @@ export default function ScanAssetsForBookings() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { videoMediaDevices } = useQrScanner();
+  const { devices } = useVideoDevices();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
@@ -169,10 +169,10 @@ export default function ScanAssetsForBookings() {
       <ScannedAssetsDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
-        {videoMediaDevices && videoMediaDevices.length > 0 ? (
+        {devices && devices.length > 0 ? (
           <ZXingScanner
             isLoading={isLoading}
-            videoMediaDevices={videoMediaDevices}
+            videoMediaDevices={devices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
             backButtonText="Booking"
             allowNonShelfCodes
