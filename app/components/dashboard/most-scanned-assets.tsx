@@ -79,7 +79,7 @@ const Row = ({
     <Td className="w-full min-w-[130px] whitespace-normal p-0 md:p-0">
       <div className="flex justify-between gap-3 px-4 py-3 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex size-12 shrink-0 items-center justify-center">
+          <div className="relative flex size-12 shrink-0 items-center justify-center">
             <AssetImage
               asset={{
                 assetId: item.id,

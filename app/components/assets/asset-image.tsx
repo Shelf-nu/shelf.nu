@@ -72,17 +72,18 @@ export const AssetImage = ({
   return (
     <>
       <>
-        {isLoading && (
-          <div
-            className={tw(
-              "absolute inset-0 top-[6px] flex items-center justify-center bg-gray-100",
-              "transition-opacity", // Fallback animation
-              className
-            )}
-          >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400 " />
-          </div>
-        )}
+        {isLoading ||
+          (true && (
+            <div
+              className={tw(
+                "absolute inset-0 flex items-center justify-center bg-gray-100",
+                "transition-opacity", // Fallback animation
+                className
+              )}
+            >
+              <Spinner className="[&_.spinner]:before:border-t-gray-400 " />
+            </div>
+          ))}
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}

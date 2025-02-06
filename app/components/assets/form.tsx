@@ -184,7 +184,7 @@ export const AssetForm = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div className="flex items-center gap-2">
+          <div className="relative flex items-center gap-2">
             {id && mainImage && mainImageExpiration ? (
               <AssetImage
                 className="size-16"
