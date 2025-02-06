@@ -12,9 +12,10 @@ import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
+import TitleContainer from "~/components/calendar/title-container";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
 import { ArrowRightIcon } from "~/components/icons/library";
@@ -143,11 +144,10 @@ export const DATE_FORMAT_OPTIONS = {
 
 // Calendar Component
 export default function Calendar() {
-  const { title } = useLoaderData<typeof loader>();
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
-  const [calendarTitle, setCalendarTitle] = useState(title);
+  const [calendarTitle, setCalendarTitle] = useState<string>();
   const [calendarSubtitle, setCalendarSubtitle] = useState(
     isMd ? undefined : `${startingDay} - ${endingDay}`
   );
@@ -278,14 +278,11 @@ export default function Calendar() {
 
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
-          <div>
-            <div className="text-left font-sans text-lg font-semibold leading-[20px] ">
-              {calendarTitle}
-            </div>
-            {!isMd || calendarView == "timeGridWeek" ? (
-              <div className="text-gray-600">{calendarSubtitle}</div>
-            ) : null}
-          </div>
+          <TitleContainer
+            calendarTitle={calendarTitle}
+            calendarSubtitle={calendarSubtitle}
+            calendarView={calendarView}
+          />
 
           <div className="flex items-center">
             <div ref={ripple} className="mr-3 flex justify-center">
