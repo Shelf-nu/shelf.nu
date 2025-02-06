@@ -124,6 +124,12 @@ type BookingFormData = {
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
   description?: string | null;
+
+  /**
+   * In case if the form is rendered outside of /edit or /new booking,
+   * then we can pass `action` to submit form
+   */
+  action?: string;
 };
 
 export function BookingForm({
@@ -136,6 +142,7 @@ export function BookingForm({
   bookingFlags,
   assetIds,
   description,
+  action,
 }: BookingFormData) {
   const navigation = useNavigation();
   const { teamMembers } = useLoaderData<typeof loader>();
@@ -191,7 +198,7 @@ export function BookingForm({
 
   return (
     <div>
-      <Form ref={zo.ref} method="post">
+      <Form ref={zo.ref} method="post" action={action}>
         {/* Hidden input for expired state. Helps is know what status we should set on the server, when the booking is getting checked out */}
         {isExpired && <input type="hidden" name="isExpired" value="true" />}
 
