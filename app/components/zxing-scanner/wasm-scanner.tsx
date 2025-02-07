@@ -214,16 +214,25 @@ export const WasmScanner = ({
   };
 
   return (
-    <div ref={containerRef} className={tw("scanner-container", className)}>
+    <div
+      ref={containerRef}
+      className={tw(
+        "relative size-full min-h-[400px] overflow-hidden",
+        className
+      )}
+    >
       <div className="relative size-full overflow-hidden">
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className="pointer-events-none size-full object-cover"
+          className="pointer-events-none size-full object-cover object-center "
         />
-        <canvas ref={canvasRef} className="canvas-overlay size-full" />
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-none absolute left-0 top-0 size-full object-cover"
+        />
 
         <div className="absolute inset-x-0 top-0 z-10 flex w-full items-center justify-between bg-transparent text-white">
           <div>

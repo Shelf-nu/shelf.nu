@@ -12,9 +12,8 @@ import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-import { Spinner } from "../shared/spinner";
 import When from "../when/when";
-import { ZXingScanner } from "../zxing-scanner/zxing-scanner";
+import { WasmScanner } from "../zxing-scanner/wasm-scanner";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;
@@ -32,7 +31,7 @@ export default function RelinkQrCodeDialog({
     success: boolean;
     error?: { message: string };
   }>();
-  const { devices } = useVideoDevices();
+  const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   const [currentState, setCurrentState] = useState<CurrentState>("initial");
   const [newQrId, setNewQrId] = useState<string>();
@@ -110,21 +109,19 @@ export default function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
-            {devices && devices.length > 0 ? (
-              <ZXingScanner
+            {devices ? (
+              <WasmScanner
                 className="h-auto flex-1"
                 overlayClassName="md:h-[320px] max-w-xs"
                 isLoading={false}
-                videoMediaDevices={devices}
+                devices={devices}
                 onQrDetectionSuccess={handleQrDetectionSuccess}
                 allowNonShelfCodes
                 hideBackButtonText
                 paused={!!newQrId}
               />
             ) : (
-              <div className="mt-4 flex h-full flex-col items-center justify-center">
-                <Spinner /> Waiting for permission to access camera.
-              </div>
+              <DevicesPermissionComponent />
             )}
 
             <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
