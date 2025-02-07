@@ -1,11 +1,11 @@
 import { useState } from "react";
-import domtoimage from "dom-to-image";
+import { toBlob } from "html-to-image";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
 import { DownloadIcon } from "lucide-react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
+import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { QrDef } from "../qr/qr-preview";
@@ -72,12 +72,12 @@ export default function BulkDownloadQrDialog({
       const zip = new JSZip();
       const qrFolder = zip.folder("qr-codes");
 
-      /* Converting our React compoentn to html so that we can later convert it into an image */
-      const qrNodes = assets.map((asset) => {
-        const qrCodeContent = renderToStaticMarkup(
+      /* Converting our React component to html so that we can later convert it into an image */
+      const qrNodes = assets.map((asset) =>
+        generateHtmlFromComponent(
           <QrPreview
             style={{
-              border: `3px solid #e5e7eb`,
+              border: "3px solid #e5e7eb",
               borderRadius: "4px",
               padding: "16px",
             }}
@@ -85,39 +85,44 @@ export default function BulkDownloadQrDialog({
             qrObj={{ qr: asset.qr }}
             item={{ name: asset.title, type: "asset" }}
           />
-        );
+        )
+      );
 
-        /* Creating div element to convert it into image because domtoimage expects an Html node */
-        const div = document.createElement("div");
-        div.innerHTML = qrCodeContent;
+      const toBlobOptions = {
+        height: 700,
+        width: 700,
+        backgroundColor: "white",
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          transform: "scale(2)",
+          transformOrigin: "center",
+        },
+      };
 
-        return div;
-      });
+      /**
+       * We are converting first qr to image separately because toBlob will cache the font
+       * and will not make further network requests for other qr codes.
+       */
+      const firstQrImage = await toBlob(qrNodes[0], toBlobOptions);
 
       /* Converting all qr nodes into images */
       const qrImages = await Promise.all(
-        qrNodes.map(async (qrNode) =>
-          /* Converting html to image */
-          domtoimage.toBlob(qrNode, {
-            height: 700,
-            width: 700,
-            bgcolor: "white",
-            style: {
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textAlign: "center",
-              transform: "scale(2)",
-              transformOrigin: "center",
-            },
-          })
-        )
+        qrNodes.slice(1).map((qrNode) => toBlob(qrNode, toBlobOptions))
       );
+
+      qrImages.push(firstQrImage);
 
       /* Appending qr code image to zip file */
       qrImages.forEach((qrImage, index) => {
         const asset = assets[index];
         const filename = `${asset.title}_${asset.qr.id}.jpg`;
+        if (!qrImage) {
+          return;
+        }
+
         if (qrFolder) {
           qrFolder.file(filename, qrImage);
         } else {
@@ -194,13 +199,15 @@ export default function BulkDownloadQrDialog({
                   Close
                 </Button>
 
-                <Button
-                  className="flex-1"
-                  onClick={handleBulkDownloadQr}
-                  disabled={disabled}
-                >
-                  Download
-                </Button>
+                <When truthy={downloadState.status !== "success"}>
+                  <Button
+                    className="flex-1"
+                    onClick={handleBulkDownloadQr}
+                    disabled={disabled}
+                  >
+                    Download
+                  </Button>
+                </When>
               </div>
             </>
           )}
