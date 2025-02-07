@@ -89,8 +89,8 @@ export default function BulkDownloadQrDialog({
       );
 
       const toBlobOptions = {
-        height: 700,
-        width: 700,
+        width: 470,
+        height: 472,
         backgroundColor: "white",
         style: {
           display: "flex",
