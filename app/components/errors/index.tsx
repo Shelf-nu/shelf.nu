@@ -39,7 +39,7 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   return (
     <div
       className={tw(
-        "flex size-full h-screen items-center justify-center",
+        "flex size-full h-dvh items-center justify-center",
         className
       )}
     >

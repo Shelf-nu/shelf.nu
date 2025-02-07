@@ -10,7 +10,6 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
-import { useClientNotification } from "~/hooks/use-client-notification";
 import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
@@ -49,7 +48,6 @@ export const meta: MetaFunction<typeof loader> = () => [
 ];
 
 const QRScanner = () => {
-  const [sendNotification] = useClientNotification();
   const navigate = useNavigate();
   const [qrId, setQrId] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState<string>(
@@ -61,11 +59,6 @@ const QRScanner = () => {
   const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   function handleQrDetectionSuccess(qrId: string) {
-    // sendNotification({
-    //   title: "Shelf's QR Code detected",
-    //   message: "Redirecting to mapped asset",
-    //   icon: { name: "success", variant: "success" },
-    // });
     setQrId(qrId);
     setScanMessage("Redirecting to mapped asset...");
 
