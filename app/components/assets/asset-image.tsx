@@ -79,14 +79,14 @@ export const AssetImage = ({
               "transition-opacity" // Fallback animation
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400 " />
+            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
           </div>
         )}
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
           src={url}
-          className={tw("", withPreview && "cursor-pointer")}
+          className={tw("size-full", withPreview && "cursor-pointer")}
           alt={alt}
           onLoad={handleImageLoad}
           loading="lazy"
