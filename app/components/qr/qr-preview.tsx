@@ -1,6 +1,6 @@
 import React, { useRef, useMemo } from "react";
 import { changeDpiDataUrl } from "changedpi";
-import domtoimage from "dom-to-image";
+import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
@@ -49,17 +49,16 @@ export const QrPreview = ({
     // making sure that the captureDiv and downloadBtn exists in DOM
     if (captureDiv && downloadBtn) {
       e.preventDefault();
-      domtoimage
-        .toPng(captureDiv, {
-          height: captureDiv.offsetHeight * 2,
-          width: captureDiv.offsetWidth * 2,
-          style: {
-            transform: `scale(${2})`,
-            transformOrigin: "top left",
-            width: `${captureDiv.offsetWidth}px`,
-            height: `${captureDiv.offsetHeight}px`,
-          },
-        })
+      toPng(captureDiv, {
+        height: captureDiv.offsetHeight * 2,
+        width: captureDiv.offsetWidth * 2,
+        style: {
+          transform: `scale(${2})`,
+          transformOrigin: "top left",
+          width: `${captureDiv.offsetWidth}px`,
+          height: `${captureDiv.offsetHeight}px`,
+        },
+      })
         .then((dataUrl: string) => {
           const downloadLink = document.createElement("a");
           downloadLink.href = changeDpiDataUrl(dataUrl, 300);
