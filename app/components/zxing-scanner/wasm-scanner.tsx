@@ -1,4 +1,3 @@
-// app/components/scanner/wasm-scanner.tsx
 import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
@@ -6,6 +5,7 @@ import { ClientOnly } from "remix-utils/client-only";
 import { readBarcodes } from "zxing-wasm";
 import type { ReadResult } from "zxing-wasm/reader";
 import { initializeScanner } from "~/utils/barcode-scanner";
+import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
 
@@ -19,6 +19,9 @@ type WasmScannerProps = {
   className?: string;
   overlayClassName?: string;
   paused?: boolean;
+
+  /** Custom message to show when scanner is paused after detecting a code */
+  scanMessage?: string;
 };
 
 export const WasmScanner = ({
@@ -31,6 +34,7 @@ export const WasmScanner = ({
   className,
   overlayClassName,
   paused = false,
+  scanMessage,
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -46,6 +50,33 @@ export const WasmScanner = ({
       await initializeScanner();
       await setupCamera();
       void processFrame();
+    };
+
+    const handleDetection = (result: string) => {
+      if (!result || incomingIsLoading) return;
+      // QR code validation logic...
+      const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+      const match = result.match(regex);
+
+      if (!match && !allowNonShelfCodes) {
+        void onQrDetectionSuccess?.(
+          result,
+          "Scanned code is not a valid Shelf QR code."
+        );
+        return;
+      }
+
+      // Vibrate on successful scan
+      if (typeof navigator.vibrate === "function") {
+        navigator.vibrate(200);
+      }
+
+      const qrId = match ? match[2] : result;
+      if (match && !isQrId(qrId)) {
+        void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+        return;
+      }
+      void onQrDetectionSuccess?.(qrId);
     };
 
     const setupCamera = async () => {
@@ -119,20 +150,9 @@ export const WasmScanner = ({
           const result = results[0];
           drawDetectionBox(ctx, result.position);
           void handleDetection(result.text);
-
-          const corners = [
-            result.position.topLeft,
-            result.position.topRight,
-            result.position.bottomRight,
-            result.position.bottomLeft,
-          ];
-
-          corners.forEach((corner) => {
-            ctx.fillStyle = "red";
-            ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
-          });
         }
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error("Frame processing error:", error);
       }
 
@@ -153,7 +173,13 @@ export const WasmScanner = ({
       }
       resizeObserver.disconnect();
     };
-  }, [selectedDevice, paused]);
+  }, [
+    selectedDevice,
+    paused,
+    incomingIsLoading,
+    allowNonShelfCodes,
+    onQrDetectionSuccess,
+  ]);
 
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
@@ -170,36 +196,17 @@ export const WasmScanner = ({
     ctx.lineTo(position.bottomLeft.x, position.bottomLeft.y);
     ctx.closePath();
     ctx.stroke();
-  };
+    const corners = [
+      position.topLeft,
+      position.topRight,
+      position.bottomRight,
+      position.bottomLeft,
+    ];
 
-  const handleDetection = (result: string) => {
-    if (!result || incomingIsLoading) return;
-    console.log(result);
-    return;
-    // // QR code validation logic...
-    // const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-    // const match = result.match(regex);
-
-    // if (!match && !allowNonShelfCodes) {
-    //   void onQrDetectionSuccess?.(
-    //     result,
-    //     "Scanned code is not a valid Shelf QR code."
-    //   );
-    //   return;
-    // }
-
-    // // Vibrate on successful scan
-    // if (typeof navigator.vibrate === "function") {
-    //   navigator.vibrate(200);
-    // }
-
-    // const qrId = match ? match[2] : result;
-    // if (match && !isQrId(qrId)) {
-    //   void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
-    //   return;
-    // }
-
-    // void onQrDetectionSuccess?.(qrId);
+    corners.forEach((corner) => {
+      ctx.fillStyle = "red";
+      ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
+    });
   };
 
   const handleDeviceChange = (deviceId: string) => {
@@ -252,13 +259,14 @@ export const WasmScanner = ({
             overlayClassName
           )}
         >
+          {/* {true && ( */}
           {paused && (
-            <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+            <div className="flex h-full flex-col items-center justify-center bg-white p-4 text-center">
               <h5>Code detected</h5>
               <ClientOnly fallback={null}>
                 {() => <SuccessAnimation />}
               </ClientOnly>
-              <p>Scanner paused</p>
+              <p>{scanMessage || "Scanner paused"}</p>
             </div>
           )}
         </div>

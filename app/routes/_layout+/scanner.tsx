@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -50,17 +51,23 @@ export const meta: MetaFunction<typeof loader> = () => [
 const QRScanner = () => {
   const [sendNotification] = useClientNotification();
   const navigate = useNavigate();
+  const [qrId, setQrId] = useState<string | null>(null);
+  const [scanMessage, setScanMessage] = useState<string>(
+    "Processing QR code..."
+  );
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
   const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   function handleQrDetectionSuccess(qrId: string) {
-    sendNotification({
-      title: "Shelf's QR Code detected",
-      message: "Redirecting to mapped asset",
-      icon: { name: "success", variant: "success" },
-    });
+    // sendNotification({
+    //   title: "Shelf's QR Code detected",
+    //   message: "Redirecting to mapped asset",
+    //   icon: { name: "success", variant: "success" },
+    // });
+    setQrId(qrId);
+    setScanMessage("Redirecting to mapped asset...");
 
     navigate(`/qr/${qrId}`);
   }
@@ -76,6 +83,8 @@ const QRScanner = () => {
           <WasmScanner
             onQrDetectionSuccess={handleQrDetectionSuccess}
             devices={devices}
+            paused={!!qrId}
+            scanMessage={scanMessage}
           />
         ) : (
           <DevicesPermissionComponent />
