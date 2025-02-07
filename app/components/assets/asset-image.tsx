@@ -86,7 +86,10 @@ export const AssetImage = ({
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
           src={url}
-          className={tw("size-full", withPreview && "cursor-pointer")}
+          className={tw(
+            "size-full object-cover",
+            withPreview && "cursor-pointer"
+          )}
           alt={alt}
           onLoad={handleImageLoad}
           loading="lazy"
