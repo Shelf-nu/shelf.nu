@@ -130,7 +130,7 @@ export function AdvancedIndexColumn({
             modeIsAdvanced && freezeColumn ? freezeColumnClassNames.name : ""
           )}
           value={
-            <div className={tw("flex items-center gap-2 ")}>
+            <div className="flex items-center gap-2">
               {showAssetImage ? (
                 <AssetImage
                   asset={{
