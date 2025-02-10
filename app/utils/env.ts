@@ -51,6 +51,7 @@ declare global {
       ADMIN_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
+      FREE_TRIAL_DAYS: string;
     }
   }
 }
