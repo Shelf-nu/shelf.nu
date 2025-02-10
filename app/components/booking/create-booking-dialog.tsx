@@ -46,7 +46,7 @@ export default function CreateBookingDialog({
 
       <DialogPortal>
         <Dialog
-          className={tw("w-[480px] overflow-auto md:h-screen", className)}
+          className={tw("overflow-auto md:h-screen md:w-[480px]", className)}
           open={isDialogOpen}
           onClose={closeDialog}
           title={
