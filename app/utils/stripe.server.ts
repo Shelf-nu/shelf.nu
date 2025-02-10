@@ -126,7 +126,7 @@ export async function createStripeCheckoutSession({
               missing_payment_method: "pause",
             },
           },
-          trial_period_days: 14,
+          trial_period_days: config.freeTrialDays,
         },
         payment_method_collection: "if_required",
       }),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigation } from "@remix-run/react";
+import { config } from "~/config/shelf.config";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
@@ -13,7 +14,6 @@ export function ChoosePurpose() {
   );
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
-
   return (
     <>
       <div className="flex flex-col items-center p-4 sm:p-6">
@@ -62,7 +62,7 @@ export function ChoosePurpose() {
                   <span className="text-primary">
                     <CheckmarkIcon />
                   </span>{" "}
-                  <span>Free 14-day trial</span>
+                  <span>Free {config.freeTrialDays}-day trial</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-primary">
