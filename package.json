@@ -106,13 +106,11 @@
     "react-dom": "18.2.0",
     "react-dropzone": "^14.2.3",
     "react-map-gl": "^7.1.7",
-    "react-media-devices": "^1.1.5",
     "react-microsoft-clarity": "^1.2.0",
     "react-router-hono-server": "^1.0.0",
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^2.15.1",
     "react-zorm": "^0.9.0",
-    "react-zxing": "^2.0.0",
     "remix-utils": "^7.5.0",
     "sharp": "^0.33.2",
     "stripe": "^14.16.0",
@@ -121,7 +119,8 @@
     "tailwindcss-animate": "^1.0.7",
     "tiny-invariant": "^1.3.1",
     "ua-parser-js": "^1.0.37",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "zxing-wasm": "^2.0.1"
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",

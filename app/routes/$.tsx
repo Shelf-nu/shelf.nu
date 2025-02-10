@@ -6,7 +6,7 @@ export const meta = () => [{ title: appendToMetaTitle("Not found") }];
 
 export default function LayoutSplat() {
   return (
-    <div className="flex size-full h-screen items-center justify-center">
+    <div className="flex size-full h-dvh items-center justify-center">
       <div className="flex flex-col items-center text-center">
         <span className="mb-5 size-[56px] text-primary">
           <ErrorIcon />
