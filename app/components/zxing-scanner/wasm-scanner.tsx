@@ -4,7 +4,6 @@ import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import { readBarcodes } from "zxing-wasm";
 import type { ReadResult } from "zxing-wasm/reader";
-import { initializeScanner } from "~/utils/barcode-scanner";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
@@ -47,7 +46,6 @@ export const WasmScanner = ({
     let animationFrame: number;
 
     const initScanner = async () => {
-      await initializeScanner();
       await setupCamera();
       void processFrame();
     };
@@ -96,9 +94,17 @@ export const WasmScanner = ({
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        videoRef.current.onloadedmetadata = () => {
+        videoRef.current.onloadedmetadata = async () => {
           if (videoRef.current) {
+            // Apply styles after metadata is loaded
+            /** We had an issue where on first load the video would be distorted/stretched.
+             * My current theory is that this was happning because the sizing by tailwind classes was set before the metadata was loaded.
+             * This approach seems to resolve the issue(for now)
+             */
+            videoRef.current.style.objectFit = "cover";
+            videoRef.current.style.width = "100%";
+            videoRef.current.style.height = "100%";
+            await videoRef.current.play();
             updateCanvasSize();
           }
         };
@@ -227,7 +233,7 @@ export const WasmScanner = ({
           autoPlay
           playsInline
           muted
-          className="pointer-events-none size-full object-cover object-center "
+          className="pointer-events-none" // No classes as we handle scaling dynamically when camera is ready
         />
         <canvas
           ref={canvasRef}

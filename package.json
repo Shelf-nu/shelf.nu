@@ -111,7 +111,6 @@
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^2.15.1",
     "react-zorm": "^0.9.0",
-    "react-zxing": "^2.0.0",
     "remix-utils": "^7.5.0",
     "sharp": "^0.33.2",
     "stripe": "^14.16.0",
