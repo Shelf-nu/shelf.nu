@@ -8,6 +8,8 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
+const DIALOG_CLOSE_SHORTCUT = "Escape";
+
 type AssetImageProps = {
   asset: {
     assetId: Asset["id"];
@@ -68,6 +70,25 @@ export const AssetImage = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(
+    function handleEscShortcut() {
+      if (!withPreview || !isDialogOpen) {
+        return;
+      }
+
+      function handleKeydown(event: KeyboardEvent) {
+        if (event.key === DIALOG_CLOSE_SHORTCUT) {
+          event.preventDefault();
+          handleCloseDialog();
+        }
+      }
+
+      window.addEventListener("keydown", handleKeydown);
+      return () => window.removeEventListener("keydown", handleKeydown);
+    },
+    [isDialogOpen, withPreview]
+  );
 
   return (
     <>
