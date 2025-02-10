@@ -10,6 +10,7 @@ import { CrispButton } from "~/components/marketing/crisp";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
 import { PriceBox } from "~/components/subscription/price-box";
+import { config } from "~/config/shelf.config";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -164,7 +165,7 @@ export default function SelectPlan() {
           value="trial"
           disabled={disabled}
         >
-          Start 14 day free trial
+          Start {config.freeTrialDays} day free trial
         </Button>
       </Form>
     </div>
