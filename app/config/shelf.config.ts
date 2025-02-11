@@ -7,7 +7,6 @@ import {
 } from "~/utils/env";
 import { Config } from "./types";
 
-console.log("FREE_TRIAL_DAYS", FREE_TRIAL_DAYS);
 export const config: Config = {
   sendOnboardingEmail: SEND_ONBOARDING_EMAIL || false,
   enablePremiumFeatures: ENABLE_PREMIUM_FEATURES || false,
