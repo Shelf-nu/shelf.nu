@@ -10,6 +10,10 @@ export function generateHtmlFromComponent(component: React.ReactElement) {
   htmlElement.innerHTML = `
 <body>
 <style>
+* {
+ box-sizing: border-box;
+}
+
 body {
 font-family: Inter, sans-serif;
 }

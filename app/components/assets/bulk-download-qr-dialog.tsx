@@ -76,11 +76,6 @@ export default function BulkDownloadQrDialog({
       const qrNodes = assets.map((asset) =>
         generateHtmlFromComponent(
           <QrPreview
-            style={{
-              border: "3px solid #e5e7eb",
-              borderRadius: "4px",
-              padding: "16px",
-            }}
             hideButton
             qrObj={{ qr: asset.qr }}
             item={{ name: asset.title, type: "asset" }}
@@ -89,16 +84,14 @@ export default function BulkDownloadQrDialog({
       );
 
       const toBlobOptions = {
-        width: 470,
-        height: 472,
+        width: 300,
+        height: 300,
         backgroundColor: "white",
         style: {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           textAlign: "center",
-          transform: "scale(2)",
-          transformOrigin: "center",
         },
       };
 
@@ -113,10 +106,8 @@ export default function BulkDownloadQrDialog({
         qrNodes.slice(1).map((qrNode) => toBlob(qrNode, toBlobOptions))
       );
 
-      qrImages.push(firstQrImage);
-
       /* Appending qr code image to zip file */
-      qrImages.forEach((qrImage, index) => {
+      [firstQrImage, ...qrImages].forEach((qrImage, index) => {
         const asset = assets[index];
         const filename = `${asset.title}_${asset.qr.id}.jpg`;
         if (!qrImage) {

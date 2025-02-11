@@ -130,12 +130,31 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
 
     return (
       <div
-        className="flex aspect-square w-[300px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white px-6 py-[17px]"
+        style={{
+          width: "300px",
+          aspectRatio: 1 / 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          gap: "12px",
+          borderRadius: "4px",
+          border: "5px solid #E3E4E8",
+          padding: "24px 17px 24px 17px",
+        }}
         ref={ref}
       >
         <div
-          className="max-w-full truncate text-center text-[12px] font-semibold text-black"
-          style={{ fontSize: "12px" }}
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: "100%",
+            color: "black",
+            textAlign: "center",
+          }}
         >
           {title}
         </div>
@@ -149,12 +168,7 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
           <div style={{ fontWeight: 600 }}>{data?.qr?.id}</div>
           <div>
             Powered by{" "}
-            <span
-              className="font-semibold text-black"
-              style={{ fontWeight: 600, color: "black" }}
-            >
-              shelf.nu
-            </span>
+            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
           </div>
         </div>
       </div>
