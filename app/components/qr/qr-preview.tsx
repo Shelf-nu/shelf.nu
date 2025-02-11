@@ -130,6 +130,11 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
 
     return (
       <div
+        /**
+         * We are using inline style here and not tailwind because we are using this component for
+         * bulk download qr codes. And bulk download qr code uses `renderToStaticMarkup` which does not
+         * compile tailwindcss.
+         */
         style={{
           width: "300px",
           aspectRatio: 1 / 1,
