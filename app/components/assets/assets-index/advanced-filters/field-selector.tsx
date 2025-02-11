@@ -59,17 +59,33 @@ export function FieldSelector({
     setSelectedIndex(0); // Reset selection when search changes
   };
 
+  // Ensure selected item is visible in viewport
+  const scrollToIndex = (index: number) => {
+    setTimeout(() => {
+      const selectedElement = document.getElementById(`column-option-${index}`);
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }, 0);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < filteredColumns.length - 1 ? prev + 1 : prev
-        );
+        setSelectedIndex((prev) => {
+          const newIndex = prev < filteredColumns.length - 1 ? prev + 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
         break;
       case "ArrowUp":
         event.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        setSelectedIndex((prev) => {
+          const newIndex = prev > 0 ? prev - 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
         break;
       case "Enter":
         event.preventDefault();
@@ -79,16 +95,6 @@ export function FieldSelector({
         break;
     }
   };
-
-  // Ensure selected item is visible in viewport
-  useEffect(() => {
-    const selectedElement = document.getElementById(
-      `column-option-${selectedIndex}`
-    );
-    if (selectedElement) {
-      selectedElement.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedIndex]);
 
   const displayText = filter.isNew
     ? "Select column"
