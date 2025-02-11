@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
@@ -40,17 +40,10 @@ export const WasmScanner = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const streamRef = useRef<MediaStream | null>(null);
+  const animationFrame = useRef<number>(0);
 
-  // Initialize WASM and camera
-  useEffect(() => {
-    let animationFrame: number;
-
-    const initScanner = async () => {
-      await setupCamera();
-      void processFrame();
-    };
-
-    const handleDetection = (result: string) => {
+  const handleDetection = useCallback(
+    (result: string) => {
       if (!result || incomingIsLoading) return;
       // QR code validation logic...
       const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
@@ -75,96 +68,107 @@ export const WasmScanner = ({
         return;
       }
       void onQrDetectionSuccess?.(qrId);
+    },
+    [incomingIsLoading, allowNonShelfCodes, onQrDetectionSuccess]
+  );
+
+  const updateCanvasSize = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const videoRect = video.getBoundingClientRect();
+    canvas.width = videoRect.width;
+    canvas.height = videoRect.height;
+  }, [videoRef, canvasRef]);
+
+  const setupCamera = useCallback(async () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+
+    const constraints = {
+      video: selectedDevice
+        ? { deviceId: { exact: selectedDevice } }
+        : { facingMode: "environment" },
+      audio: false,
     };
 
-    const setupCamera = async () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    streamRef.current = stream;
 
-      const constraints = {
-        video: selectedDevice
-          ? { deviceId: { exact: selectedDevice } }
-          : { facingMode: "environment" },
-        audio: false,
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current) {
-            // Apply styles after metadata is loaded
-            /** We had an issue where on first load the video would be distorted/stretched.
-             * My current theory is that this was happning because the sizing by tailwind classes was set before the metadata was loaded.
-             * This approach seems to resolve the issue(for now)
-             */
-            videoRef.current.style.objectFit = "cover";
-            videoRef.current.style.width = "100%";
-            videoRef.current.style.height = "100%";
-            await videoRef.current.play();
-            updateCanvasSize();
-          }
-        };
-      }
-
-      // Set initial device if not set
-      if (!selectedDevice) {
-        const activeTrack = stream.getVideoTracks()[0];
-        const settings = activeTrack.getSettings();
-        setSelectedDevice(settings.deviceId);
-      }
-    };
-
-    const updateCanvasSize = () => {
-      if (!videoRef.current || !canvasRef.current) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const videoRect = video.getBoundingClientRect();
-      canvas.width = videoRect.width;
-      canvas.height = videoRect.height;
-    };
-
-    const processFrame = async () => {
-      if (!videoRef.current || !canvasRef.current || paused) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return;
-
-      try {
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
-
-        canvas.width = videoWidth;
-        canvas.height = videoHeight;
-        ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-        const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
-
-        const results = await readBarcodes(imageData, {
-          tryHarder: true,
-          formats: ["QRCode"],
-          maxNumberOfSymbols: 1,
-        });
-
-        if (results.length > 0) {
-          const result = results[0];
-          drawDetectionBox(ctx, result.position);
-          void handleDetection(result.text);
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = async () => {
+        if (videoRef.current) {
+          // Apply styles after metadata is loaded
+          /** We had an issue where on first load the video would be distorted/stretched.
+           * My current theory is that this was happning because the sizing by tailwind classes was set before the metadata was loaded.
+           * This approach seems to resolve the issue(for now)
+           */
+          videoRef.current.style.objectFit = "cover";
+          videoRef.current.style.width = "100%";
+          videoRef.current.style.height = "100%";
+          await videoRef.current.play();
+          updateCanvasSize();
         }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error("Frame processing error:", error);
+      };
+    }
+
+    // Set initial device if not set
+    if (!selectedDevice) {
+      const activeTrack = stream.getVideoTracks()[0];
+      const settings = activeTrack.getSettings();
+      setSelectedDevice(settings.deviceId);
+    }
+  }, [selectedDevice, updateCanvasSize]);
+
+  const processFrame = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current || paused) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    try {
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      // Make sure video dimensions are available because if they are not getImageData will error out
+      console.log(videoWidth, videoHeight);
+
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+      ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+
+      const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+
+      const results = await readBarcodes(imageData, {
+        tryHarder: true,
+        formats: ["QRCode"],
+        maxNumberOfSymbols: 1,
+      });
+
+      if (results.length > 0) {
+        const result = results[0];
+        drawDetectionBox(ctx, result.position);
+        void handleDetection(result.text);
       }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Frame processing error:", error);
+    }
 
-      animationFrame = requestAnimationFrame(processFrame);
-    };
+    animationFrame.current = requestAnimationFrame(processFrame);
+  }, [paused, handleDetection]);
 
+  const initScanner = useCallback(async () => {
+    await setupCamera();
+    void processFrame();
+  }, [setupCamera, processFrame]);
+
+  // Create observer
+  useEffect(() => {
     void initScanner();
 
     const resizeObserver = new ResizeObserver(updateCanvasSize);
@@ -173,19 +177,13 @@ export const WasmScanner = ({
     }
 
     return () => {
-      cancelAnimationFrame(animationFrame);
+      cancelAnimationFrame(animationFrame.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
       resizeObserver.disconnect();
     };
-  }, [
-    selectedDevice,
-    paused,
-    incomingIsLoading,
-    allowNonShelfCodes,
-    onQrDetectionSuccess,
-  ]);
+  }, [initScanner, animationFrame, updateCanvasSize]);
 
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
@@ -213,10 +211,6 @@ export const WasmScanner = ({
       ctx.fillStyle = "red";
       ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
     });
-  };
-
-  const handleDeviceChange = (deviceId: string) => {
-    setSelectedDevice(deviceId);
   };
 
   return (
@@ -256,7 +250,7 @@ export const WasmScanner = ({
           <div>
             <select
               value={selectedDevice}
-              onChange={(e) => handleDeviceChange(e.target.value)}
+              onChange={(e) => setSelectedDevice(e.target.value)}
               className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
             >
               {devices.map((device, index) => (
