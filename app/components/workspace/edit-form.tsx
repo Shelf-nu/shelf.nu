@@ -10,16 +10,10 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import CurrencySelector from "./currency-selector";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
 import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -61,8 +55,7 @@ export const WorkspaceEditForm = ({
   children,
   className,
 }: Props) => {
-  const { curriences, organization, isPersonalWorkspace } =
-    useLoaderData<typeof loader>();
+  const { organization, isPersonalWorkspace } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
   let schema = EditWorkspaceFormSchema(
@@ -144,33 +137,10 @@ export const WorkspaceEditForm = ({
             }
           >
             <InnerLabel hideLg>Currency</InnerLabel>
-            <Select
+            <CurrencySelector
               defaultValue={currency || "USD"}
-              disabled={disabled}
               name={zo.fields.currency()}
-            >
-              <SelectTrigger
-                className="px-3.5 py-3"
-                aria-label="Select currency"
-              >
-                <SelectValue placeholder="Choose a field type" />
-              </SelectTrigger>
-              <SelectContent
-                position="popper"
-                className="w-full min-w-[300px]"
-                align="start"
-              >
-                <div className=" max-h-[320px] overflow-auto">
-                  {curriences.map((value) => (
-                    <SelectItem value={value} key={value}>
-                      <span className="mr-4 text-[14px] text-gray-700">
-                        {value}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </div>
-              </SelectContent>
-            </Select>
+            />
           </FormRow>
         </div>
 

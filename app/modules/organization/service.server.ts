@@ -264,6 +264,8 @@ export async function updateOrganization({
       });
     }
 
+    console.log(data);
+
     return await db.organization.update({
       where: { id },
       data: data,
