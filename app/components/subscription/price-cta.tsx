@@ -1,4 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
+import { config } from "~/config/shelf.config";
 import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
@@ -48,7 +49,7 @@ export const PriceCta = ({
             name="intent"
             value="trial"
           >
-            Start 14 day free trial
+            Start {config.freeTrialDays} day free trial
           </Button>
         )}
       </Form>

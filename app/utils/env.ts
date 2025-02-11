@@ -15,6 +15,7 @@ declare global {
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
       URL_SHORTENER: string;
+      FREE_TRIAL_DAYS: string;
     };
   }
 }
@@ -50,6 +51,7 @@ declare global {
       ADMIN_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
+      FREE_TRIAL_DAYS: string;
     }
   }
 }
@@ -190,6 +192,12 @@ export const ENABLE_PREMIUM_FEATURES =
     isRequired: false,
   }) === "true" || false;
 
+export const FREE_TRIAL_DAYS =
+  getEnv("FREE_TRIAL_DAYS", {
+    isSecret: false,
+    isRequired: false,
+  }) || "14";
+
 export const DISABLE_SIGNUP =
   getEnv("DISABLE_SIGNUP", {
     isSecret: false,
@@ -225,5 +233,6 @@ export function getBrowserEnv() {
     MAINTENANCE_MODE,
     CHROME_EXECUTABLE_PATH,
     URL_SHORTENER,
+    FREE_TRIAL_DAYS,
   };
 }
