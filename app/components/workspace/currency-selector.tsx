@@ -1,4 +1,6 @@
 import { useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+
 import {
   Popover,
   PopoverContent,
@@ -27,6 +29,8 @@ export default function CurrencySelector({
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState(defaultValue);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredCurrencies = useMemo(() => {
@@ -44,8 +48,55 @@ export default function CurrencySelector({
     setIsOpen(false);
   }
 
+  // Ensure selected item is visible in viewport
+  const scrollToIndex = (index: number) => {
+    setTimeout(() => {
+      const selectedElement = document.getElementById(
+        `currency-option-${index}`
+      );
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }, 0);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) => {
+          const newIndex =
+            prev < filteredCurrencies.length - 1 ? prev + 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => {
+          const newIndex = prev > 0 ? prev - 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (filteredCurrencies[selectedIndex]) {
+          setSelectedCurrency(filteredCurrencies[selectedIndex]);
+          setIsOpen(false);
+        }
+        break;
+    }
+  };
+
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover
+      open={isOpen}
+      onOpenChange={(v) => {
+        scrollToIndex(selectedIndex);
+        setIsOpen(v);
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           ref={triggerRef}
@@ -74,17 +125,20 @@ export default function CurrencySelector({
               onChange={(event) => {
                 setSearchQuery(event.target.value);
               }}
+              onKeyDown={handleKeyDown}
             />
           </div>
-          {filteredCurrencies.map((currency) => {
+          {filteredCurrencies.map((currency, index) => {
             const isSelected = selectedCurrency === currency;
+            const isHovered = selectedIndex === index;
 
             return (
               <div
+                id={`currency-option-${index}`}
                 key={currency}
                 className={tw(
                   "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                  isSelected && "bg-gray-50"
+                  isHovered && "bg-gray-50"
                 )}
                 onClick={() => {
                   handleSelect(currency);
