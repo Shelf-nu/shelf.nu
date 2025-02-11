@@ -6,6 +6,11 @@ export interface Config {
   sendOnboardingEmail: boolean;
 
   /**
+   * Number of days for the free trial
+   */
+  freeTrialDays: number;
+
+  /**
    * Enable premium features
    */
   enablePremiumFeatures: boolean;

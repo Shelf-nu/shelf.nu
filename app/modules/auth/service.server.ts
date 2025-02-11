@@ -344,17 +344,17 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 
 export async function validateSession(token: string) {
   try {
-    const t0 = performance.now();
+    // const t0 = performance.now();
     const result = await db.$queryRaw<{ id: String; revoked: boolean }[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false
       LIMIT 1 
     `;
-    const t1 = performance.now();
+    // const t1 = performance.now();
 
     // eslint-disable-next-line no-console
-    console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
+    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
 
     if (result.length === 0) {
       //logging for debug
