@@ -19,6 +19,12 @@ type WasmScannerProps = {
   overlayClassName?: string;
   paused?: boolean;
 
+  /**
+   * If true, scanner will continue processing after successful detection
+   * If false (default), scanner will cleanup and stop after successful detection
+   */
+  continuousScanning?: boolean;
+
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
 };
@@ -34,6 +40,7 @@ export const WasmScanner = ({
   overlayClassName,
   paused = false,
   scanMessage,
+  continuousScanning = false,
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,35 +48,80 @@ export const WasmScanner = ({
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrame = useRef<number>(0);
+  // Processing ref to prevent multiple detections
+  const isProcessingRef = useRef<boolean>(false);
+
+  /**
+   * Cleanup function to stop all ongoing processes and release camera
+   */
+  const cleanup = useCallback(() => {
+    // Cancel any pending animation frames
+    if (animationFrame.current) {
+      cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = 0;
+    }
+
+    // Stop and remove all tracks from the stream
+    if (streamRef.current) {
+      const tracks = streamRef.current.getTracks();
+      tracks.forEach((track) => {
+        track.stop();
+        streamRef.current?.removeTrack(track);
+      });
+      streamRef.current = null;
+    }
+
+    // Clear video source
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
   const handleDetection = useCallback(
-    (result: string) => {
-      if (!result || incomingIsLoading) return;
-      // QR code validation logic...
-      const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-      const match = result.match(regex);
+    async (result: string) => {
+      if (!result || incomingIsLoading || isProcessingRef.current) return;
 
-      if (!match && !allowNonShelfCodes) {
-        void onQrDetectionSuccess?.(
-          result,
-          "Scanned code is not a valid Shelf QR code."
-        );
-        return;
-      }
+      isProcessingRef.current = true;
 
-      // Vibrate on successful scan
-      if (typeof navigator.vibrate === "function") {
-        navigator.vibrate(200);
-      }
+      try {
+        const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+        const match = result.match(regex);
 
-      const qrId = match ? match[2] : result;
-      if (match && !isQrId(qrId)) {
-        void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
-        return;
+        if (!match && !allowNonShelfCodes) {
+          await onQrDetectionSuccess?.(
+            result,
+            "Scanned code is not a valid Shelf QR code."
+          );
+          return;
+        }
+
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate(200);
+        }
+
+        const qrId = match ? match[2] : result;
+        if (match && !isQrId(qrId)) {
+          await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+          return;
+        }
+
+        // Only cleanup if not in continuous scanning mode
+        if (!continuousScanning) {
+          cleanup();
+        }
+
+        await onQrDetectionSuccess?.(qrId);
+      } finally {
+        isProcessingRef.current = false;
       }
-      void onQrDetectionSuccess?.(qrId);
     },
-    [incomingIsLoading, allowNonShelfCodes, onQrDetectionSuccess]
+    [
+      incomingIsLoading,
+      allowNonShelfCodes,
+      onQrDetectionSuccess,
+      cleanup,
+      continuousScanning,
+    ]
   );
 
   const updateCanvasSize = useCallback(() => {
@@ -124,7 +176,14 @@ export const WasmScanner = ({
   }, [selectedDevice, updateCanvasSize]);
 
   const processFrame = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || paused) return;
+    if (
+      !videoRef.current ||
+      !canvasRef.current ||
+      paused ||
+      isProcessingRef.current
+    ) {
+      return;
+    }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -134,8 +193,6 @@ export const WasmScanner = ({
     try {
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
-      // Make sure video dimensions are available because if they are not getImageData will error out
-      console.log(videoWidth, videoHeight);
 
       canvas.width = videoWidth;
       canvas.height = videoHeight;
@@ -149,7 +206,7 @@ export const WasmScanner = ({
         maxNumberOfSymbols: 1,
       });
 
-      if (results.length > 0) {
+      if (results.length > 0 && !isProcessingRef.current) {
         const result = results[0];
         drawDetectionBox(ctx, result.position);
         void handleDetection(result.text);
@@ -159,7 +216,10 @@ export const WasmScanner = ({
       console.error("Frame processing error:", error);
     }
 
-    animationFrame.current = requestAnimationFrame(processFrame);
+    // Always request next frame unless paused
+    if (!paused) {
+      animationFrame.current = requestAnimationFrame(processFrame);
+    }
   }, [paused, handleDetection]);
 
   const initScanner = useCallback(async () => {
@@ -177,13 +237,10 @@ export const WasmScanner = ({
     }
 
     return () => {
-      cancelAnimationFrame(animationFrame.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
+      cleanup();
       resizeObserver.disconnect();
     };
-  }, [initScanner, animationFrame, updateCanvasSize]);
+  }, [initScanner, animationFrame, updateCanvasSize, cleanup]);
 
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
