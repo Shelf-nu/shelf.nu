@@ -224,7 +224,7 @@ export default function GeneralPage() {
   const { organization, canExportAssets } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
-      <div className=" mb-6">
+      <div className="mb-6">
         <h3 className="text-text-lg font-semibold">General</h3>
         <p className="text-sm text-gray-600">
           Manage general workspace settings.
