@@ -119,7 +119,6 @@ export type QrDef = {
 };
 
 interface QrLabelProps {
-  className?: string;
   data?: { qr?: QrDef };
   title: string;
 }

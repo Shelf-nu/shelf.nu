@@ -9,7 +9,7 @@ import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { QrDef } from "../qr/qr-preview";
-import { QrPreview } from "../qr/qr-preview";
+import { QrLabel } from "../qr/qr-preview";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
@@ -75,11 +75,7 @@ export default function BulkDownloadQrDialog({
       /* Converting our React component to html so that we can later convert it into an image */
       const qrNodes = assets.map((asset) =>
         generateHtmlFromComponent(
-          <QrPreview
-            hideButton
-            qrObj={{ qr: asset.qr }}
-            item={{ name: asset.title, type: "asset" }}
-          />
+          <QrLabel data={{ qr: asset.qr }} title={asset.title} />
         )
       );
 
