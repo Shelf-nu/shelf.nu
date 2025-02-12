@@ -7,6 +7,7 @@ import type { ReadResult } from "zxing-wasm/reader";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
+import { getBestBackCamera } from "./utils";
 
 type WasmScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
@@ -50,7 +51,7 @@ export const WasmScanner = ({
   const animationFrame = useRef<number>(0);
   // Processing ref to prevent multiple detections
   const isProcessingRef = useRef<boolean>(false);
-
+  const currentDeviceIdRef = useRef<string>();
   /**
    * Cleanup function to stop all ongoing processes and release camera
    */
@@ -135,8 +136,18 @@ export const WasmScanner = ({
   }, [videoRef, canvasRef]);
 
   const setupCamera = useCallback(async () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+    const currentStream = streamRef.current;
+    const currentTrack = currentStream?.getVideoTracks()[0];
+    const currentDeviceId = currentTrack?.getSettings().deviceId;
+
+    // Avoid reinitializing if device hasn't changed
+    if (currentDeviceId === selectedDevice) {
+      return;
+    }
+
+    // Stop existing stream
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
     }
 
     const constraints = {
@@ -146,32 +157,35 @@ export const WasmScanner = ({
       audio: false,
     };
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    streamRef.current = stream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
 
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = async () => {
-        if (videoRef.current) {
-          // Apply styles after metadata is loaded
-          /** We had an issue where on first load the video would be distorted/stretched.
-           * My current theory is that this was happning because the sizing by tailwind classes was set before the metadata was loaded.
-           * This approach seems to resolve the issue(for now)
-           */
-          videoRef.current.style.objectFit = "cover";
-          videoRef.current.style.width = "100%";
-          videoRef.current.style.height = "100%";
-          await videoRef.current.play();
-          updateCanvasSize();
-        }
-      };
-    }
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = async () => {
+          if (videoRef.current) {
+            try {
+              await videoRef.current.play();
+            } catch (error) {
+              console.error("Error playing video:", error);
+            }
+            updateCanvasSize();
 
-    // Set initial device if not set
-    if (!selectedDevice) {
-      const activeTrack = stream.getVideoTracks()[0];
-      const settings = activeTrack.getSettings();
-      setSelectedDevice(settings.deviceId);
+            // Get device ID from active track
+            const activeTrack = stream.getVideoTracks()[0];
+            const activeDeviceId = activeTrack.getSettings().deviceId;
+            currentDeviceIdRef.current = activeDeviceId;
+
+            // Update selectedDevice state if it's the initial load
+            if (!selectedDevice) {
+              setSelectedDevice(activeDeviceId);
+            }
+          }
+        };
+      }
+    } catch (error) {
+      console.error("Error accessing camera:", error);
     }
   }, [selectedDevice, updateCanvasSize]);
 
@@ -251,6 +265,17 @@ export const WasmScanner = ({
     };
   }, [initScanner, animationFrame, updateCanvasSize, cleanup]);
 
+  // Initialize selectedDevice when devices are available
+  useEffect(() => {
+    if (devices.length > 0 && !selectedDevice) {
+      // Default to the first device with "environment" in the label (back camera)
+      const environmentCamera = getBestBackCamera(devices);
+      setSelectedDevice(
+        environmentCamera?.deviceId || devices[devices.length - 1]?.deviceId
+      );
+    }
+  }, [devices]); // Only run when devices list changes
+
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
     position: ReadResult["position"]
@@ -293,7 +318,7 @@ export const WasmScanner = ({
           autoPlay
           playsInline
           muted
-          className="pointer-events-none" // No classes as we handle scaling dynamically when camera is ready
+          className="pointer-events-none size-full object-cover" // No classes as we handle scaling dynamically when camera is ready
         />
         <canvas
           ref={canvasRef}
