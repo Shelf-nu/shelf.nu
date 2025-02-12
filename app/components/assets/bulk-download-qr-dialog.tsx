@@ -110,7 +110,6 @@ export default function BulkDownloadQrDialog({
         if (!qrImage) {
           return;
         }
-        console.log(index + 1, filename);
 
         if (qrFolder) {
           qrFolder.file(filename, qrImage);
