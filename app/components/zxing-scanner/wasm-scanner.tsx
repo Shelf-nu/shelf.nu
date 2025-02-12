@@ -51,7 +51,8 @@ export const WasmScanner = ({
   const animationFrame = useRef<number>(0);
   // Processing ref to prevent multiple detections
   const isProcessingRef = useRef<boolean>(false);
-  const currentDeviceIdRef = useRef<string>();
+  const isInitializing = useRef(true);
+
   /**
    * Cleanup function to stop all ongoing processes and release camera
    */
@@ -136,56 +137,45 @@ export const WasmScanner = ({
   }, [videoRef, canvasRef]);
 
   const setupCamera = useCallback(async () => {
-    const currentStream = streamRef.current;
-    const currentTrack = currentStream?.getVideoTracks()[0];
-    const currentDeviceId = currentTrack?.getSettings().deviceId;
-
-    // Avoid reinitializing if device hasn't changed
-    if (currentDeviceId === selectedDevice) {
-      return;
-    }
-
-    // Stop existing stream
-    if (currentStream) {
-      currentStream.getTracks().forEach((track) => track.stop());
-    }
-
-    const constraints = {
-      video: selectedDevice
-        ? { deviceId: { exact: selectedDevice } }
-        : { facingMode: "environment" },
-      audio: false,
-    };
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const currentDeviceId = streamRef.current
+        ?.getVideoTracks()[0]
+        ?.getSettings().deviceId;
+
+      // Skip if already using the correct device
+      if (currentDeviceId === selectedDevice) return;
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+
+      const constraints = selectedDevice
+        ? { deviceId: { exact: selectedDevice } }
+        : { facingMode: "environment" };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: constraints,
+        audio: false,
+      });
+
       streamRef.current = stream;
+
+      // Update selectedDevice only on initial load
+      if (isInitializing.current) {
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        setSelectedDevice(settings.deviceId);
+        isInitializing.current = false;
+      }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current) {
-            try {
-              await videoRef.current.play();
-            } catch (error) {
-              console.error("Error playing video:", error);
-            }
-            updateCanvasSize();
-
-            // Get device ID from active track
-            const activeTrack = stream.getVideoTracks()[0];
-            const activeDeviceId = activeTrack.getSettings().deviceId;
-            currentDeviceIdRef.current = activeDeviceId;
-
-            // Update selectedDevice state if it's the initial load
-            if (!selectedDevice) {
-              setSelectedDevice(activeDeviceId);
-            }
-          }
-        };
+        await videoRef.current.play();
+        updateCanvasSize();
       }
     } catch (error) {
-      console.error("Error accessing camera:", error);
+      console.error("Camera error:", error);
+      isInitializing.current = false;
     }
   }, [selectedDevice, updateCanvasSize]);
 
@@ -250,11 +240,16 @@ export const WasmScanner = ({
     void processFrame();
   }, [setupCamera, processFrame]);
 
-  // Create observer
+  // Simplified initialization flow
   useEffect(() => {
-    void initScanner();
+    const init = async () => {
+      await setupCamera();
+      void processFrame();
+    };
 
+    void init();
     const resizeObserver = new ResizeObserver(updateCanvasSize);
+
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
@@ -263,18 +258,32 @@ export const WasmScanner = ({
       cleanup();
       resizeObserver.disconnect();
     };
-  }, [initScanner, animationFrame, updateCanvasSize, cleanup]);
+  }, [setupCamera, processFrame, updateCanvasSize, cleanup]);
 
-  // Initialize selectedDevice when devices are available
+  // Handle device selection changes
+  useEffect(() => {
+    if (selectedDevice) {
+      const initCamera = async () => {
+        isInitializing.current = true;
+        await setupCamera();
+      };
+      void initCamera();
+    }
+  }, [selectedDevice, setupCamera]);
+
+  // Initialize default device selection
   useEffect(() => {
     if (devices.length > 0 && !selectedDevice) {
-      // Default to the first device with "environment" in the label (back camera)
-      const environmentCamera = getBestBackCamera(devices);
-      setSelectedDevice(
-        environmentCamera?.deviceId || devices[devices.length - 1]?.deviceId
-      );
+      // Find first device with environment facing mode (if available)
+      const environmentDevice = getBestBackCamera(devices);
+      setSelectedDevice(environmentDevice?.deviceId || devices[0]?.deviceId);
     }
-  }, [devices]); // Only run when devices list changes
+  }, [devices, selectedDevice]);
+
+  const handleDeviceChange = (deviceId: string) => {
+    isInitializing.current = true;
+    setSelectedDevice(deviceId);
+  };
 
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
@@ -341,7 +350,7 @@ export const WasmScanner = ({
           <div>
             <select
               value={selectedDevice}
-              onChange={(e) => setSelectedDevice(e.target.value)}
+              onChange={(e) => handleDeviceChange(e.target.value)}
               className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
             >
               {devices.map((device, index) => (
