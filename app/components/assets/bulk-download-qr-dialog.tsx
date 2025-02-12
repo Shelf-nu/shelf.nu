@@ -7,6 +7,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
 import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
+import { sanitizeFilename } from "~/utils/misc";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { QrDef } from "../qr/qr-preview";
 import { QrLabel } from "../qr/qr-preview";
@@ -105,7 +106,7 @@ export default function BulkDownloadQrDialog({
       /* Appending qr code image to zip file */
       [firstQrImage, ...qrImages].forEach((qrImage, index) => {
         const asset = assets[index];
-        const filename = `${asset.title}_${asset.qr.id}.jpg`;
+        const filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
         if (!qrImage) {
           return;
         }

@@ -34,3 +34,15 @@ export function isValidImageUrl(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * Sanitizes a filename, removing invalid characters and replacing spaces with underscores
+ * @param filename String to sanitize
+ * @returns
+ */
+export function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/[/\\:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_")
+    .trim();
+}
