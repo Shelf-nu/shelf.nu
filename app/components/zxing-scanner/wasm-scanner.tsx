@@ -191,6 +191,15 @@ export const WasmScanner = ({
     if (!ctx) return;
 
     try {
+      // Check if video is actually playing and has valid dimensions
+      if (
+        video.readyState !== video.HAVE_ENOUGH_DATA ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) {
+        animationFrame.current = requestAnimationFrame(processFrame);
+        return;
+      }
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
 
