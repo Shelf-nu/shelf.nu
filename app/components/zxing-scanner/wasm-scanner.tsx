@@ -235,11 +235,6 @@ export const WasmScanner = ({
     }
   }, [paused, handleDetection]);
 
-  const initScanner = useCallback(async () => {
-    await setupCamera();
-    void processFrame();
-  }, [setupCamera, processFrame]);
-
   // Simplified initialization flow
   useEffect(() => {
     const init = async () => {
