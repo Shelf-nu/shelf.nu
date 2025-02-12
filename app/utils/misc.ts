@@ -41,8 +41,12 @@ export function isValidImageUrl(url: string): boolean {
  * @returns
  */
 export function sanitizeFilename(filename: string): string {
-  return filename
+  let s = filename
     .replace(/[/\\:*?"<>|]/g, "_")
     .replace(/\s+/g, "_")
     .trim();
+  if (s.startsWith(".")) {
+    s = "_" + s;
+  }
+  return s;
 }
