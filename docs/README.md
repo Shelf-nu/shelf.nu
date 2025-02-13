@@ -7,7 +7,7 @@ Here you can find the documentation for shelf.
 - [Getting Started](./get-started.md) - Instructions for how to get started
   with Shelf.
 - [Response and Error handling](./handling-errors.md) - Guide on how to handle responses and errors in actions/loaders and services
-- [Shelf Config file](./shelf-config.md) - Shelf configuration file
+- [Shelf Config file](./shelf.config.ts.md) - Shelf configuration file
 - [Asset Search](./asset-search.md) - Asset search via Prisma Full text search
 - [Advanced Asset Index](./advanced-index/README.md) - Advanced asset index
 - [Single sign-on](./sso/README.md) - Single sign-on powered by Supabase
