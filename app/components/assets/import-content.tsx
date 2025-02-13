@@ -21,7 +21,7 @@ import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
 export const ImportContent = () => (
-  <>
+  <div className="text-left">
     <h3>Import your own content</h3>
     <p>
       Import your own content by placing it in the csv file. Here you can{" "}
@@ -152,7 +152,7 @@ export const ImportContent = () => (
     </div>
 
     <FileForm intent={"content"} />
-  </>
+  </div>
 );
 
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
