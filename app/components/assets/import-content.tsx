@@ -4,9 +4,7 @@ import { useFetcher } from "@remix-run/react";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 import Input from "../forms/input";
-import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -22,22 +20,8 @@ import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
-export const ImportBackup = () => (
-  <>
-    <h2>Import backup from different workspace</h2>
-    <p>
-      Currently this feature is provided as a service to shelf.nu users. If you
-      are interested{" "}
-      <CrispButton className={tw()} variant="link" title="Get in touch">
-        get in touch
-      </CrispButton>{" "}
-      with us and we will migrate your data for you.
-    </p>
-  </>
-);
-
 export const ImportContent = () => (
-  <>
+  <div className="text-left">
     <h3>Import your own content</h3>
     <p>
       Import your own content by placing it in the csv file. Here you can{" "}
@@ -154,8 +138,21 @@ export const ImportContent = () => (
         </li>
       </ul>
     </div>
+
+    <div className="mt-2 w-full">
+      For more help, you can use our{" "}
+      <Button
+        variant="link"
+        to="https://www.shelf.nu/csv-helper"
+        target="_blank"
+      >
+        CSV Helper Tool
+      </Button>
+      .
+    </div>
+
     <FileForm intent={"content"} />
-  </>
+  </div>
 );
 
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
@@ -180,7 +177,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
   return (
     <fetcher.Form
-      className="mt-4"
+      className="mt-4 w-full"
       method="post"
       ref={formRef}
       encType="multipart/form-data"
