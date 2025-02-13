@@ -6,17 +6,8 @@ import type {
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { z } from "zod";
-import {
-  ImportBackup,
-  ImportContent,
-} from "~/components/assets/import-content";
+import { ImportContent } from "~/components/assets/import-content";
 import Header from "~/components/layout/header";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/shared/tabs";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -119,21 +110,8 @@ export default function AssetsImport() {
   return (
     <div className="h-full">
       <Header />
-      <div className="flex h-auto w-full flex-col items-center">
-        <div className="h-[80px] w-full"></div>
-        <Tabs defaultValue="content" className="w-1/2">
-          <TabsList>
-            <TabsTrigger value="content">Import your own content</TabsTrigger>
-            <TabsTrigger value="backup">Import from backup</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="content">
-            <ImportContent />
-          </TabsContent>
-          <TabsContent value="backup">
-            <ImportBackup />
-          </TabsContent>
-        </Tabs>
+      <div className="flex h-auto w-full flex-col items-center py-10 max-w-screen-sm mx-auto">
+        <ImportContent />
       </div>
     </div>
   );
