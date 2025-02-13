@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 
@@ -21,6 +21,9 @@ export const useVideoDevices = () => {
   // Track loading state during device enumeration
   const [loading, setLoading] = useState(true);
 
+  // Ref to track the active media stream
+  const streamRef = useRef<MediaStream | null>(null);
+  const isMountedRef = useRef(true); // Track mount state
   /**
    * Request access to video devices and enumerate available cameras
    * Memoized to prevent unnecessary re-renders
@@ -28,30 +31,46 @@ export const useVideoDevices = () => {
   const getDevices = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    // Stop existing stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
     try {
-      /**
-       * Request camera permissions first
-       * Here we are just requesting permissions so we dont care which camera we ask for.
-       * */
-      await navigator.mediaDevices.getUserMedia({
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: false,
       });
 
-      // Get all media devices
+      // Check if component is still mounted
+      if (!isMountedRef.current) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      streamRef.current = mediaStream;
+
       const allDevices = await navigator.mediaDevices.enumerateDevices();
-      // Filter for video input devices only
       const videoDevices = allDevices.filter(
         (device) => device.kind === "videoinput"
       );
-      // Set devices if any found, otherwise null
-      setDevices(videoDevices.length > 0 ? videoDevices : null);
+
+      if (isMountedRef.current) {
+        setDevices(videoDevices.length > 0 ? videoDevices : null);
+      }
     } catch (err) {
-      // Handle errors, ensuring we always set an Error object
-      setError(err instanceof Error ? err : new Error("Failed to get devices"));
-      setDevices(null);
+      if (isMountedRef.current) {
+        setError(
+          err instanceof Error ? err : new Error("Failed to get devices")
+        );
+        setDevices(null);
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -110,22 +129,37 @@ export const useVideoDevices = () => {
    * Clean up listeners on unmount
    */
   useEffect(() => {
+    isMountedRef.current = true; // Set mount state
+
     void getDevices();
 
-    // Handler for device changes (e.g., camera connected/disconnected)
-    const handleDeviceChange = async () => {
-      await getDevices();
+    const handleDeviceChange = () => {
+      if (isMountedRef.current) void getDevices();
     };
 
-    // Listen for device changes
     navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
 
-    // Cleanup listener on unmount
     return () => {
+      isMountedRef.current = false; // Mark as unmounted
+
       navigator.mediaDevices.removeEventListener(
         "devicechange",
         handleDeviceChange
       );
+
+      // Stop active stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
+      // Safari-specific workaround: Revoke permissions
+      if (/^((?!chrome|android).)*safari/i.test(navigator.userAgent)) {
+        navigator.mediaDevices
+          .getUserMedia({ video: true })
+          .then((stream) => stream.getTracks().forEach((track) => track.stop()))
+          .catch(() => {});
+      }
     };
   }, [getDevices]);
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
@@ -7,6 +7,9 @@ import type { ReadResult } from "zxing-wasm/reader";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
+import { getBestBackCamera } from "./utils";
+import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
@@ -18,6 +21,12 @@ type WasmScannerProps = {
   className?: string;
   overlayClassName?: string;
   paused?: boolean;
+
+  /**
+   * If true, scanner will continue processing after successful detection
+   * If false (default), scanner will cleanup and stop after successful detection
+   */
+  continuousScanning?: boolean;
 
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
@@ -34,158 +43,264 @@ export const WasmScanner = ({
   overlayClassName,
   paused = false,
   scanMessage,
+  continuousScanning = false,
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedDevice, setSelectedDevice] = useState<string>();
   const streamRef = useRef<MediaStream | null>(null);
+  const animationFrame = useRef<number>(0);
+  // Processing ref to prevent multiple detections
+  const isProcessingRef = useRef<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Initialize WASM and camera
-  useEffect(() => {
-    let animationFrame: number;
+  const isInitializing = useRef(true);
+  const [isLoading, setIsLoading] = useState(false);
 
-    const initScanner = async () => {
-      await setupCamera();
-      void processFrame();
-    };
+  /**
+   * Cleanup function to stop all ongoing processes and release camera
+   */
+  const cleanup = useCallback(() => {
+    // Cancel any pending animation frames
+    if (animationFrame.current) {
+      cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = 0;
+    }
 
-    const handleDetection = (result: string) => {
-      if (!result || incomingIsLoading) return;
-      // QR code validation logic...
-      const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-      const match = result.match(regex);
+    // Stop and remove all tracks from the stream
+    if (streamRef.current) {
+      const tracks = streamRef.current.getTracks();
+      tracks.forEach((track) => {
+        track.stop();
+        streamRef.current?.removeTrack(track);
+      });
+      streamRef.current = null;
+    }
 
-      if (!match && !allowNonShelfCodes) {
-        void onQrDetectionSuccess?.(
-          result,
-          "Scanned code is not a valid Shelf QR code."
-        );
-        return;
-      }
+    // Clear video source
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
-      // Vibrate on successful scan
-      if (typeof navigator.vibrate === "function") {
-        navigator.vibrate(200);
-      }
+  const handleDetection = useCallback(
+    async (result: string) => {
+      if (!result || incomingIsLoading || isProcessingRef.current) return;
 
-      const qrId = match ? match[2] : result;
-      if (match && !isQrId(qrId)) {
-        void onQrDetectionSuccess?.(qrId, "Invalid QR code format");
-        return;
-      }
-      void onQrDetectionSuccess?.(qrId);
-    };
-
-    const setupCamera = async () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-
-      const constraints = {
-        video: selectedDevice
-          ? { deviceId: { exact: selectedDevice } }
-          : { facingMode: "environment" },
-        audio: false,
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current) {
-            // Apply styles after metadata is loaded
-            /** We had an issue where on first load the video would be distorted/stretched.
-             * My current theory is that this was happning because the sizing by tailwind classes was set before the metadata was loaded.
-             * This approach seems to resolve the issue(for now)
-             */
-            videoRef.current.style.objectFit = "cover";
-            videoRef.current.style.width = "100%";
-            videoRef.current.style.height = "100%";
-            await videoRef.current.play();
-            updateCanvasSize();
-          }
-        };
-      }
-
-      // Set initial device if not set
-      if (!selectedDevice) {
-        const activeTrack = stream.getVideoTracks()[0];
-        const settings = activeTrack.getSettings();
-        setSelectedDevice(settings.deviceId);
-      }
-    };
-
-    const updateCanvasSize = () => {
-      if (!videoRef.current || !canvasRef.current) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const videoRect = video.getBoundingClientRect();
-      canvas.width = videoRect.width;
-      canvas.height = videoRect.height;
-    };
-
-    const processFrame = async () => {
-      if (!videoRef.current || !canvasRef.current || paused) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return;
+      isProcessingRef.current = true;
 
       try {
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
+        const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+        const match = result.match(regex);
 
-        canvas.width = videoWidth;
-        canvas.height = videoHeight;
-        ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-        const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
-
-        const results = await readBarcodes(imageData, {
-          tryHarder: true,
-          formats: ["QRCode"],
-          maxNumberOfSymbols: 1,
-        });
-
-        if (results.length > 0) {
-          const result = results[0];
-          drawDetectionBox(ctx, result.position);
-          void handleDetection(result.text);
+        if (!match && !allowNonShelfCodes) {
+          await onQrDetectionSuccess?.(
+            result,
+            "Scanned code is not a valid Shelf QR code."
+          );
+          return;
         }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error("Frame processing error:", error);
+
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate(200);
+        }
+
+        const qrId = match ? match[2] : result;
+        if (match && !isQrId(qrId)) {
+          await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+          return;
+        }
+
+        // Only cleanup if not in continuous scanning mode
+        if (!continuousScanning) {
+          cleanup();
+        }
+
+        await onQrDetectionSuccess?.(qrId);
+      } finally {
+        isProcessingRef.current = false;
+      }
+    },
+    [
+      incomingIsLoading,
+      allowNonShelfCodes,
+      onQrDetectionSuccess,
+      cleanup,
+      continuousScanning,
+    ]
+  );
+
+  const updateCanvasSize = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const videoRect = video.getBoundingClientRect();
+    canvas.width = videoRect.width;
+    canvas.height = videoRect.height;
+  }, [videoRef, canvasRef]);
+
+  const setupCamera = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const currentVideoTrack = streamRef.current?.getVideoTracks()[0];
+      // Skip redundant initialization
+      if (
+        currentVideoTrack?.readyState === "live" &&
+        currentVideoTrack?.getSettings().deviceId === selectedDevice
+      ) {
+        return;
       }
 
-      animationFrame = requestAnimationFrame(processFrame);
+      // Cleanup previous stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+
+      const constraints = selectedDevice
+        ? { deviceId: { exact: selectedDevice } }
+        : { facingMode: "environment" };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: constraints,
+        audio: false,
+      });
+
+      // Handle component unmount while waiting for camera
+      if (!videoRef.current) return;
+
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+
+      // Wait for video to be ready
+      await new Promise((resolve) => {
+        videoRef.current!.onloadedmetadata = resolve;
+      });
+
+      await videoRef.current.play();
+      updateCanvasSize();
+
+      // First initialization only
+      if (isInitializing.current) {
+        const track = stream.getVideoTracks()[0];
+        setSelectedDevice(track.getSettings().deviceId);
+        isInitializing.current = false;
+      }
+    } catch (error) {
+      setError(
+        `Camera error: ${error instanceof Error ? error.message : error}`
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedDevice, updateCanvasSize]);
+
+  const processFrame = useCallback(async () => {
+    if (
+      !videoRef.current ||
+      !canvasRef.current ||
+      paused ||
+      isProcessingRef.current
+    ) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    try {
+      // Check if video is actually playing and has valid dimensions
+      if (
+        video.readyState !== video.HAVE_ENOUGH_DATA ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) {
+        animationFrame.current = requestAnimationFrame(processFrame);
+        return;
+      }
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+      ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+
+      const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+
+      const results = await readBarcodes(imageData, {
+        tryHarder: true,
+        formats: ["QRCode"],
+        maxNumberOfSymbols: 1,
+      });
+
+      if (results.length > 0 && !isProcessingRef.current) {
+        const result = results[0];
+        drawDetectionBox(ctx, result.position);
+        void handleDetection(result.text);
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Frame processing error:", error);
+    }
+
+    // Always request next frame unless paused
+    if (!paused) {
+      animationFrame.current = requestAnimationFrame(processFrame);
+    }
+  }, [paused, handleDetection]);
+
+  // Simplified initialization flow
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    const init = async () => {
+      await setupCamera();
+      if (!abortController.signal.aborted && !paused) {
+        animationFrame.current = requestAnimationFrame(processFrame);
+      }
     };
 
-    void initScanner();
-
+    void init();
     const resizeObserver = new ResizeObserver(updateCanvasSize);
+
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
-      cancelAnimationFrame(animationFrame);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
+      abortController.abort();
+      cleanup();
       resizeObserver.disconnect();
     };
-  }, [
-    selectedDevice,
-    paused,
-    incomingIsLoading,
-    allowNonShelfCodes,
-    onQrDetectionSuccess,
-  ]);
+  }, [setupCamera, processFrame, paused, cleanup, updateCanvasSize]);
+
+  // Handle device selection changes
+  useEffect(() => {
+    if (selectedDevice) {
+      const initCamera = async () => {
+        isInitializing.current = true;
+        await setupCamera();
+      };
+      void initCamera();
+    }
+  }, [selectedDevice, setupCamera]);
+
+  // Initialize default device selection
+  useEffect(() => {
+    if (devices.length > 0 && !selectedDevice) {
+      // Find first device with environment facing mode (if available)
+      const environmentDevice = getBestBackCamera(devices);
+      setSelectedDevice(environmentDevice?.deviceId || devices[0]?.deviceId);
+    }
+  }, [devices, selectedDevice]);
+
+  const handleDeviceChange = (deviceId: string) => {
+    isInitializing.current = true;
+    setSelectedDevice(deviceId);
+  };
 
   const drawDetectionBox = (
     ctx: CanvasRenderingContext2D,
@@ -215,10 +330,6 @@ export const WasmScanner = ({
     });
   };
 
-  const handleDeviceChange = (deviceId: string) => {
-    setSelectedDevice(deviceId);
-  };
-
   return (
     <div
       ref={containerRef}
@@ -228,12 +339,43 @@ export const WasmScanner = ({
       )}
     >
       <div className="relative size-full overflow-hidden">
+        {/* Error State Overlay */}
+        {error && error !== "" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
+            <div className="text-center text-white">
+              <p className="mb-4">{error}</p>
+              <p className="mb-4">
+                If the issue persists, please contact support.
+              </p>
+              <Button
+                onClick={() => window.location.reload()}
+                variant="secondary"
+              >
+                Refresh Page
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80">
+            <div className="text-center text-white ">
+              <Spinner className="mx-auto mb-2" />
+              Initializing camera...
+            </div>
+          </div>
+        )}
+
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className="pointer-events-none" // No classes as we handle scaling dynamically when camera is ready
+          className="pointer-events-none size-full object-cover" // No classes as we handle scaling dynamically when camera is ready
+          onError={(e) => {
+            setError(`Video error: ${e.currentTarget.error?.message}`);
+            setIsLoading(false);
+          }}
         />
         <canvas
           ref={canvasRef}
