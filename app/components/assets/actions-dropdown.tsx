@@ -128,7 +128,7 @@ const ConditionalActionsDropdown = () => {
               })}
             >
               <DropdownMenuItem
-                className="border-b px-4 py-1 md:p-0"
+                className="border-b px-0 py-1 md:p-0"
                 disabled={assetIsCheckedOut && !assetCanBeReleased}
               >
                 {assetCanBeReleased ? (
@@ -174,7 +174,7 @@ const ConditionalActionsDropdown = () => {
               })}
             >
               <DropdownMenuItem
-                className="px-4 py-1 md:p-0"
+                className="px-0 py-1 md:p-0"
                 disabled={assetIsCheckedOut}
               >
                 <Button
@@ -191,13 +191,13 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               </DropdownMenuItem>
 
-              <DropdownMenuItem className={tw("border-b px-4 py-1 md:p-0")}>
+              <DropdownMenuItem className={tw("border-b px-0 py-1 md:p-0")}>
                 <UpdateGpsCoordinatesForm
                   // Closes the dropdown when the button is clicked
                   callback={handleMenuClose}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
+              <DropdownMenuItem className="border-b px-0 py-1 md:p-0">
                 <Button
                   role="button"
                   variant="link"
@@ -214,7 +214,7 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               </DropdownMenuItem>
               <When truthy={isAdministratorOrOwner}>
-                <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
+                <DropdownMenuItem className="border-b px-0 py-1 md:p-0">
                   <Button
                     role="button"
                     variant="link"
@@ -231,7 +231,7 @@ const ConditionalActionsDropdown = () => {
                   </Button>
                 </DropdownMenuItem>
               </When>
-              <DropdownMenuItem className="px-4 py-1 md:p-0">
+              <DropdownMenuItem className="px-0 py-1 md:p-0">
                 <Button
                   to="edit"
                   role="link"
@@ -244,7 +244,7 @@ const ConditionalActionsDropdown = () => {
                   </span>
                 </Button>
               </DropdownMenuItem>
-              <DropdownMenuItem className="px-4 py-1 md:p-0">
+              <DropdownMenuItem className="px-0 py-1 md:p-0">
                 <Button
                   to="overview/duplicate"
                   role="link"
@@ -259,7 +259,7 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="px-4 py-1 md:p-0"
+                className="px-0 py-1 md:p-0"
                 onSelect={(e) => {
                   e.preventDefault();
                 }}
