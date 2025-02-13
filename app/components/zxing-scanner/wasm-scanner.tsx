@@ -8,6 +8,8 @@ import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
 import { getBestBackCamera } from "./utils";
+import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
   onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
@@ -51,7 +53,10 @@ export const WasmScanner = ({
   const animationFrame = useRef<number>(0);
   // Processing ref to prevent multiple detections
   const isProcessingRef = useRef<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
   const isInitializing = useRef(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   /**
    * Cleanup function to stop all ongoing processes and release camera
@@ -138,13 +143,17 @@ export const WasmScanner = ({
 
   const setupCamera = useCallback(async () => {
     try {
-      const currentDeviceId = streamRef.current
-        ?.getVideoTracks()[0]
-        ?.getSettings().deviceId;
+      setIsLoading(true);
+      const currentVideoTrack = streamRef.current?.getVideoTracks()[0];
+      // Skip redundant initialization
+      if (
+        currentVideoTrack?.readyState === "live" &&
+        currentVideoTrack?.getSettings().deviceId === selectedDevice
+      ) {
+        return;
+      }
 
-      // Skip if already using the correct device
-      if (currentDeviceId === selectedDevice) return;
-
+      // Cleanup previous stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -158,24 +167,32 @@ export const WasmScanner = ({
         audio: false,
       });
 
-      streamRef.current = stream;
+      // Handle component unmount while waiting for camera
+      if (!videoRef.current) return;
 
-      // Update selectedDevice only on initial load
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+
+      // Wait for video to be ready
+      await new Promise((resolve) => {
+        videoRef.current!.onloadedmetadata = resolve;
+      });
+
+      await videoRef.current.play();
+      updateCanvasSize();
+
+      // First initialization only
       if (isInitializing.current) {
         const track = stream.getVideoTracks()[0];
-        const settings = track.getSettings();
-        setSelectedDevice(settings.deviceId);
+        setSelectedDevice(track.getSettings().deviceId);
         isInitializing.current = false;
       }
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        updateCanvasSize();
-      }
     } catch (error) {
-      console.error("Camera error:", error);
-      isInitializing.current = false;
+      setError(
+        `Camera error: ${error instanceof Error ? error.message : error}`
+      );
+    } finally {
+      setIsLoading(false);
     }
   }, [selectedDevice, updateCanvasSize]);
 
@@ -237,9 +254,13 @@ export const WasmScanner = ({
 
   // Simplified initialization flow
   useEffect(() => {
+    const abortController = new AbortController();
+
     const init = async () => {
       await setupCamera();
-      void processFrame();
+      if (!abortController.signal.aborted && !paused) {
+        animationFrame.current = requestAnimationFrame(processFrame);
+      }
     };
 
     void init();
@@ -250,10 +271,11 @@ export const WasmScanner = ({
     }
 
     return () => {
+      abortController.abort();
       cleanup();
       resizeObserver.disconnect();
     };
-  }, [setupCamera, processFrame, updateCanvasSize, cleanup]);
+  }, [setupCamera, processFrame, paused, cleanup, updateCanvasSize]);
 
   // Handle device selection changes
   useEffect(() => {
@@ -317,12 +339,43 @@ export const WasmScanner = ({
       )}
     >
       <div className="relative size-full overflow-hidden">
+        {/* Error State Overlay */}
+        {error && error !== "" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
+            <div className="text-center text-white">
+              <p className="mb-4">{error}</p>
+              <p className="mb-4">
+                If the issue persists, please contact support.
+              </p>
+              <Button
+                onClick={() => window.location.reload()}
+                variant="secondary"
+              >
+                Refresh Page
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80">
+            <div className="text-center text-white ">
+              <Spinner className="mx-auto mb-2" />
+              Initializing camera...
+            </div>
+          </div>
+        )}
+
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           className="pointer-events-none size-full object-cover" // No classes as we handle scaling dynamically when camera is ready
+          onError={(e) => {
+            setError(`Video error: ${e.currentTarget.error?.message}`);
+            setIsLoading(false);
+          }}
         />
         <canvas
           ref={canvasRef}
