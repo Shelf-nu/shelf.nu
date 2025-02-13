@@ -1,15 +1,18 @@
 import React, { useRef, useMemo } from "react";
 import { changeDpiDataUrl } from "changedpi";
-import domtoimage from "dom-to-image";
+import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
+import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 interface ObjectType {
   className?: string;
+  style?: React.CSSProperties;
+  hideButton?: boolean;
   item: {
     name: string;
     type: "asset" | "kit";
@@ -23,7 +26,13 @@ interface ObjectType {
   };
 }
 
-export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
+export const QrPreview = ({
+  className,
+  style,
+  qrObj,
+  item,
+  hideButton = false,
+}: ObjectType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
@@ -40,17 +49,16 @@ export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
     // making sure that the captureDiv and downloadBtn exists in DOM
     if (captureDiv && downloadBtn) {
       e.preventDefault();
-      domtoimage
-        .toPng(captureDiv, {
-          height: captureDiv.offsetHeight * 2,
-          width: captureDiv.offsetWidth * 2,
-          style: {
-            transform: `scale(${2})`,
-            transformOrigin: "top left",
-            width: `${captureDiv.offsetWidth}px`,
-            height: `${captureDiv.offsetHeight}px`,
-          },
-        })
+      toPng(captureDiv, {
+        height: captureDiv.offsetHeight * 2,
+        width: captureDiv.offsetWidth * 2,
+        style: {
+          transform: `scale(${2})`,
+          transformOrigin: "top left",
+          width: `${captureDiv.offsetWidth}px`,
+          height: `${captureDiv.offsetHeight}px`,
+        },
+      })
         .then((dataUrl: string) => {
           const downloadLink = document.createElement("a");
           downloadLink.href = changeDpiDataUrl(dataUrl, 300);
@@ -66,64 +74,92 @@ export const QrPreview = ({ className, qrObj, item }: ObjectType) => {
     }
   }
 
-  const printQr = useReactToPrint({
-    content: () => captureDivRef.current,
-  });
+  const printQr = useReactToPrint({ content: () => captureDivRef.current });
+
   return (
     <div
-      className={tw(
-        "mb-4 w-auto rounded border border-solid bg-white",
-        className
-      )}
+      className={tw("mb-4 w-auto rounded border-2 bg-white", className)}
+      style={style}
     >
       <div className="flex w-full justify-center pt-6">
         <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
       </div>
-      <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
-        <Button
-          icon="download"
-          onClick={downloadQr}
-          download={`${slugify(item.name)}-${qrObj?.qr
-            ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
-          ref={downloadQrBtnRef}
-          variant="secondary"
-          className="w-full"
-        >
-          Download
-        </Button>
-        <Button
-          icon="print"
-          variant="secondary"
-          className="w-full"
-          onClick={printQr}
-        >
-          Print
-        </Button>
-      </div>
+
+      <When truthy={!hideButton}>
+        <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
+          <Button
+            icon="download"
+            onClick={downloadQr}
+            download={`${slugify(item.name)}-${qrObj?.qr
+              ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
+            ref={downloadQrBtnRef}
+            variant="secondary"
+            className="w-full"
+          >
+            Download
+          </Button>
+          <Button
+            icon="print"
+            variant="secondary"
+            className="w-full"
+            onClick={printQr}
+          >
+            Print
+          </Button>
+        </div>
+      </When>
     </div>
   );
 };
 
+export type QrDef = {
+  id: string;
+  size: SizeKeys;
+  src: string;
+};
+
 interface QrLabelProps {
-  data?: {
-    qr?: {
-      id: string;
-      size: SizeKeys;
-      src: string;
-    };
-  };
+  data?: { qr?: QrDef };
   title: string;
 }
 
-const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
+export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
     const { data, title } = props ?? {};
+
     return (
       <div
-        className="flex aspect-square w-[300px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white px-6 py-[17px]"
+        /**
+         * We are using inline style here and not tailwind because we are using this component for
+         * bulk download qr codes. And bulk download qr code uses `renderToStaticMarkup` which does not
+         * compile tailwindcss.
+         */
+        style={{
+          width: "300px",
+          aspectRatio: 1 / 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          gap: "12px",
+          borderRadius: "4px",
+          border: "5px solid #E3E4E8",
+          padding: "24px 17px 24px 17px",
+        }}
         ref={ref}
       >
-        <div className="max-w-full truncate text-center text-[12px] font-semibold text-black">
+        <div
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: "100%",
+            color: "black",
+            textAlign: "center",
+          }}
+        >
           {title}
         </div>
         <figure className="qr-code flex justify-center">
@@ -132,14 +168,12 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
             alt={`${data?.qr?.size}-shelf-qr-code.png`}
           />
         </figure>
-        <div className="w-full text-center text-[12px]">
-          <span className="block  font-semibold text-black">
-            {data?.qr?.id}
-          </span>
-          <span className="block text-black">
+        <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
+          <div style={{ fontWeight: 600 }}>{data?.qr?.id}</div>
+          <div>
             Powered by{" "}
-            <span className="font-semibold text-black">shelf.nu</span>
-          </span>
+            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+          </div>
         </div>
       </div>
     );
