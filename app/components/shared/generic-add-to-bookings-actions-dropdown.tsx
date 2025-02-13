@@ -41,12 +41,9 @@ const ConditionalActionsDropdown = ({
 }) => {
   const {
     ref: dropdownRef,
-    defaultApplied,
     open,
-    defaultOpen,
     setOpen,
-  } = useControlledDropdownMenu();
-
+  } = useControlledDropdownMenu({ skipDefault: true });
   return (
     <>
       {open && (
@@ -56,14 +53,7 @@ const ConditionalActionsDropdown = ({
           )}
         />
       )}
-      <DropdownMenu
-        modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
-        }}
-        open={open}
-        defaultOpen={defaultOpen}
-      >
+      <DropdownMenu modal={false} open={open}>
         <DropdownMenuTrigger
           className={`asset-actions hidden sm:flex`}
           onClick={() => setOpen(true)}

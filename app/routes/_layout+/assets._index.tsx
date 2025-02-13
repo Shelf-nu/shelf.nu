@@ -373,7 +373,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          className="flex justify-between gap-3 p-4  md:justify-normal md:px-6"
+          className="flex justify-between gap-3 py-4  md:justify-normal md:pl-0 md:pr-6"
           to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
