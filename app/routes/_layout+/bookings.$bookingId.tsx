@@ -607,7 +607,7 @@ export default function BookingEditPage() {
       <Header
         title={hasName ? name : booking.name}
         subHeading={
-          <div className="flex items-center gap-2">
+          <div key={booking.status} className="flex items-center gap-2">
             <Badge color={bookingStatusColorMap[booking.status]}>
               <span className="block lowercase first-letter:uppercase">
                 {booking.status}
