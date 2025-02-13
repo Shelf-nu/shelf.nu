@@ -9,6 +9,14 @@ type UseControlledDropdownMenuReturn = {
   setOpen: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
+interface Options {
+  /**
+   * Set this to true if you want to skip the defaultOpen functionality for small screens when scanning
+   * This is useful as we don't want to open all versions of a dropdown by default when scanning a QR code
+   */
+  skipDefault?: boolean;
+}
+
 /**
  * Hook to control the state of a dropdown menu.
  * If the user clicks outside the dropdown, it will close.
@@ -16,11 +24,15 @@ type UseControlledDropdownMenuReturn = {
  *
  * @returns {UseControlledDropdownMenuReturn}
  */
-export function useControlledDropdownMenu(): UseControlledDropdownMenuReturn {
+export function useControlledDropdownMenu(
+  options: Options = {}
+): UseControlledDropdownMenuReturn {
   const ref = useRef<HTMLDivElement>(null);
   const [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
-  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
+  const defaultOpen = options?.skipDefault
+    ? false
+    : window.innerWidth <= 640 && refIsQrScan;
 
   const [open, setOpen] = useState(defaultOpen);
   const [defaultApplied, setDefaultApplied] = useState(false);

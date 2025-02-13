@@ -126,7 +126,7 @@ export function AdvancedIndexColumn({
       return (
         <TextColumn
           className={tw(
-            "min-w-[300px] max-w-[400px] whitespace-normal",
+            "min-w-[300px] max-w-[450px] whitespace-normal",
             modeIsAdvanced && freezeColumn ? freezeColumnClassNames.name : ""
           )}
           value={
@@ -139,15 +139,15 @@ export function AdvancedIndexColumn({
                     mainImageExpiration: item.mainImageExpiration,
                     alt: item.title,
                   }}
-                  className="size-10 rounded-[4px] border object-cover"
+                  className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={!!item.mainImage}
                 />
               ) : null}
 
-              <div>
+              <div className="min-w-0 flex-1 truncate">
                 <Link
                   to={item.id}
-                  className="font-medium underline hover:text-gray-600"
+                  className="truncate font-medium underline hover:text-gray-600"
                   title={item.title}
                 >
                   {item.title}
