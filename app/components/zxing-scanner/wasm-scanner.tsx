@@ -132,14 +132,13 @@ export const WasmScanner = ({
   );
 
   const updateCanvasSize = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-
+    if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const videoRect = video.getBoundingClientRect();
-    canvas.width = videoRect.width;
-    canvas.height = videoRect.height;
-  }, [videoRef, canvasRef]);
+    if (!canvas) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }, []);
 
   const setupCamera = useCallback(async () => {
     try {
@@ -221,6 +220,8 @@ export const WasmScanner = ({
         animationFrame.current = requestAnimationFrame(processFrame);
         return;
       }
+      console.log("Video dimensions:", video.videoWidth, video.videoHeight);
+      console.log("Canvas dimensions:", canvas.width, canvas.height);
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
 
@@ -283,10 +284,13 @@ export const WasmScanner = ({
       const initCamera = async () => {
         isInitializing.current = true;
         await setupCamera();
+        if (!paused) {
+          animationFrame.current = requestAnimationFrame(processFrame);
+        }
       };
       void initCamera();
     }
-  }, [selectedDevice, setupCamera]);
+  }, [selectedDevice, setupCamera, processFrame, paused]);
 
   // Initialize default device selection
   useEffect(() => {
