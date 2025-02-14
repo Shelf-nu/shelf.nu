@@ -1,0 +1,12 @@
+/* styles/nprogress-custom.css */
+#nprogress .bar {
+  @apply bg-gradient-to-r from-primary-700 to-primary-700;
+}
+
+#nprogress .peg {
+  @apply shadow-lg shadow-primary-700;
+}
+
+#nprogress .spinner {
+  @apply hidden;
+}

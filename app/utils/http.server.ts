@@ -3,6 +3,7 @@ import { json } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
 import { sendNotification } from "./emitter/send-notification.server";
+import { SERVER_URL, URL_SHORTENER } from "./env";
 import type { Options } from "./error";
 import {
   ShelfError,
@@ -155,12 +156,17 @@ export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,
   defaultRedirect = "/"
 ) {
-  if (
-    !to ||
-    typeof to !== "string" ||
-    !to.startsWith("/") ||
-    to.startsWith("//")
-  ) {
+  /** List of domains we allow to redirect to
+   */
+  const safeList = [SERVER_URL, `https://${URL_SHORTENER}`];
+
+  if (!to || typeof to !== "string" || to.startsWith("//")) {
+    return defaultRedirect;
+  }
+
+  // Check if the URL starts with any of the safe domains
+  const isSafeDomain = safeList.some((safeUrl) => to.startsWith(safeUrl));
+  if (!to.startsWith("/") && !isSafeDomain) {
     return defaultRedirect;
   }
 
@@ -192,13 +198,13 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @param cause - The error that has been catch
  * @returns The normalized error with `error` key set to the error
  */
-export function error(cause: ShelfError) {
+export function error(cause: ShelfError, shouldSendNotification = true) {
   Logger.error(cause);
 
-  // TODO: @DonKoko maybe globally rethink this?
   if (
     cause.additionalData?.userId &&
-    typeof cause.additionalData?.userId === "string"
+    typeof cause.additionalData?.userId === "string" &&
+    shouldSendNotification
   ) {
     sendNotification({
       title: cause.title || "Oops! Something went wrong",

@@ -1,6 +1,7 @@
 # Contribute to Shelf
 
 We really appreciate your interest to contribute to Shelf! Any kind of contribution is highly appreciated, not only coding ☺️.
+Wondering what is up for grabs? Check out those issues: https://github.com/Shelf-nu/shelf.nu/labels/Open%20for%20contibutions
 
 **Prerequisites:** Node 16 (or newer) installed in your computer.
 

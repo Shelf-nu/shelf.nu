@@ -1,8 +1,7 @@
 import { useRef } from "react";
-
-import { Form } from "@remix-run/react";
 import { useFetcher } from "react-router-dom";
 import { isFormProcessing } from "~/utils/form";
+import { Form } from "../custom-form";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 
@@ -23,6 +22,8 @@ export default function PasswordResetForm({ userEmail }: Props) {
             Use the link to send yourself a password reset email. You will be
             logged out 3 seconds after clicking the link.
           </p>
+          <input type="hidden" name="type" value="resetPassword" />
+
           <Button
             type="submit"
             disabled={isProcessing}

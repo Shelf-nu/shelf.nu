@@ -7,7 +7,7 @@ import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export function loader() {
@@ -39,12 +39,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const asset = await getAsset({ id: assetId, organizationId });
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      include: { qrCodes: true },
+    });
     /** WE get the first qrCode as the app only supports 1 code per asset for now */
     const qr = asset?.qrCodes[0];
 
     await createScan({
       userAgent: request.headers.get("user-agent") as string,
+      userId: userId,
       qrId: qr.id,
       deleted: false,
       latitude: latitude,

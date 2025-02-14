@@ -9,6 +9,8 @@ node_modules
 .env.staging
 .cache
 
+tsconfig.tsbuildinfo
+
 /prisma/data.db
 /prisma/data.db-journal
 
@@ -19,6 +21,7 @@ node_modules
 **/supabase/.branches
 **/supabase/.temp
 **/supabase/.env
+/sso/metadata-files
 
 # OS
 .DS_Store
@@ -29,6 +32,7 @@ test-results/
 /playwright-report/*
 desktop-app/shelf-installer
 desktop-app/portable
+/test/lab_equipment_2000.csv
 
 .npmrc
 
@@ -36,3 +40,5 @@ desktop-app/portable
 
 # Sentry Config File
 .sentryclirc
+
+.cert

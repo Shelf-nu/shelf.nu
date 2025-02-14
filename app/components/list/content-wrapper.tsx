@@ -9,7 +9,10 @@ export function ListContentWrapper({
 }) {
   return (
     <div
-      className={tw("flex flex-1 flex-col md:mx-0 md:mt-4 md:gap-2", className)}
+      className={tw(
+        "relative flex flex-1 flex-col md:mx-0 md:mt-4 md:gap-2",
+        className
+      )}
     >
       {children}
     </div>

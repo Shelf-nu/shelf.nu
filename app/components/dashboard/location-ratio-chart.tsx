@@ -46,6 +46,7 @@ export default function LocationRatioChart() {
                     value={(assetsWithLocation / totalAssets) * 100}
                     size="xl"
                     color="orange"
+                    className="relative"
                   >
                     <span className="block text-center text-xs font-medium text-gray-600">
                       Location known <br />

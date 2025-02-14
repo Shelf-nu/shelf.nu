@@ -1,11 +1,12 @@
-import { Roles } from "@prisma/client";
+import type { SsoDetails } from "@prisma/client";
+import { OrganizationRoles, Roles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { ShelfError } from "./error";
 import type {
   PermissionAction,
   PermissionEntity,
-} from "./permissions/permission.validator.server";
+} from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
@@ -79,10 +80,46 @@ export async function requirePermission({
     userId,
   });
 
+  const role = roles ? roles[0] : OrganizationRoles.BASE;
+
   return {
     organizations,
     organizationId,
     currentOrganization,
-    role: roles ? roles[0] : undefined,
+    role,
+    isSelfServiceOrBase:
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE,
+    userOrganizations,
   };
+}
+
+/** Gets the role needed for SSO login from the groupID returned by the SSO claims */
+export function getRoleFromGroupId(
+  ssoDetails: SsoDetails,
+  groupIds: string[]
+): OrganizationRoles {
+  // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
+  if (ssoDetails.adminGroupId && groupIds.includes(ssoDetails.adminGroupId)) {
+    return OrganizationRoles.ADMIN;
+  } else if (
+    ssoDetails.selfServiceGroupId &&
+    groupIds.includes(ssoDetails.selfServiceGroupId)
+  ) {
+    return OrganizationRoles.SELF_SERVICE;
+  } else if (
+    ssoDetails.baseUserGroupId &&
+    groupIds.includes(ssoDetails.baseUserGroupId)
+  ) {
+    return OrganizationRoles.BASE;
+  } else {
+    throw new ShelfError({
+      cause: null,
+      title: "Group ID not found",
+      message:
+        "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
+      label: "Auth",
+      additionalData: { ssoDetails, groupIds },
+    });
+  }
 }

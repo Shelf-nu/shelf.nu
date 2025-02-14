@@ -1,13 +1,16 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization, User, UserOrganization } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
+import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
+import { sendEmail } from "~/emails/mail.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
@@ -17,20 +20,53 @@ import {
 
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, isLikeShelfError } from "~/utils/error";
-import type { ValidationError } from "~/utils/http";
+import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
+import { getRedirectUrlFromRequest, type ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
+import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
-import type { UpdateUserPayload } from "./types";
+import type { MergeInclude } from "~/utils/utils";
+import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
+import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
+import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
+import { getOrganizationsBySsoDomain } from "../organization/service.server";
+import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
+
+type UserWithInclude<T extends Prisma.UserInclude | undefined> =
+  T extends Prisma.UserInclude ? Prisma.UserGetPayload<{ include: T }> : User;
+
+export async function getUserByID<T extends Prisma.UserInclude | undefined>(
+  id: User["id"],
+  include?: T
+): Promise<UserWithInclude<T>> {
+  try {
+    const user = await db.user.findUniqueOrThrow({
+      where: { id },
+      include: { ...include },
+    });
+
+    return user as UserWithInclude<T>;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "User not found",
+      message: "The user you are trying to access does not exist.",
+      additionalData: { id, include },
+      label,
+    });
+  }
+}
 
 export async function findUserByEmail(email: User["email"]) {
   try {
@@ -40,19 +76,6 @@ export async function findUserByEmail(email: User["email"]) {
       cause,
       message: "Failed to find user",
       additionalData: { email },
-      label,
-    });
-  }
-}
-
-export async function getUserByID(id: User["id"]) {
-  try {
-    return await db.user.findUniqueOrThrow({ where: { id } });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "No user found with this ID",
-      additionalData: { id },
       label,
     });
   }
@@ -107,10 +130,13 @@ export async function createUserOrAttachOrg({
   roles,
   password,
   firstName,
+  createdWithInvite = false,
 }: Pick<User, "email" | "firstName"> & {
   organizationId: Organization["id"];
   roles: OrganizationRoles[];
   password: string;
+  /** We mark  */
+  createdWithInvite: boolean;
 }) {
   try {
     const shelfUser = await db.user.findFirst({ where: { email } });
@@ -139,6 +165,7 @@ export async function createUserOrAttachOrg({
         organizationId,
         roles,
         firstName,
+        createdWithInvite,
       });
     }
 
@@ -162,6 +189,315 @@ export async function createUserOrAttachOrg({
   }
 }
 
+/**
+ * Creates a new user from SSO authentication or handles subsequent logins.
+ *
+ * This function handles two SSO scenarios:
+ * 1. Pure SSO: User authenticates via SSO but their workspace access is managed manually through invites
+ * 2. SCIM SSO: User authenticates via SSO and their workspace access is managed through IDP group mappings
+ *
+ * All SSO users get a personal workspace and can be invited to other workspaces manually,
+ * even if no organizations are configured to use their email domain.
+ *
+ * @param authSession - The authentication session from Supabase containing user ID and email
+ * @param userData - User data received from the SSO provider
+ * @param userData.firstName - User's first name from SSO provider
+ * @param userData.lastName - User's last name from SSO provider
+ * @param userData.groups - Array of group IDs the user belongs to in the IDP
+ *
+ * @returns Object containing the created/updated user and their first organization (if any)
+ * @throws ShelfError if user creation/update fails
+ */
+
+export async function createUserFromSSO(
+  authSession: AuthSession,
+  userData: {
+    firstName: string;
+    lastName: string;
+    groups: string[];
+  }
+) {
+  try {
+    const { email, userId } = authSession;
+    const { firstName, lastName, groups } = userData;
+    const emailDomain = email.split("@")[1];
+
+    // Create user with personal workspace - all users get this now
+    const user = await createUser({
+      email,
+      firstName,
+      lastName,
+      userId,
+      username: randomUsernameFromEmail(email),
+      isSSO: true,
+    });
+
+    // Find organizations that match this domain - handles multiple domains per org
+    const organizations = await getOrganizationsBySsoDomain(emailDomain);
+
+    // For each matching organization, handle SCIM access if configured
+    for (const org of organizations) {
+      const { ssoDetails } = org;
+      if (!ssoDetails) continue;
+
+      // Check if this organization uses SCIM (has group mappings)
+      const hasGroupMappings = !!(
+        ssoDetails.adminGroupId ||
+        ssoDetails.baseUserGroupId ||
+        ssoDetails.selfServiceGroupId
+      );
+
+      if (hasGroupMappings) {
+        const role = getRoleFromGroupId(ssoDetails, groups);
+        if (role) {
+          await createUserOrgAssociation(db, {
+            userId: user.id,
+            organizationIds: [org.id],
+            roles: [role],
+          });
+
+          await createTeamMember({
+            name: `${firstName} ${lastName}`,
+            organizationId: org.id,
+            userId,
+          });
+        }
+      }
+    }
+
+    // Return the user and first matching org (if any)
+    return { user, org: organizations[0] || null };
+  } catch (cause: any) {
+    throw new ShelfError({
+      cause,
+      message: `Failed to create SSO user: ${cause.message}`,
+      additionalData: {
+        email: authSession.email,
+        userId: authSession.userId,
+        domain: authSession.email.split("@")[1],
+      },
+      label: "Auth",
+    });
+  }
+}
+
+interface UserOrgTransition {
+  userId: string;
+  organizationId: string;
+  previousRoles: OrganizationRoles[];
+  newRole: OrganizationRoles | null;
+  transitionType: "ROLE_CHANGE" | "ACCESS_REVOKED" | "ACCESS_GRANTED";
+}
+
+/**
+ * Handles the transition of user access when org switches from invite-based to SCIM-based
+ * @returns Object containing transition details for logging/notification
+ */
+async function handleSCIMTransition(
+  userId: string,
+  organization: Organization,
+  currentRoles: OrganizationRoles[],
+  desiredRole: OrganizationRoles | null
+): Promise<UserOrgTransition> {
+  const transition: UserOrgTransition = {
+    userId,
+    organizationId: organization.id,
+    previousRoles: currentRoles,
+    newRole: desiredRole,
+    transitionType:
+      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+  };
+
+  try {
+    if (!desiredRole) {
+      // User has no valid SCIM groups, revoke access
+      await db.userOrganization.delete({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+      });
+
+      transition.transitionType = "ACCESS_REVOKED";
+
+      Logger.info({
+        message: "Revoked user access due to SCIM group changes",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+        },
+      });
+    } else {
+      // Update to SCIM-based role
+      await db.userOrganization.update({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId: organization.id,
+          },
+        },
+        data: {
+          roles: {
+            set: [desiredRole],
+          },
+        },
+      });
+
+      transition.transitionType = "ROLE_CHANGE";
+
+      Logger.info({
+        message: "Updated user role based on SCIM groups",
+        additionalData: {
+          userId,
+          organizationId: organization.id,
+          previousRoles: currentRoles,
+          newRole: desiredRole,
+        },
+      });
+    }
+
+    return transition;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to handle SCIM transition",
+      additionalData: {
+        userId,
+        organizationId: organization.id,
+        currentRoles,
+        desiredRole,
+      },
+      label: "SSO",
+    });
+  }
+}
+
+/**
+ * Updates an existing SSO user on subsequent logins.
+ * Handles both Pure SSO and SCIM SSO scenarios for multiple domains.
+ */
+export async function updateUserFromSSO(
+  authSession: AuthSession,
+  existingUser: Prisma.UserGetPayload<{
+    include: typeof INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION;
+  }>,
+  userData: {
+    firstName: string;
+    lastName: string;
+    groups: string[];
+  }
+): Promise<{
+  user: User;
+  org: Organization | null;
+  transitions: UserOrgTransition[];
+}> {
+  const { email, userId } = authSession;
+  const { firstName, lastName, groups } = userData;
+  const emailDomain = email.split("@")[1];
+
+  try {
+    let user = existingUser;
+
+    // Update user profile if needed
+    if (user.firstName !== firstName || user.lastName !== lastName) {
+      user = await db.user.update({
+        where: { id: userId },
+        data: { firstName, lastName },
+        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+      });
+    }
+
+    // Find organizations that match this user's email domain
+    // getOrganizationsBySsoDomain now handles multiple domains per org
+    const domainOrganizations = await getOrganizationsBySsoDomain(emailDomain);
+    const existingUserOrganizations = user.userOrganizations;
+
+    const transitions: UserOrgTransition[] = [];
+
+    for (const org of domainOrganizations) {
+      const { ssoDetails } = org;
+      if (!ssoDetails) continue;
+      // Check if this organization uses SCIM (has group mappings)
+      const hasGroupMappings = !!(
+        ssoDetails.adminGroupId ||
+        ssoDetails.baseUserGroupId ||
+        ssoDetails.selfServiceGroupId
+      );
+
+      if (hasGroupMappings) {
+        // Get desired role based on user's groups
+        const desiredRole = getRoleFromGroupId(ssoDetails, groups);
+        // Find if user already has access to this org
+        const existingOrgAccess = existingUserOrganizations.find(
+          (uo) => uo.organization.id === org.id
+        );
+
+        if (existingOrgAccess) {
+          // Handle transition for existing access
+          const transition = await handleSCIMTransition(
+            userId,
+            org,
+            existingOrgAccess.roles,
+            desiredRole
+          );
+          transitions.push(transition);
+        } else if (desiredRole) {
+          // User doesn't have access but should - grant it
+          await createUserOrgAssociation(db, {
+            userId: user.id,
+            organizationIds: [org.id],
+            roles: [desiredRole],
+          });
+
+          // Create team member for the new organization access
+          await createTeamMember({
+            name: `${firstName} ${lastName}`,
+            organizationId: org.id,
+            userId,
+          });
+
+          transitions.push({
+            userId,
+            organizationId: org.id,
+            previousRoles: [],
+            newRole: desiredRole,
+            transitionType: "ACCESS_GRANTED",
+          });
+        }
+      }
+    }
+
+    // Return first org with SCIM access for redirect
+    const firstScimOrg = domainOrganizations.find(
+      (org) =>
+        org.ssoDetails &&
+        (org.ssoDetails.adminGroupId ||
+          org.ssoDetails.baseUserGroupId ||
+          org.ssoDetails.selfServiceGroupId)
+    );
+
+    return {
+      user,
+      org: firstScimOrg || null,
+      transitions,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: `Failed to update SSO user: ${email}`,
+      additionalData: {
+        email,
+        userId,
+        domain: emailDomain,
+      },
+      label: "SSO",
+    });
+  }
+}
+
 export async function createUser(
   payload: Pick<
     AuthSession & { username: string },
@@ -170,9 +506,27 @@ export async function createUser(
     organizationId?: Organization["id"];
     roles?: OrganizationRoles[];
     firstName?: User["firstName"];
+    lastName?: User["lastName"];
+    isSSO?: boolean;
+    createdWithInvite?: boolean;
   }
 ) {
-  const { email, userId, username, organizationId, roles, firstName } = payload;
+  const {
+    email,
+    userId,
+    username,
+    organizationId,
+    roles,
+    firstName,
+    lastName,
+    isSSO,
+    createdWithInvite,
+  } = payload;
+
+  /**
+   * We only create a personal org if the signup is not disabled
+   * */
+  const shouldCreatePersonalOrg = !config.disableSignup;
 
   try {
     return await db.$transaction(
@@ -183,48 +537,75 @@ export async function createUser(
             id: userId,
             username,
             firstName,
-            organizations: {
-              create: [
-                {
-                  name: "Personal",
-                  categories: {
-                    create: defaultUserCategories.map((c) => ({
-                      ...c,
-                      userId,
-                    })),
-                  },
-                },
-              ],
-            },
+            lastName,
+            createdWithInvite,
             roles: {
               connect: {
                 name: Roles["USER"],
               },
             },
+
+            ...(shouldCreatePersonalOrg && {
+              organizations: {
+                create: [
+                  {
+                    name: "Personal",
+                    categories: {
+                      create: defaultUserCategories.map((c) => ({
+                        ...c,
+                        userId,
+                      })),
+                    },
+                    /**
+                     * Creating a teamMember when a new organization/workspace is created
+                     * so that the owner appear in the list by default
+                     */
+                    members: {
+                      create: {
+                        name: `${firstName} ${lastName} (Owner)`,
+                        user: { connect: { id: userId } },
+                      },
+                    },
+                    // Creating asset index settings for new users' personal org
+                    assetIndexSettings: {
+                      create: {
+                        mode: "SIMPLE",
+                        columns: defaultFields,
+                        user: {
+                          connect: {
+                            id: userId,
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            }),
+            ...(isSSO && {
+              // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
+              onboarded: true,
+              sso: true,
+            }),
           },
           include: {
+            ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
             organizations: true,
           },
         });
 
-        const organizationIds: Organization["id"][] = [
-          user.organizations[0].id,
-        ];
-
-        if (organizationId) {
-          organizationIds.push(organizationId);
-        }
-
-        /** Create user organization association
+        /**
+         * Creating an organization for the user
          * 1. For the personal org
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          createUserOrgAssociation(tx, {
-            userId: user.id,
-            organizationIds: [user.organizations[0].id],
-            roles: [OrganizationRoles.OWNER],
-          }),
+          shouldCreatePersonalOrg && // We only create a personal org for non-SSO users
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [user.organizations[0].id],
+              roles: [OrganizationRoles.OWNER],
+            }),
           organizationId &&
             roles?.length &&
             createUserOrgAssociation(tx, {
@@ -250,7 +631,10 @@ export async function createUser(
   }
 }
 
-export async function updateUser(updateUserPayload: UpdateUserPayload) {
+export async function updateUser<T extends Prisma.UserInclude>(
+  updateUserPayload: UpdateUserPayload,
+  extraIncludes?: T
+) {
   /**
    * Remove password from object so we can pass it to prisma user update
    * Also we remove the email as we dont allow it to be changed for now
@@ -278,6 +662,9 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
           },
         },
       },
+      include: {
+        ...extraIncludes,
+      },
     });
 
     if (
@@ -290,14 +677,15 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
       );
     }
 
-    return updatedUser;
+    return updatedUser as Prisma.UserGetPayload<{ include: T }>;
   } catch (cause) {
     const validationErrors: ValidationError<any> = {};
 
-    if (
+    const isUniqueViolation =
       cause instanceof Prisma.PrismaClientKnownRequestError &&
-      cause.code === "P2002"
-    ) {
+      cause.code === "P2002";
+
+    if (isUniqueViolation) {
       // The .code property can be accessed in a type-safe manner
       validationErrors[cause.meta?.target as string] = {
         message: `${cause.meta?.target} is already taken.`,
@@ -309,6 +697,73 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
       message:
         "Something went wrong while updating your profile. Please try again or contact support.",
       additionalData: { ...cleanClone, validationErrors },
+      label,
+      shouldBeCaptured: !isUniqueViolation,
+    });
+  }
+}
+
+/**
+ * Updates user email in both the auth and shelf databases
+ * If for some reason the user update fails we should also revenrt the auth account update
+ */
+export async function updateUserEmail({
+  userId,
+  currentEmail,
+  newEmail,
+}: {
+  userId: User["id"];
+  currentEmail: User["email"];
+  newEmail: string;
+}) {
+  try {
+    /**
+     * Update the user in supabase auth
+     */
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      userId,
+      {
+        email: newEmail,
+      }
+    );
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message:
+          "Failed to update email in auth. Please try again and if the issue persists, contact support",
+        additionalData: { userId, newEmail, currentEmail },
+        label,
+      });
+    }
+
+    /** Update the user in the DB */
+    const updatedUser = await db.user
+      .update({
+        where: { id: userId },
+        data: { email: newEmail },
+      })
+      .catch((cause) => {
+        // On failure, revert the change of the user update in auth
+        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
+          email: currentEmail,
+        });
+
+        // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
+        throw new ShelfError({
+          cause,
+          message: "Failed to update email in shelf",
+          additionalData: { userId, newEmail, currentEmail },
+          label,
+        });
+      });
+
+    return updatedUser;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update email",
+      additionalData: { userId, currentEmail, newEmail },
       label,
     });
   }
@@ -370,10 +825,20 @@ async function getUsers({
 
     /** If the search string exists, add it to the where object */
     if (search) {
-      where.email = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.OR = [
+        {
+          email: {
+            contains: search,
+            mode: "insensitive",
+          },
+        },
+        {
+          id: {
+            contains: search,
+            mode: "insensitive",
+          },
+        },
+      ];
     }
 
     const [users, totalUsers] = await Promise.all([
@@ -449,23 +914,99 @@ export async function updateProfilePicture({
   }
 }
 
-export async function deleteUser(id: User["id"]) {
+/**
+ * To prevent database issues and data loss, we do soft delete.
+ * To comply with regulations, we will destroy all personal data related to the user
+ *
+ * To soft delete the user we do the following:
+ * 1. Update the user email to: deleted+{randomId}@deleted.shelf.nu
+ * 2. Update the user username to: deleted+{randomId}
+ * 3. Update the user firstName to: Deleted
+ * 4. Update the user lastName to: User
+ * 5. Delete the user's profile picture
+ * 6. Remove all relations to organizations the user is part of but doesnt own
+ * 7. Move all entities the user created inside organizations the user is part of but doesnt own to the owner of the organization
+ */
+export async function softDeleteUser(id: User["id"]) {
   try {
-    const user = await db.user.findUnique({
-      where: { id },
-      include: { organizations: true },
+    const user = await getUserByID(id, {
+      userOrganizations: {
+        include: {
+          organization: {
+            select: { id: true, userId: true },
+          },
+        },
+      },
     });
 
-    /** Find the personal org of the user and delete it */
-    const personalOrg = user?.organizations.find(
-      (org) => org.type === "PERSONAL"
+    const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(
+      (uo) => !uo.roles.includes(OrganizationRoles.OWNER)
     );
 
-    await db.organization.delete({
-      where: { id: personalOrg?.id },
+    await db.$transaction(async (tx) => {
+      /** Move entries inside each of organizationsTheUserDoesNotOwn from following models:
+       *   - [x] Asset
+       *   - [x] Category
+       *   - [x] Tag
+       *   - [x] Location
+       *   - [x] CustomField
+       *   - [x] Invite
+       *   - [x] Booking
+       *   - [x] Image
+       *   - [x] Kit
+       * The new owner should be the owner of the organization
+       */
+      for (const userOrg of organizationsTheUserDoesNotOwn) {
+        const newOwnerId = userOrg.organization?.userId;
+
+        if (newOwnerId) {
+          await transferEntitiesToNewOwner({
+            tx,
+            id,
+            newOwnerId,
+            organizationId: userOrg.organizationId,
+          });
+        }
+        /**
+         * Remove the user from all organizations the user belongs to but doesnt own.
+         * */
+        await revokeAccessToOrganization({
+          userId: id,
+          organizationId: userOrg.organizationId,
+        });
+      }
+
+      /** Update the user data */
+
+      const randomId = generateId();
+      await tx.user.update({
+        where: { id },
+        data: {
+          email: `deleted+${randomId}@deleted.shelf.nu`,
+          username: `deleted+${randomId}`,
+          firstName: "Deleted",
+          lastName: "User",
+          deletedAt: new Date(),
+        },
+      });
     });
 
-    await db.user.delete({ where: { id } });
+    /**
+     * Delete the picture of the user
+     *
+     * Note: This happens outside of the transaction because we dont want to rollback the deletion of the user if the deletion of the picture fails
+     * If it fails for some reason, we will get it in our logs that there was an issue so we can check it manually
+     * */
+    if (user.profilePicture) {
+      await deleteProfilePicture({ url: user.profilePicture });
+    }
+
+    /** Send an email to the user that their request has been completed */
+    void sendEmail({
+      to: user.email,
+      subject: "Your account has been deleted",
+      text: `Your shelf account has been deleted. \n\n Kind regards, \n Shelf Team\n\n`,
+    });
   } catch (cause) {
     if (
       cause instanceof PrismaClientKnownRequestError &&
@@ -482,8 +1023,6 @@ export async function deleteUser(id: User["id"]) {
       });
     }
   }
-
-  await deleteAuthAccount(id);
 }
 
 export { defaultUserCategories };
@@ -568,6 +1107,244 @@ export async function revokeAccessToOrganization({
       message: "Failed to revoke user access to organization",
       additionalData: { userId, organizationId },
       label,
+    });
+  }
+}
+
+/** Move entries inside an organization from 1 owner to another.
+ * Affects the following models:
+ *   - [x] Asset
+ *   - [x] Category
+ *   - [x] Tag
+ *   - [x] Location
+ *   - [x] CustomField
+ *   - [x] Invite
+ *   - [x] Booking
+ *   - [x] Image
+ *   - [x] Kit
+ * Required to be used inside a transaction
+ */
+export async function transferEntitiesToNewOwner({
+  tx,
+  id,
+  newOwnerId,
+  organizationId,
+}: {
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  id: User["id"];
+  newOwnerId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /** Update assets */
+  await tx.asset.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update categories */
+  await tx.category.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update tags */
+  await tx.tag.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update locations */
+  await tx.location.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update custom fields */
+  await tx.customField.updateMany({
+    where: {
+      userId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update invites */
+  await tx.invite.updateMany({
+    where: {
+      inviterId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      inviterId: newOwnerId,
+    },
+  });
+
+  /** Update bookings */
+  await tx.booking.updateMany({
+    where: {
+      creatorId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      creatorId: newOwnerId,
+    },
+  });
+
+  /** Update bookings where the person deleted is the custodian */
+  await tx.booking.updateMany({
+    where: {
+      custodianUserId: id,
+      organizationId: organizationId,
+    },
+    data: {
+      custodianUserId: null,
+    },
+  });
+
+  /** Update images */
+  await tx.image.updateMany({
+    where: {
+      userId: id,
+      ownerOrgId: organizationId,
+    },
+    data: {
+      userId: newOwnerId,
+    },
+  });
+
+  /** Update kits */
+  await tx.kit.updateMany({
+    where: {
+      createdById: id,
+      organizationId: organizationId,
+    },
+    data: {
+      createdById: newOwnerId,
+    },
+  });
+}
+
+type UserWithExtraInclude<T extends Prisma.UserInclude | undefined> =
+  T extends Prisma.UserInclude
+    ? Prisma.UserGetPayload<{
+        include: MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+      }>
+    : Prisma.UserGetPayload<{ include: typeof USER_STATIC_INCLUDE }>;
+
+export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
+  id,
+  organizationId,
+  userOrganizations,
+  request,
+  extraInclude,
+}: Pick<User, "id"> & {
+  organizationId: Organization["id"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+  extraInclude?: T;
+}) {
+  try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const mergedInclude = {
+      ...USER_STATIC_INCLUDE,
+      ...extraInclude,
+    } as MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+
+    const user = (await db.user.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, userOrganizations: { some: { organizationId } } },
+          ...(userOrganizations?.length
+            ? [
+                {
+                  id,
+                  userOrganizations: {
+                    some: { organizationId: { in: otherOrganizationIds } },
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+      include: mergedInclude,
+    })) as UserWithExtraInclude<T>;
+
+    /* User is accessing the User in the wrong organization */
+    const isUserInCurrentOrg = !!user.userOrganizations.find(
+      (userOrg) => userOrg.organizationId === organizationId
+    );
+
+    const otherOrgsForUser =
+      userOrganizations?.filter(
+        (org) =>
+          !!user.userOrganizations.find(
+            (userOrg) => userOrg.organizationId === org.organizationId
+          )
+      ) ?? [];
+
+    if (
+      userOrganizations?.length &&
+      !isUserInCurrentOrg &&
+      otherOrgsForUser?.length
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "User not found",
+        message: "",
+        additionalData: {
+          model: "teamMember",
+          organizations: otherOrgsForUser,
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "User not found.",
+      message:
+        "The user you are trying to access does not exists or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

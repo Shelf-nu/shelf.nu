@@ -16,11 +16,13 @@ import {
 } from "mocks/user";
 import { db } from "~/database/db.server";
 
-import { randomUsernameFromEmail } from "~/utils/user";
+import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import {
   createUserAccountForTesting,
   defaultUserCategories,
+  // defaultUserCategories,
 } from "./service.server";
+import { defaultFields } from "../asset-index-settings/helpers";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -42,6 +44,8 @@ vitest.mock("~/database/db.server", () => ({
     },
   },
 }));
+
+const username = `test-user-${USER_ID}`;
 
 describe(createUserAccountForTesting.name, () => {
   it("should return null if no auth account created", async () => {
@@ -70,7 +74,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -117,7 +121,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -162,7 +166,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -196,10 +200,12 @@ describe(createUserAccountForTesting.name, () => {
       ).matches;
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
+
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue({
       id: USER_ID,
       email: USER_EMAIL,
+      username: username,
       organizations: [
         {
           id: "org-id",
@@ -209,7 +215,6 @@ describe(createUserAccountForTesting.name, () => {
     // mock db transaction passing the db instance
     //@ts-expect-error missing vitest type
     db.$transaction.mockImplementationOnce((callback) => callback(db));
-    const username = randomUsernameFromEmail(USER_EMAIL);
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
@@ -219,13 +224,15 @@ describe(createUserAccountForTesting.name, () => {
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
     server.events.removeAllListeners();
+
     expect(db.user.create).toBeCalledWith({
       data: {
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
         firstName: undefined,
-        // categories: { create: defaultUserCategories },
+        lastName: undefined,
+        // After the last changes because of SSO we dont need this anymore
         organizations: {
           create: [
             {
@@ -235,6 +242,23 @@ describe(createUserAccountForTesting.name, () => {
                   ...c,
                   userId: USER_ID,
                 })),
+              },
+              members: {
+                create: {
+                  name: `${undefined} ${undefined} (Owner)`,
+                  user: { connect: { id: USER_ID } },
+                },
+              },
+              assetIndexSettings: {
+                create: {
+                  mode: "SIMPLE",
+                  columns: defaultFields,
+                  user: {
+                    connect: {
+                      id: USER_ID,
+                    },
+                  },
+                },
               },
             },
           ],
@@ -247,6 +271,7 @@ describe(createUserAccountForTesting.name, () => {
       },
       include: {
         organizations: true,
+        ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
       },
     });
     expect(result).toEqual(authSession);

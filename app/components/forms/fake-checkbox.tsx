@@ -2,9 +2,14 @@ import type { SVGProps } from "react";
 
 type FakeCheckboxProps = SVGProps<SVGSVGElement> & {
   checked?: boolean;
+  fillColor?: string;
 };
 
-export const FakeCheckbox = ({ checked, ...svgProps }: FakeCheckboxProps) =>
+export const FakeCheckbox = ({
+  checked,
+  fillColor = "#FEF6EE",
+  ...svgProps
+}: FakeCheckboxProps) =>
   checked ? (
     <svg
       width="20"
@@ -14,15 +19,22 @@ export const FakeCheckbox = ({ checked, ...svgProps }: FakeCheckboxProps) =>
       xmlns="http://www.w3.org/2000/svg"
       {...svgProps}
     >
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="#FEF6EE" />
+      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill={fillColor} />
       <path
         d="M14.6668 6.5L8.25016 12.9167L5.3335 10"
-        stroke="#EF6820"
+        stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#EF6820" />
+      <rect
+        x="0.5"
+        y="0.5"
+        width="19"
+        height="19"
+        rx="5.5"
+        stroke="currentColor"
+      />
     </svg>
   ) : (
     <svg

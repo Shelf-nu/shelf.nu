@@ -2,11 +2,12 @@ import { useEffect, useMemo } from "react";
 import type { Asset } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -23,13 +24,21 @@ import {
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset/service.server";
 
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -92,7 +101,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      excludeSearchFromView: true,
     });
 
     const modelName = {
@@ -150,7 +158,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetIds, removedAssetIds } = parseData(
+    let { assetIds, removedAssetIds } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -180,6 +188,37 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           label: "Location",
         });
       });
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+
+      const locationAssets = location.assets.map((asset) => asset.id);
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...locationAssets.filter((asset) => !removedAssetIds.includes(asset)),
+        ]),
+      ];
+    }
 
     /**
      * We need to query all the modified assets so we know their location before the change
@@ -292,7 +331,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location, header } = useLoaderData<typeof loader>();
+  const { location, header, items, totalItems } =
+    useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -304,11 +344,25 @@ export default function AddAssetsToLocation() {
   const [selectedAssets, setSelectedAssets] = useAtom(
     locationsSelectedAssetsAtom
   );
+  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
+
   const removedAssetIds = useMemo(
     () =>
       locationAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [locationAssetsIds, selectedAssets]
   );
+
+  function handleSelectAll() {
+    if (hasSelectedAll) {
+      setSelectedAssets([]);
+    } else {
+      setSelectedAssets([
+        ...locationAssetsIds,
+        ...items.map((item) => item.id),
+        ALL_SELECTED_KEY,
+      ]);
+    }
+  }
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per location
@@ -396,14 +450,24 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 flex h-full flex-col justify-between border-0"
+          className="-mx-5 flex h-full flex-col justify-start border-0"
+          headerExtraContent={
+            <Button
+              variant="secondary"
+              className="min-w-24 px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          }
         />
       </div>
       {/* Footer of the modal */}
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center">
-          {selectedAssets.length} assets selected
-        </div>
+        <p>
+          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+        </p>
+
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
@@ -488,7 +552,10 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
       </Td>
 
       <Td>
-        <FakeCheckbox className="text-white" checked={checked} />
+        <FakeCheckbox
+          className={tw("text-white", checked ? "text-primary" : "")}
+          checked={checked}
+        />
       </Td>
     </>
   );

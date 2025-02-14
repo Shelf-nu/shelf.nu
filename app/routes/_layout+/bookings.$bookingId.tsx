@@ -1,11 +1,11 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -17,18 +17,23 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
-import { createNotes } from "~/modules/asset/service.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
+  getBookingFlags,
   removeAssets,
   sendBookingUpdateNotification,
   upsertBooking,
 } from "~/modules/booking/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import {
@@ -49,9 +54,8 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -60,15 +64,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     additionalData: { userId },
   });
 
-  try {
-    const { organizationId, role } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const { page, perPageParam } = paramsValues;
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+  /** Needed for getting the assets */
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    const searchParams = getCurrentSearchParams(request);
+  try {
+    const { organizationId, isSelfServiceOrBase, userOrganizations } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
 
     /**
      * If the org id in the params is different than the current organization id,
@@ -82,14 +94,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
     const booking = await getBooking({
       id: bookingId,
       organizationId: organizationId,
+      userOrganizations,
+      request,
     });
 
-    /** For self service users, we only allow them to read their own bookings */
-    if (isSelfService && booking.custodianUserId !== authSession.userId) {
+    /** For self service & base users, we only allow them to read their own bookings */
+    if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",
@@ -99,94 +112,82 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, org, assets] = await Promise.all([
-      /**
-       * We need to fetch the team members to be able to display them in the custodian dropdown.
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
+    const [teamMembersData, assets, totalAssets, bookingFlags] =
+      await Promise.all([
+        /**
+         * We need to fetch the team members to be able to display them in the custodian dropdown.
+         */
+        getTeamMemberForCustodianFilter({
           organizationId,
-          userId: {
-            not: null,
-          },
-        },
-        include: {
-          user: true,
-        },
-        orderBy: {
-          userId: "asc",
-        },
-      }),
-      /** We create a teamMember entry to represent the org owner.
-       * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-       * assigning custody to users, not NRM.
-       */
-      db.organization.findUnique({
-        where: {
-          id: organizationId,
-        },
-        select: {
-          owner: true,
-        },
-      }),
-      /**
-       * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-       * That way we know if the asset is available or not because we can see if they are booked for the same period
-       */
-      db.asset.findMany({
-        where: {
-          id: {
-            in: booking?.assets.map((a) => a.id) || [],
-          },
-        },
-        include: {
-          category: true,
-          custody: true,
-          bookings: {
-            where: {
-              // id: { not: booking.id },
-              ...(booking.from && booking.to
-                ? {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                    OR: [
-                      {
-                        from: { lte: booking.to },
-                        to: { gte: booking.from },
-                      },
-                      {
-                        from: { gte: booking.from },
-                        to: { lte: booking.to },
-                      },
-                    ],
-                  }
-                : {}),
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          selectedTeamMembers: booking.custodianTeamMemberId
+            ? [booking.custodianTeamMemberId]
+            : [],
+          isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+          userId,
+        }),
+
+        /**
+         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
+         * That way we know if the asset is available or not because we can see if they are booked for the same period
+         */
+        db.asset.findMany({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
             },
           },
-        },
-      }),
-    ]);
-
-    if (org?.owner) {
-      teamMembers.push({
-        id: "owner",
-        name: "owner",
-        user: org.owner,
-        userId: org.owner.id as string,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        deletedAt: null,
-      });
-    }
+          skip,
+          take,
+          include: {
+            category: true,
+            custody: true,
+            kit: true,
+            bookings: {
+              where: {
+                // id: { not: booking.id },
+                ...(booking.from && booking.to
+                  ? {
+                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
+          },
+        }),
+        /** Count assets them */
+        db.asset.count({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
+            },
+          },
+        }),
+        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+        getBookingFlags({
+          id: booking.id,
+          assetIds: booking.assets.map((a) => a.id),
+          from: booking.from,
+          to: booking.to,
+        }),
+      ]);
 
     /** We replace the assets ids in the booking object with the assets fetched in the separate request.
      * This is useful for more consistent data in the front-end */
     booking.assets = assets;
 
-    const { page, perPageParam } = getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -195,18 +196,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
+    const totalPages = Math.ceil(totalAssets / perPage);
 
     return json(
       data({
         header,
         booking,
         modelName,
-        items: assets,
+        items: booking.assets,
         page,
-        totalItems: booking.assets.length,
+        totalItems: totalAssets,
         perPage,
-        totalPages: booking.assets.length / perPage,
-        teamMembers,
+        totalPages,
+        ...teamMembersData,
+        bookingFlags,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -224,6 +227,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => "single",
+  name: "bookings.$bookingId",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -250,6 +254,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkIn",
           "archive",
           "cancel",
+          "removeKit",
+          "revert-to-draft",
         ]),
         nameChangeOnly: z
           .string()
@@ -270,15 +276,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
+      removeKit: PermissionAction.update,
+      "revert-to-draft": PermissionAction.update,
     };
 
-    const { organizationId, role } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: intent2ActionMap[intent],
-    });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: intent2ActionMap[intent],
+      });
+
     const user = await getUserByID(authSession.userId);
 
     const headers = [
@@ -298,6 +307,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           checkOut: BookingStatus.ONGOING,
           checkIn: BookingStatus.COMPLETE,
         };
+        // Parse the isExpired field
+        const { isExpired } = parseData(
+          formData,
+          z.object({
+            isExpired: z
+              .string()
+              .optional()
+              .transform((val) => val === "true"),
+          })
+        );
+        // Modify status if expired during checkout
+        const status =
+          intent === "checkOut" && isExpired
+            ? BookingStatus.OVERDUE
+            : intentToStatusMap[intent];
+
         let upsertBookingData = {
           organizationId,
           id,
@@ -305,60 +330,72 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // We are only changing the name so we do things simpler
         if (nameChangeOnly) {
-          const { name } = parseData(
+          const { name, description } = parseData(
             formData,
             z.object({
               name: z.string(),
+              description: z.string().optional(),
             }),
             {
               additionalData: { userId, id, organizationId, role },
             }
           );
-          Object.assign(upsertBookingData, {
-            name,
-          });
+
+          Object.assign(upsertBookingData, { name, description });
         } else {
           /** WE are updating the whole booking */
           const payload = parseData(
             formData,
-            NewBookingFormSchema(), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
+            NewBookingFormSchema(false, false, getHints(request)), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
             {
               additionalData: { userId, id, organizationId, role },
             }
           );
 
-          const { name, custodian } = payload;
+          const { name, custodian, description } = payload;
 
           const hints = getHints(request);
-          const startDate = formData.get("startDate")!.toString();
-          const endDate = formData.get("endDate")!.toString();
           const fmt = "yyyy-MM-dd'T'HH:mm";
-          const from = DateTime.fromFormat(startDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
-          const to = DateTime.fromFormat(endDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
+
+          const from = DateTime.fromFormat(
+            formData.get("startDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
+
+          const to = DateTime.fromFormat(
+            formData.get("endDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
 
           Object.assign(upsertBookingData, {
-            custodianUserId: custodian,
+            custodianUserId: custodian?.userId,
+            custodianTeamMemberId: custodian?.id,
             name,
             from,
             to,
+            description,
           });
         }
 
         // Add the status if it exists
         Object.assign(upsertBookingData, {
-          ...(intentToStatusMap[intent] && {
-            status: intentToStatusMap[intent],
+          ...(status && {
+            status,
           }),
+          // Make sure to pass isExpired when checking out
+          ...(intent === "checkOut" && { isExpired }),
         });
         // Update and save the booking
         const booking = await upsertBooking(
           upsertBookingData,
           getClientHint(request),
-          isSelfService
+          isSelfServiceOrBase
         );
 
         await createNotesForBookingUpdate(intent, booking, {
@@ -374,7 +411,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
       case "delete": {
-        if (isSelfService) {
+        if (isSelfServiceOrBase) {
           /**
            * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
            * They have delete permissions but shouldnt be able to delete other people's bookings
@@ -395,7 +432,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
 
         const deletedBooking = await deleteBooking(
-          { id },
+          { id, organizationId },
           getClientHint(request)
         );
 
@@ -435,6 +472,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId: authSession.userId,
+          organizationId,
         });
 
         sendNotification({
@@ -496,6 +534,50 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
       }
+      case "removeKit": {
+        const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
+          additionalData: { userId, id, organizationId, role },
+        });
+
+        const kit = await db.kit.findUniqueOrThrow({
+          where: { id: kitId },
+          select: { assets: { select: { id: true } } },
+        });
+
+        const b = await removeAssets({
+          booking: { id, assetIds: kit.assets.map((a) => a.id) },
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          userId: authSession.userId,
+          organizationId,
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Your kit has been removed from the booking",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ booking: b }), {
+          headers,
+        });
+      }
+      case "revert-to-draft": {
+        await upsertBooking(
+          { id, status: BookingStatus.DRAFT },
+          getClientHint(request)
+        );
+
+        sendNotification({
+          title: "Booking reverted",
+          message: "Your booking has been reverted back to draft successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
@@ -511,13 +593,21 @@ export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
-  return (
-    <>
+  /**When we are on the booking.scan-assets route, we render an outlet */
+  const shouldRenderOutlet =
+    currentRoute?.handle?.name === "booking.scan-assets";
+
+  return shouldRenderOutlet ? (
+    <Outlet />
+  ) : (
+    <div className="relative">
       <Header
         title={hasName ? name : booking.name}
         subHeading={
-          <div className="flex items-center gap-2">
+          <div key={booking.status} className="flex items-center gap-2">
             <Badge color={bookingStatusColorMap[booking.status]}>
               <span className="block lowercase first-letter:uppercase">
                 {booking.status}
@@ -531,6 +621,6 @@ export default function BookingEditPage() {
         <BookingPageContent />
         <ContextualModal />
       </div>
-    </>
+    </div>
   );
 }

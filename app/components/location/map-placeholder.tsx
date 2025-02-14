@@ -1,5 +1,5 @@
-import { MapIcon } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
+import Icon from "../icons/icon";
 
 export const MapPlaceholder = ({
   title = "Unable to generate map",
@@ -8,20 +8,15 @@ export const MapPlaceholder = ({
   title?: string;
   description?: string;
 }) => (
-  <div className="relative">
-    <img
-      src="/static/images/no-location-image.jpg"
-      alt="No scanned location"
-      className="w-full rounded-none"
-    />
-    <div className="absolute top-0 z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
+  <div className="rounded-md border-0 bg-white py-14">
+    <div className="z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(
-          "border-error-50 bg-error-100 text-error-600",
-          " flex size-14 items-center justify-center rounded-full"
+          "mb-4 border text-gray-500",
+          "flex size-14 items-center justify-center rounded-md p-3 shadow"
         )}
       >
-        <MapIcon />
+        <Icon disableWrap={true} icon="map" />
       </div>
       <h4>{title}</h4>
       <p>{description}</p>

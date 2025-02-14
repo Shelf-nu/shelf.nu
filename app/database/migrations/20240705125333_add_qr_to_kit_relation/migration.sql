@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Qr" ADD COLUMN     "kitId" TEXT;
+
+-- AddForeignKey
+ALTER TABLE "Qr" ADD CONSTRAINT "Qr_kitId_fkey" FOREIGN KEY ("kitId") REFERENCES "Kit"("id") ON DELETE SET NULL ON UPDATE CASCADE;

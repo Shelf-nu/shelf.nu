@@ -1,12 +1,7 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Link,
-  useLoaderData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
 import { MarkBatchAsPrinted } from "~/components/admin/mark-batch-as-printed";
@@ -23,6 +18,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,
@@ -128,15 +124,16 @@ export default function Area51() {
           hideFirstHeaderColumn
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">QR id</Th>
-              <Th className="hidden md:table-cell">Asset</Th>
-              <Th className="hidden md:table-cell">Organization ID</Th>
-              <Th className="hidden md:table-cell">User ID</Th>
-              <Th className="hidden md:table-cell">
+              <Th>QR id</Th>
+              <Th>Asset</Th>
+              <Th>Kit</Th>
+              <Th>Organization ID</Th>
+              <Th>User ID</Th>
+              <Th>
                 <span title="Only available for batched codes">Printed</span>
               </Th>
-              <Th className="hidden md:table-cell">Batch</Th>
-              <Th className="hidden md:table-cell">Created at</Th>
+              <Th>Batch</Th>
+              <Th>Created at</Th>
             </>
           }
         />
@@ -154,6 +151,12 @@ const ListUserContent = ({
         select: {
           id: true;
           title: true;
+        };
+      };
+      kit: {
+        select: {
+          id: true;
+          name: true;
         };
       };
       organization: {
@@ -189,6 +192,11 @@ const ListUserContent = ({
     <Td className=" whitespace-normal p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.asset ? <span>{item.asset.title}</span> : "N/A"}
+      </div>
+    </Td>
+    <Td className=" whitespace-normal p-0 md:p-0">
+      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        {item.kit ? <span>{item.kit.name}</span> : "N/A"}
       </div>
     </Td>
     <Td className=" p-0 md:p-0">

@@ -19,7 +19,6 @@ export function mapAuthSession(
       label,
     });
   }
-
   return {
     accessToken: supabaseAuthSession.access_token,
     refreshToken: supabaseAuthSession.refresh_token,

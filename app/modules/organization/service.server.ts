@@ -1,12 +1,32 @@
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
-import type { Organization, User } from "@prisma/client";
+import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 
 const label: ErrorLabel = "Organization";
+
+export async function getOrganizationById<T extends Prisma.OrganizationInclude>(
+  id: Organization["id"],
+  extraIncludes?: T
+) {
+  try {
+    return (await db.organization.findUniqueOrThrow({
+      where: { id },
+      include: extraIncludes,
+    })) as Prisma.OrganizationGetPayload<{ include: T }>;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "No organization found with this ID",
+      additionalData: { id },
+      label,
+    });
+  }
+}
 
 export const getOrganizationByUserId = async ({
   userId,
@@ -45,6 +65,60 @@ export const getOrganizationByUserId = async ({
   }
 };
 
+/**
+ * Gets organizations that use the email domain for SSO
+ * Supports multiple domains per organization via comma-separated domain strings
+ * @param emailDomain - Email domain to check
+ * @returns Array of organizations that use this domain for SSO
+ */
+export async function getOrganizationsBySsoDomain(emailDomain: string) {
+  try {
+    if (!emailDomain) {
+      throw new ShelfError({
+        cause: null,
+        message: "Email domain is required",
+        additionalData: { emailDomain },
+        label: "SSO",
+      });
+    }
+
+    // Query for organizations where the domain field contains the email domain
+    const organizations = await db.organization.findMany({
+      where: {
+        ssoDetails: {
+          isNot: null,
+        },
+        AND: [
+          {
+            ssoDetails: {
+              domain: {
+                contains: emailDomain,
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        ssoDetails: true,
+      },
+    });
+
+    // Filter to ensure exact domain matches
+    return organizations.filter((org) =>
+      org.ssoDetails?.domain
+        ? emailMatchesDomains(emailDomain, org.ssoDetails.domain)
+        : false
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get organizations by SSO domain",
+      additionalData: { emailDomain },
+      label: "SSO",
+    });
+  }
+}
+
 export async function createOrganization({
   name,
   userId,
@@ -55,6 +129,8 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
+    const owner = await db.user.findFirstOrThrow({ where: { id: userId } });
+
     const data = {
       name,
       currency,
@@ -73,7 +149,29 @@ export async function createOrganization({
           id: userId,
         },
       },
-    };
+      /**
+       * Creating a teamMember when a new organization/workspace is created
+       * so that the owner appear in the list by default
+       */
+      members: {
+        create: {
+          name: `${owner.firstName} ${owner.lastName} (Owner)`,
+          user: { connect: { id: owner.id } },
+        },
+      },
+
+      assetIndexSettings: {
+        create: {
+          mode: "SIMPLE",
+          columns: defaultFields,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      },
+    } satisfies Prisma.OrganizationCreateInput;
 
     const org = await db.organization.create({ data });
 
@@ -118,14 +216,26 @@ export async function updateOrganization({
   image,
   userId,
   currency,
-}: Pick<Organization, "name" | "id" | "currency"> & {
+  ssoDetails,
+}: Pick<Organization, "id" | "currency"> & {
+  name?: string;
   userId: User["id"];
   image: File | null;
+  ssoDetails?: {
+    selfServiceGroupId: string;
+    adminGroupId: string;
+    baseUserGroupId: string;
+  };
 }) {
   try {
     const data = {
       name,
       currency,
+      ...(ssoDetails && {
+        ssoDetails: {
+          update: ssoDetails,
+        },
+      }),
     };
 
     if (image?.size && image?.size > 0) {
@@ -174,6 +284,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
     return await db.userOrganization.findMany({
       where: { userId },
       select: {
+        organizationId: true,
         roles: true,
         organization: {
           select: {
@@ -184,12 +295,14 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
             userId: true,
             updatedAt: true,
             currency: true,
+            enabledSso: true,
             owner: {
               select: {
                 id: true,
                 email: true,
               },
             },
+            ssoDetails: true,
           },
         },
       },
@@ -237,4 +350,56 @@ export async function getOrganizationAdminsEmails({
       label,
     });
   }
+}
+
+export async function toggleOrganizationSso({
+  organizationId,
+  enabledSso,
+}: {
+  organizationId: string;
+  enabledSso: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId, type: OrganizationType.TEAM },
+      data: {
+        enabledSso,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling organization SSO. Please try again or contact support.",
+      additionalData: { organizationId, enabledSso },
+      label,
+    });
+  }
+}
+
+/**
+ * Utility function to parse and validate domains from a comma-separated string
+ * @param domainsString - Comma-separated string of domains
+ * @returns Array of cleaned domain strings
+ */
+export function parseDomains(domainsString: string): string[] {
+  return domainsString
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Checks if a given email matches any of the provided comma-separated domains
+ * @param email - Email address to check
+ * @param domainsString - Comma-separated string of domains
+ * @returns boolean indicating if email matches any domain
+ */
+export function emailMatchesDomains(
+  emailDomain: string,
+  domainsString: string | null
+): boolean {
+  if (!emailDomain || !domainsString) return false;
+  const domains = parseDomains(domainsString);
+  return domains.includes(emailDomain.toLowerCase());
 }

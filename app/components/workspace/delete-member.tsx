@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Prisma, TeamMember } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -16,6 +16,7 @@ import {
 
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import { Form } from "../custom-form";
 import { TrashIcon, XIcon } from "../icons/library";
 
 export const DeleteMember = ({
@@ -116,8 +117,8 @@ const UnableToDeleteMemberContent = ({
       <AlertDialogTitle>Unable to delete team member</AlertDialogTitle>
       <AlertDialogDescription>
         The team member you are trying to delete has custody over{" "}
-        {custodiesCount} assets. Please check in those assets before deleting
-        the user.
+        {custodiesCount} assets. Please release custody or check-in those assets
+        before deleting the user.
       </AlertDialogDescription>
       <AlertDialogCancel
         asChild

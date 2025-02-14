@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
@@ -10,7 +9,7 @@ import { error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
@@ -22,22 +21,17 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
   try {
     /** Check if the current user is allowed to read booking */
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    const booking = await getBooking({
-      id: bookingId,
-      organizationId: organizationId,
-    });
 
-    /** Check if the user is self service */
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const booking = await getBooking({ id: bookingId, organizationId });
 
-    /** For self service users, we only allow them to read their own bookings */
-    if (isSelfService && booking.custodianUserId !== authSession.userId) {
+    /** For self service & base users, we only allow them to read their own bookings */
+    if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {
       throw new ShelfError({
         cause: null,
         message:

@@ -10,13 +10,16 @@ import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
+import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -38,7 +41,7 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -144,6 +147,8 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <Header>
@@ -161,11 +166,14 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
+          bulkActions={
+            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          }
           ItemComponent={TagItem}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell">Actions</Th>
+              <Th>Description</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -183,8 +191,15 @@ const TagItem = ({
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
       <TagBadge>{item.name}</TagBadge>
     </Td>
-    <Td className="w-3/4 text-gray-500" title="Description">
-      {item.description}
+    <Td className="max-w-62 md:w-3/4">
+      {item.description ? (
+        <LineBreakText
+          className="md:w-3/4"
+          text={item.description}
+          numberOfLines={3}
+          charactersPerLine={60}
+        />
+      ) : null}
     </Td>
     <Td className="text-left">
       <Button

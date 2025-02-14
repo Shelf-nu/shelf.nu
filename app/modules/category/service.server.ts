@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Category";
@@ -171,9 +172,11 @@ export async function createCategoriesIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating categories. Please try again or contact support.",
+        "Something went wrong while creating categories. Seems like some of the category data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }
@@ -182,16 +185,15 @@ export async function getCategory({
   organizationId,
 }: Pick<Category, "id" | "organizationId">) {
   try {
-    return await db.category.findUnique({
-      where: {
-        id,
-        organizationId,
-      },
+    return await db.category.findFirstOrThrow({
+      where: { id, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching the category",
+      title: "Category not found",
+      message:
+        "The category you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
     });
@@ -220,6 +222,29 @@ export async function updateCategory({
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Category", {
       additionalData: { id, organizationId, name },
+    });
+  }
+}
+
+export async function bulkDeleteCategories({
+  categoryIds,
+  organizationId,
+}: {
+  categoryIds: Category["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    return await db.category.deleteMany({
+      where: categoryIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: categoryIds }, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting categories.",
+      additionalData: { categoryIds, organizationId },
+      label,
     });
   }
 }

@@ -19,6 +19,7 @@ import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
+import { getBookings } from "~/modules/booking/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -35,11 +36,11 @@ import {
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -74,6 +75,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                       firstName: true,
                       lastName: true,
                       profilePicture: true,
+                      email: true,
                     },
                   },
                 },
@@ -95,6 +97,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           label: "Dashboard",
         });
       });
+
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      perPage: 1000,
+      statuses: ["ONGOING", "OVERDUE"],
+      extraInclude: {
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    });
 
     const announcement = await db.announcement
       .findFirst({
@@ -135,6 +149,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipOnboardingChecklist: cookie.skipOnboardingChecklist,
         custodiansData: getCustodiansOrderedByTotalCustodies({
           assets,
+          bookings,
         }),
         mostScannedAssets: getMostScannedAssets({ assets }),
         mostScannedCategories: getMostScannedAssetsCategories({ assets }),

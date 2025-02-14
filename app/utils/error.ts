@@ -1,5 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
+import type { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { ValidationError } from "./http";
 
 /**
@@ -47,6 +48,7 @@ export type FailureReason = {
     | "Admin dashboard"
     | "App layout"
     | "Assets"
+    | "Asset Index Settings"
     | "Auth"
     | "Booking"
     | "Category"
@@ -79,16 +81,25 @@ export type FailureReason = {
     | "Tier"
     | "User"
     | "Scanner"
+    | "SSO"
     | "Kit"
+    | "Note"
     // Other kinds of errors
+    | "DB"
     | "Storage"
     | "Request validation"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment" // Related to the environment setup
+    | "Image Import"
+    | "Image Cache"
+    | "Asset Reminder"
+    | "Asset Scheduler" // Error related to the image import
     | "Template";
   /**
    * The message intended for the user.
+   * You can add new lines using \n which will be parsed into paragraphs in the html
+   * Moveoer, you can add html to highlight strings
    */
   message: string;
   /**
@@ -170,6 +181,8 @@ export class ShelfError extends Error {
         : shouldBeCaptured) ?? true;
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
+      : isNotFoundError(cause)
+      ? 404
       : status || 500;
     this.traceId = traceId || createId();
   }
@@ -188,9 +201,35 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
   );
 }
 
+/**
+ * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
+ */
+export function isNotFoundError(
+  cause: unknown
+): cause is PrismaClientKnownRequestError {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "P2025"
+  );
+}
+
+/**
+ * This function is used to check if the error is a zod validation error.
+ */
+export function isZodValidationError(cause: unknown) {
+  if (!isLikeShelfError(cause)) {
+    return false;
+  }
+
+  return cause.additionalData && "validationErrors" in cause.additionalData;
+}
+
 export function makeShelfError(
   cause: unknown,
-  additionalData?: AdditionalData
+  additionalData?: AdditionalData,
+  shouldBeCaptured: boolean = true
 ) {
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
@@ -200,6 +239,8 @@ export function makeShelfError(
         ...cause.additionalData,
         ...additionalData,
       },
+      shouldBeCaptured:
+        "shouldBeCaptured" in cause ? cause.shouldBeCaptured : shouldBeCaptured,
     });
   }
 
@@ -209,6 +250,7 @@ export function makeShelfError(
     message: "Sorry, something went wrong.",
     additionalData,
     label: "Unknown",
+    shouldBeCaptured,
   });
 }
 
@@ -275,7 +317,7 @@ export function maybeUniqueConstraintViolation(
   options?: Options
 ) {
   let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
-  let shouldBeCaptured = true;
+  let shouldBeCaptured = false;
   const validationErrors = {} as ValidationError<any>;
 
   if (

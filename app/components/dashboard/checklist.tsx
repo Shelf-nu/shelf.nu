@@ -72,7 +72,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -112,7 +112,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -143,7 +143,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -194,7 +194,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -231,7 +231,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -240,7 +240,7 @@ export default function OnboardingChecklist() {
       </div>
       <div className="mb-8">
         <div className="mb-4">
-          <h4 className=" text-lg font-semibold">Customize you experience</h4>
+          <h4 className=" text-lg font-semibold">Customize your experience</h4>
           <p className="text-[14px] text-gray-600">
             Optimize your workflow and use Shelf in way that works for you and
             your organizations.
@@ -281,7 +281,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>

@@ -1,11 +1,10 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 import Input from "../forms/input";
-import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -18,23 +17,11 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 import { WarningBox } from "../shared/warning-box";
-
-export const ImportBackup = () => (
-  <>
-    <h3>Import backup from different workspace</h3>
-    <p>
-      Currently this feature is provided as a service to shelf.nu users. If you
-      are interested{" "}
-      <CrispButton className={tw()} variant="link" title="Get in touch">
-        get in touch
-      </CrispButton>{" "}
-      with us and we will migrate your data for you.
-    </p>
-  </>
-);
+import { Table, Td, Th, Tr } from "../table";
+import When from "../when/when";
 
 export const ImportContent = () => (
-  <>
+  <div className="text-left">
     <h3>Import your own content</h3>
     <p>
       Import your own content by placing it in the csv file. Here you can{" "}
@@ -46,26 +33,26 @@ export const ImportContent = () => (
       >
         download our CSV template.
       </Button>{" "}
-      <WarningBox className="my-4">
-        <>
-          <strong>IMPORTANT</strong>: Do not use data exported from asset backup
-          to import assets. You must use the template provided above or you will
-          get corrupted data.
-        </>
-      </WarningBox>
-      Some important details about how this works:
     </p>
-    <br />
+    <WarningBox className="my-4">
+      <>
+        <strong>IMPORTANT</strong>: Do not use data exported from asset backup
+        to import assets. You must use the template provided above or you will
+        get corrupted data.
+      </>
+    </WarningBox>
+    <h4>Base rules and limitations</h4>
     <ul className="list-inside list-disc">
       <li>
-        You must use <b>;</b> as a delimiter in your csv file
+        You must use <b>, (comma)</b> or <b>; (semicolon)</b> as a delimiter in
+        your csv file
       </li>
       <li>Each row represents a new asset that will be created</li>
       <li>
-        Columns such as <b>category, location & custodian</b> represent just the
-        name of the related entry. As an example, if you put the category{" "}
-        <b>Laptops</b> we will look for an existing category with that name and
-        link the asset to it. If it doesn't exist, we will create it.
+        Columns such as <b>kit, category, location & custodian</b> represent
+        just the name of the related entry. As an example, if you put the
+        category <b>Laptops</b> we will look for an existing category with that
+        name and link the asset to it. If it doesn't exist, we will create it.
       </li>
       <li>
         Columns such as <b>tags</b> represent the names of a collection of
@@ -76,29 +63,96 @@ export const ImportContent = () => (
         The content you are importing will <b>NOT</b> be merged with existing
         assets. A new asset will be created for each valid row in the sheet.
       </li>
-      <li>
-        To import custom fields, prefix your column heading with <b>"cf: "</b>,
-        add the type followed by a coma from one of the allowed types(
-        <b>"text", "boolean", "option", "multiline text", "date"</b>).
-        <br /> this is how a sample header looks like for custom type with name{" "}
-        <b>"purchase date"</b> and type <b>"date"</b> :{" "}
-        <b>"cf:purchase date, type:date"</b>
-        <br /> if no type is mentioned "text" is used as default type.
-        <br /> date can be in <b>mm-dd-yyyy</b> or <b>dd-mon-yyyy</b> format.
-        <br /> in case of options, you dont have to have the options created, we
-        create option(both the field and the option) while importing if the
-        option doesnt exisit.
-      </li>
-      <li>
-        <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to
-        describe the columns.
-      </li>
-      <li>
-        If any of the data in the file is invalid, the whole import will fail
-      </li>
     </ul>
+
+    <h4 className="mt-2">Importing Custom fields</h4>
+    <div>
+      To import custom fields, prefix your column heading with <b>"cf: "</b>,{" "}
+      <br />
+      add the type followed by a coma from one of the allowed types:
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          <b>text</b> - default if no type is passed
+        </li>
+        <li>
+          <b>boolean</b> - choose a yes or no value
+        </li>
+        <li>
+          <b>option</b> - you dont have to have the options created, we create
+          option(both the field and the option) while importing if the option
+          doesnt exisit.
+        </li>
+        <li>
+          <b>multiline text</b>
+        </li>
+        <li>
+          <b>date</b> - must be in <b>YYYY-MM-DD</b> format
+        </li>
+      </ul>
+      If no type is mentioned <b>"text"</b> is used as default type.
+    </div>
+    <div>
+      This is how a sample header looks like for custom field with name{" "}
+      <b>"purchase date"</b> and type <b>"date"</b> :{" "}
+      <b>"cf:purchase date, type:date"</b>
+    </div>
+
+    <h4 className="mt-2">Importing with QR codes</h4>
+    <div>
+      You also have the option to se a Shelf QR code for each asset. This is
+      very valuable if you already have Shelf QR codes printed and you want to
+      link them to the assets you are importing.
+      <br />
+      This feature comes with the following limitations:
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          <b>Existing code</b> - the QR code needs to already exist in shelf
+        </li>
+        <li>
+          <b>No duplicate codes</b> - the qrId needs to be unique for each asset
+        </li>
+        <li>
+          <b>No linked codes</b> - the qrId needs not be linked to any asset or
+          kit
+        </li>
+        <li>
+          <b>QR ownership</b> - the QR code needs to be either unclaimed or
+          belong to the organization you are trying to import it to.
+        </li>
+      </ul>
+      If no <b>"qrId"</b> is used a new QR code will be generated.
+      <br />
+      If you are interesting in receiving some unclaimed or unlinked codes, feel
+      free to get in touch with support and we can provide those for you.
+    </div>
+
+    <div>
+      <h4 className="mt-2">Extra considerations</h4>
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          The first row of the sheet will be ignored. Use it to describe the
+          columns as in the example sheet.
+        </li>
+        <li>
+          If any of the data in the file is invalid, the whole import will fail
+        </li>
+      </ul>
+    </div>
+
+    <div className="mt-2 w-full">
+      For more help, you can use our{" "}
+      <Button
+        variant="link"
+        to="https://www.shelf.nu/csv-helper"
+        target="_blank"
+      >
+        CSV Helper Tool
+      </Button>
+      .
+    </div>
+
     <FileForm intent={"content"} />
-  </>
+  </div>
 );
 
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
@@ -123,7 +177,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
   return (
     <fetcher.Form
-      className="mt-4"
+      className="mt-4 w-full"
       method="post"
       ref={formRef}
       encType="multipart/form-data"
@@ -144,7 +198,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
           <Button
             title={"Confirm asset import"}
             disabled={!selectedFile}
-            className="mt-4"
+            className="my-4"
           >
             Confirm asset import
           </Button>
@@ -163,38 +217,124 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 <Input
                   type="text"
                   label={"Confirmation"}
+                  autoFocus
                   name="agree"
                   value={agreed}
-                  onChange={(e) => setAgreed(e.target.value as any)}
+                  onChange={(e) =>
+                    setAgreed(e.target.value.toUpperCase() as any)
+                  }
                   placeholder="I AGREE"
                   pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
                   required
+                  onKeyDown={(e) => {
+                    if (e.key == "Enter") {
+                      e.preventDefault();
+                      // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
+                      if (!disabled) {
+                        fetcher.submit(formRef.current);
+                      }
+                    }
+                  }}
                 />
               </>
             ) : null}
           </AlertDialogHeader>
-          {data?.error ? (
+
+          <When truthy={!!data?.error}>
             <div>
-              <b className="text-red-500">{data.error.message}</b>
-              <p>
+              <h5 className="text-red-500">{data?.error?.title}</h5>
+              <p className="text-red-500">{data?.error?.message}</p>
+              {data?.error?.additionalData?.duplicateCodes ? (
+                <BrokenQrCodesTable
+                  title="Duplicate codes"
+                  data={
+                    data.error.additionalData
+                      .duplicateCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.nonExistentCodes ? (
+                <BrokenQrCodesTable
+                  title="Non existent codes"
+                  data={
+                    data.error.additionalData
+                      .nonExistentCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.linkedCodes ? (
+                <BrokenQrCodesTable
+                  title="Already linked codes"
+                  data={
+                    data.error.additionalData
+                      .linkedCodes as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+              {data?.error?.additionalData?.connectedToOtherOrgs ? (
+                <BrokenQrCodesTable
+                  title="Some codes do not belong to this organization"
+                  data={
+                    data.error.additionalData
+                      .connectedToOtherOrgs as QRCodePerImportedAsset[]
+                  }
+                />
+              ) : null}
+
+              {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (
+                <table className="mt-4 w-full rounded-md border text-left text-sm">
+                  <thead className="bg-error-100 text-xs">
+                    <tr>
+                      <th scope="col" className="px-2 py-1">
+                        Incorrect Header
+                      </th>
+                      <th scope="col" className="px-2 py-1">
+                        Error
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data?.error?.additionalData?.defectedHeaders?.map(
+                      (data: {
+                        incorrectHeader: string;
+                        errorMessage: string;
+                      }) => (
+                        <tr key={data.incorrectHeader}>
+                          <td className="px-2 py-1">{data.incorrectHeader}</td>
+                          <td className="px-2 py-1">{data.errorMessage}</td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              ) : null}
+
+              <p className="mt-2">
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
               </p>
             </div>
-          ) : null}
+          </When>
 
-          {isSuccessful ? (
+          <When truthy={isSuccessful}>
             <div>
               <b className="text-green-500">Success!</b>
               <p>Your assets have been imported.</p>
             </div>
-          ) : null}
+          </When>
 
           <AlertDialogFooter>
             {isSuccessful ? (
-              <Button to="/assets" width="full">
-                View your newly created assets
-              </Button>
+              <div className="flex gap-2">
+                <AlertDialogCancel asChild>
+                  <Button variant="secondary" width="full">
+                    Close
+                  </Button>
+                </AlertDialogCancel>
+                <Button to="/assets" width="full" className="whitespace-nowrap">
+                  View new assets
+                </Button>
+              </div>
             ) : (
               <>
                 <AlertDialogCancel asChild>
@@ -218,3 +358,33 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
     </fetcher.Form>
   );
 };
+
+function BrokenQrCodesTable({
+  title,
+  data,
+}: {
+  title: string;
+  data: QRCodePerImportedAsset[];
+}) {
+  return (
+    <div className="mt-3">
+      <h5>{title}</h5>
+      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
+        <thead>
+          <Tr>
+            <Th>Asset title</Th>
+            <Th>QR ID</Th>
+          </Tr>
+        </thead>
+        <tbody>
+          {data.map((code: { title: string; qrId: string }) => (
+            <Tr key={code.title}>
+              <Td>{code.title}</Td>
+              <Td>{code.qrId}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}

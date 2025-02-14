@@ -8,7 +8,7 @@ import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
-import { createNote } from "../asset/service.server";
+import { createNote } from "../note/service.server";
 
 export async function createTemplate({
   name,
@@ -268,11 +268,8 @@ export async function makeDefault({
 
 export async function getTemplateById(id: Template["id"]) {
   try {
-    return await db.template.findUniqueOrThrow({
-      where: {
-        id,
-      },
-    });
+    const template = await db.template.findUniqueOrThrow({ where: { id } });
+    return template;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -287,10 +284,12 @@ export async function getTemplateById(id: Template["id"]) {
 
 export async function getLatestTemplateFile(id: Template["id"]) {
   try {
-    return await db.templateFile.findFirst({
+    const templateFile = await db.templateFile.findFirst({
       where: { templateId: id },
       orderBy: { revision: "desc" },
     });
+
+    return templateFile;
   } catch (cause) {
     throw new ShelfError({
       cause,

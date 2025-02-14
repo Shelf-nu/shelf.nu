@@ -1,16 +1,16 @@
+import { useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Spinner } from "~/components/shared/spinner";
-import { ZXingScanner } from "~/components/zxing-scanner";
-import { useQrScanner } from "~/hooks/use-qr-scanner";
+import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
+import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -48,25 +48,39 @@ export const meta: MetaFunction<typeof loader> = () => [
 ];
 
 const QRScanner = () => {
-  const { videoMediaDevices } = useQrScanner();
+  const navigate = useNavigate();
+  const [qrId, setQrId] = useState<string | null>(null);
+  const [scanMessage, setScanMessage] = useState<string>(
+    "Processing QR code..."
+  );
+
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 132 : vh - 167;
+  const height = isMd ? vh - 124 : vh - 158;
+  const { devices, DevicesPermissionComponent } = useVideoDevices();
+
+  function handleQrDetectionSuccess(qrId: string) {
+    setQrId(qrId);
+    setScanMessage("Redirecting to mapped asset...");
+
+    navigate(`/qr/${qrId}`);
+  }
 
   return (
     <>
       <Header title="QR code scanner" />
       <div
-        className={` -mx-4 flex flex-col`}
-        style={{
-          height: `${height}px`,
-        }}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={{ height: `${height}px` }}
       >
-        {videoMediaDevices && videoMediaDevices.length > 0 ? (
-          <ZXingScanner videoMediaDevices={videoMediaDevices} />
+        {devices ? (
+          <WasmScanner
+            onQrDetectionSuccess={handleQrDetectionSuccess}
+            devices={devices}
+            paused={!!qrId}
+            scanMessage={scanMessage}
+          />
         ) : (
-          <div className="mt-4 flex flex-col items-center justify-center">
-            <Spinner /> Waiting for permission to access camera.
-          </div>
+          <DevicesPermissionComponent />
         )}
       </div>
     </>

@@ -4,10 +4,13 @@ import {
   type LoaderFunctionArgs,
   type MetaFunction,
 } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { CrispButton } from "~/components/marketing/crisp";
+import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
 import { PriceBox } from "~/components/subscription/price-box";
+import { config } from "~/config/shelf.config";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -16,7 +19,7 @@ import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -90,13 +93,7 @@ export default function SelectPlan() {
 
   return (
     <div className="flex flex-col items-center p-4 sm:p-6">
-      <img
-        src="/static/images/shelf-symbol.png"
-        alt="logo"
-        className="my-4 md:mt-0"
-        width={32}
-        height={32}
-      />
+      <ShelfSymbolLogo className="my-4 size-8 md:mt-0" />
       <div className="mb-8 text-center">
         <h3>Select your payment plan</h3>
         <p>No credit card or payment required.</p>
@@ -149,7 +146,11 @@ export default function SelectPlan() {
         </CrispButton>
         .
       </p>
-      <Form method="post" className="w-full" action="/settings/subscription">
+      <Form
+        method="post"
+        className="w-full"
+        action="/account-details/subscription"
+      >
         <input type="hidden" name="priceId" value={activePrice?.id || ""} />
         <input
           type="hidden"
@@ -164,7 +165,7 @@ export default function SelectPlan() {
           value="trial"
           disabled={disabled}
         >
-          Start 14 day free trial
+          Start {config.freeTrialDays} day free trial
         </Button>
       </Form>
     </div>

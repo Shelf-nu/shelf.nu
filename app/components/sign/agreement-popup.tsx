@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
+import { useSearchParams } from "~/hooks/search-params";
 import Agreement from "./agreement";
 import { Button } from "../shared/button";
 

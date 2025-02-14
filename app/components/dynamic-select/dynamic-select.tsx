@@ -15,6 +15,7 @@ import type {
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -24,9 +25,21 @@ import When from "../when/when";
 
 type Props = ModelFilterProps & {
   className?: string;
+  triggerWrapperClassName?: string;
   style?: React.CSSProperties;
   fieldName?: string;
+
+  /** This is the html label */
   label?: React.ReactNode;
+
+  /** This is to be shown inside the popover */
+  contentLabel?: React.ReactNode;
+
+  /** Hide the label */
+  hideLabel?: boolean;
+
+  /** Is this input required. Used to show a required star */
+  required?: boolean;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -36,18 +49,23 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   closeOnSelect?: boolean;
   excludeItems?: string[];
-  onChange?: ((value: string) => void) | null;
-  /**
+  /** Allow undefined for deselection cases */
+  onChange?: ((value: string | undefined) => void) | null /**
    * Allow item to unselect on clicking again
-   */
+   */;
   allowClear?: boolean;
+  hidden?: boolean;
 };
 
 export default function DynamicSelect({
   className,
+  triggerWrapperClassName,
   style,
   fieldName,
+  contentLabel,
   label,
+  hideLabel,
+  required,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -61,6 +79,7 @@ export default function DynamicSelect({
   onChange = null,
   allowClear,
   selectionMode = "none",
+  hidden = false,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -91,14 +110,16 @@ export default function DynamicSelect({
   );
 
   function handleItemChange(id: string) {
-    if (allowClear && selectedValue === id) {
-      setSelectedValue(undefined);
-    } else {
-      setSelectedValue(id);
-      handleSelectItemChange(id);
-    }
+    const isDeselecting = allowClear && selectedValue === id;
 
-    onChange && onChange(id);
+    // Update local state
+    setSelectedValue(isDeselecting ? undefined : id);
+
+    // Always update URL params and parent state
+    handleSelectItemChange(id);
+
+    // Notify parent with the new value
+    onChange?.(isDeselecting ? undefined : id);
 
     if (closeOnSelect) {
       setIsPopoverOpen(false);
@@ -112,6 +133,25 @@ export default function DynamicSelect({
     [defaultValue]
   );
 
+  /** This is needed so we know what to show on the trigger */
+  const selectedItem = items.find((i) => i.id === selectedValue);
+  const triggerValue = selectedItem
+    ? typeof renderItem === "function"
+      ? renderItem({ ...selectedItem, metadata: selectedItem })
+      : selectedItem.name
+    : placeholder;
+
+  if (hidden) {
+    return (
+      <input
+        key={`${selectedValue}-${defaultValue}`}
+        type="hidden"
+        value={selectedValue}
+        name={fieldName ?? model.name}
+      />
+    );
+  }
+
   return (
     <>
       <div className="relative w-full">
@@ -124,14 +164,41 @@ export default function DynamicSelect({
         <MobileStyles open={isPopoverOpen} />
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-          <PopoverTrigger disabled={disabled} asChild>
-            <div
-              ref={triggerRef}
-              className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+          <PopoverTrigger
+            disabled={disabled}
+            asChild
+            className={tw(
+              triggerWrapperClassName,
+              "inline-flex w-full items-center gap-2 "
+            )}
+          >
+            <button
+              className={tw(
+                "w-full",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
             >
-              {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
-              <ChevronDownIcon />
-            </div>
+              {label && (
+                <InnerLabel hideLg={hideLabel} required={required}>
+                  {label}
+                </InnerLabel>
+              )}
+
+              <div
+                ref={triggerRef}
+                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[14px]  hover:cursor-pointer disabled:opacity-50"
+              >
+                <span
+                  className={tw(
+                    "truncate whitespace-nowrap pr-2",
+                    selectedValue === undefined && "text-gray-500"
+                  )}
+                >
+                  {triggerValue}
+                </span>
+                <ChevronDownIcon />
+              </div>
+            </button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent
@@ -148,7 +215,7 @@ export default function DynamicSelect({
             >
               <div className="flex items-center justify-between p-3">
                 <div className="text-xs font-semibold text-gray-700">
-                  {label}
+                  {contentLabel}
                 </div>
                 <When truthy={selectedItems?.length > 0 && showSearch}>
                   <Button
@@ -170,8 +237,8 @@ export default function DynamicSelect({
                 <div className="filters-form relative border-y border-y-gray-200 p-3">
                   <Input
                     type="text"
-                    label={`Search ${label}`}
-                    placeholder={`Search ${label}`}
+                    label={`Search ${contentLabel}`}
+                    placeholder={`Search ${contentLabel}`}
                     hideLabel
                     className="text-gray-500"
                     icon={searchIcon}
@@ -201,33 +268,41 @@ export default function DynamicSelect({
                     modelName={model.name}
                   />
                 )}
-                {itemsToRender.map((item) => (
-                  <div
-                    key={item.id}
-                    className={tw(
-                      "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                      item.id === selectedValue && "bg-gray-100"
-                    )}
-                    onClick={() => {
-                      handleItemChange(item.id);
-                    }}
-                  >
-                    <div>
-                      {typeof renderItem === "function" ? (
-                        renderItem({ ...item, metadata: item })
-                      ) : (
-                        <div className="flex items-center truncate text-sm font-medium">
-                          {item.name}
-                        </div>
+                {itemsToRender.map((item) => {
+                  //making sure only showinng the option if it as some value.
+                  const value =
+                    typeof renderItem === "function" ? (
+                      renderItem({ ...item, metadata: item })
+                    ) : (
+                      <div className="flex items-center truncate text-sm font-medium">
+                        {item.name}
+                      </div>
+                    );
+                  if (!value) {
+                    return null;
+                  }
+                  return (
+                    <div
+                      key={item.id}
+                      className={tw(
+                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                        item.id === selectedValue && "bg-gray-100"
                       )}
+                      onClick={() => {
+                        handleItemChange(item.id);
+                      }}
+                    >
+                      <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
+                        {value}
+                      </span>
+                      <When truthy={item.id === selectedValue}>
+                        <span className="h-auto w-[18px] text-primary">
+                          <CheckIcon />
+                        </span>
+                      </When>
                     </div>
-
-                    <When truthy={item.id === selectedValue}>
-                      <CheckIcon className="text-primary" />
-                    </When>
-                  </div>
-                ))}
-
+                  );
+                })}
                 {items.length < totalItems && searchQuery === "" && (
                   <button
                     type="button"

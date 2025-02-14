@@ -1,15 +1,12 @@
 import type { ChangeEvent, FocusEvent } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FetcherWithComponents } from "@remix-run/react";
 import { useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import {
-  MarkdownEditor,
-  clearMarkdownAtom,
-} from "~/components/markdown/markdown-editor";
+import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 
 export const NewNoteSchema = z.object({
@@ -29,8 +26,15 @@ export const NewNote = ({
   const [isEditing, setIsEditing] = useAtom(isEditingAtom);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const [, clearMarkdown] = useAtom(clearMarkdownAtom);
   const isDone = fetcher.state === "idle" && fetcher.data != null;
+
+  /** Controls whether actions are disabled */
+  const [disabled, setDisabled] = useState<boolean>(false);
+
+  function handleSubmit() {
+    /** Disabled the input and buttons while form is submitting */
+    setDisabled(true);
+  }
 
   const handelBlur = (
     e: ChangeEvent<HTMLTextAreaElement> & FocusEvent<HTMLTextAreaElement>
@@ -65,15 +69,17 @@ export const NewNote = ({
     [fetcher]
   );
 
+  /** Focus the input when we are in edit mode */
   useEffect(() => {
     if (isEditing) {
       editorRef?.current?.focus();
     }
   }, [isEditing]);
 
+  /** When submitting is done, set isEditing to false to close the editor */
   useEffect(() => {
-    clearMarkdown();
-  }, [isDone, clearMarkdown]);
+    setIsEditing(false);
+  }, [isDone, setIsEditing]);
 
   return (
     <div ref={wrapperRef}>
@@ -81,7 +87,7 @@ export const NewNote = ({
         action={`/assets/${params.assetId}/note`}
         method="post"
         ref={zo.ref}
-        onSubmit={clearMarkdown}
+        onSubmit={handleSubmit}
       >
         {isEditing ? (
           <div className="relative flex flex-col pb-12 xl:pb-0">
@@ -90,10 +96,11 @@ export const NewNote = ({
                 variant="secondary"
                 size="sm"
                 onClick={() => setIsEditing(false)}
+                disabled={disabled}
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="">
+              <Button type="submit" size="sm" className="" disabled={disabled}>
                 Create note
               </Button>
             </div>
@@ -101,14 +108,13 @@ export const NewNote = ({
               label={"note"}
               defaultValue={""}
               name={zo.fields.content()}
-              placeholder={"Leave a note"}
-              // @ts-ignore
+              placeholder="Leave a note"
               rows={4}
               ref={editorRef}
               className="rounded-b-none"
               onBlur={handelBlur}
               onKeyDown={handleKeyDown}
-              maxLength={100000}
+              disabled={disabled}
             />
           </div>
         ) : (

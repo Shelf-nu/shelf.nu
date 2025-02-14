@@ -1,11 +1,12 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet, json } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -34,3 +35,5 @@ export const handle = {
 export default function LocationsPage() {
   return <Outlet />;
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

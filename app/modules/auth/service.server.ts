@@ -1,10 +1,12 @@
-import { isAuthApiError } from "@supabase/supabase-js";
+import { AuthError, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
+import { config } from "~/config/shelf.config";
+import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
 
@@ -83,12 +85,15 @@ export async function resendVerificationEmail(email: string) {
       throw error;
     }
   } catch (cause) {
+    // @ts-expect-error
+    const isRateLimitError = cause?.code === "over_email_send_rate_limit";
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while resending the verification email. Please try again later or contact support.",
       additionalData: { email },
       label,
+      shouldBeCaptured: !isRateLimitError,
     });
   }
 }
@@ -133,26 +138,98 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
+export async function signInWithSSO(domain: string) {
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
+      domain,
+      options: {
+        redirectTo: `${SERVER_URL}/oauth/callback`,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data.url;
+  } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    // @ts-expect-error
+    if (cause?.code === "sso_provider_not_found") {
+      message = "No SSO provider assigned for your organization's domain";
+      shouldBeCaptured = false;
+    }
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+      shouldBeCaptured,
+      additionalData: { domain },
+    });
+  }
+}
+
+/**
+ * Helper function to check if user is SSO-only and throw appropriate error
+ * @param email User's email address
+ * @throws ShelfError if user exists and is SSO-only
+ */
+async function validateNonSSOUser(email: string) {
+  const user = await db.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { sso: true },
+  });
+
+  if (user?.sso) {
+    throw new ShelfError({
+      cause: null,
+      title: "SSO User",
+      message:
+        "This email address is associated with an SSO account. Please use SSO login instead.",
+      additionalData: { email },
+      label: "Auth",
+    });
+  }
+}
+
 export async function sendOTP(email: string) {
   try {
-    const { error } = await getSupabaseAdmin().auth.signInWithOtp({ email });
+    await validateNonSSOUser(email);
+
+    const { error } = await getSupabaseAdmin().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: !config.disableSignup, // If signup is disabled, don't create a new user
+      },
+    });
 
     if (error) {
       throw error;
     }
   } catch (cause) {
+    // @ts-expect-error
+    const isRateLimitError = cause.code === "over_email_send_rate_limit";
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while sending the OTP. Please try again later or contact support.",
+        cause instanceof AuthError || isLikeShelfError(cause)
+          ? cause.message
+          : "Something went wrong while sending the OTP. Please try again later or contact support.",
       additionalData: { email },
       label,
+      shouldBeCaptured: !isRateLimitError,
     });
   }
 }
 
 export async function sendResetPasswordLink(email: string) {
   try {
+    await validateNonSSOUser(email);
+
     await getSupabaseAdmin().auth.resetPasswordForEmail(email, {
       redirectTo: `${SERVER_URL}/reset-password`,
     });
@@ -167,8 +244,30 @@ export async function sendResetPasswordLink(email: string) {
   }
 }
 
-export async function updateAccountPassword(id: string, password: string) {
+export async function updateAccountPassword(
+  id: string,
+  password: string,
+  accessToken?: string | undefined
+) {
   try {
+    const user = await db.user.findFirst({
+      where: { id },
+      select: {
+        sso: true,
+      },
+    });
+    if (user?.sso) {
+      throw new ShelfError({
+        cause: null,
+        message: "You cannot update the password of an SSO user.",
+        label,
+      });
+    }
+    //logout all the others session expect the current sesssion.
+    if (accessToken) {
+      await getSupabaseAdmin().auth.admin.signOut(accessToken, "others");
+    }
+    //on password update, it is remvoing the session in th supbase.
     const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
       password,
     });
@@ -243,6 +342,45 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
+export async function validateSession(token: string) {
+  try {
+    // const t0 = performance.now();
+    const result = await db.$queryRaw<{ id: String; revoked: boolean }[]>`
+      SELECT id, revoked FROM auth.refresh_tokens 
+      WHERE token = ${token} 
+      AND revoked = false
+      LIMIT 1 
+    `;
+    // const t1 = performance.now();
+
+    // eslint-disable-next-line no-console
+    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
+
+    if (result.length === 0) {
+      //logging for debug
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Refresh token is invalid or has been revoked",
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+    }
+    return result.length > 0;
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: "Something went wrong while valdiating the session",
+        label,
+        shouldBeCaptured: false,
+      })
+    );
+    return false;
+  }
+}
+
 export async function refreshAccessToken(
   refreshToken?: string
 ): Promise<AuthSession> {
@@ -280,6 +418,9 @@ export async function refreshAccessToken(
       message:
         "Unable to refresh access token. Please try again. If the issue persists, contact support",
       label,
+      additionalData: {
+        refreshToken,
+      },
     });
   }
 }

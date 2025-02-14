@@ -1,50 +1,55 @@
-import { useCallback, type ReactNode } from "react";
-import { useMatches, useNavigate } from "@remix-run/react";
+import type { ReactNode } from "react";
+import ReactDOM from "react-dom";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
 export const Dialog = ({
+  title,
   children,
   open,
-  noScroll,
+  onClose,
+  className,
+  headerClassName,
 }: {
+  title: string | ReactNode;
   children: ReactNode;
   open: boolean;
-  noScroll: boolean;
-}) => {
-  const matches = useMatches();
-  const prevRoute = matches[matches.length - 2];
-  const navigate = useNavigate();
-  const handleBackdropClose = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.target !== e.currentTarget) return;
-      navigate(prevRoute);
-    },
-    [prevRoute, navigate]
-  );
-
-  return open ? (
-    <div className="dialog-backdrop" onClick={handleBackdropClose}>
-      <dialog className="dialog" open={true}>
-        <div
-          className={tw(
-            " relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
-            noScroll ? "md:h-[85vh]" : "md:overflow-y-auto"
-          )}
-        >
-          <Button
-            to={prevRoute}
-            variant="link"
-            className={
-              "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
-            }
+  onClose: Function;
+  className?: string;
+  headerClassName?: string;
+}) =>
+  open ? (
+    <div
+      className="dialog-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <dialog className={tw("dialog", className)} open>
+        <div className="flex h-full flex-col bg-white">
+          <div
+            className={tw(
+              "dialog-header flex items-start justify-between bg-white px-6 py-3",
+              headerClassName
+            )}
           >
-            <XIcon />
-          </Button>
-          {children}
+            {title}
+            <Button
+              onClick={onClose}
+              variant="link"
+              className={"mt-4 leading-none text-gray-500 md:right-6"}
+            >
+              <XIcon />
+            </Button>
+          </div>
+          <div className="dialog-body grow overflow-auto">{children}</div>
         </div>
       </dialog>
     </div>
   ) : null;
-};
+
+export const DialogPortal = ({ children }: { children: React.ReactNode }) =>
+  ReactDOM.createPortal(children, document.body);

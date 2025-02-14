@@ -21,15 +21,15 @@ import {
 } from "~/components/location/form";
 import { getLocation, updateLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -43,14 +43,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.update,
     });
 
-    const { location } = await getLocation({ organizationId, id });
+    const { location } = await getLocation({
+      organizationId,
+      id,
+      userOrganizations,
+      request,
+    });
 
     const header: HeaderData = {
       title: `Edit | ${location.name}`,
@@ -104,7 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       clonedRequest,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
     );
 
     const file = formDataFile.get("image") as File | null;
@@ -140,15 +145,15 @@ export default function LocationEditPage() {
   const { location } = useLoaderData<typeof loader>();
 
   return (
-    <>
+    <div className="relative">
       <Header title={hasName ? name : location.name} />
-      <div className=" items-top flex justify-between">
+      <div className="items-top flex justify-between">
         <LocationForm
           name={location.name}
           description={location.description}
           address={location.address}
         />
       </div>
-    </>
+    </div>
   );
 }

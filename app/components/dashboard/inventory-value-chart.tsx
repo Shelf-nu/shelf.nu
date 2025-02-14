@@ -46,6 +46,7 @@ export default function InventoryValueChart() {
                     value={(valueKnownAssets / totalAssets) * 100}
                     size="xl"
                     color="orange"
+                    className="relative"
                   >
                     <span className="block text-center text-xs font-medium text-gray-600">
                       Value Known <br />
@@ -64,7 +65,6 @@ export default function InventoryValueChart() {
                   Inventory value
                 </Text>
                 <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
-                  {currency}{" "}
                   {(totalValuation || 0).toLocaleString(locale, {
                     style: "currency",
                     currency: currency,

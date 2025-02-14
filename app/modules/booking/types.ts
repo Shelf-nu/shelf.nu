@@ -14,11 +14,6 @@ export interface ClientHint {
   locale: string;
 }
 
-export interface SchedulerDataDeprecated {
-  id: string;
-  hints: ClientHint;
-}
-
 export interface SchedulerData {
   id: string;
   hints: ClientHint;
@@ -34,3 +29,13 @@ export type BookingUpdateIntent =
   | "checkIn"
   | "archive"
   | "cancel";
+
+export type BookingWithCustodians = Prisma.BookingGetPayload<{
+  include: {
+    assets: true;
+    from: true;
+    to: true;
+    custodianUser: true;
+    custodianTeamMember: true;
+  };
+}>;

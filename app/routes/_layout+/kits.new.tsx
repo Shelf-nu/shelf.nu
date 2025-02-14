@@ -1,10 +1,10 @@
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
+import { useSearchParams } from "~/hooks/search-params";
 import { createKit, updateKitImage } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -13,18 +13,24 @@ import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 const header = {
   title: "Untitled kit",
 };
 
-export function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.create,
+    });
     return json(
       data({
         header,
@@ -54,7 +60,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.kit,
       action: PermissionAction.create,
     });
 
@@ -80,6 +86,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       request,
       kitId: kit.id,
       userId,
+      organizationId,
     });
 
     sendNotification({
@@ -98,11 +105,12 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function CreateNewKit() {
   const title = useAtomValue(dynamicTitleAtom);
-
+  const [searchParams] = useSearchParams();
+  const qrId = searchParams.get("qrId");
   return (
     <>
       <Header title={title ?? "Untitled kit"} />
-      <KitsForm />
+      <KitsForm qrId={qrId} />
     </>
   );
 }

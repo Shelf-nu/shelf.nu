@@ -1,26 +1,41 @@
 import { Roles } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
-import { useAtom } from "jotai";
+import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { ScanBarcodeIcon } from "lucide-react";
+import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
-import Sidebar from "~/components/layout/sidebar/sidebar";
+import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
+import AppSidebar from "~/components/layout/sidebar/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
+import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  installPwaPromptCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
@@ -30,54 +45,39 @@ import {
   getStripeCustomer,
   stripe,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription";
+import { canUseBookings } from "~/utils/subscription.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
+export type LayoutLoaderResponse = typeof loader;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    // @TODO - we need to look into doing a select as we dont want to expose all data always
-    const user = await db.user
-      .findUniqueOrThrow({
-        where: { id: userId },
-        include: {
-          roles: true,
-          organizations: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              imageId: true,
-            },
-          },
-          userOrganizations: {
-            where: {
-              userId: authSession.userId,
-            },
-            select: {
-              organization: true,
-              roles: true,
-            },
-          },
-          tier: {
-            select: {
-              tierLimit: true,
-            },
-          },
+    const user = await getUserByID(userId, {
+      roles: true,
+      organizations: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          imageId: true,
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "We can't find your user data. Please try again or contact support.",
-          additionalData: { userId },
-          label: "App layout",
-        });
-      });
+      },
+      userOrganizations: {
+        where: {
+          userId: authSession.userId,
+        },
+        select: {
+          id: true,
+          organization: true,
+          roles: true,
+        },
+      },
+    });
 
     let subscription = null;
 
@@ -91,7 +91,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
-    const cookie = await initializePerPageCookieOnLayout(request);
+    const userPrefsCookie = await initializePerPageCookieOnLayout(request);
+
+    const cookieHeader = request.headers.get("Cookie");
+    const pwaPromptCookie =
+      (await installPwaPromptCookie.parse(cookieHeader)) || {};
 
     if (!user.onboarded) {
       return redirect("onboarding");
@@ -102,7 +106,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      */
     const { organizationId, organizations, currentOrganization } =
       await getSelectedOrganisation({ userId: authSession.userId, request });
-
+    const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
     return json(
       data({
         user,
@@ -113,18 +117,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         )?.roles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
-        hideSupportBanner: cookie.hideSupportBanner,
-        minimizedSidebar: cookie.minimizedSidebar,
-        isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+        hideNoticeCard: userPrefsCookie.hideNoticeCard,
+        minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        scannerCameraId: userPrefsCookie.scannerCameraId,
+        hideInstallPwaPrompt: pwaPromptCookie.hidden,
+        isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
-        disabledTeamOrg: await disabledTeamOrg({
-          currentOrganization,
-          organizations,
-        }),
+        disabledTeamOrg: isAdmin
+          ? false
+          : await disabledTeamOrg({
+              currentOrganization,
+              organizations,
+              url: request.url,
+            }),
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
+        headers: [setCookie(await userPrefs.serialize(userPrefsCookie))],
       }
     );
   } catch (cause) {
@@ -133,39 +142,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+export const meta: MetaFunction<typeof loader> = ({ error }) => [
+  /** This will make sure that if we have an error its visible in the title of the browser tab */
+  // @ts-expect-error
+  { title: error ? appendToMetaTitle(error.data.error.title) : "" },
+];
+
 export default function App() {
   useCrisp();
-  const { currentOrganizationId, disabledTeamOrg } =
-    useLoaderData<typeof loader>();
-  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
+  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
+
+  const renderInstallPwaPromptOnMobile = () =>
+    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
+    window.matchMedia("(max-width: 640px)").matches &&
+    !window.matchMedia("(display-mode: standalone)").matches ? (
+      <InstallPwaPromptModal />
+    ) : null;
 
   return (
-    <>
-      <div
-        id="container"
-        key={currentOrganizationId}
-        className="flex min-h-screen min-w-[320px] flex-col"
-      >
-        <div className="inner-container flex flex-col md:flex-row">
-          <Sidebar />
-          <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-            <div className="flex h-full flex-1 flex-col">
-              {disabledTeamOrg ? (
-                <NoSubscription />
-              ) : workspaceSwitching ? (
-                <div className="flex size-full flex-col items-center justify-center text-center">
-                  <Spinner />
-                  <p className="mt-2">Activating workspace...</p>
-                </div>
-              ) : (
-                <Outlet />
-              )}
-            </div>
-            <Toaster />
-          </main>
-        </div>
-      </div>
-    </>
+    <SidebarProvider defaultOpen={!minimizedSidebar}>
+      <AppSidebar />
+      <SidebarInset>
+        {disabledTeamOrg ? (
+          <NoSubscription />
+        ) : workspaceSwitching ? (
+          <div className="flex size-full flex-col items-center justify-center text-center">
+            <Spinner />
+            <p className="mt-2">Activating workspace...</p>
+          </div>
+        ) : (
+          <>
+            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+              <Link to="." title="Home" className="block h-8">
+                <ShelfMobileLogo />
+              </Link>
+              <div className="flex items-center space-x-2">
+                <NavLink
+                  to="/scanner"
+                  title="Scan QR Code"
+                  className={({ isActive }) =>
+                    tw(
+                      "relative flex items-center justify-center px-2 transition",
+                      isActive ? "text-primary-600" : "text-gray-500"
+                    )
+                  }
+                >
+                  <ScanBarcodeIcon />
+                </NavLink>
+                <SidebarTrigger />
+              </div>
+            </header>
+            <Outlet />
+          </>
+        )}
+        <Toaster />
+        <ClientOnly fallback={null}>
+          {renderInstallPwaPromptOnMobile}
+        </ClientOnly>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

@@ -3,17 +3,17 @@ import type { Custody, Template } from "@prisma/client";
 import { AssetStatus, Roles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
-// import resolveConfig from "tailwindcss/resolveConfig";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
-import Agreement from "~/components/sign/agreement";
 import AgreementPopup, {
   AGREEMENT_POPUP_VISIBLE,
 } from "~/components/sign/agreement-popup";
 
 import { db } from "~/database/db.server";
-import { createNote, getAsset } from "~/modules/asset/service.server";
+import { useSearchParams } from "~/hooks/search-params";
+import { getAsset } from "~/modules/asset/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -27,9 +27,8 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import tailwindConfig from "../../../tailwind.config";
 
 export const loader = async ({
   context,
@@ -206,9 +205,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function Sign() {
-  const { template, templateFile } = useLoaderData<typeof loader>();
-  const templateUrl = templateFile.url;
-  // const twConfig = resolveConfig(tailwindConfig);
+  const { template } = useLoaderData<typeof loader>();
   const [params, setParams] = useSearchParams();
   const showAgreementPopup = useCallback(() => {
     params.set(AGREEMENT_POPUP_VISIBLE, "true");
@@ -245,9 +242,9 @@ export default function Sign() {
           </p>
         </div>
         {/* @ts-ignore */}
-        {window.innerWidth > twConfig.theme.screens.md.split("px")[0] && (
+        {/* {window.innerWidth > twConfig.theme.screens.md.split("px")[0] && (
           <Agreement />
-        )}
+        )} */}
       </div>
     </div>
   );

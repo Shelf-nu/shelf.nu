@@ -35,13 +35,21 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("location"),
   }),
   BasicModelFilters.extend({
+    name: z.literal("kit"),
+  }),
+  BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
+    userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+  }),
+  BasicModelFilters.extend({
+    name: z.literal("booking"),
   }),
 ]);
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
 export type ModelFilters = z.infer<typeof ModelFiltersSchema>;
+export type ModelFiltersLoader = typeof loader;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -65,25 +73,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     /** Validating parameters */
-    const { name, queryKey, queryValue, selectedValues, ...filters } =
-      parseData(searchParams, ModelFiltersSchema);
+    const modelFilters = parseData(searchParams, ModelFiltersSchema);
+    const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
-    const queryData = (await db[name].dynamicFindMany({
-      where: {
-        organizationId,
-        OR: [
+    const where: Record<string, any> = {
+      organizationId,
+      OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
+    };
+    /**
+     * When searching for teamMember, we have to search for
+     * - teamMember's name
+     * - teamMember's user firstName, lastName and email
+     */
+    if (modelFilters.name === "teamMember") {
+      where.OR.push(
+        { name: { contains: queryValue, mode: "insensitive" } },
+        { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
+        { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
+        { user: { email: { contains: queryValue, mode: "insensitive" } } }
+      );
+
+      where.deletedAt = modelFilters.deletedAt;
+      if (modelFilters.userWithAdminAndOwnerOnly) {
+        where.AND = [
+          { user: { isNot: null } },
           {
-            [queryKey]: {
-              contains: queryValue,
-              mode: "insensitive",
+            user: {
+              userOrganizations: {
+                some: {
+                  AND: [
+                    { organizationId },
+                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                  ],
+                },
+              },
             },
           },
-          {
-            id: { in: (selectedValues ?? "").split(",") },
-          },
-        ],
-        ...filters,
-      },
+        ];
+      }
+    } else {
+      where.OR.push({
+        [queryKey]: { contains: queryValue, mode: "insensitive" },
+      });
+    }
+
+    const queryData = (await db[name].dynamicFindMany({
+      where,
+      include:
+        /** We need user's information to resolve teamMember's name */
+        name === "teamMember"
+          ? {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            }
+          : undefined,
     })) as Array<Record<string, string>>;
 
     return json(
@@ -93,6 +142,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: item[queryKey],
           color: item?.color,
           metadata: item,
+          user: item?.user as any,
         })),
       })
     );

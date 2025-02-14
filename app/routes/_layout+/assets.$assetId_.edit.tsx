@@ -40,7 +40,7 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { slugify } from "~/utils/slugify";
 
@@ -52,14 +52,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
-    });
+    const { organizationId, currentOrganization, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      });
 
-    const asset = await getAsset({ organizationId, id });
+    const asset = await getAsset({
+      organizationId,
+      id,
+      include: { tags: true, customFields: true },
+      userOrganizations,
+      request,
+    });
 
     const { categories, totalCategories, tags, locations, totalLocations } =
       await getAllEntriesForCreateAndEdit({
@@ -164,6 +171,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       assetId: id,
       userId: authSession.userId,
+      organizationId,
     });
 
     const {
@@ -190,6 +198,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: authSession.userId,
       customFieldsValues,
       valuation,
+      organizationId,
     });
 
     sendNotification({
@@ -203,7 +212,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(`/assets/new`);
     }
 
-    return redirect(`/assets/${id}`);
+    return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });
@@ -220,10 +229,13 @@ export default function AssetEditPage() {
   );
 
   return (
-    <>
+    <div className="relative">
       <Header title={hasTitle ? title : asset.title} />
       <div className=" items-top flex justify-between">
         <AssetForm
+          id={asset.id}
+          mainImage={asset.mainImage}
+          mainImageExpiration={String(asset.mainImageExpiration)}
           title={asset.title}
           category={asset.categoryId}
           location={asset.locationId}
@@ -232,6 +244,6 @@ export default function AssetEditPage() {
           tags={tags}
         />
       </div>
-    </>
+    </div>
   );
 }

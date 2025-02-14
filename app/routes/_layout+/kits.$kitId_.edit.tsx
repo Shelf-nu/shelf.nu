@@ -29,7 +29,7 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -43,14 +43,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
 
-    const kit = await getKit({ id: kitId });
+    const kit = await getKit({
+      id: kitId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     const header: HeaderData = {
       title: `Edit | ${kit.name}`,
@@ -108,11 +113,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         createdById: userId,
         name: payload.name,
         description: payload.description,
+        organizationId,
       }),
       updateKitImage({
         request,
         kitId,
         userId,
+        organizationId,
       }),
     ]);
 

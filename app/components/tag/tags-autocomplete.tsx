@@ -1,27 +1,23 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import type { Tag } from "react-tag-autocomplete";
 import { ReactTags } from "react-tag-autocomplete";
-import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 
-export interface Suggestion {
+export interface TagSuggestion {
   label: string;
   value: string;
 }
 
-export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
+export const TagsAutocomplete = ({
+  existingTags,
+  suggestions,
+}: {
+  existingTags: Tag[];
+  suggestions: TagSuggestion[];
+}) => {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
     React.useLayoutEffect = React.useEffect;
   }
-
-  /** Get the tags from the loader */
-
-  const suggestions = useLoaderData<typeof loader>().tags.map((tag) => ({
-    label: tag.name,
-    value: tag.id,
-  }));
-
   const [selected, setSelected] = useState<Tag[]>([]);
 
   useEffect(() => {

@@ -1,10 +1,9 @@
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
-import { ShelfError } from "~/utils/error";
-import { sendEmail } from "~/utils/mail.server";
 import type { ClientHint } from "./types";
 
 /**
@@ -156,44 +155,35 @@ export const checkinReminderEmailContent = ({
     )}.`,
   });
 
-export async function sendCheckinReminder(
+export function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
   hints: ClientHint
 ) {
-  try {
-    await sendEmail({
-      to: booking.custodianUser!.email,
-      subject: `Checkin reminder (${booking.name}) - shelf.nu`,
-      text: checkinReminderEmailContent({
-        hints,
-        bookingName: booking.name,
-        assetsCount: assetCount,
-        custodian:
-          `${booking.custodianUser!.firstName} ${booking.custodianUser
-            ?.lastName}` || (booking.custodianTeamMember?.name as string),
-        from: booking.from!,
-        to: booking.to!,
-        bookingId: booking.id,
-      }),
-      html: bookingUpdatesTemplateString({
-        booking,
-        heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
-          new Date(booking.to!),
-          new Date()
-        )}.`,
-        assetCount,
-        hints,
-      }),
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while sending the checkin reminder email",
-      additionalData: { booking },
-      label: "Booking",
-    });
-  }
+  sendEmail({
+    to: booking.custodianUser!.email,
+    subject: `🔔 Checkin reminder (${booking.name}) - shelf.nu`,
+    text: checkinReminderEmailContent({
+      hints,
+      bookingName: booking.name,
+      assetsCount: assetCount,
+      custodian:
+        `${booking.custodianUser!.firstName} ${booking.custodianUser
+          ?.lastName}` || (booking.custodianTeamMember?.name as string),
+      from: booking.from!,
+      to: booking.to!,
+      bookingId: booking.id,
+    }),
+    html: bookingUpdatesTemplateString({
+      booking,
+      heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
+        new Date(booking.to!),
+        new Date()
+      )}.`,
+      assetCount,
+      hints,
+    }),
+  });
 }
 
 /**

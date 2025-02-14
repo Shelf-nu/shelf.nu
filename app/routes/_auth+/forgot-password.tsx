@@ -4,9 +4,10 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
@@ -59,6 +60,17 @@ export async function action({ request }: ActionFunctionArgs) {
             cause: null,
             message:
               "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
+            additionalData: { email },
+            shouldBeCaptured: false,
+            label: "Auth",
+          });
+        }
+
+        if (user.sso) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This user is an SSO user and cannot reset password using email.",
             additionalData: { email },
             shouldBeCaptured: false,
             label: "Auth",

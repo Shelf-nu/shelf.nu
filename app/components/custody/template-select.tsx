@@ -1,5 +1,5 @@
 import { Link, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/assets.$assetId.check-out";
+import type { loader } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
 import {
   Select,
   SelectTrigger,
@@ -11,6 +11,7 @@ import { Button } from "../shared/button";
 
 export default function TemplateSelect() {
   const { templates } = useLoaderData<typeof loader>();
+
   return (
     <div className="relative w-full">
       <Select name="template">

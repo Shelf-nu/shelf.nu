@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
@@ -73,10 +73,10 @@ export default function NewAnnouncement() {
             Announcement Content
           </label>
           <MarkdownEditor
-            label={"content"}
+            defaultValue=""
+            label="content"
             name="content"
             placeholder={"Announcement content"}
-            // @ts-ignore
             rows={4}
             className="rounded-b-none"
             required

@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils/tw";
+import { InnerLabel } from "./inner-label";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
@@ -67,7 +68,7 @@ const Input = forwardRef(function Input(
   ref
 ) {
   const iconClasses = tw(
-    "pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]"
+    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]"
   );
 
   const addonClasses = tw(
@@ -100,6 +101,7 @@ const Input = forwardRef(function Input(
   let input = (
     <input
       {...inputProps}
+      aria-label={label}
       ref={ref as RefObject<HTMLInputElement> | undefined}
     />
   );
@@ -111,22 +113,20 @@ const Input = forwardRef(function Input(
         maxLength={rest.maxLength || 250}
         rows={rest.rows || 8}
         ref={ref as RefObject<HTMLTextAreaElement> | undefined}
+        aria-label={label}
       />
     );
   }
 
   return (
-    <label className={tw("relative flex flex-col", className)}>
+    <label
+      className={tw("relative flex flex-col", className)}
+      htmlFor={inputProps.name}
+    >
       {/* Label */}
-      <span
-        className={tw(
-          `mb-[6px] text-text-sm font-medium text-gray-700`,
-          hideLabel && "md:hidden",
-          required && "required-input-label"
-        )}
-      >
+      <InnerLabel hideLg={hideLabel} required={required}>
         {label}
-      </span>
+      </InnerLabel>
 
       <div className={`relative flex flex-wrap items-stretch`}>
         {/* IconType */}

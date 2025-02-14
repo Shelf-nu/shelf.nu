@@ -8,7 +8,7 @@ import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
   data,
@@ -28,13 +28,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   try {
     /* Find the QR in the database */
-    const qr = await getQr(id);
-    /** If the QR doesn't exist, getQR will throw a 404
-     *
-     * AFTER MVP: Here we have to consider a deleted User which will
-     * delete all the connected QRs.
-     * However, in real life there could be a physical QR code
-     * that is still there. Will we allow someone to claim it?
+    const qr = await getQr({ id });
+    /**
+     * If the QR doesn't exist, getQR will throw a 404
      */
 
     /** Record the scan in the DB using the QR id
@@ -43,6 +39,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const scan = await createScan({
       userAgent: request.headers.get("user-agent") as string,
+      userId,
       qrId: id,
       deleted: !qr,
     });
@@ -67,8 +64,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Does the QR code belong to any user or is it unclaimed?
      */
     if (!qr.organizationId) {
-      /** We redirect to link where we handle the rest of the logic */
-      return redirect(`link?scanId=${scan.id}`);
+      /** We redirect to claim where we handle the linking of the code to an organization */
+      return redirect(`claim?scanId=${scan.id}`);
     }
 
     /**
@@ -78,45 +75,62 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
-    const userOrganizations = (
-      await getUserOrganizations({
-        userId: authSession.userId,
-      })
-    ).map((uo) => uo.organization);
-    const userOrganizationIds = userOrganizations.map((org) => org.id);
-    const personalOrganization = userOrganizations.find(
+    const userOrganizations = await getUserOrganizations({
+      userId: authSession.userId,
+    });
+    const organizations = userOrganizations.map((uo) => uo.organization);
+    const organizationsIds = organizations.map((org) => org.id);
+    const personalOrganization = organizations.find(
       (org) => org.type === "PERSONAL"
     ) as Pick<Organization, "id">;
 
-    if (!userOrganizationIds.includes(qr.organizationId)) {
+    if (!organizationsIds.includes(qr.organizationId)) {
       return redirect(`contact-owner?scanId=${scan.id}`);
     }
 
     const headers = [
       setCookie(
         await setSelectedOrganizationIdCookie(
-          userOrganizationIds.find((orgId) => orgId === qr.organizationId) ||
+          organizationsIds.find((orgId) => orgId === qr.organizationId) ||
             personalOrganization.id
         )
       ),
     ];
 
     /**
-     * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
-     * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
+     * When there is no assetId or qrId that means that the asset or kit was deleted or the Qr was generated as unlinked.
+     * Here we redirect to a page where the user has the option to link to existing asset or kit create a new one.
      */
-    if (!qr.assetId) {
+    if (!qr.assetId && !qr.kitId) {
       return redirect(`link?scanId=${scan.id}`, {
         headers,
       });
     }
 
-    return redirect(
-      `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
-      {
-        headers,
-      }
-    );
+    /** If its linked to an asset, redirect to the asset */
+    if (qr.assetId) {
+      return redirect(
+        `/assets/${qr.assetId}/overview?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        {
+          headers,
+        }
+      );
+    } else if (qr.kitId) {
+      /** If its linked to a kit, redirect to the kit */
+      return redirect(
+        `/kits/${qr.kitId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        {
+          headers,
+        }
+      );
+    } else {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Something went wrong with handling this QR code. This should not happen. Please try again or contact support.",
+        label: "QR",
+      });
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     throw json(error(reason), { status: reason.status });

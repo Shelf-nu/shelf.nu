@@ -12,7 +12,6 @@ import {
 } from "~/components/templates/form";
 
 import { createTemplate, createTemplateRevision } from "~/modules/template";
-import { assertUserCanCreateMoreTemplates } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -20,8 +19,9 @@ import { data, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanCreateMoreTemplates } from "~/utils/subscription.server";
 
 const title = "New Template";
 
@@ -29,7 +29,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    await assertUserCanCreateMoreTemplates({ userId });
+    await assertUserCanCreateMoreTemplates(userId);
 
     const header = {
       title,
@@ -63,9 +63,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     switch (method) {
       case "POST": {
-        await assertUserCanCreateMoreTemplates({
-          userId: authSession.userId,
-        });
+        await assertUserCanCreateMoreTemplates(userId);
 
         const { organizationId } = await requirePermission({
           userId: authSession.userId,

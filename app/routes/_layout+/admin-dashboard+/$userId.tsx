@@ -1,16 +1,44 @@
-import type { Asset, Qr, User } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
+import type { ReactNode } from "react";
+import {
+  TierId,
+  type Asset,
+  type Qr,
+  type User,
+  type CustomTierLimit,
+} from "@prisma/client";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  SerializeFrom,
+} from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData, Link, useFetcher } from "@remix-run/react";
+
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
+import FormRow from "~/components/forms/form-row";
+import Input from "~/components/forms/input";
+import { Switch } from "~/components/forms/switch";
+import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
+import { Spinner } from "~/components/shared/spinner";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
-import { deleteUser } from "~/modules/user/service.server";
+import { updateUserTierId } from "~/modules/tier/service.server";
+import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams, isDelete } from "~/utils/http.server";
+import { isFormProcessing } from "~/utils/form";
+import {
+  data,
+  error,
+  getParams,
+  isDelete,
+  parseData,
+} from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { createStripeCustomer } from "~/utils/stripe.server";
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -34,30 +62,19 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    const user = await db.user
-      .findUnique({
-        where: { id: shelfUserId },
+    const user = await getUserByID(shelfUserId, {
+      qrCodes: {
+        orderBy: { createdAt: "desc" },
         include: {
-          qrCodes: {
-            orderBy: { createdAt: "desc" },
-            include: {
-              asset: {
-                select: {
-                  title: true,
-                },
-              },
+          asset: {
+            select: {
+              title: true,
             },
           },
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to load shelf user",
-          additionalData: { userId, shelfUserId },
-          label: "Admin dashboard",
-        });
-      });
+      },
+      customTierLimit: true,
+    });
 
     const userOrganizations = await db.userOrganization
       .findMany({
@@ -109,17 +126,86 @@ export const action = async ({
   try {
     await requireAdmin(userId);
 
-    if (isDelete(request)) {
-      await deleteUser(shelfUserId);
+    const { intent } = parseData(
+      await request.clone().formData(),
+      z.object({
+        intent: z.enum([
+          "updateTier",
+          "updateCustomTierDetails",
+          "createCustomerId",
+          "deleteUser",
+        ]),
+      })
+    );
 
-      sendNotification({
-        title: "User deleted",
-        message: "The user has been deleted successfully",
-        icon: { name: "trash", variant: "error" },
-        senderId: userId,
-      });
+    switch (intent) {
+      case "updateTier": {
+        const { tierId } = parseData(
+          await request.formData(),
+          z.object({
+            tierId: z.nativeEnum(TierId),
+          })
+        );
 
-      return redirect("/admin-dashboard");
+        const user = await updateUserTierId(shelfUserId, tierId);
+
+        sendNotification({
+          title: "Tier updated",
+          message: `The user's tier has been updated successfully to ${user.tierId}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+
+        break;
+      }
+      case "updateCustomTierDetails": {
+        const { maxOrganizations, isEnterprise } = parseData(
+          await request.formData(),
+          z.object({
+            maxOrganizations: z.string().transform((val) => +val),
+            isEnterprise: z
+              .string()
+              .optional()
+              .transform((val) => (val === "on" ? true : false)),
+          })
+        );
+
+        await db.customTierLimit.upsert({
+          where: { userId: shelfUserId },
+          create: {
+            userId: shelfUserId,
+            maxOrganizations,
+            isEnterprise,
+          },
+          update: {
+            maxOrganizations,
+            isEnterprise,
+          },
+        });
+
+        break;
+      }
+      case "deleteUser":
+        if (isDelete(request)) {
+          await softDeleteUser(shelfUserId);
+
+          sendNotification({
+            title: "User deleted",
+            message: "The user has been deleted successfully",
+            icon: { name: "trash", variant: "error" },
+            senderId: userId,
+          });
+          return json(data({ success: true }));
+        }
+      case "createCustomerId": {
+        const user = await getUserByID(shelfUserId);
+        await createStripeCustomer({
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          userId: user.id,
+        });
+        return json(data(null));
+      }
     }
 
     return json(data(null));
@@ -130,27 +216,79 @@ export const action = async ({
 };
 
 export default function Area51UserPage() {
-  const { user, organizations } = useLoaderData<typeof loader>();
+  // Get the loader data type
+  type LoaderData = SerializeFrom<typeof loader>;
+
+  const { user, organizations } = useLoaderData<LoaderData>();
+
+  const hasCustomTier =
+    user?.tierId === "custom" && user?.customTierLimit !== null;
+  // Extract user type from loader data
+  type User = NonNullable<LoaderData["user"]>;
+
+  const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
+    switch (key) {
+      case "tierId":
+        return <TierUpdateForm tierId={user.tierId} />;
+      case "customerId":
+        return !value ? (
+          <Form className="inline-block" method="POST">
+            <input type="hidden" name="intent" value="createCustomerId" />
+            <Button type="submit" variant="link" size="sm">
+              Create customer ID
+            </Button>
+          </Form>
+        ) : (
+          <>
+            <Button
+              to={`https://dashboard.stripe.com/customers/${value}`}
+              target="_blank"
+              variant={"block-link"}
+            >
+              {value}
+            </Button>
+          </>
+        );
+      default:
+        return typeof value === "string"
+          ? value
+          : typeof value === "boolean"
+          ? String(value)
+          : null;
+    }
+  };
+
   return user ? (
     <div>
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
-          <div className="flex gap-3">
-            <DeleteUser user={user} />
-          </div>
+          <DeleteUser />
         </div>
-        <ul className="mt-5">
-          {user
-            ? Object.entries(user).map(([key, value]) => (
-                <li key={key}>
-                  <span className="font-semibold">{key}</span>:{" "}
-                  {typeof value === "string" ? value : null}
-                  {typeof value === "boolean" ? String(value) : null}
-                </li>
-              ))
-            : null}
-        </ul>
+        <div className="flex gap-2">
+          <div className="w-[400px]">
+            <ul className="mt-5">
+              {user
+                ? Object.entries(user)
+                    .filter(
+                      ([k, _v]) => !["qrCodes", "customTierLimit"].includes(k)
+                    )
+                    .map(([key, value]) => (
+                      <li key={key}>
+                        <span className="font-semibold">{key}</span>:{" "}
+                        {renderValue(key as keyof User, value)}
+                      </li>
+                    ))
+                : null}
+            </ul>
+          </div>
+
+          {hasCustomTier && (
+            <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
+              <CustomTierDetailsForm customTierLimit={user.customTierLimit!} />
+            </div>
+          )}
+        </div>
       </div>
       <div className="mt-10">
         <Table>
@@ -175,14 +313,16 @@ export default function Area51UserPage() {
               <Tr key={org.id}>
                 <Td>
                   <Link
-                    to={`/admin-dashboard/org/${org.id}`}
+                    to={`/admin-dashboard/org/${org.id}/assets`}
                     className="underline hover:text-gray-500"
                   >
                     {org.name}
                   </Link>
                 </Td>
                 <Td>{org.type}</Td>
-                <Td>{org.createdAt}</Td>
+                <Td>
+                  <DateS date={org.createdAt} />
+                </Td>
                 <Td>{org.userId === user.id ? "yes" : "no"}</Td>
               </Tr>
             ))}
@@ -191,4 +331,91 @@ export default function Area51UserPage() {
       </div>
     </div>
   ) : null;
+}
+
+function TierUpdateForm({ tierId }: { tierId: TierId }) {
+  const fetcher = useFetcher();
+  const disabled = isFormProcessing(fetcher.state);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="updateTier" />
+
+      <select
+        style={{ all: "revert" }}
+        disabled={disabled}
+        defaultValue={tierId}
+        name="tierId"
+      >
+        {Object.keys(TierId).map((tier) => (
+          <option key={tier} value={tier}>
+            {tier}
+          </option>
+        ))}
+      </select>
+      {disabled && <Spinner />}
+    </fetcher.Form>
+  );
+}
+
+function CustomTierDetailsForm({
+  customTierLimit,
+}: {
+  customTierLimit: Pick<CustomTierLimit, "maxOrganizations" | "isEnterprise">;
+}) {
+  return (
+    <div>
+      <h4>Custom tier details</h4>
+      <p>
+        NOTE: We have more fields but for custom tier for now, the only relevant
+        one is number of workspaces so I only added this to form so we can ship
+        faster. Fields that are not added are: <b>canImportAssets</b>,
+        <b>canExportAssets</b>, <b>maxCustomFields</b>
+      </p>
+      <Form method="post">
+        <FormRow
+          rowLabel="Is Enterprise?"
+          className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+        >
+          <div className="flex items-center gap-3">
+            <Switch
+              name={"isEnterprise"}
+              defaultChecked={customTierLimit.isEnterprise}
+            />
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Max workspaces (organizations)"}
+          className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+          subHeading={
+            "How many workspaces should this user be allowed to create/own? Keep in mind that the user always has 1 Personal workspace so you need to do the desired number + 1."
+          }
+          required
+        >
+          <Input
+            label="Max workspaces (organizations)"
+            name="maxOrganizations"
+            type="number"
+            min={1}
+            max={1000}
+            hideLabel
+            className="disabled my-2 w-full"
+            defaultValue={customTierLimit.maxOrganizations}
+            required
+          />
+        </FormRow>
+
+        <Button type="submit" name="intent" value="updateCustomTierDetails">
+          Save
+        </Button>
+      </Form>
+    </div>
+  );
 }

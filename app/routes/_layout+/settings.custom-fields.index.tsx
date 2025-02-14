@@ -3,11 +3,13 @@ import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
+import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
+import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
@@ -27,9 +29,9 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { canCreateMoreCustomFields } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -103,28 +105,32 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
+  const { isBaseOrSelfService } = useUserRoleHelper();
+
   return (
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
         <h2 className=" text-lg text-gray-900">Custom Fields</h2>
-        <ControlledActionButton
-          canUseFeature={canCreateMoreCustomFields}
-          buttonContent={{
-            title: "New Custom Field",
-            message:
-              "You are not able to create more active custom fields within your current plan.",
-          }}
-          buttonProps={{
-            to: "new",
-            role: "link",
-            icon: "plus",
-            "aria-label": `new custom field`,
-            "data-test-id": "createNewCustomField",
-            variant: "primary",
-          }}
-        />
+        <Button
+          to="new"
+          role="link"
+          aria-label="new custom field"
+          data-test-id="createNewCustomField"
+          variant="primary"
+          disabled={
+            !canCreateMoreCustomFields
+              ? {
+                  reason:
+                    "You are not able to create more active custom fields within your current plan.",
+                }
+              : false
+          }
+        >
+          New custom field
+        </Button>
       </div>
       <List
+        bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
         ItemComponent={TeamMemberRow}
         headerChildren={
           <>

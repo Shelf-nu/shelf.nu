@@ -2,24 +2,18 @@
 import { PassThrough } from "stream";
 
 import { createReadableStreamFromReadable } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  AppLoadContext,
-  EntryContext,
-  LoaderFunctionArgs,
-} from "@remix-run/node";
+import type { AppLoadContext, EntryContext } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerEmailWorkers } from "./emails/email.worker.server";
+import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
-import { SENTRY_DSN } from "./utils/env";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
-import { initSentry } from "./utils/sentry.server";
-
-initSentry();
+export * from "../server";
 
 // === start: register scheduler and workers ===
 schedulerService
@@ -30,6 +24,26 @@ schedulerService
         new ShelfError({
           cause,
           message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+
+    await regierAssetWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering asset workers.",
+          label: "Scheduler",
+        })
+      );
+    });
+
+    await registerEmailWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering email workers.",
           label: "Scheduler",
         })
       );
@@ -56,18 +70,7 @@ schedulerService
  * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
  *
  */
-export function handleError(
-  error: unknown,
-  { request }: LoaderFunctionArgs | ActionFunctionArgs
-) {
-  if (SENTRY_DSN) {
-    void Sentry.captureRemixServerException(
-      error,
-      "unhandled.remix.server",
-      request
-    );
-  }
-}
+export const handleError = Sentry.wrapHandleErrorWithSentry;
 
 const ABORT_DELAY = 5000;
 

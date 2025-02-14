@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CustomField } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import CategoriesInput from "../forms/categories-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -46,7 +47,10 @@ export const NewCustomFieldFormSchema = z.object({
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
   options: z.array(z.string()).optional(),
-  categories: z.array(z.string()).optional(),
+  categories: z
+    .array(z.string().min(1, "Please select a category"))
+    .optional()
+    .default([]),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -161,7 +165,7 @@ export const CustomFieldForm = ({
                 </div>
               </SelectContent>
             </Select>
-            <div className="mt-2 flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600 ">
+            <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600 ">
               <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
             </div>
           </FormRow>
@@ -262,6 +266,7 @@ export const CustomFieldForm = ({
               <CategoriesInput
                 categories={categories}
                 name={(i) => zo.fields.categories(i)()}
+                error={(i) => zo.errors.categories(i)()?.message}
               />
             )}
           </FormRow>

@@ -12,7 +12,7 @@ export type NotificationIcon = {
 export interface NotificationType {
   open: boolean;
   title: string;
-  message: string;
+  message?: string | null;
   icon: NotificationIcon;
   time?: number;
   senderId: User["id"] | null;

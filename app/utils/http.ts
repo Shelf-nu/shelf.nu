@@ -50,3 +50,15 @@ export function getValidationErrors<Schema extends ZodType<any, any, any>>(
 
   return error.additionalData[VALIDATION_ERROR];
 }
+
+/**
+ * Get a redirect url from a request persisting the URLSearchParams
+ */
+export function getRedirectUrlFromRequest(request: Request) {
+  const url = new URL(request.url);
+  const searchParams = url.searchParams.toString();
+  const redirectUrl = `${url.pathname}${
+    searchParams ? `?${searchParams}` : ""
+  }`;
+  return redirectUrl;
+}

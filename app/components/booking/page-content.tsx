@@ -1,14 +1,20 @@
 import { useLoaderData } from "@remix-run/react";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { BookingAssetsColumn } from "./booking-assets-column";
 import { BookingForm } from "./form";
 
 export function BookingPageContent() {
-  const { booking, teamMembers } = useLoaderData<typeof loader>();
+  const { booking, teamMembers, bookingFlags } = useLoaderData<typeof loader>();
 
-  const bookingStatus = useBookingStatus(booking);
+  const bookingStatus = useBookingStatusHelpers(booking);
+
+  const custodianUser = teamMembers.find((member) =>
+    booking.custodianUserId
+      ? booking.custodianUserId === member?.userId
+      : booking.custodianTeamMemberId === member.id
+  );
 
   return (
     <div
@@ -19,6 +25,8 @@ export function BookingPageContent() {
         <BookingForm
           id={booking.id}
           name={booking.name}
+          description={booking.description}
+          bookingFlags={bookingFlags}
           startDate={
             booking.from
               ? dateForDateTimeInputValue(new Date(booking.from))
@@ -29,12 +37,7 @@ export function BookingPageContent() {
               ? dateForDateTimeInputValue(new Date(booking.to))
               : undefined
           }
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
+          custodianRef={custodianUser?.id}
           bookingStatus={bookingStatus}
         />
       </div>

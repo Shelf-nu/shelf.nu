@@ -1,14 +1,16 @@
 import type { Prisma } from "@prisma/client";
-import { KitStatus } from "@prisma/client";
+import { KitStatus, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
@@ -16,23 +18,28 @@ import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
-import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  getPaginatedAndFilterableKits,
+  updateKitsWithBookingCustodians,
+} from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -41,7 +48,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
-    const [
+    let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
@@ -49,10 +56,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        extraInclude: {
+          assets: {
+            select: { id: true, availableToBook: true, status: true },
+          },
+        },
       }),
       db.teamMember
         .findMany({
-          where: { deletedAt: null, organizationId },
+          where: {
+            deletedAt: null,
+            organizationId,
+            userId:
+              role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+          },
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -73,6 +90,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect("/kits");
     }
 
+    kits = await updateKitsWithBookingCustodians(kits);
+
     const header = {
       title: "Kits",
     };
@@ -88,6 +107,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         items: kits,
         page,
         totalItems: totalKits,
+        totalPages,
         perPage,
         modelName,
         search,
@@ -112,13 +132,27 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
+  const { roles, isBase } = useUserRoleHelper();
+  const canCreateKit = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: PermissionAction.create,
+  });
+
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
 
   return (
     <>
       <Header>
-        <Button to="new" role="link" aria-label="new kit" icon="kit">
-          New kit
-        </Button>
+        {canCreateKit && (
+          <Button to="new" role="link" aria-label="new kit" icon="kit">
+            New kit
+          </Button>
+        )}
       </Header>
 
       <ListContentWrapper>
@@ -134,30 +168,38 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          <DynamicDropdown
-            trigger={
-              <div className="flex cursor-pointer items-center gap-2">
-                Custodian{" "}
-                <ChevronRight className="hidden rotate-90 md:inline" />
-              </div>
-            }
-            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-            label="Filter by custodian"
-            placeholder="Search team members"
-            countKey="totalTeamMembers"
-            initialDataKey="teamMembers"
-          />
+          {canReadCustody && (
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              countKey="totalTeamMembers"
+              initialDataKey="teamMembers"
+              transformItem={(item) => ({
+                ...item,
+                id: item.metadata?.userId ? item.metadata.userId : item.id,
+              })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+            />
+          )}
         </Filters>
 
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
+          bulkActions={isBase ? undefined : <BulkActionsDropdown />}
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell">Assets</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
+              <Th>Description</Th>
+              <Th>Assets</Th>
+              {canReadCustody && <Th>Custodian</Th>}
             </>
           }
         />
@@ -170,9 +212,40 @@ function ListContent({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: typeof KITS_INCLUDE_FIELDS;
+    include: {
+      _count: { select: { assets: true } };
+      custody: {
+        select: {
+          custodian: {
+            select: {
+              name: true;
+              user: {
+                select: {
+                  firstName: true;
+                  lastName: true;
+                  email: true;
+                  profilePicture: true;
+                };
+              };
+            };
+          };
+        };
+      };
+      assets: {
+        select: {
+          id: true;
+          availableToBook: true;
+        };
+      };
+    };
   }>;
 }) {
+  const { roles } = useUserRoleHelper();
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -194,42 +267,63 @@ function ListContent({
                 {item.name}
               </span>
               <div>
-                <KitStatusBadge status={item.status} availableToBook={true} />
+                <KitStatusBadge
+                  status={item.status}
+                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
+                />
               </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
-
-      <Td className="hidden max-w-96 truncate md:table-cell">
-        {item.description}
-      </Td>
-
-      <Td className="hidden md:table-cell">{item._count.assets}</Td>
-
-      <Td className="hidden md:table-cell">
-        {item.custody ? (
-          <GrayBadge>
-            <>
-              {item.custody.custodian?.user ? (
-                <img
-                  src={
-                    item.custody.custodian?.user?.profilePicture ||
-                    "/static/images/default_pfp.jpg"
-                  }
-                  className="mr-1 size-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-px">{item.custody.custodian.name}</span>
-            </>
-          </GrayBadge>
+      <Td className="max-w-62 md:max-w-96">
+        {item.description ? (
+          <LineBreakText
+            className="md:max-w-96"
+            text={item.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
         ) : null}
       </Td>
+      <Td>{item._count.assets}</Td>
+      {canReadCustody && (
+        <Td>
+          {item.custody ? (
+            <GrayBadge>
+              <>
+                {item.custody.custodian?.user ? (
+                  <img
+                    src={
+                      item.custody.custodian?.user?.profilePicture ||
+                      "/static/images/default_pfp.jpg"
+                    }
+                    className="mr-1 size-4 rounded-full"
+                    alt=""
+                  />
+                ) : null}
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: item?.custody?.custodian.name,
+                    user: item?.custody?.custodian?.user
+                      ? {
+                          firstName:
+                            item?.custody?.custodian?.user?.firstName || null,
+                          lastName:
+                            item?.custody?.custodian?.user?.lastName || null,
+                          profilePicture:
+                            item?.custody?.custodian?.user?.profilePicture ||
+                            null,
+                          email: item?.custody?.custodian?.user?.email || "",
+                        }
+                      : undefined,
+                  })}
+                </span>
+              </>
+            </GrayBadge>
+          ) : null}
+        </Td>
+      )}
     </>
   );
 }

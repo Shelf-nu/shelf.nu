@@ -1,4 +1,4 @@
-import type { Scan } from "@prisma/client";
+import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
 import parser from "ua-parser-js";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
@@ -8,7 +8,11 @@ export function parseScanData({
   userId,
   request,
 }: {
-  scan: Scan | null;
+  scan:
+    | (Scan & {
+        user: (User & { userOrganizations: UserOrganization[] | null }) | null;
+      } & { qr: Qr | null })
+    | null;
   userId: string;
   request: Request;
 }) {
@@ -18,8 +22,24 @@ export function parseScanData({
      * 1. Coordinates - if they are null, we don't render the map, print unknown location
      * 2. User - Scanned by: You || Unknown
      */
+    function isValidUser(
+      userOrganizations: UserOrganization[] | null | undefined,
+      organizationId: string | null | undefined
+    ) {
+      if (!userOrganizations || !organizationId) {
+        return false;
+      }
+      return userOrganizations.find(
+        (uo) => uo?.organizationId === organizationId
+      );
+    }
     if (scan) {
-      const scannedBy = scan.userId === userId ? "You" : "Unknown";
+      let scannedBy = scan.userId === userId ? "You" : "Unknown";
+      const user = scan?.user;
+      scannedBy =
+        user && isValidUser(user?.userOrganizations, scan?.qr?.organizationId)
+          ? `${user.firstName} ${user.lastName}(${user.email})`
+          : "Unknown";
       const coordinates =
         scan.latitude && scan.longitude
           ? `${scan.latitude}, ${scan.longitude}`

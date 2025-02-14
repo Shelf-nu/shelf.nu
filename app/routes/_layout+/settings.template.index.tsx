@@ -1,5 +1,5 @@
 import type { Template } from "@prisma/client";
-import { TemplateType, TierId } from "@prisma/client";
+import { TemplateType } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -12,7 +12,6 @@ import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -24,9 +23,9 @@ import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canCreateMoreTemplates } from "~/utils/subscription";
+import { canCreateMoreTemplates } from "~/utils/subscription.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -192,16 +191,15 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function TemplatePage() {
-  const { items, canCreateMoreTemplates, tier, totalItems } =
-    useLoaderData<typeof loader>();
+  const { items, totalItems } = useLoaderData<typeof loader>();
 
   const hasItems = totalItems > 0;
 
-  let upgradeMessage =
-    "You are currently able to create a max of 3 templates. If you want to create more than 3 Team templates, please get in touch with sales";
-  if (tier.id !== TierId.tier_2) {
-    upgradeMessage = `You cannot create more than ${tier.tierLimit?.maxTemplates} templates on a ${tier.name} subscription. `;
-  }
+  // let upgradeMessage =
+  //   "You are currently able to create a max of 3 templates. If you want to create more than 3 Team templates, please get in touch with sales";
+  // if (tier.id !== TierId.tier_2) {
+  //   upgradeMessage = `You cannot create more than ${tier.tierLimit?.maxTemplates} templates on a ${tier.name} subscription. `;
+  // }
 
   return (
     <div>
@@ -240,7 +238,7 @@ export default function TemplatePage() {
               <>
                 <div className="flex w-full items-center justify-between">
                   <h3 className="text-md text-gray-900">PDF Templates</h3>
-                  <ControlledActionButton
+                  {/* <ControlledActionButton
                     canUseFeature={canCreateMoreTemplates}
                     buttonContent={{
                       title: "Add template",
@@ -256,7 +254,7 @@ export default function TemplatePage() {
                       "data-test-id": "createNewTemplateButton",
                       variant: "primary",
                     }}
-                  />
+                  /> */}
                 </div>
                 <div className="mt-5 w-full flex-1 overflow-x-auto rounded-[12px] border bg-white">
                   <Table>

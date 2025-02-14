@@ -42,11 +42,8 @@ export function destroySelectedOrganizationIdCookie() {
 
 /**
  * This function is used to get the selected organization for the user.
- *
  * It checks if the user is part of the current selected organization
- *
- * **It always defaults to the personal organization if the user is not part of the current selected organization.**
- *
+ * It always defaults to the personal organization if the user is not part of the current selected organization.
  * @throws If the user is not part of any organization
  */
 export async function getSelectedOrganisation({
@@ -64,26 +61,12 @@ export async function getSelectedOrganisation({
   const userOrganizations = await getUserOrganizations({ userId });
   const organizations = userOrganizations.map((uo) => uo.organization);
   const userOrganizationIds = organizations.map((org) => org.id);
-  const personalOrganization = organizations.find(
-    (org) => org.type === "PERSONAL"
-  );
-
-  if (!personalOrganization) {
-    throw new ShelfError({
-      cause: null,
-      title: "No personal organization found",
-      message:
-        "You do not have a personal organization. This should not happen. Please contact support.",
-      additionalData: { userId, organizationId, userOrganizationIds },
-      label,
-    });
-  }
 
   // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
   // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
   // 💡 This can be improved by implementing a system that sends an sse notification when a user is revoked and forcing the app to reload
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    organizationId = personalOrganization.id;
+    organizationId = userOrganizationIds[0];
   }
 
   const currentOrganization = organizations.find(

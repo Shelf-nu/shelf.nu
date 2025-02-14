@@ -8,7 +8,7 @@ dialog {
 }
 
 dialog > div {
-  @apply !shadow-none md:!shadow-lg;
+  @apply !shadow-none md:!shadow-lg !pb-0;
 }
 
 .booking-inner-wrapper {

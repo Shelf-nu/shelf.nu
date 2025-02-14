@@ -4,31 +4,30 @@ import type {
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import {
-  Form,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { sendEmail } from "~/emails/mail.server";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { getAuthUserById } from "~/modules/auth/service.server";
+import { useSearchParams } from "~/hooks/search-params";
+import {
+  getAuthUserById,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { SMTP_FROM } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { isZodValidationError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
@@ -75,6 +74,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     const userSignedUpWithPassword =
       authUser.user_metadata.signup_method === "email-password";
+
     const OnboardingFormSchema = createOnboardingSchema(
       userSignedUpWithPassword
     );
@@ -113,7 +113,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { userSignedUpWithPassword } = parseData(
       formData,
-      z.object({ userSignedUpWithPassword: z.coerce.boolean() })
+      z.object({
+        userSignedUpWithPassword: z.string().transform((val) => val === "true"),
+      })
     );
 
     const OnboardingFormSchema = createOnboardingSchema(
@@ -122,12 +124,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(formData, OnboardingFormSchema);
 
+    /** If the user already signed up with password, we dont need to update it in their account, so we remove it from the payload  */
+    if (userSignedUpWithPassword) {
+      delete payload.password;
+      delete payload.confirmPassword;
+    }
+
     /** Update the user */
     const user = await updateUser({
       ...payload,
       id: userId,
       onboarded: true,
     });
+
+    /**
+     * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
+     * In this case, we need to create a new session for the user.
+     * We only need to do that if the user DIDNT sign up using password. In that case the password gets set in the updateUser above
+     */
+    if (user && !userSignedUpWithPassword) {
+      //making sure new session is created.
+      const authSession = await signInWithEmail(
+        user.email,
+        payload.password as string
+      );
+      if (authSession) {
+        context.setSession(authSession);
+      }
+    }
 
     /** We create the stripe customer when the user gets onboarded.
      * This is to make sure that we have a stripe customer for the user.
@@ -143,18 +167,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     if (config.sendOnboardingEmail) {
       /** Send onboarding email */
-      await sendEmail({
-        from: SMTP_FROM || `"Carlos from shelf.nu" <carlos@shelf.nu>`,
+      sendEmail({
+        from: SMTP_FROM || `"Carlos from shelf.nu" <carlos@emails.shelf.nu>`,
+        replyTo: "carlos@shelf.nu",
         to: user.email,
         subject: "🏷️ Welcome to Shelf - can I ask you a question?",
         text: onboardingEmailText({ firstName: user.firstName as string }),
       });
     }
 
+    /** If organizationId is passed, that means the user comes from an invite */
     const { organizationId } = parseData(
       formData,
       z.object({ organizationId: z.string().optional() })
     );
+
+    const createdWithInvite = !!organizationId || user.createdWithInvite;
 
     const headers = [];
 
@@ -164,11 +192,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(organizationId ? `/assets` : `/welcome`, {
+    return redirect(createdWithInvite ? `/assets` : `/welcome`, {
       headers,
     });
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(
+      cause,
+      { userId },
+      !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }

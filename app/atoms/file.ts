@@ -1,7 +1,7 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
 
-import { formatBytes } from "~/utils/format-bytes";
+import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
@@ -18,7 +18,7 @@ export const validateFileAtom = atom(
       const file = event?.target?.files?.[0];
       if (file) {
         const allowedType = verifyAccept(file.type, event.target.accept);
-        const allowedSize = file.size < MAX_SIZE;
+        const allowedSize = file.size < MAX_IMAGE_UPLOAD_SIZE;
 
         if (!allowedType) {
           event.target.value = "";
@@ -30,7 +30,7 @@ export const validateFileAtom = atom(
         if (!allowedSize) {
           /** Clean the field */
           event.target.value = "";
-          return `Max file size is ${formatBytes(MAX_SIZE)}`;
+          return "Max file size is 8MB";
         }
 
         return undefined;

@@ -1,19 +1,17 @@
-import type { Asset } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
-import { getAsset } from "~/modules/asset/service.server";
 import {
   createReport,
   sendReportEmails,
 } from "~/modules/report-found/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -45,10 +43,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
         where: {
           id: qrId,
         },
-        select: {
-          asset: true,
-          userId: true,
-          organizationId: true,
+        include: {
+          asset: {
+            include: {
+              organization: {
+                select: {
+                  owner: {
+                    select: {
+                      email: true,
+                      id: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          kit: true,
         },
       })
       .catch((cause) => {
@@ -61,16 +71,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
         });
       });
 
-    if (!qr || !qr.asset || !qr.asset.id) {
-      throw new ShelfError({
-        cause: null,
-        message: "QR code doesn't exist.",
-        additionalData: { qrId },
-        label: "QR",
-        status: 400,
-      });
-    }
-
     /**
      * This should not happen as the user will be redirected to claim the code before they ever land on this page.
      * We still handle it just in case also to keep TS happy.
@@ -78,15 +78,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!qr.organizationId || !qr?.userId) {
       throw new ShelfError({
         cause: null,
+        title: "Unclaimed QR code",
         message:
-          "This QR doesn't belong to any user or organization so it cannot be reported as found. If this issue persists, please contact support.",
-        title: "QR is not claimed",
+          "This QR doesn't belong to any user or organization so it cannot be reported as found. If you think this is a mistake, please contact support.",
         label: "QR",
       });
     }
 
-    const owner = await getUserByID(qr.userId);
-    const asset = await getAsset({ id: qr.asset.id });
+    const ownerEmail = qr?.asset?.organization?.owner.email;
 
     const payload = parseData(await request.formData(), NewReportSchema);
     const { email, content } = payload;
@@ -94,7 +93,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const report = await createReport({
       email,
       content,
-      assetId: qr.asset.id,
+      assetId: qr?.asset?.id,
+      kitId: qr?.kit?.id,
     });
 
     /**
@@ -102,12 +102,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
      * 1. To the owner of the asset
      * 2. To the person who reported the asset as found
      */
-    await sendReportEmails({
-      owner,
-      asset: asset as Asset,
-      message: report.content,
-      reporterEmail: report.email,
-    });
+    if (ownerEmail) {
+      await sendReportEmails({
+        ownerEmail,
+        qr,
+        message: report.content,
+        reporterEmail: report.email,
+      });
+    }
 
     return json(data({ report }));
   } catch (cause) {

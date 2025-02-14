@@ -1,5 +1,5 @@
 import type { Location } from "@prisma/client";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -7,8 +7,10 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -90,7 +92,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
             </p>
             <Input
               // disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+              accept={ACCEPT_SUPPORTED_IMAGES}
               name="image"
               type="file"
               onChange={validateFile}
@@ -145,7 +147,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
           >
             <Input
               inputType="textarea"
-              label={zo.fields.description()}
+              label="Description"
+              hideLabel
               name={zo.fields.description()}
               defaultValue={description || ""}
               placeholder="Add a description for your location."

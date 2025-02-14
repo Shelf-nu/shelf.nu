@@ -18,8 +18,9 @@ export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger
       className={tw("asset-actions", fullWidth ? "w-full" : "")}
+      aria-label="Actions Trigger"
     >
-      <span className="flex items-center gap-2">
+      <span className="flex size-6 items-center justify-center gap-2 text-center">
         <VerticalDotsIcon />
       </span>
     </DropdownMenuTrigger>

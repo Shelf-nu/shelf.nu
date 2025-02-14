@@ -90,9 +90,9 @@ const DropdownMenuItem = React.forwardRef<
     <DropdownMenuPrimitive.Item
       ref={ref}
       className={tw(
-        "relative flex cursor-default select-none items-center px-2 py-1.5 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-slate-100 ",
+        "relative flex cursor-default select-none items-center px-2 py-1.5 text-sm font-medium outline-none  focus:bg-slate-100 ",
         inset && "pl-8",
-        disabled && "pointer-events-none cursor-not-allowed opacity-30",
+        disabled && "pointer-events-none cursor-not-allowed opacity-50",
         className
       )}
       {...props}
@@ -111,14 +111,14 @@ const DropdownMenuCheckboxItem = React.forwardRef<
     <DropdownMenuPrimitive.CheckboxItem
       ref={ref}
       className={tw(
-        "relative flex cursor-default select-none items-center rounded px-2 py-1.5 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-slate-100 ",
+        "relative flex cursor-default select-none items-center rounded px-2 py-1.5 text-sm font-medium outline-none  focus:bg-slate-100 ",
         className
       )}
       checked={checked}
       {...props}
     >
       {children}
-      <span className="absolute right-2 flex  items-center justify-center text-primary">
+      <span className="absolute right-2 flex  h-auto w-[18px] items-center justify-center text-primary">
         <DropdownMenuPrimitive.ItemIndicator>
           <CheckIcon />
         </DropdownMenuPrimitive.ItemIndicator>
@@ -135,7 +135,7 @@ const DropdownMenuRadioItem = React.forwardRef<
     <DropdownMenuPrimitive.RadioItem
       ref={ref}
       className={tw(
-        "relative flex cursor-default select-none items-center rounded-[4px] py-1.5 pl-8 pr-2 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-slate-100",
+        "relative flex cursor-default select-none items-center rounded-[4px] py-1.5 pl-8 pr-2 text-sm font-medium outline-none  focus:bg-slate-100",
         className
       )}
       {...props}

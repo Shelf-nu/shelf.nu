@@ -13,6 +13,9 @@ declare global {
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
+      CHROME_EXECUTABLE_PATH: string;
+      URL_SHORTENER: string;
+      FREE_TRIAL_DAYS: string;
     };
   }
 }
@@ -24,6 +27,7 @@ declare global {
       SUPABASE_URL: string;
       SUPABASE_SERVICE_ROLE: string;
       SERVER_URL: string;
+      URL_SHORTENER: string;
       SUPABASE_ANON_PUBLIC: string;
       SESSION_SECRET: string;
       MAPTILER_TOKEN: string;
@@ -32,6 +36,8 @@ declare global {
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
+      DISABLE_SIGNUP: string;
+      DISABLE_SSO: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -43,8 +49,9 @@ declare global {
       GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
       ADMIN_EMAIL: string;
-      ADMIN_PASSWORD: string;
-      ADMIN_USERNAME: string;
+      CHROME_EXECUTABLE_PATH: string;
+      FINGERPRINT: string;
+      FREE_TRIAL_DAYS: string;
     }
   }
 }
@@ -101,7 +108,16 @@ export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
+export const URL_SHORTENER = getEnv("URL_SHORTENER", {
+  isRequired: false,
+});
+
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
+export const FINGERPRINT = getEnv("FINGERPRINT", {
+  isSecret: true,
+  isRequired: false,
+});
+
 export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,
   isRequired: false,
@@ -123,10 +139,12 @@ export const SENTRY_DSN = getEnv("SENTRY_DSN", {
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
   isRequired: false,
 });
-export const ADMIN_PASSWORD = getEnv("ADMIN_PASSWORD", {
-  isRequired: false,
-});
-export const ADMIN_USERNAME = getEnv("ADMIN_USERNAME", {
+
+/**
+ * A comma separated list of customerIds that have custom install of shelf.
+ * We need this in order to make our webhook work properly.
+ */
+export const CUSTOM_INSTALL_CUSTOMERS = getEnv("CUSTOM_INSTALL_CUSTOMERS", {
   isRequired: false,
 });
 
@@ -174,11 +192,34 @@ export const ENABLE_PREMIUM_FEATURES =
     isRequired: false,
   }) === "true" || false;
 
+export const FREE_TRIAL_DAYS =
+  getEnv("FREE_TRIAL_DAYS", {
+    isSecret: false,
+    isRequired: false,
+  }) || "14";
+
+export const DISABLE_SIGNUP =
+  getEnv("DISABLE_SIGNUP", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DISABLE_SSO =
+  getEnv("DISABLE_SSO", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export const SEND_ONBOARDING_EMAIL =
   getEnv("SEND_ONBOARDING_EMAIL", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
+
+export const CHROME_EXECUTABLE_PATH = getEnv("CHROME_EXECUTABLE_PATH", {
+  isSecret: false,
+  isRequired: false,
+});
 
 export function getBrowserEnv() {
   return {
@@ -190,5 +231,8 @@ export function getBrowserEnv() {
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
+    CHROME_EXECUTABLE_PATH,
+    URL_SHORTENER,
+    FREE_TRIAL_DAYS,
   };
 }

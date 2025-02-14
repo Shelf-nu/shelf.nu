@@ -101,3 +101,204 @@ const MyComponent = ({ booking }) => {
   );
 };
 ```
+
+## useVideoDevices
+
+The `useVideoDevices` hook manages video device access and permissions for camera-dependent features like QR scanning. It provides device status, error handling, and permission management.
+
+### Returns
+
+- `devices`: Array of available video input devices (`MediaDeviceInfo[]`) or `null`
+- `error`: Error object if device access fails or `null`
+- `loading`: Boolean indicating if device enumeration is in progress
+- `requestPermissions`: Function to request device access
+- `DevicesPermissionComponent`: React component for rendering permission/error UI states
+
+### Usage
+
+````typescript
+const QRScanner = () => {
+ const { devices, DevicesPermissionComponent } = useVideoDevices();
+
+ return (
+   <div>
+     {devices ? (
+       <Scanner videoMediaDevices={devices} />
+     ) : (
+       <DevicesPermissionComponent />
+     )}
+   </div>
+ );
+};
+
+## `useDisabled`
+
+The `useDisabled` hook is used to determine if a button should be disabled during navigation. By default, it operates with the navigation state, but it can optionally accept a fetcher to use as the state.
+
+**Usage:**
+
+```typescript
+/** Without fetcher, using default navigation */
+const isDisabled = useDisabled();
+
+/** Without fetcher */
+const isDisabled = useDisabled(fetcher);
+````
+
+**Parameters:**
+
+- `fetcher` (optional): An object that contains the state to be used. If not provided, the navigation state will be used.
+
+**Returns:**
+
+- `boolean`: Returns `true` if the form is processing and the button should be disabled, otherwise `false`.
+
+**Example:**
+
+```typescript
+import { useDisabled } from './path/to/hooks';
+
+const MyComponent = () => {
+  const fetcher = useFetcher();
+  const isDisabled = useDisabled(fetcher);
+
+  return (
+    <button disabled={isDisabled}>
+      Submit
+    </button>
+  );
+};
+```
+
+**Dependencies:**
+
+- `useNavigation`: A hook that provides the current navigation state.
+- `isFormProcessing`: A function that checks if the form is currently processing based on the state.
+
+## useUserRoleHelper
+
+The `useUserRoleHelper` hook is helps you to always know the roles of the current user and also returns some helper boolean values to make it easier to check for specific roles.
+
+The useUserRoleHelper function returns an object(roles) and helper boolean attributes:
+
+- `roles`: enum that provides role of the current user
+- `isAdministrator`: A boolean value indicating whether the user has the 'ADMIN' role.
+- `isOwner`: A boolean value indicating whether the user has the OWNER role.
+- `isAdministratorOrOwner`: A boolean value indicating whether the user has either the 'ADMIN' or 'OWNER'role.
+- `isSelfService`: A boolean value indicating whether the user has the 'SELF_SERVICE' role.
+- `isBase`: A boolean value indicating whether the user has the 'BASE' role.
+- `isBaseOrSelfService`: A boolean value indicating whether the user has either the BASE or 'SELF_SERVICE' role.
+
+**Usage:**
+The "New Asset" button is rendered only if isAdministratorOrOwner is true.
+
+```typescript
+import React from 'react';
+import { useUserRoleHelper } from '~/hooks/user-user-role-helper';
+
+export default function AssetIndexPage() {
+  const { isAdministratorOrOwner } = useUserRoleHelper();
+
+  return (
+    <div>
+      <header>
+        {isAdministratorOrOwner && (
+          <button>
+            New Asset
+          </button>
+        )}
+      </header>
+    </div>
+  );
+}
+```
+
+**Dependencies:**
+
+- `useRouteLoaderData`: hook from `@remix-run/react` that returns the loader data for a given route by ID.
+
+## `useUserData`
+
+The `useUserData` hook is used to access the current user's data from within any component in the application, particularly those nested under the `_layout` route.
+
+**Overview**
+
+This hook simplifies the process of retrieving user data that is loaded in the `_layout` route. It uses the `useRouteLoaderData` hook from Remix to access the loader data, making it easy to get user information without prop drilling.
+
+**Returns**
+
+- `user`: The user data object from the `_layout` route loader. This typically includes properties like `email` and possibly other user-related information.
+
+**Usage:**
+
+Here's an example of how to use the `useUserData` hook in a component:
+
+```typescript
+import React from 'react';
+import { useUserData } from '~/hooks/use-user-data';
+
+export const RequestDeleteUser = () => {
+  const user = useUserData();
+
+  return (
+    <form>
+      {/* Other form elements */}
+      <input type="hidden" name="email" value={user?.email} />
+      {/* Rest of the component */}
+    </form>
+  );
+}
+```
+
+In this example, the `useUserData` hook is used to retrieve the current user's email address, which is then used in a hidden form field.
+
+## Dependencies
+
+- `useRouteLoaderData`: A hook from `@remix-run/react` that returns the loader data for a given route by ID.
+- `loader` type from `~/routes/_layout+/_layout`: Used to type the loader data.
+
+## useTableIsOverflowing
+
+**Overview**
+
+The `useTableIsOverflowing` hook is used to handle the table's right-side scroll fade effect. It checks whether the table is overflowing and determines if the fade effect should be applied.
+
+**Returns:**
+
+- `containerRef`: A reference to the table container element.
+
+- `isOverflowing`: A boolean indicating whether the table is overflowing and has not reached the end.
+
+**Usage:**
+
+```typescript
+import React from "react";
+import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
+import { tw } from "~/utils/tw";
+
+export function Table({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const { containerRef, isOverflowing } = useTableIsOverflowing();
+
+  return (
+    <div className={`relative ${isOverflowing ? "overflowing" : ""}`}>
+      <div className="fixed-gradient"></div>
+      <div
+        ref={containerRef}
+        className="scrollbar-top scrollbar-always-visible"
+      >
+        <table className={tw("w-full table-auto border-collapse", className)}>
+          {children}
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+In this example hook detects if the table content exceeds the container's width. When it does, isOverflowing becomes true, adding the overflowing class to the outer div. This class can trigger visual indicators like gradients to show users there's more content to scroll through.

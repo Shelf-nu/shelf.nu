@@ -8,7 +8,7 @@ swap_size_mb = 512
 auto_rollback = true
 
 [deploy]
-strategy = "bluegreen"
+strategy = "rolling"
 
 [env]
 NODE_ENV = "production"
@@ -26,7 +26,7 @@ port = 443
 [http_service]
 internal_port = 8080
 force_https = true
-auto_stop_machines = false
+auto_stop_machines = "off"
 auto_start_machines = false
 min_machines_running = 1
 processes = ["app"]

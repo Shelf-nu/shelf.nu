@@ -5,15 +5,12 @@ import { UnavailableBadge } from "../shared/unavailable-badge";
 
 export function userFriendlyKitStatus(status: KitStatus) {
   switch (status) {
-    case KitStatus.IN_CUSTODY: {
+    case KitStatus.IN_CUSTODY:
       return "In Custody";
-    }
-    case KitStatus.CHECKED_OUT: {
+    case KitStatus.CHECKED_OUT:
       return "Checked Out";
-    }
-    default: {
+    default:
       return "Available";
-    }
   }
 }
 
@@ -41,7 +38,7 @@ export function KitStatusBadge({
         {userFriendlyAssetStatus(status)}
       </Badge>
       {!availableToBook && (
-        <UnavailableBadge title="This kit is not available" />
+        <UnavailableBadge title="This kit is not available for Bookings because some of its assets are marked as unavailable" />
       )}
     </div>
   );

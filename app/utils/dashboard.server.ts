@@ -150,23 +150,71 @@ function hasCustody(asset: Asset): asset is Asset & { custody: Custody } {
 
 export function getCustodiansOrderedByTotalCustodies({
   assets,
+  bookings,
 }: {
   assets: Asset[];
+  bookings: Prisma.BookingGetPayload<{
+    include: {
+      custodianTeamMember: true;
+      custodianUser: true;
+      assets: true;
+    };
+  }>[];
 }) {
   const assetsWithCustody = assets.filter(
     (asset) => asset.custody && asset.custody.custodian
   );
-  const allCustodiansSet = new Set(
-    assetsWithCustody.filter(hasCustody).map((asset) => asset.custody.custodian)
-  );
-  const allCustodians = Array.from(allCustodiansSet).filter(Boolean);
 
+  /** All custodians with directly assigned custody via assets */
+  const allDirectCustodians = Array.from(
+    new Set(
+      assetsWithCustody
+        .filter(hasCustody)
+        .map((asset) => asset.custody.custodian)
+    )
+  ).filter(Boolean);
+
+  /** All custodians with custody via bookings */
+  const allBookerCustodians = Array.from(
+    new Set(
+      bookings.map((booking) =>
+        booking.custodianUser
+          ? {
+              id: booking.custodianUserId,
+              userId: booking.custodianUserId,
+              user: booking.custodianUser,
+            }
+          : {
+              id: booking.custodianTeamMemberId,
+              ...booking.custodianTeamMember,
+            }
+      )
+    )
+  ).filter(Boolean);
+
+  const allCustodians = [...allDirectCustodians, ...allBookerCustodians];
   let custodianCounts: { [key: string]: number } = {};
 
+  /** Count normal custodies */
   for (let asset of assetsWithCustody) {
     if (asset.custody) {
-      let custodianId = asset.custody.custodian.id;
-      custodianCounts[custodianId] = (custodianCounts[custodianId] || 0) + 1;
+      // will use userId to map and show consolidated hold of assets (through bookings or direct custodies) of a team member, in case of NRM will use custodian id
+      let userId = asset.custody.custodian.userId
+        ? asset.custody.custodian.userId
+        : asset.custody.custodian.id;
+      custodianCounts[userId] = (custodianCounts[userId] || 0) + 1;
+    }
+  }
+
+  /** Count custodies via bookings */
+  for (let booking of bookings) {
+    if (booking.custodianUserId) {
+      custodianCounts[booking.custodianUserId] =
+        (custodianCounts[booking.custodianUserId] || 0) + booking.assets.length;
+    } else if (booking.custodianTeamMemberId) {
+      custodianCounts[booking.custodianTeamMemberId] =
+        (custodianCounts[booking.custodianTeamMemberId] || 0) +
+        booking.assets.length;
     }
   }
 
@@ -177,8 +225,8 @@ export function getCustodiansOrderedByTotalCustodies({
     ([id, count]) => ({
       id,
       count,
-      custodian: allCustodians.find(
-        (custodian) => custodian.id === id
+      custodian: allCustodians.find((custodian) =>
+        custodian.userId ? custodian.userId === id : custodian.id === id
       ) as TeamMemberWithUser,
     })
   );

@@ -11,7 +11,7 @@ export const trialEndsSoonText = ({ user, subscription }: Props) => `Howdy ${
 
 You are reaching the end of your trial period with Shelf, which concludes on ${new Date(
   (subscription.trial_end as number) * 1000 // We force this as we check it before even calling the send email function
-).toLocaleDateString()}. It's been a pleasure having you explore what Shelf has to offer. To maintain uninterrupted access to our premium features, we invite you to transition to one of our paid plans. You can make this upgrade by visiting your subscription settings: ${SERVER_URL}/settings/subscription .
+).toLocaleDateString()}. It's been a pleasure having you explore what Shelf has to offer. To maintain uninterrupted access to our premium features, we invite you to transition to one of our paid plans. You can make this upgrade by visiting your subscription settings: ${SERVER_URL}/account-details/subscription .
 
 Should you have any inquiries or require further assistance, our support team is at your disposal. You can reach us via email at support@shelf.nu.
 

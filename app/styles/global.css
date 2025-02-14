@@ -1,5 +1,12 @@
 :root {
   --tw-ring-color: #eaf2ff;
+  --sidebar-background: theme(colors.white);
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 240 5.9% 10%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
 }
 
 html {
@@ -40,10 +47,6 @@ h5 {
   @apply text-text-sm;
 }
 
-label span {
-  @apply capitalize;
-}
-
 p {
   @apply font-normal;
 }
@@ -60,8 +63,8 @@ p {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 20px;
-  height: 20px;
+  width: 100%;
+  height: 100%;
   margin-top: -10px;
   margin-left: -10px;
   border-radius: 50%;
@@ -152,8 +155,8 @@ dialog {
   }
 }
 
-.search-form label > span,
-.filters-form label > span {
+.search-form label > .inner-label,
+.filters-form label > .inner-label {
   @apply hidden;
 }
 
@@ -242,4 +245,107 @@ dialog {
 
 .word-break {
   word-break: break-word;
+}
+
+/* Disable spacing on first column of list, for lists with bulk actions */
+
+.list.list-with-bulk-actions tr td:nth-child(2),
+.list.list-with-bulk-actions tr td:nth-child(2) > div {
+  @apply !pl-0;
+}
+
+.wordwrap {
+  white-space: pre-wrap; /* Webkit */
+  white-space: -moz-pre-wrap; /* Firefox */
+  white-space: -pre-wrap; /* Opera <7 */
+  white-space: -o-pre-wrap; /* Opera 7 */
+  word-wrap: break-word; /* IE */
+}
+
+.fixed-gradient {
+  position: absolute;
+  top: 8px;
+  bottom: 11px;
+  width: 60px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
+  pointer-events: none;
+  z-index: 1;
+  display: none;
+}
+
+.overflowing .fixed-gradient {
+  display: block;
+}
+
+.scrollbar-top {
+  position: relative;
+  overflow: auto;
+}
+
+/** Loading text */
+.loading-text {
+  display: inline-block;
+  font-family: monospace;
+  clip-path: inset(0 3ch 0 0);
+  animation: l 1s steps(4) infinite;
+}
+
+@keyframes l {
+  to {
+    clip-path: inset(0 -1ch 0 0);
+  }
+}
+
+.bulk-tagging-dialog .react-tags__listbox {
+  z-index: 1000;
+}
+
+.bulk-tagging-dialog .dialog-body {
+  @apply overflow-visible;
+}
+
+/* Popover animations */
+
+div[data-radix-popper-content-wrapper] > div {
+  @apply mt-2;
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+div[data-radix-popper-content-wrapper] > div[data-side="top"] {
+  animation-name: slideUp;
+}
+div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
+  animation-name: slideDown;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+::target-text {
+  background-color: yellow;
+  color: black;
+}
+
+.pseudo-border-bottom {
+  @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-[''] hover:bg-gray-100;
 }

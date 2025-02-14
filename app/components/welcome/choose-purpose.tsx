@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigation } from "@remix-run/react";
+import { config } from "~/config/shelf.config";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { CheckmarkIcon } from "../icons/library";
+import { ShelfSymbolLogo } from "../marketing/logos";
 import { Button } from "../shared/button";
 
 export function ChoosePurpose() {
@@ -12,17 +14,10 @@ export function ChoosePurpose() {
   );
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
-
   return (
     <>
       <div className="flex flex-col items-center p-4 sm:p-6">
-        <img
-          src="/static/images/shelf-symbol.png"
-          alt="logo"
-          className="mb-4"
-          width={32}
-          height={32}
-        />
+        <ShelfSymbolLogo className="mb-4 size-8" />
         <div className="mb-8 text-center">
           <h3>How will you use shelf?</h3>
           <p>
@@ -64,10 +59,16 @@ export function ChoosePurpose() {
               </p>
               <div className="mt-3 flex flex-col gap-4 md:flex-row">
                 <div className="flex items-center gap-3">
-                  <CheckmarkIcon /> <span>Free 14-day trial</span>
+                  <span className="text-primary">
+                    <CheckmarkIcon />
+                  </span>{" "}
+                  <span>Free {config.freeTrialDays}-day trial</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <CheckmarkIcon /> No credit card required
+                  <span className="text-primary">
+                    <CheckmarkIcon />
+                  </span>{" "}
+                  No credit card required
                 </div>
               </div>
             </div>

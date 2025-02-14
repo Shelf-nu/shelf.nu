@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
@@ -8,7 +7,7 @@ import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 // Loader Function to Return Bookings Data
@@ -17,19 +16,18 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const calendarEvents = await getBookingsForCalendar({
       request,
       organizationId,
       userId,
-      isSelfService,
+      isSelfServiceOrBase,
     });
 
     return new Response(JSON.stringify(calendarEvents), {

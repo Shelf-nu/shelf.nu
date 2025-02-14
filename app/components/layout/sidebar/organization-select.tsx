@@ -16,8 +16,11 @@ type SlotKeys = "after-select";
 
 export const OrganizationSelect = ({
   slots,
+  className,
 }: {
   slots?: Record<SlotKeys, ReactNode>;
+  /** Class applied inside the SelectContent */
+  className?: string;
 }) => {
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
@@ -27,12 +30,12 @@ export const OrganizationSelect = ({
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" className="w-full" align="start">
-        <div className=" max-h-[320px] w-[253px] overflow-auto">
+        <div className={tw("max-h-[320px] w-[253px] overflow-auto", className)}>
           {organizations.map((org) => (
             <SelectItem
               value={org.id}
               key={org.id}
-              className="flex cursor-pointer select-none items-center justify-between gap-4  py-2 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+              className="flex cursor-pointer select-none items-center justify-between gap-4  py-2 outline-none  hover:bg-gray-100 focus:bg-gray-100"
             >
               <div className="flex items-center gap-2">
                 {org.type === "PERSONAL" ? (
@@ -46,7 +49,7 @@ export const OrganizationSelect = ({
                   />
                 )}
 
-                <div className="ml-[3px] line-clamp-1 max-w-[265px] text-ellipsis text-sm text-gray-900">
+                <div className="ml-[3px] line-clamp-1 max-w-[265px] text-ellipsis text-left text-sm text-gray-900">
                   {org.name}
                 </div>
               </div>

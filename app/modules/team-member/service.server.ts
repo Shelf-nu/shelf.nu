@@ -5,17 +5,31 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
+type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
+  include: {
+    user: {
+      select: {
+        firstName: true;
+        lastName: true;
+        email: true;
+      };
+    };
+  };
+}>;
 
 export async function createTeamMember({
   name,
   organizationId,
+  userId,
 }: {
   name: TeamMember["name"];
   organizationId: Organization["id"];
+  userId?: TeamMember["userId"];
 }) {
   try {
     return await db.teamMember.create({
@@ -26,6 +40,13 @@ export async function createTeamMember({
             id: organizationId,
           },
         },
+        user: userId
+          ? {
+              connect: {
+                id: userId,
+              },
+            }
+          : undefined,
       },
     });
   } catch (cause) {
@@ -62,13 +83,17 @@ export async function createTeamMemberIfNotExists({
       return {};
     }
 
-    // now we loop through the categories and check if they exist
+    // Process each team member with case-insensitive matching
     for (const [teamMember, _] of teamMembers) {
       const existingTeamMember = await db.teamMember.findFirst({
         where: {
           deletedAt: null,
-          name: teamMember,
           organizationId,
+          // Use case-insensitive comparison via Prisma's mode option
+          name: {
+            equals: teamMember as string,
+            mode: "insensitive",
+          },
         },
       });
 
@@ -90,9 +115,11 @@ export async function createTeamMemberIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating the team member. Please try again or contact support.",
+        "Something went wrong while creating the team member. Seems like some of the team member data in your import file is invalid. Please check and try again.",
       additionalData: { organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }
@@ -104,6 +131,7 @@ export async function getTeamMembers(params: {
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
+  where?: Prisma.TeamMemberWhereInput;
 }) {
   const { organizationId, page = 1, perPage = 8, search } = params;
 
@@ -115,6 +143,7 @@ export async function getTeamMembers(params: {
     let where: Prisma.TeamMemberWhereInput = {
       deletedAt: null,
       organizationId,
+      ...params.where,
     };
 
     /** If the search string exists, add it to the where object */
@@ -155,9 +184,11 @@ export async function getTeamMembers(params: {
 export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
+  where,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
+  where?: Prisma.TeamMemberWhereInput;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -171,6 +202,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
       page,
       perPage,
       search,
+      where,
     });
     const totalPages = Math.ceil(totalTeamMembers / perPage);
 
@@ -197,67 +229,75 @@ export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
   getAll,
+  isSelfService,
+  userId,
 }: {
   organizationId: Organization["id"];
   selectedTeamMembers?: TeamMember["id"][];
   getAll?: boolean;
+  isSelfService?: boolean;
+  userId?: string;
 }) {
   try {
-    const [
-      teamMemberExcludedSelected,
-      teamMembersSelected,
-      totalTeamMembers,
-      org,
-    ] = await Promise.all([
-      db.teamMember.findMany({
-        where: {
-          organizationId,
-          id: { notIn: selectedTeamMembers },
-          deletedAt: null,
-        },
-        take: getAll ? undefined : 12,
-      }),
-      db.teamMember.findMany({
-        where: { organizationId, id: { in: selectedTeamMembers } },
-      }),
-      db.teamMember.count({ where: { organizationId, deletedAt: null } }),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: { owner: true },
-      }),
-    ]);
+    const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
+      await Promise.all([
+        db.teamMember.findMany({
+          where: {
+            organizationId,
+            id: { notIn: selectedTeamMembers },
+            deletedAt: null,
+            userId: isSelfService && userId ? userId : undefined,
+          },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+          take: getAll ? undefined : 12,
+        }),
+        db.teamMember.findMany({
+          where: { organizationId, id: { in: selectedTeamMembers } },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+        }),
+        db.teamMember.count({ where: { organizationId, deletedAt: null } }),
+      ]);
 
-    const allTeamMembers = [
+    const teamMembers = [
       ...teamMembersSelected,
       ...teamMemberExcludedSelected,
-    ];
+    ].sort((a, b) => {
+      // First sort by whether they have a userId
+      if (a.userId && !b.userId) return -1;
+      if (!a.userId && b.userId) return 1;
 
-    /**
-     * Owners can be assigned in bookings so have to add it to the list
-     */
-    if (org?.owner && typeof org.owner.id === "string") {
-      allTeamMembers.push({
-        id: "owner",
-        name: `${org.owner.firstName} ${org.owner.lastName} (Owner)`,
-        userId: org.owner.id,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        deletedAt: null,
-      });
-    }
+      // Then sort alphabetically by name
+      const aName = a?.user
+        ? `${a.user.firstName} ${a.user.lastName}`.toLowerCase()
+        : a.name.toLowerCase();
+      const bName = b.user
+        ? `${b.user.firstName} ${b.user.lastName}`.toLowerCase()
+        : b.name.toLowerCase();
 
-    /**
-     * If teamMember has a user associated then we have to use that user's id
-     * otherwise we have to use teamMember's id
-     */
-    const combinedTeamMembers = allTeamMembers.map((teamMember) => ({
-      ...teamMember,
-      id: teamMember.userId ? teamMember.userId : teamMember.id,
-    }));
+      return aName.localeCompare(bName);
+    });
+
+    /** Checks and fixes teamMember names if they are broken */
+    await fixTeamMembersNames(teamMembers);
 
     return {
-      teamMembers: combinedTeamMembers,
+      teamMembers,
       totalTeamMembers,
     };
   } catch (cause) {
@@ -265,6 +305,155 @@ export async function getTeamMemberForCustodianFilter({
       cause,
       message: "Failed to fetch team members",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+export async function getTeamMember({
+  id,
+  organizationId,
+}: {
+  id: TeamMember["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    return await db.teamMember.findUniqueOrThrow({
+      where: { id, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Team member not found",
+      additionalData: { id },
+      label,
+    });
+  }
+}
+
+export async function bulkDeleteNRMs({
+  nrmIds,
+  organizationId,
+}: {
+  nrmIds: TeamMember["id"][];
+  organizationId: TeamMember["organizationId"];
+}) {
+  try {
+    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
+      ? { organizationId }
+      : { id: { in: nrmIds }, organizationId };
+
+    const teamMembers = await db.teamMember.findMany({
+      where,
+      select: { id: true, _count: { select: { custodies: true } } },
+    });
+
+    /** If some team members have custody, then delete is not allowed */
+    const someTeamMemberHasCustodies = teamMembers.some(
+      (tm) => tm._count.custodies > 0
+    );
+
+    if (someTeamMemberHasCustodies) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some team members has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+        label,
+      });
+    }
+
+    return await db.teamMember.updateMany({
+      where: { id: { in: teamMembers.map((tm) => tm.id) } },
+      data: { deletedAt: new Date() },
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting non-registered members";
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+    });
+  }
+}
+
+/**
+ * Checks if the team member name is empty. If it is, it is considered invalid and the team member id is returned
+ * @param teamMember Contains the team member data
+ * @returns teamMember.id if the name is empty
+ */
+function validateTeamMemberName(teamMember: TeamMemberWithUserData) {
+  if (!teamMember.name || teamMember.name.trim() === "") {
+    return teamMember.id;
+  }
+}
+
+/**
+ * Fixes team members with invalid names. THis runs as void on the background so it doenst block the main thread
+ * @param teamMembers  Array of team members with user data
+ */
+async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
+  try {
+    const teamMembersWithEmptyNames = teamMembers.filter(
+      validateTeamMemberName
+    );
+
+    /** If there are none, just return */
+    if (teamMembersWithEmptyNames.length === 0) return;
+
+    /**
+     * Updates team member names by:
+     * 1. Using first + last name if both exist
+     * 2. Using just first or last name if one exists
+     * 3. Falling back to email username if no name exists
+     * 4. Using "Unknown" as last resort if no email exists
+     */
+    await Promise.all(
+      teamMembersWithEmptyNames.map((teamMember) => {
+        let name: string;
+
+        if (teamMember.user) {
+          const { firstName, lastName, email } = teamMember.user;
+
+          if (firstName?.trim() || lastName?.trim()) {
+            // At least one name exists - concatenate available names
+            name = [firstName?.trim(), lastName?.trim()]
+              .filter(Boolean)
+              .join(" ");
+          } else {
+            // No names but email exists - use email username
+            name = email.split("@")[0];
+            // Optionally improve email username readability
+            name = name
+              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+          }
+
+          return db.teamMember.update({
+            where: { id: teamMember.id },
+            data: { name },
+          });
+        }
+        return null;
+      })
+    );
+
+    /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: "Team members with empty names found",
+        additionalData: { teamMembersWithEmptyNames },
+        label,
+      })
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fix team members names",
       label,
     });
   }

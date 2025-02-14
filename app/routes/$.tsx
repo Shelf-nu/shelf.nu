@@ -1,11 +1,16 @@
+import { ErrorIcon } from "~/components/errors";
 import { Button } from "~/components/shared/button";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-/** This route is meant for handling 404 errors for logged in users  */
+export const meta = () => [{ title: appendToMetaTitle("Not found") }];
+
 export default function LayoutSplat() {
   return (
-    <div className="flex size-full items-center justify-center">
+    <div className="flex size-full h-dvh items-center justify-center">
       <div className="flex flex-col items-center text-center">
-        <img src="/images/error-icon.svg" alt="" className="mb-5" />
+        <span className="mb-5 size-[56px] text-primary">
+          <ErrorIcon />
+        </span>
         <h2 className="mb-2">Page not found</h2>
         <p className="max-w-[550px]">
           We couldn't find the page you were looking for.

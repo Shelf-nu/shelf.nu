@@ -1,13 +1,15 @@
 import type { Kit } from "@prisma/client";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -17,12 +19,13 @@ import { Card } from "../shared/card";
 export const NewKitFormSchema = z.object({
   name: z
     .string()
-    .min(2, "Name is required!")
+    .min(2, "Name is required")
     .transform((value) => value.trim()),
   description: z
     .string()
     .optional()
     .transform((value) => value?.trim()),
+  qrId: z.string().optional(),
 });
 
 type KitFormProps = {
@@ -30,6 +33,7 @@ type KitFormProps = {
   name?: Kit["name"];
   description?: Kit["description"];
   saveButtonLabel?: string;
+  qrId?: string | null;
 };
 
 export default function KitsForm({
@@ -37,6 +41,7 @@ export default function KitsForm({
   name,
   description,
   saveButtonLabel = "Add",
+  qrId,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -67,6 +72,9 @@ export default function KitsForm({
             {saveButtonLabel}
           </Button>
         </AbsolutePositionedHeaderActions>
+        {qrId ? (
+          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
+        ) : null}
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input
@@ -97,7 +105,7 @@ export default function KitsForm({
           <Input
             inputType="textarea"
             maxLength={1000}
-            label={zo.fields.description()}
+            label={"Description"}
             name={zo.fields.description()}
             defaultValue={description || ""}
             hideLabel
@@ -115,7 +123,7 @@ export default function KitsForm({
             </p>
             <Input
               disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+              accept={ACCEPT_SUPPORTED_IMAGES}
               name="image"
               type="file"
               onChange={validateFile}
@@ -128,6 +136,14 @@ export default function KitsForm({
             <p className="mt-2 lg:hidden">
               Accepts PNG, JPG or JPEG (max.4 MB)
             </p>
+          </div>
+        </FormRow>
+
+        <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
+          <div className="ml-auto">
+            <Button type="submit" disabled={disabled}>
+              Save
+            </Button>
           </div>
         </FormRow>
       </Form>

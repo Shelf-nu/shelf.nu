@@ -1,34 +1,12 @@
 import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 
+import {
+  Role2PermissionMap,
+  type PermissionAction,
+  type PermissionEntity,
+} from "./permission.data";
 import { ShelfError } from "../error";
-
-export enum PermissionAction {
-  create = "create",
-  read = "read",
-  update = "update",
-  delete = "delete",
-  checkout = "checkout",
-  checkin = "checkin",
-  export = "export",
-  import = "import",
-}
-export enum PermissionEntity {
-  asset = "asset",
-  qr = "qr",
-  booking = "booking",
-  tag = "tag",
-  category = "category",
-  location = "location",
-  customField = "customField",
-  workspace = "workspace",
-  teamMember = "teamMember",
-  dashboard = "dashboard",
-  generalSettings = "generalSettings",
-  subscription = "subscription",
-  template = "template",
-  kit = "kit",
-}
 
 export interface PermissionCheckProps {
   organizationId: string;
@@ -38,38 +16,9 @@ export interface PermissionCheckProps {
   entity: PermissionEntity;
 }
 
-//this will come from DB eventually
-const Role2PermissionMap: {
-  [K in OrganizationRoles]?: Record<PermissionEntity, PermissionAction[]>;
-} = {
-  [OrganizationRoles.SELF_SERVICE]: {
-    [PermissionEntity.asset]: [PermissionAction.read],
-    [PermissionEntity.booking]: [
-      PermissionAction.create,
-      PermissionAction.read,
-      PermissionAction.update,
-      PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
-    ],
-    [PermissionEntity.qr]: [],
-    [PermissionEntity.category]: [],
-    [PermissionEntity.customField]: [],
-    [PermissionEntity.location]: [],
-    [PermissionEntity.tag]: [],
-    [PermissionEntity.teamMember]: [],
-    [PermissionEntity.workspace]: [],
-    [PermissionEntity.dashboard]: [],
-    [PermissionEntity.generalSettings]: [],
-    [PermissionEntity.subscription]: [],
-    [PermissionEntity.template]: [
-      PermissionAction.create,
-      PermissionAction.read,
-      PermissionAction.update,
-    ],
-    [PermissionEntity.kit]: [PermissionAction.read],
-  },
-};
-
-async function hasPermission(params: PermissionCheckProps): Promise<Boolean> {
+export async function hasPermission(
+  params: PermissionCheckProps
+): Promise<Boolean> {
   let { userId, entity, action, organizationId, roles } = params;
 
   try {
@@ -133,6 +82,8 @@ export const validatePermission = async (props: PermissionCheckProps) => {
       additionalData: { ...props },
       status: 403,
       label: "Permission",
+      shouldBeCaptured: false,
     });
   }
+  return true;
 };

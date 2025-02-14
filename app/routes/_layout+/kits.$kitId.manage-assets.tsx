@@ -1,13 +1,14 @@
 import { useEffect, useMemo } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -23,21 +24,29 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import {
-  createBulkKitChangeNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -152,7 +161,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetIds } = parseData(
+    let { assetIds } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -166,9 +175,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
-          assets: { select: { id: true, title: true, kit: true } },
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              kit: true,
+              bookings: { select: { id: true, status: true } },
+            },
+          },
           custody: {
-            select: { custodian: { select: { id: true, name: true } } },
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      email: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       })
@@ -185,6 +216,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const removedAssets = kit.assets.filter(
       (asset) => !assetIds.includes(asset.id)
     );
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+      const kitAssets = kit.assets.map((asset) => asset.id);
+      const removedAssetsIds = removedAssets.map((asset) => asset.id);
+
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...kitAssets.filter((asset) => !removedAssetsIds.includes(asset)),
+        ]),
+      ];
+    }
 
     const newlyAddedAssets = await db.asset
       .findMany({
@@ -209,6 +272,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add unavailable asset in a kit.",
+        additionalData: { userId, kitId },
+        label: "Kit",
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** User is not allowed to add asset to any of these booking status */
+    const disallowedBookingStatus: BookingStatus[] = [
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ];
+    const kitBookings =
+      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+    if (
+      kitBookings &&
+      kitBookings.some((b) => disallowedBookingStatus.includes(b.status))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add asset to an unavailable kit.",
         additionalData: { userId, kitId },
         label: "Kit",
       });
@@ -265,7 +349,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ),
         db.note.createMany({
           data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -289,13 +375,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }),
         db.note.createMany({
           data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${kit.custody?.custodian.name.trim()}'s** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}'s** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
           })),
         }),
       ]);
+    }
+
+    /**
+     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
+     * then we have to add or remove these assets to booking also
+     */
+    const bookingsToUpdate = kitBookings.filter(
+      (b) => b.status === "DRAFT" || b.status === "RESERVED"
+    );
+
+    if (bookingsToUpdate?.length) {
+      await Promise.all(
+        bookingsToUpdate.map((booking) =>
+          db.booking.update({
+            where: { id: booking.id },
+            data: {
+              assets: {
+                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
+                disconnect: removedAssets.map((a) => ({ id: a.id })),
+              },
+            },
+          })
+        )
+      );
     }
 
     return redirect(`/kits/${kitId}`);
@@ -306,7 +418,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function ManageAssetsInKit() {
-  const { kit, header } = useLoaderData<typeof loader>();
+  const { kit, header, items, totalItems } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -314,6 +426,20 @@ export default function ManageAssetsInKit() {
   const kitAssetIds = useMemo(() => kit.assets.map((k) => k.id), [kit.assets]);
 
   const [selectedAssets, setSelectedAssets] = useAtom(kitsSelectedAssetsAtom);
+
+  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
+
+  function handleSelectAll() {
+    if (hasSelectedAll) {
+      setSelectedAssets([]);
+    } else {
+      setSelectedAssets([
+        ...kitAssetIds,
+        ...items.map((item) => item.id),
+        ALL_SELECTED_KEY,
+      ]);
+    }
+  }
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per kit
@@ -328,7 +454,7 @@ export default function ManageAssetsInKit() {
     <div className="flex h-full max-h-full flex-col">
       <Header
         {...header}
-        hideBreadcrumbs={true}
+        hideBreadcrumbs
         classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
       />
 
@@ -394,7 +520,10 @@ export default function ManageAssetsInKit() {
             /**
              * We will select asset only if it is not in custody
              */
-            if (!item.isInOtherCustody) {
+            if (
+              !item.isInOtherCustody &&
+              item.status !== AssetStatus.CHECKED_OUT
+            ) {
               setSelectedAssets((selectedAssets) =>
                 selectedAssets.includes(assetId)
                   ? selectedAssets.filter((id) => id !== assetId)
@@ -408,15 +537,25 @@ export default function ManageAssetsInKit() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 flex h-full flex-col justify-between border-0"
+          className="-mx-5 flex h-full flex-col justify-start border-0"
+          headerExtraContent={
+            <Button
+              variant="secondary"
+              className="px-2 py-1 text-sm font-normal"
+              onClick={handleSelectAll}
+            >
+              {hasSelectedAll ? "Clear all" : "Select all"}
+            </Button>
+          }
         />
       </div>
 
       {/* Footer of the modal */}
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
-        <div className="flex items-center font-medium">
-          {selectedAssets.length} assets selected
-        </div>
+        <p>
+          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+        </p>
+
         <div className="flex gap-3">
           <Button variant="secondary" to="..">
             Close
@@ -459,13 +598,13 @@ const RowComponent = ({
 }) => {
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
-
+  const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
   return (
     <>
       <Td
         className={tw(
           "w-full p-0 md:p-0",
-          item.isInOtherCustody && "cursor-not-allowed"
+          (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
         )}
       >
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
@@ -502,11 +641,11 @@ const RowComponent = ({
           </div>
 
           {/* Asset is in custody */}
-          {item.isInOtherCustody ? (
+          <When truthy={item.isInOtherCustody}>
             <TooltipProvider delayDuration={100}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-warning-700">
+                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
                     In custody
                   </div>
                 </TooltipTrigger>
@@ -523,20 +662,47 @@ const RowComponent = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : null}
+          </When>
+
+          {/* Asset is in checked out */}
+          <When truthy={isCheckedOut}>
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                    Checked out
+                  </div>
+                </TooltipTrigger>
+
+                <TooltipContent side="top" align="end" className="md:w-80">
+                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                    Asset is checked out
+                  </h2>
+                  <div className="text-wrap text-xs font-medium text-gray-500">
+                    Asset is currently in checked out via a booking. <br /> Make
+                    sure the asset has an Available status in order to add it to
+                    this kit.
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </When>
         </div>
       </Td>
 
       <Td
         className={
-          item.isInOtherCustody ? "cursor-not-allowed opacity-50" : undefined
+          item.isInOtherCustody || isCheckedOut
+            ? "cursor-not-allowed opacity-50"
+            : undefined
         }
       >
         <FakeCheckbox
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody ? "text-gray-200" : ""
+            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
+            checked ? "text-primary" : ""
           )}
         />
       </Td>

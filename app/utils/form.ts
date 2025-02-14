@@ -1,3 +1,5 @@
+import type { Navigation } from "@remix-run/react";
+
 export function isFormProcessing(state: "idle" | "submitting" | "loading") {
   return state === "submitting" || state === "loading";
 }
@@ -15,4 +17,9 @@ export function handleInputChange(
     ...currentState,
     [field]: event.target.value,
   }));
+}
+
+export function isSearching(navigation: Navigation) {
+  const search = new URLSearchParams(navigation?.location?.search);
+  return search?.has("s");
 }

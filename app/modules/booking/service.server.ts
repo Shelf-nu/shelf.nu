@@ -1,23 +1,29 @@
-import {
-  type Booking,
-  type Prisma,
-  type Organization,
-  type Asset,
-  BookingStatus,
-  AssetStatus,
+import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import type {
+  Booking,
+  Prisma,
+  Organization,
+  Asset,
+  Kit,
+  User,
+  UserOrganization,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { sendEmail } from "~/utils/mail.server";
-import { scheduler } from "~/utils/scheduler.server";
-import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import type { MergeInclude } from "~/utils/utils";
+import { bookingSchedulerEventsEnum } from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -26,8 +32,11 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
-import { createNotes } from "../asset/service.server";
+// eslint-disable-next-line import/no-cycle
+import { getBookingWhereInput } from "./utils.server";
+import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
@@ -73,7 +82,7 @@ export async function scheduleNextBookingJob({
 }) {
   try {
     const id = await scheduler.sendAfter(
-      schedulerKeys.bookingQueue,
+      QueueNames.bookingQueue,
       data,
       {},
       when
@@ -114,10 +123,32 @@ async function updateBookingAssetStates(
   }
 }
 
-const commonInclude: Prisma.BookingInclude = {
+async function updateBookingKitStates({
+  kitIds,
+  status,
+}: {
+  kitIds: string[];
+  status: KitStatus;
+}) {
+  try {
+    return await db.kit.updateMany({
+      where: { id: { in: kitIds } },
+      data: { status },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the booking kit states.",
+      additionalData: { kitIds, status },
+      label,
+    });
+  }
+}
+
+const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
-};
+} as Prisma.BookingInclude;
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -132,10 +163,14 @@ export async function upsertBooking(
       | "to"
       | "custodianTeamMemberId"
       | "custodianUserId"
-    > & { assetIds: Asset["id"][] }
+      | "description"
+    > & {
+      assetIds: Asset["id"][];
+      isExpired: boolean;
+    }
   >,
   hints: ClientHint,
-  isSelfService: boolean = false
+  isBaseOrSelfService: boolean = false
 ) {
   try {
     const {
@@ -145,9 +180,22 @@ export async function upsertBooking(
       custodianTeamMemberId,
       custodianUserId,
       id,
+      description,
+      isExpired,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
+
+    const assetsWithKits = id
+      ? await db.asset.findMany({
+          where: { bookings: { some: { id } } },
+          select: { id: true, kitId: true },
+        })
+      : null;
+
+    const kitIds = getKitIdsByAssets(assetsWithKits ?? []);
+    const hasKits = kitIds.length > 0;
+
     if (assetIds?.length) {
       data.assets = {
         connect: assetIds.map((id) => ({
@@ -197,17 +245,28 @@ export async function upsertBooking(
         data.custodianUser = {
           connect: { id: custodianUser.user.id },
         };
-      } else {
-        //disconnect any stake userId
-        data.custodianUser = {
-          disconnect: true,
-        };
+      } else if (id) {
+        const b = await db.booking.findFirst({
+          where: { id },
+          select: { custodianUserId: true },
+        });
+
+        if (b?.custodianUserId) {
+          data.custodianUser = {
+            disconnect: true,
+          };
+        }
       }
+    }
+
+    if (description) {
+      data.description = description;
     }
 
     /** Editing */
     if (id) {
       let newAssetStatus;
+      let newKitStatus;
       const isTerminalState = [
         BookingStatus.ARCHIVED,
         BookingStatus.CANCELLED,
@@ -226,8 +285,13 @@ export async function upsertBooking(
             oldBooking.status as any
           ) // Check if the booking was ongoing or overdue
         ) {
-          //booking has ended, make asset available
+          // booking has ended, make asset available
           newAssetStatus = AssetStatus.AVAILABLE;
+
+          // if booking as some kits, make kits available
+          if (hasKits) {
+            newKitStatus = KitStatus.AVAILABLE;
+          }
         }
         //cancel any active schedulers
         await cancelScheduler(oldBooking);
@@ -236,10 +300,10 @@ export async function upsertBooking(
       //update
       const res = await db.booking
         .update({
-          where: { id },
+          where: { id, organizationId },
           data,
           include: {
-            ...commonInclude,
+            ...BOOKING_COMMON_INCLUDE,
             assets: true,
             ...bookingIncludeForEmails,
           },
@@ -255,19 +319,38 @@ export async function upsertBooking(
         });
 
       if (
+        // For both regular checkouts (ONGOING) and expired checkouts (OVERDUE)
+        ((booking.status === BookingStatus.ONGOING ||
+          booking.status === BookingStatus.OVERDUE) &&
+          isExpired) ||
         booking.status === BookingStatus.ONGOING ||
         (res.status === BookingStatus.ONGOING && booking.assetIds?.length)
       ) {
-        //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
-        //no need to worry about overdue as the previous state is always ongoing
         newAssetStatus = AssetStatus.CHECKED_OUT;
+        if (hasKits) {
+          newKitStatus = AssetStatus.CHECKED_OUT;
+        }
       }
 
       const promises = [];
       if (newAssetStatus) {
         promises.push(updateBookingAssetStates(res, newAssetStatus));
       }
-      if (res.from && booking.status === BookingStatus.RESERVED) {
+
+      if (newKitStatus) {
+        promises.push(
+          updateBookingKitStates({
+            kitIds,
+            status: newKitStatus,
+          })
+        );
+      }
+
+      if (
+        res.from &&
+        booking.status === BookingStatus.RESERVED &&
+        !booking.isExpired //Only schedule if the booking is not already
+      ) {
         promises.push(cancelScheduler(res));
         const when = new Date(res.from);
         when.setHours(when.getHours() - 1); //1hour before send checkout reminder
@@ -294,7 +377,7 @@ export async function upsertBooking(
             const custodian =
               `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
               (res.custodianTeamMember?.name as string);
-            let subject = `Booking reserved (${res.name}) - shelf.nu`;
+            let subject = `✅ Booking reserved (${res.name}) - shelf.nu`;
             let text = assetReservedEmailContent({
               bookingName: res.name,
               assetsCount: res.assets.length,
@@ -312,7 +395,7 @@ export async function upsertBooking(
             });
 
             /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
-            if (isSelfService) {
+            if (isBaseOrSelfService) {
               const adminsEmails = await getOrganizationAdminsEmails({
                 organizationId: res.organizationId,
               });
@@ -338,7 +421,7 @@ export async function upsertBooking(
             }
 
             if (data.status === BookingStatus.COMPLETE) {
-              subject = `Booking completed (${res.name}) - shelf.nu`;
+              subject = `🎉 Booking completed (${res.name}) - shelf.nu`;
               text = completedBookingEmailContent({
                 bookingName: res.name,
                 assetsCount: res._count.assets,
@@ -410,11 +493,12 @@ export async function upsertBooking(
         connect: { id: organizationId },
       };
     }
+
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
-      include: { ...commonInclude, organization: true },
+      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
     });
-    if (res.from && booking.status === BookingStatus.RESERVED) {
+    if (res.from && booking.status === BookingStatus.RESERVED && !isExpired) {
       await cancelScheduler(res);
       const when = new Date(res.from);
       when.setHours(when.getHours() - 1); //1hour before send checkout reminder
@@ -433,7 +517,7 @@ export async function upsertBooking(
       cause,
       message:
         "Something went wrong while trying to create or update the booking. Please try again or contact support.",
-      additionalData: { booking, hints, isSelfService },
+      additionalData: { booking, hints, isBaseOrSelfService },
       label,
     });
   }
@@ -449,12 +533,15 @@ export async function getBookings(params: {
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
   custodianUserId?: Booking["custodianUserId"] | null;
-  custodianTeamMemberId?: Booking["custodianTeamMemberId"] | null;
+  /** Accepts an array of team member IDs instead of a single ID so it can be used for filtering of bookings on index */
+  custodianTeamMemberIds?: string[] | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
   extraInclude?: Prisma.BookingInclude;
+  /** Controls whether entries should be paginated or not */
+  takeAll?: boolean;
 }) {
   const {
     organizationId,
@@ -463,13 +550,14 @@ export async function getBookings(params: {
     search,
     statuses,
     custodianUserId,
-    custodianTeamMemberId,
+    custodianTeamMemberIds,
     assetIds,
     bookingTo,
     excludeBookingIds,
     bookingFrom,
     userId,
     extraInclude,
+    takeAll = false,
   } = params;
 
   try {
@@ -511,12 +599,36 @@ export async function getBookings(params: {
         mode: "insensitive",
       };
     }
-    if (custodianTeamMemberId) {
-      where.custodianTeamMemberId = custodianTeamMemberId;
+
+    /** Handle combination of custodianTeamMemberIds and custodianUserId */
+    if (
+      custodianTeamMemberIds &&
+      custodianTeamMemberIds?.length &&
+      custodianUserId
+    ) {
+      where.OR = [
+        {
+          custodianTeamMemberId: {
+            in: custodianTeamMemberIds,
+          },
+        },
+        {
+          custodianUserId,
+        },
+      ];
+    } else {
+      /** Handle custodianTeamMemberIds if present */
+      if (custodianTeamMemberIds?.length) {
+        where.custodianTeamMemberId = {
+          in: custodianTeamMemberIds,
+        };
+      }
+      /** Handle custodianUserId if present */
+      if (custodianUserId) {
+        where.custodianUserId = custodianUserId;
+      }
     }
-    if (custodianUserId) {
-      where.custodianUserId = custodianUserId;
-    }
+
     if (statuses?.length) {
       where.status = {
         in: statuses,
@@ -540,6 +652,7 @@ export async function getBookings(params: {
     if (excludeBookingIds?.length) {
       where.id = { notIn: excludeBookingIds };
     }
+
     if (bookingFrom && bookingTo) {
       where.OR = [
         {
@@ -555,11 +668,13 @@ export async function getBookings(params: {
 
     const [bookings, bookingCount] = await Promise.all([
       db.booking.findMany({
-        skip,
-        take,
+        ...(!takeAll && {
+          skip,
+          take,
+        }),
         where,
         include: {
-          ...commonInclude,
+          ...BOOKING_COMMON_INCLUDE,
           assets: {
             select: {
               id: true,
@@ -599,6 +714,8 @@ export async function removeAssets({
   firstName,
   lastName,
   userId,
+  kitIds = [],
+  organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
     assetIds: Asset["id"][];
@@ -606,12 +723,14 @@ export async function removeAssets({
   firstName: string;
   lastName: string;
   userId: string;
+  kitIds?: Kit["id"][];
+  organizationId: Booking["organizationId"];
 }) {
   try {
     const { assetIds, id } = booking;
     const b = await db.booking.update({
       // First, disconnect the assets from the booking
-      where: { id },
+      where: { id, organizationId },
       data: {
         assets: {
           disconnect: assetIds.map((id) => ({ id })),
@@ -627,15 +746,24 @@ export async function removeAssets({
      *
      * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
      * the updateMany will not find the assets in the booking anymore and wont update them
+     *
+     * If there was some kit removed from the booking, then we have to update the status of that kit to available
      */
     if (
       b.status === BookingStatus.ONGOING ||
       b.status === BookingStatus.OVERDUE
     ) {
       await db.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assetIds }, organizationId },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      if (kitIds.length > 0) {
+        await db.kit.updateMany({
+          where: { id: { in: kitIds }, organizationId },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
     }
 
     await createNotes({
@@ -660,28 +788,37 @@ export async function removeAssets({
 }
 
 export async function deleteBooking(
-  booking: Pick<Booking, "id">,
+  booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
   try {
-    const { id } = booking;
+    const { id, organizationId } = booking;
     const activeBooking = await db.booking.findFirst({
       where: {
         id,
         status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
+        organizationId,
       },
       include: {
         assets: {
           select: {
             id: true,
+            kitId: true,
           },
         },
       },
     });
+
+    const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
+    const uniqueKitIds = new Set(
+      assetWithKits.map((a) => a.kitId) as unknown as string
+    );
+    const hasKits = uniqueKitIds.size > 0;
+
     const b = await db.booking.delete({
-      where: { id },
+      where: { id, organizationId },
       include: {
-        ...commonInclude,
+        ...BOOKING_COMMON_INCLUDE,
         ...bookingIncludeForEmails,
         assets: {
           select: {
@@ -693,7 +830,7 @@ export async function deleteBooking(
 
     const email = b.custodianUser?.email;
     if (email) {
-      const subject = `Booking deleted (${b.name}) - shelf.nu`;
+      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
       const text = deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b._count.assets,
@@ -713,7 +850,7 @@ export async function deleteBooking(
         hideViewButton: true,
       });
 
-      await sendEmail({
+      sendEmail({
         to: email,
         subject,
         text,
@@ -721,10 +858,17 @@ export async function deleteBooking(
       });
     }
 
-    // FIXME: if sendEmail fails updateBookinAssetStates will not be called
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
+
+      // If booking has some kits, then make them available too
+      if (hasKits) {
+        await updateBookingKitStates({
+          kitIds: [...uniqueKitIds],
+          status: KitStatus.AVAILABLE,
+        });
+      }
     }
     await cancelScheduler(b);
 
@@ -740,11 +884,35 @@ export async function deleteBooking(
   }
 }
 
-export async function getBooking(
-  booking: Pick<Booking, "id" | "organizationId">
+const BOOKING_WITH_ASSETS_INCLUDE = {
+  ...BOOKING_COMMON_INCLUDE,
+  assets: {
+    select: {
+      id: true,
+      availableToBook: true,
+      status: true,
+      kitId: true,
+    },
+  },
+} satisfies Prisma.BookingInclude;
+
+type BookingWithExtraInclude<T extends Prisma.BookingInclude | undefined> =
+  T extends Prisma.BookingInclude
+    ? Prisma.BookingGetPayload<{
+        include: MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
+      }>
+    : Prisma.BookingGetPayload<{ include: typeof BOOKING_WITH_ASSETS_INCLUDE }>;
+
+export async function getBooking<T extends Prisma.BookingInclude | undefined>(
+  booking: Pick<Booking, "id" | "organizationId"> & {
+    userOrganizations?: Pick<UserOrganization, "organizationId">[];
+    request?: Request;
+    extraInclude?: T;
+  }
 ) {
   try {
-    const { id, organizationId } = booking;
+    const { id, organizationId, userOrganizations, request, extraInclude } =
+      booking;
 
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -752,23 +920,68 @@ export async function getBooking(
      * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
-    return await db.booking.findFirstOrThrow({
-      where: { id, organizationId },
-      include: {
-        ...commonInclude,
-        assets: {
-          select: { id: true, availableToBook: true, status: true },
-        },
+    const mergedInclude = {
+      ...BOOKING_WITH_ASSETS_INCLUDE,
+      ...extraInclude,
+    } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
+
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const bookingFound = (await db.booking.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
       },
-    });
+      include: mergedInclude,
+    })) as BookingWithExtraInclude<T>;
+
+    /* User is accessing the asset in the wrong organization. */
+    if (
+      userOrganizations?.length &&
+      bookingFound.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(bookingFound.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Booking not found",
+        message: "",
+        additionalData: {
+          model: "booking",
+          organization: userOrganizations?.find(
+            (org) => org.organizationId === bookingFound.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return bookingFound;
   } catch (cause) {
+    const is404 = isNotFoundError(cause);
     throw new ShelfError({
       cause,
       title: "Booking not found",
       message:
         "The booking you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { booking },
+      additionalData: {
+        ...booking,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
+      shouldBeCaptured: !is404,
     });
   }
 }
@@ -777,9 +990,14 @@ export async function getBookingsForCalendar(params: {
   request: Request;
   organizationId: Organization["id"];
   userId: string;
-  isSelfService: boolean;
+  isSelfServiceOrBase: boolean;
 }) {
-  const { request, organizationId, userId, isSelfService = false } = params;
+  const {
+    request,
+    organizationId,
+    userId,
+    isSelfServiceOrBase = false,
+  } = params;
   const searchParams = getCurrentSearchParams(request);
 
   const start = searchParams.get("start") as string;
@@ -793,7 +1011,7 @@ export async function getBookingsForCalendar(params: {
       userId,
       bookingFrom: new Date(start),
       bookingTo: new Date(end),
-      ...(isSelfService && {
+      ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: userId,
       }),
@@ -801,6 +1019,7 @@ export async function getBookingsForCalendar(params: {
         custodianTeamMember: true,
         custodianUser: true,
       },
+      takeAll: true,
     });
 
     const events = bookings
@@ -825,6 +1044,16 @@ export async function getBookingsForCalendar(params: {
           extendedProps: {
             status: booking.status,
             id: booking.id,
+            name: booking.name,
+            description: booking.description,
+            start: (booking.from as Date).toISOString(),
+            end: (booking.to as Date).toISOString(),
+            custodian: {
+              name: custodianName,
+              image: booking.custodianUser
+                ? booking.custodianUser.profilePicture
+                : undefined,
+            },
           },
         };
       });
@@ -917,5 +1146,609 @@ export function sendBookingUpdateNotification(
 
     default:
       break;
+  }
+}
+
+export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
+  const assetsWithKit = assets.filter((a) => !!a.kitId) as Array<{
+    id: string;
+    kitId: string;
+  }>;
+
+  const allKitIds = assetsWithKit.map((a) => a.kitId);
+  const uniqueKitIds = new Set(allKitIds);
+
+  return [...uniqueKitIds];
+}
+
+export async function getBookingFlags(
+  booking: Pick<Booking, "id" | "from" | "to"> & {
+    assetIds: Asset["id"][];
+  }
+) {
+  const assets = await db.asset.findMany({
+    where: { id: { in: booking.assetIds } },
+    include: {
+      category: true,
+      custody: true,
+      kit: true,
+      bookings: {
+        where: {
+          ...(booking.from && booking.to
+            ? {
+                status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                OR: [
+                  {
+                    from: { lte: booking.to },
+                    to: { gte: booking.from },
+                  },
+                  {
+                    from: { gte: booking.from },
+                    to: { lte: booking.to },
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+    },
+  });
+
+  const hasAssets = assets.length > 0;
+
+  const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  const hasCheckedOutAssets = assets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
+  );
+
+  const hasAlreadyBookedAssets = assets.some(
+    (asset) => asset.bookings && asset.bookings.length > 0
+  );
+
+  const hasAssetsInCustody = assets.some(
+    (asset) => asset.status === AssetStatus.IN_CUSTODY
+  );
+
+  const hasKits = assets.some((asset) => !!asset.kitId);
+
+  return {
+    hasAssets,
+    hasUnavailableAssets,
+    hasCheckedOutAssets,
+    hasAlreadyBookedAssets,
+    hasAssetsInCustody,
+    hasKits,
+  };
+}
+
+export async function bulkDeleteBookings({
+  bookingIds,
+  organizationId,
+  userId,
+  hints,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  hints: ClientHint;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const [bookings, user] = await Promise.all([
+      db.booking.findMany({
+        where,
+        include: {
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: { include: { owner: { select: { email: true } } } },
+          _count: { select: { assets: true } },
+          assets: { select: { id: true, kitId: true } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /** We have to send mails to custodianUsers */
+    const bookingsToSendEmail = bookings.filter(
+      (booking) => !!booking.custodianUser?.email
+    );
+
+    /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
+    const overdueOrOngoingBookings = bookings.filter(
+      (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
+    );
+
+    /** We have to cancel scheduler for the bookings */
+    const bookingsWithSchedulerReference = overdueOrOngoingBookings.filter(
+      (booking) => !!booking.activeSchedulerReference
+    );
+
+    await db.$transaction(async (tx) => {
+      /** Deleting all selected bookings */
+      await tx.booking.deleteMany({
+        where: { id: { in: bookings.map((booking) => booking.id) } },
+      });
+
+      /** Making assets and kits available */
+      if (overdueOrOngoingBookings.length > 0) {
+        const allAssets = overdueOrOngoingBookings.flatMap(
+          (booking) => booking.assets
+        );
+
+        const allKitIds = allAssets
+          .filter((asset) => !!asset.kitId)
+          .map((asset) => asset.kitId as string);
+
+        const uniqueKitIds = new Set(allKitIds);
+
+        await tx.asset.updateMany({
+          where: { id: { in: allAssets.map((asset) => asset.id) } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+
+        await tx.kit.updateMany({
+          where: { id: { in: [...uniqueKitIds] } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
+
+      /** Making notes for all the assets */
+      const notesData = bookings
+        .map((booking) =>
+          booking.assets.map((asset) => ({
+            userId,
+            assetId: asset.id,
+            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
+              booking.name
+            }**.`,
+            type: "UPDATE" as const,
+          }))
+        )
+        .flat() satisfies Prisma.NoteCreateManyInput[];
+
+      await tx.note.createMany({ data: notesData });
+    });
+
+    /** Cancelling scheduler */
+    await Promise.all(
+      bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
+    );
+
+    const emailConfigs = bookingsToSendEmail.map((b) => ({
+      to: b.custodianUser?.email ?? "",
+      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+      text: deletedBookingEmailContent({
+        bookingName: b.name,
+        assetsCount: b.assets.length,
+        custodian:
+          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+          (b.custodianTeamMember?.name as string),
+        from: b.from as Date,
+        to: b.to as Date,
+        bookingId: b.id,
+        hints,
+      }),
+      html: bookingUpdatesTemplateString({
+        booking: b,
+        heading: `Your booking as been deleted: "${b.name}"`,
+        assetCount: b.assets.length,
+        hints,
+        hideViewButton: true,
+      }),
+    }));
+
+    return emailConfigs.map(sendEmail);
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting bookings.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkArchiveBookings({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const bookings = await db.booking.findMany({ where });
+
+    const someBookingNotComplete = bookings.some(
+      (b) => b.status !== "COMPLETE"
+    );
+
+    /** Bookings must be complete to add them in archive */
+    if (someBookingNotComplete) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+        label,
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      /** Updating status of bookings to ARCHIVED  */
+      await tx.booking.updateMany({
+        where: { id: { in: bookings.map((b) => b.id) } },
+        data: { status: BookingStatus.ARCHIVED },
+      });
+    });
+
+    /** Cancel any active schedulers */
+    await Promise.all(bookings.map((b) => cancelScheduler(b)));
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk archive booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkCancelBookings({
+  bookingIds,
+  organizationId,
+  userId,
+  hints,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  hints: ClientHint;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const [bookings, user] = await Promise.all([
+      db.booking.findMany({
+        where,
+        include: {
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: { include: { owner: { select: { email: true } } } },
+          _count: { select: { assets: true } },
+          assets: { select: { id: true, kitId: true } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /** Bookings with any of these statuses cannot be cancelled */
+    const unavailableBookingStatus: BookingStatus[] = [
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+      BookingStatus.COMPLETE,
+      BookingStatus.DRAFT,
+    ];
+
+    const someUnavailableToCancelBookings = bookings.some((b) =>
+      unavailableBookingStatus.includes(b.status)
+    );
+
+    if (someUnavailableToCancelBookings) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some unavailable to cancel booking selected. Please make sure you are selecting the booking which are allowed to cancel.",
+        label,
+      });
+    }
+
+    /** We have to send mails to custodianUsers */
+    const bookingsToSendEmail = bookings.filter(
+      (booking) => !!booking.custodianUser?.email
+    );
+
+    /** We have to make all the assets and kits available if the booking as ongoing or overdue */
+    const ongoingOrOverdueBookings = bookings.filter(
+      (b) => b.status === "ONGOING" || b.status === "OVERDUE"
+    );
+
+    /** We have to cancel scheduler for the bookings */
+    const bookingsWithSchedulerReference = ongoingOrOverdueBookings.filter(
+      (booking) => !!booking.activeSchedulerReference
+    );
+
+    await db.$transaction(async (tx) => {
+      /** Updating status of bookings to CANCELLED */
+      await tx.booking.updateMany({
+        where: { id: { in: bookings.map((b) => b.id) } },
+        data: { status: BookingStatus.CANCELLED },
+      });
+
+      /** Updating status of assets and kits  */
+      if (ongoingOrOverdueBookings.length > 0) {
+        const allAssets = ongoingOrOverdueBookings.flatMap((b) => b.assets);
+        const allKitIds = allAssets
+          .filter((a) => !!a.kitId)
+          .map((a) => a.kitId as string);
+
+        const uniqueKitIds = new Set(allKitIds);
+
+        /** Making assets available */
+        await tx.asset.updateMany({
+          where: { id: { in: allAssets.map((a) => a.id) } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+
+        /** Making kits available */
+        await tx.kit.updateMany({
+          where: { id: { in: [...uniqueKitIds] } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
+
+      /** Making notes for all the assets */
+      const notesData = bookings
+        .map((b) =>
+          b.assets.map((asset) => ({
+            assetId: asset.id,
+            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
+              b.name
+            }](/bookings/${b.id})**.`,
+            userId,
+            type: "UPDATE" as const,
+          }))
+        )
+        .flat() satisfies Prisma.NoteCreateManyInput[];
+
+      await tx.note.createMany({ data: notesData });
+    });
+
+    /** Cancelling scheduler */
+    await Promise.all(
+      bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
+    );
+
+    /** Sending cancellation emails */
+    await Promise.all(
+      bookingsToSendEmail.map((b) => {
+        const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
+        const text = cancelledBookingEmailContent({
+          bookingName: b.name,
+          assetsCount: b._count.assets,
+          custodian:
+            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+            (b.custodianTeamMember?.name as string),
+          from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+          to: b.to as Date,
+          bookingId: b.id,
+          hints: hints,
+        });
+
+        const html = bookingUpdatesTemplateString({
+          booking: b,
+          heading: `Your booking has been cancelled: "${b.name}".`,
+          assetCount: b._count.assets,
+          hints,
+        });
+
+        return sendEmail({
+          to: b.custodianUser?.email ?? "",
+          subject,
+          text,
+          html,
+        });
+      })
+    );
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk cancelling bookings.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId, userId },
+      label,
+    });
+  }
+}
+
+export async function addScannedAssetsToBooking({
+  assetIds,
+  bookingId,
+  organizationId,
+}: {
+  assetIds: Asset["id"][];
+  bookingId: Booking["id"];
+  organizationId: Booking["organizationId"];
+}) {
+  try {
+    const booking = await db.booking.findFirstOrThrow({
+      where: { id: bookingId, organizationId },
+    });
+
+    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
+     * If there are already checked out or in custody assets, the user wont be able to check out
+     */
+
+    /** Adding assets into booking */
+    return await db.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while adding scanned assets to booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetIds, bookingId, organizationId },
+      label,
+    });
+  }
+}
+
+export async function getExistingBookingDetails(bookingId: string) {
+  try {
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        status: true,
+        assets: { select: { id: true, title: true } },
+      },
+    });
+
+    if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking is not in Draft or Reserved status.",
+        label: "Booking",
+      });
+    }
+
+    return booking;
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause,
+      message:
+        cause?.message ||
+        "Something went wrong while getting existing booking details.",
+      additionalData: { bookingId },
+      label: "Booking",
+    });
+  }
+}
+
+export function formatBookingsDates(bookings: Booking[], request: Request) {
+  return bookings.map((b) => {
+    if (b.from && b.to) {
+      const from = new Date(b.from);
+      const displayFrom = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(from);
+
+      const to = new Date(b.to);
+      const displayTo = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(to);
+
+      return {
+        ...b,
+        displayFrom: displayFrom.split(","),
+        displayTo: displayTo.split(","),
+      };
+    }
+    return b;
+  });
+}
+
+export async function getAvailableAssetsIdsForBooking(
+  assetIds: Asset["id"][]
+): Promise<string[]> {
+  try {
+    const selectedAssets = await db.asset.findMany({
+      where: { id: { in: assetIds } },
+      select: { status: true, id: true, kit: true },
+    });
+    if (selectedAssets.some((asset) => asset.kit)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add assets that belong to a kit.",
+        label: "Booking",
+      });
+    }
+    return selectedAssets.map((asset) => asset.id);
+  } catch (cause: ShelfError | any) {
+    throw new ShelfError({
+      cause: cause,
+      message: cause?.message
+        ? cause.message
+        : "Something went wrong while getting available assets.",
+      label: "Assets",
+    });
+  }
+}
+
+/**
+ * This function checks for the available assets.
+ * and returns the ids and booking info.
+ */
+export async function processBooking(bookingId: string, assetIds: string[]) {
+  try {
+    const [finalAssetIds, bookingInfo] = await Promise.all([
+      getAvailableAssetsIdsForBooking(assetIds),
+      getExistingBookingDetails(bookingId),
+    ]);
+
+    if (!finalAssetIds.length) {
+      throw new ShelfError({
+        cause: null,
+        message: "No assets available.",
+        label: "Booking",
+      });
+    }
+
+    return {
+      finalAssetIds,
+      bookingInfo,
+    };
+  } catch (cause) {
+    let message = "Something went wrong while processing the booking.";
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
+    throw new ShelfError({
+      cause: cause,
+      message,
+      label: "Booking",
+    });
   }
 }

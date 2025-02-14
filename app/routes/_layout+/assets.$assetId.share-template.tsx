@@ -7,16 +7,16 @@ import Input from "~/components/forms/input";
 import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
-import { sendEmail } from "~/utils/mail.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
@@ -132,7 +132,7 @@ export const action = async ({
       senderId: authSession.userId,
     });
 
-    await sendEmail({
+    sendEmail({
       to: email,
       subject: `Custody of ${assetName} shared with you`,
       text: `You have been given the custody of ${assetName}. To claim the custody, you must sign the ${templateName} document. Click on this link to sign the document: https://app.shelf.nu/sign/${assetId}`,

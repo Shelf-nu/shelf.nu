@@ -4,3 +4,8 @@ body {
 body .inner-container {
   @apply flex-1;
 }
+
+main {
+  /* We need this to override the default behaviour on this view to prevent scrolling */
+  @apply !pb-0;
+}

@@ -6,7 +6,7 @@ datasource db {
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["views", "fullTextSearch"]
+  previewFeatures = ["fullTextSearchPostgres"]
 }
 
 model Image {
@@ -25,28 +25,32 @@ model Image {
   ownerOrg   Organization @relation("owner", fields: [ownerOrgId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   ownerOrgId String
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 }
 
 model User {
-  id             String  @id @default(cuid())
-  email          String  @unique
-  username       String  @unique @default(cuid())
-  firstName      String?
-  lastName       String?
-  profilePicture String?
-  usedFreeTrial  Boolean @default(false)
-  onboarded      Boolean @default(false)
-  customerId     String? @unique // Stripe customer id
-  tierId         TierId  @default(free)
-  tier           Tier    @relation(fields: [tierId], references: [id])
+  id                String  @id @default(cuid())
+  email             String  @unique
+  username          String  @unique @default(cuid())
+  firstName         String?
+  lastName          String?
+  profilePicture    String?
+  usedFreeTrial     Boolean @default(false)
+  onboarded         Boolean @default(false)
+  customerId        String? @unique // Stripe customer id
+  sso               Boolean @default(false)
+  createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Used to flag if the user is soft deleted
+  deletedAt DateTime?
+
   // Relationships
+
   assets            Asset[]
   templates         Template[]
   categories        Category[]
@@ -66,8 +70,18 @@ model User {
   bookings          Booking[]          @relation("creator")
   custodies         Booking[]          @relation("custodian")
   createdKits       Kit[]
+  tierId            TierId             @default(free)
+  tier              Tier               @relation(fields: [tierId], references: [id])
+  assetReminders    AssetReminder[]
+
+  // A user can have multiple asset index settings, 1 for each organization
+  assetIndexSettings AssetIndexSettings[]
+
+  // This relationship will be used only when tierId == custom
+  customTierLimit CustomTierLimit?
 
   @@unique([email, username])
+  @@index([firstName, lastName])
 }
 
 model Asset {
@@ -87,7 +101,7 @@ model Asset {
   // Relationships
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId         String
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
   category       Category?    @relation(fields: [categoryId], references: [id])
   categoryId     String?
@@ -96,34 +110,67 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody         Custody?
-  notes           Note[]
-  qrCodes         Qr[]
-  reports         ReportFound[]
-  tags            Tag[]
-  customFields    AssetCustomFieldValue[]
-  assetSearchView AssetSearchView?
-  bookings        Booking[]
+  custody      Custody?
+  notes        Note[]
+  qrCodes      Qr[]
+  reports      ReportFound[]
+  tags         Tag[]
+  customFields AssetCustomFieldValue[]
+  bookings     Booking[]
+  reminders    AssetReminder[]
 
-  //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
-}
-
-view AssetSearchView {
-  id           String @id @default(cuid())
-  searchVector String
-
-  // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id])
-  assetId String @unique
-
-  // Datetime
-  createdAt DateTime @default(now())
+  // Special GIN index for optimization of simple search queries
+  @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
+  // Indexes for optimization of queries
+  @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
+  @@index([status, organizationId], name: "Asset_status_organizationId_idx")
+  @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
+  @@index([valuation, organizationId], name: "Asset_valuation_organizationId_idx")
+  @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
+  @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
+  @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
 }
 
 enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   CHECKED_OUT
+}
+
+model AssetIndexSettings {
+  id String @id @default(cuid())
+
+  // Relationships
+  // This is the user who's settings we are storing
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  // This is the organizationId for which the user is setting the index settings
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+
+  // Settings fields
+  mode AssetIndexMode @default(SIMPLE)
+
+  // Holds the columns that are visible in the index view in json format
+  // Format is {name: string, visible: boolean, position: number}[] where name is the name of the column, visible is whether the column is visible or not and position is the position of the column
+  // The shape of the JSON includes both some fixed entries that will always be present and some dynamic entries for the custom fields
+  // The fixed entries are: id, status, description, valuation, createdAt, category, tags, location, kit, custody
+  columns Json @default("[ {\"name\": \"id\", \"visible\": true, \"position\": 0}, {\"name\": \"status\", \"visible\": true, \"position\": 1}, {\"name\": \"description\", \"visible\": true, \"position\": 2}, {\"name\": \"valuation\", \"visible\": true, \"position\": 3}, {\"name\": \"createdAt\", \"visible\": true, \"position\": 4}, {\"name\": \"category\", \"visible\": true, \"position\": 5}, {\"name\": \"tags\", \"visible\": true, \"position\": 6}, {\"name\": \"location\", \"visible\": true, \"position\": 7}, {\"name\": \"kit\", \"visible\": true, \"position\": 8}, {\"name\": \"custody\", \"visible\": true, \"position\": 9} ]")
+
+  freezeColumn   Boolean @default(true)
+  showAssetImage Boolean @default(true)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+}
+
+enum AssetIndexMode {
+  SIMPLE
+  ADVANCED
 }
 
 model Category {
@@ -138,12 +185,12 @@ model Category {
 
   // Relationships
   assets Asset[]
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
   customFields CustomField[]
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
@@ -157,9 +204,9 @@ model Tag {
   //relations
   assets Asset[]
   userId String
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   // Datetime
@@ -179,9 +226,9 @@ model Note {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId  String
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId  String?
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 }
 
@@ -203,7 +250,10 @@ model Qr {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
   assetId String?
 
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId String?
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   userId String?
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
@@ -217,6 +267,8 @@ model Qr {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   scans     Scan[]
+
+  @@index([assetId], name: "Qr_assetId_idx")
 }
 
 model PrintBatch {
@@ -246,8 +298,11 @@ model ReportFound {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String?
 }
 
 enum ErrorCorrection {
@@ -300,7 +355,7 @@ model Location {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   assets Asset[]
@@ -328,18 +383,22 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId  String
   custodies       Custody[]
   receivedInvites Invite[]
-  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   userId          String?
   kitCustodies    KitCustody[]
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  bookings  Booking[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+  bookings       Booking[]
+  assetReminders AssetReminder[]
+
+  // Special GIN index for optimization of simple search queries
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 model Custody {
@@ -362,6 +421,8 @@ model Custody {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
 }
 
 model Organization {
@@ -369,7 +430,7 @@ model Organization {
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
-  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId   String
   currency Currency @default(USD)
 
@@ -379,6 +440,12 @@ model Organization {
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
 
+  // Not required. It will only be created for orgs that need sso
+  // We can know if an org has SSO by checking the ssoDetailsId
+  enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
+  ssoDetailsId String?
+  ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
+
   locations         Location[]
   categories        Category[]
   tags              Tag[]
@@ -386,21 +453,23 @@ model Organization {
   invites           Invite[]
   userOrganizations UserOrganization[]
 
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  customFields CustomField[]
-  images       Image[]       @relation("owner")
-  templates    Template[]
-  bookings     Booking[]
-  kits         Kit[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customFields       CustomField[]
+  images             Image[]              @relation("owner")
+  templates          Template[]
+  bookings           Booking[]
+  kits               Kit[]
+  assetIndexSettings AssetIndexSettings[]
+  assetReminders     AssetReminder[]
 }
 
 model UserOrganization {
   id String @id @unique @default(cuid())
 
-  user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId         String
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   roles     OrganizationRoles[]
@@ -417,9 +486,26 @@ enum OrganizationType {
 
 enum OrganizationRoles {
   ADMIN
-  TEAM_MEMBER
+  BASE
   OWNER
   SELF_SERVICE
+}
+
+model SsoDetails {
+  id String @id @default(cuid())
+
+  // The domains of the organization. Comma separated for multiple domains
+  domain String
+
+  organizations Organization[]
+
+  baseUserGroupId    String? // The group id for BASE users
+  selfServiceGroupId String? // The group id for SELF_SERVICE users
+  adminGroupId       String? // The group id for ADMIN users
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
@@ -429,6 +515,7 @@ enum TierId {
   free
   tier_1
   tier_2
+  custom
 }
 
 // Tiers correspond to Stripe products
@@ -442,14 +529,32 @@ model Tier {
   updatedAt   DateTime   @updatedAt
 }
 
+// TierLimit is used for the basic tiers
 model TierLimit {
   id               TierId   @id
   tier             Tier?
   canImportAssets  Boolean  @default(false)
   canExportAssets  Boolean  @default(false)
+  canImportNRM     Boolean  @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
   maxTemplates     Int      @default(3)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// CustomTierLimit is used for users which has Tier with ID: custom
+model CustomTierLimit {
+  id               String   @id @unique @default(cuid())
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId           String?  @unique // This is the foreign key
+  canImportAssets  Boolean  @default(true)
+  canExportAssets  Boolean  @default(true)
+  canImportNRM     Boolean  @default(true)
+  maxCustomFields  Int      @default(1000)
+  maxOrganizations Int      @default(1)
+  maxTemplates     Int      @default(3)
+  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -508,10 +613,10 @@ model CustomField {
   options String[]
 
   // Relationships
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId    String
 
   categories Category[]
@@ -542,36 +647,47 @@ model AssetCustomFieldValue {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 
-  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade)
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   customFieldId String
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
 }
 
 enum Currency {
   USD // United States Dollar
   EUR // Euro
   GBP // British Pound Sterling
-  JPY // Japanese Yen
+
+  AED // United Arab Emirates Dirham
   AUD // Australian Dollar
+  BRL // Brazilian Real
   CAD // Canadian Dollar
   CHF // Swiss Franc
   CNY // Chinese Yuan
-  INR // Indian Rupee
-  ZAR // South African Rand
-  BRL // Brazilian Real
-  MXN // Mexican Peso
-  SGD // Singapore Dollar
-  NZD // New Zealand Dollar
-  SEK // Swedish Krona
-  NOK // Norwegian Krone
-  KRW // South Korean Won
-  RUB // Russian Ruble
+  CZK // Czech Koruna
+  DKK // Danish Krone
   HKD // Hong Kong Dollar
+  IDR // Indonesian Rupiah
+  INR // Indian Rupee
+  JPY // Japanese Yen
+  KRW // South Korean Won
+  LKR // Sri Lankan Rupee
+  MXN // Mexican Peso
+  MYR // Malaysian Ringgit
+  NOK // Norwegian Krone
+  NZD // New Zealand Dollar
+  PHP // Philippine Peso
+  PLN // Polish Zloty
+  RUB // Russian Ruble
   SAR // Saudi Riyal
-  AED // United Arab Emirates Dirham
+  SEK // Swedish Krona
+  SGD // Singapore Dollar
+  ZAR // South African Rand
+  PKR // Pakistani Rupee  
 }
 
 enum InviteStatuses {
@@ -587,7 +703,7 @@ model Invite {
   //relations
   inviter           User         @relation("inviter", fields: [inviterId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   inviterId         String
-  organization      Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId    String
   inviteeUser       User?        @relation("invitee", fields: [inviteeUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   inviteeUserId     String?
@@ -633,8 +749,9 @@ enum BookingStatus {
 model Booking {
   id String @id @default(cuid())
 
-  name   String
-  status BookingStatus @default(DRAFT)
+  name        String
+  status      BookingStatus @default(DRAFT)
+  description String?       @default("")
 
   activeSchedulerReference String?
 
@@ -648,7 +765,7 @@ model Booking {
   custodianTeamMember   TeamMember? @relation(fields: [custodianTeamMemberId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   custodianTeamMemberId String?
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
   assets Asset[]
@@ -672,11 +789,13 @@ model Kit {
 
   assets  Asset[]
   custody KitCustody?
+  qrCodes Qr[]
+  reports ReportFound[]
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
 
   createdAt DateTime @default(now())
@@ -700,4 +819,28 @@ model KitCustody {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AssetReminder {
+  id                       String       @id @default(cuid())
+  name                     String
+  message                  String
+  alertDateTime            DateTime
+  activeSchedulerReference String?
+  organization             Organization @relation(fields: [organizationId], references: [id])
+  organizationId           String
+  asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId                  String
+  teamMembers              TeamMember[]
+  createdBy                User         @relation(fields: [createdById], references: [id])
+  createdById              String
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+
+  // Optimized indexes
+  @@index([assetId, alertDateTime])
+  @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([organizationId, alertDateTime, assetId])
+  // For scheduler related queries
+  @@index([alertDateTime, activeSchedulerReference])
 }

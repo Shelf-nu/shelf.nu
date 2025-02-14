@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { exportAssetsToCsv } from "~/utils/csv.server";
+import { exportAssetsBackupToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -20,7 +20,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     await requireAdmin(authSession.userId);
 
     /** Join the rows with a new line */
-    const csvString = await exportAssetsToCsv({ organizationId });
+    const csvString = await exportAssetsBackupToCsv({ organizationId });
 
     return new Response(csvString, {
       status: 200,

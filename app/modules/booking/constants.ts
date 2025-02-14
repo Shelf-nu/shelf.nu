@@ -1,6 +1,3 @@
-export const schedulerKeys = {
-  bookingQueue: "booking-queue",
-};
 export enum bookingSchedulerEventsEnum {
   checkoutReminder = `booking-checkout-reminder`,
   checkinReminder = `booking-checkin-reminder`,

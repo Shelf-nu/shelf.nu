@@ -79,7 +79,10 @@ test("should allow you to add team member", async ({ page, account }) => {
   await page.click('[data-test-id="closeToast"]');
 });
 
-test("should allow you to check out an asset", async ({ page, account }) => {
+test("should allow you to assign custody of an asset", async ({
+  page,
+  account,
+}) => {
   const asset = page.getByText(testAsset.title);
   await expect(asset).toBeVisible();
   await asset.click();
@@ -89,8 +92,8 @@ test("should allow you to check out an asset", async ({ page, account }) => {
   ).toBeVisible();
 
   await page.locator('[data-test-id="assetActionsButton"]').click();
-  await page.getByRole("link", { name: "Check out asset" }).click();
-  await expect(page).toHaveURL(/.*assets\/[^]*\/check-out/);
+  await page.getByRole("link", { name: "Assign custody" }).click();
+  await expect(page).toHaveURL(/.*assets\/[^]*\/assign-custody/);
   await page.getByRole("combobox").click();
   await page
     .getByRole("option", { name: teamMemberName })
@@ -122,7 +125,10 @@ test("should allow you to check out an asset", async ({ page, account }) => {
   await page.click('[data-test-id="closeToast"]');
 });
 
-test("should allow you to check in an asset", async ({ page, account }) => {
+test("should allow you to release custody of an asset", async ({
+  page,
+  account,
+}) => {
   const asset = page.getByText(testAsset.title);
   await expect(asset).toBeVisible();
   await asset.click();
@@ -132,8 +138,8 @@ test("should allow you to check in an asset", async ({ page, account }) => {
   ).toBeVisible();
 
   await page.locator('[data-test-id="assetActionsButton"]').click();
-  await page.getByRole("link", { name: "Check in" }).click();
-  await expect(page).toHaveURL(/.*assets\/[^]*\/check-in/);
+  await page.getByRole("link", { name: "Assign custody" }).click();
+  await expect(page).toHaveURL(/.*assets\/[^]*\/assign-custody/);
   await page.getByRole("button", { name: "Confirm" }).click();
 
   /** Make sure the status of the asset is changed */

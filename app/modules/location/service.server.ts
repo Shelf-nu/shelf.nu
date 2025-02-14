@@ -1,7 +1,21 @@
-import type { Prisma, User, Location, Organization } from "@prisma/client";
+import type {
+  Prisma,
+  User,
+  Location,
+  Organization,
+  UserOrganization,
+} from "@prisma/client";
+import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  isNotFoundError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Location";
@@ -14,11 +28,25 @@ export async function getLocation(
     /** Assets to be loaded per page with the location */
     perPage?: number;
     search?: string | null;
+    userOrganizations?: Pick<UserOrganization, "organizationId">[];
+    request?: Request;
   }
 ) {
-  const { organizationId, id, page = 1, perPage = 8, search } = params;
+  const {
+    organizationId,
+    id,
+    page = 1,
+    perPage = 8,
+    search,
+    userOrganizations,
+    request,
+  } = params;
 
   try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
@@ -35,7 +63,14 @@ export async function getLocation(
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
-        where: { id, organizationId },
+        where: {
+          OR: [
+            { id, organizationId },
+            ...(userOrganizations?.length
+              ? [{ id, organizationId: { in: otherOrganizationIds } }]
+              : []),
+          ],
+        },
         include: {
           image: {
             select: {
@@ -62,13 +97,48 @@ export async function getLocation(
       }),
     ]);
 
+    /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
+    if (
+      userOrganizations?.length &&
+      location.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(location.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Location not found.",
+        message: "",
+        additionalData: {
+          model: "location",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === location.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
     return { location, totalAssetsWithinLocation };
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching location",
-      additionalData: { ...params },
+      title: "Location not found",
+      message:
+        "The location you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -188,10 +258,13 @@ export async function createLocation({
   }
 }
 
-export async function deleteLocation({ id }: Pick<Location, "id">) {
+export async function deleteLocation({
+  id,
+  organizationId,
+}: Pick<Location, "id" | "organizationId">) {
   try {
     const location = await db.location.delete({
-      where: { id },
+      where: { id, organizationId },
     });
 
     if (location.imageId) {
@@ -260,8 +333,8 @@ export async function updateLocation(payload: {
     }
 
     return await db.location.update({
-      where: { id },
-      data: data,
+      where: { id, organizationId },
+      data,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
@@ -290,6 +363,11 @@ export async function createLocationsIfNotExists({
         .filter((asset) => asset.location !== "")
         .map((asset) => [asset.location, ""])
     );
+
+    // Handle the case where there are no teamMembers
+    if (locations.has(undefined)) {
+      return {};
+    }
 
     // now we loop through the locations and check if they exist
     for (const [location, _] of locations) {
@@ -329,8 +407,57 @@ export async function createLocationsIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating locations. Please try again or contact support.",
+        "Something went wrong while creating locations. Seems like some of the location data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
+      label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+export async function bulkDeleteLocations({
+  locationIds,
+  organizationId,
+}: {
+  locationIds: Location["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    /** We have to delete the images of locations if any */
+    const locations = await db.location.findMany({
+      where: locationIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: locationIds }, organizationId },
+      select: { id: true, imageId: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all locations */
+      await tx.location.deleteMany({
+        where: { id: { in: locations.map((location) => location.id) } },
+      });
+
+      /** Deleting images of locations */
+      const locationWithImages = locations.filter(
+        (location) => !!location.imageId
+      );
+      await tx.image.deleteMany({
+        where: {
+          id: {
+            in: locationWithImages.map((location) => {
+              invariant(location.imageId, "Image not found to delete");
+              return location.imageId;
+            }),
+          },
+        },
+      });
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting locations.",
+      additionalData: { locationIds, organizationId },
       label,
     });
   }
