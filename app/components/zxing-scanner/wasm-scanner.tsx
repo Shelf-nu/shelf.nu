@@ -290,7 +290,7 @@ export const WasmScanner = ({
       };
       void initCamera();
     }
-  }, [selectedDevice, setupCamera, processFrame, paused]);
+  }, [paused, processFrame, selectedDevice, setupCamera]);
 
   // Initialize default device selection
   useEffect(() => {
@@ -302,6 +302,7 @@ export const WasmScanner = ({
   }, [devices, selectedDevice]);
 
   const handleDeviceChange = (deviceId: string) => {
+    // cleanup(); // Explicit cleanup before switch
     isInitializing.current = true;
     setSelectedDevice(deviceId);
   };
