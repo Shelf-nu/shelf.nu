@@ -457,11 +457,16 @@ function InfoOverlay({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Visible while camera is loading
+ * Displays a spinner and a message
+ * If the process takes more than 10 seconds we can safely assume something went wrong and we give the user the option to reload the page
+ */
 function Initializing() {
   const [expired, setExpired] = useState(false);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setExpired(true), 7000);
+    const timeout = setTimeout(() => setExpired(true), 10000);
     return () => clearTimeout(timeout);
   }, []);
 
