@@ -175,11 +175,6 @@ export const WasmScanner = ({
       // Wait for video to be ready
       await new Promise((resolve) => {
         const handleLoadedMetadata = () => {
-          console.log(
-            "Video dimensions:",
-            videoRef.current!.videoWidth,
-            videoRef.current!.videoHeight
-          );
           updateCanvasSize();
           videoRef.current!.removeEventListener(
             "loadedmetadata",
