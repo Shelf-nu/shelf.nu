@@ -12,6 +12,7 @@ import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
+import { Separator } from "~/components/shared/separator";
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -202,43 +203,44 @@ export default function TemplatePage() {
   // }
 
   return (
-    <div>
-      <div className="w-full">
-        <div className="mb-2.5 flex flex-col bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
-          <h2 className=" text-lg text-gray-900">Templates</h2>
+    <div className="w-full rounded-md border bg-white p-4 md:p-10">
+      <h2 className=" text-lg text-gray-900">Templates</h2>
+      <p className="text-sm text-gray-600">Manage all your templates here.</p>
+
+      <Separator className="my-8" />
+
+      <div className="flex flex-col justify-between gap-4 gap-x-5 md:flex-row">
+        <div className="w-full max-w-72">
+          <h3 className="mb-1 text-sm text-gray-600">PDF Templates</h3>
           <p className="text-sm text-gray-600">
-            Manage all your templates here.
+            Use these templates to generate a PDF document for assigning custody
+            and your bookings. You can even set them up to require an electronic
+            signature. Default means that this template will be first selected.
           </p>
         </div>
-        <div className="mb-2.5 flex items-start justify-between gap-x-5 bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
-          <div className="w-full max-w-[280px]">
-            <h3 className="text-sm text-gray-600">PDF Templates</h3>
-            <p className="text-sm text-gray-600">
-              Use these templates to generate a PDF document for assigning
-              custody and your bookings. You can even set them up to require an
-              electronic signature. Default means that this template will be
-              first selected.
-            </p>
-          </div>
-          <div className="mb-2.5 flex w-full flex-col items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
-            {!hasItems ? (
-              <EmptyState
-                customContent={{
-                  title: "No templates on database",
-                  text: "What are you waiting for? Add your first template now!",
-                  newButtonRoute: `new`,
-                  newButtonContent: "Add Template",
-                }}
-                modelName={{
-                  singular: "template",
-                  plural: "templates",
-                }}
-              />
-            ) : (
-              <>
-                <div className="flex w-full items-center justify-between">
+
+        <div className="flex w-full flex-col items-center rounded border">
+          {!hasItems ? (
+            <EmptyState
+              customContent={{
+                title: "No templates on database",
+                text: "What are you waiting for? Add your first template now!",
+                newButtonRoute: `new`,
+                newButtonContent: "Add Template",
+              }}
+              modelName={{
+                singular: "template",
+                plural: "templates",
+              }}
+            />
+          ) : (
+            <>
+              <div className="flex w-full items-center justify-between p-4">
+                <div>
                   <h3 className="text-md text-gray-900">PDF Templates</h3>
-                  {/* <ControlledActionButton
+                  <p className="text-sm text-gray-600">{totalItems} items</p>
+                </div>
+                {/* <ControlledActionButton
                     canUseFeature={canCreateMoreTemplates}
                     buttonContent={{
                       title: "Add template",
@@ -255,30 +257,30 @@ export default function TemplatePage() {
                       variant: "primary",
                     }}
                   /> */}
-                </div>
-                <div className="mt-5 w-full flex-1 overflow-x-auto rounded-[12px] border bg-white">
-                  <Table>
-                    <ListHeader
-                      children={
-                        <>
-                          <Th>Default</Th>
-                          <Th>Status</Th>
-                          <Th>Actions</Th>
-                        </>
-                      }
-                    />
-                    <tbody>
-                      {items.map((template) => (
-                        <ListItem item={template} key={template.id}>
-                          <TemplateRow item={template} />
-                        </ListItem>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              </>
-            )}
-          </div>
+              </div>
+
+              <div className="w-full flex-1 border-t">
+                <Table>
+                  <ListHeader
+                    children={
+                      <>
+                        <Th>Default</Th>
+                        <Th>Status</Th>
+                        <Th>Actions</Th>
+                      </>
+                    }
+                  />
+                  <tbody>
+                    {items.map((template) => (
+                      <ListItem item={template} key={template.id}>
+                        <TemplateRow item={template} />
+                      </ListItem>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
