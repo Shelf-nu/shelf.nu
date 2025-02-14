@@ -25,8 +25,6 @@ import {
   PrintIcon,
   SettingsIcon,
   SendIcon,
-  StarIcon,
-  PdfIcon,
   LogoutIcon,
   HelpIcon,
   Profile,
@@ -95,9 +93,7 @@ export type IconType =
   | "print"
   | "settings"
   | "send"
-  | "star"
   | "deactivate"
-  | "pdf"
   | "logout"
   | "help"
   | "profile"
@@ -172,8 +168,6 @@ export const iconsMap: IconsMap = {
   profile: <Profile />,
   logout: <LogoutIcon />,
   send: <SendIcon />,
-  star: <StarIcon />,
-  pdf: <PdfIcon />,
   copy: <CopyIcon />,
   sign: <SignIcon />,
   user: <UserIcon />,

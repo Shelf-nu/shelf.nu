@@ -4,6 +4,7 @@ import type { Template, TemplateFile } from "@prisma/client";
 import { TemplateType } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { FileTypeIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -23,7 +24,6 @@ import { Switch } from "../forms/switch";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
-import iconsMap from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 
 const MAX_FILE_SIZE = 5_000_000;
@@ -236,7 +236,7 @@ export const TemplateForm = ({
         {pdfUrl && (
           <Card className="flex w-full items-center gap-x-5">
             <div className={"flex grow gap-x-3"}>
-              {iconsMap["pdf"]}
+              <FileTypeIcon />
               <div className="flex flex-col">
                 <a
                   href={pdfUrl}
@@ -260,7 +260,7 @@ export const TemplateForm = ({
         )}
         {pdf && (
           <Card className="flex w-full items-start justify-between gap-x-3">
-            {iconsMap["pdf"]}
+            <FileTypeIcon />
             <div className={"flex w-full grow flex-col"}>
               <span className="text-sm font-semibold text-gray-600">
                 {pdf.name}

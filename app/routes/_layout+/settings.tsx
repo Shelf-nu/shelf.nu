@@ -48,6 +48,7 @@ export default function SettingsPage() {
 
   const matches = useMatches();
   const currentRoute = matches.at(-1);
+
   return (
     <>
       <Header hidePageDescription />

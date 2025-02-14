@@ -517,7 +517,6 @@ export default function Custody() {
               to {isSelfService ? "yourself" : "one of your team members"}.
             </p>
           </div>
-
           <div className="relative z-50 mb-8">
             <DynamicSelect
               hidden={isSelfService}

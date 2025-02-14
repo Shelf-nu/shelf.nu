@@ -385,7 +385,6 @@ export function canCreateMoreTemplates({
   return totalTemplates < tierLimit?.maxTemplates;
 }
 
-/** End template features */
 export async function assertUserCanCreateMoreTemplates(userId: string) {
   /** Get the tier limit and check if they can export */
   const tierLimit = await getUserTierLimit(userId);
@@ -408,3 +407,5 @@ export async function assertUserCanCreateMoreTemplates(userId: string) {
     });
   }
 }
+
+/** End template features */

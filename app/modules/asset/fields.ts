@@ -101,11 +101,7 @@ export const assetIndexFields = ({
     custody: {
       select: {
         templateSigned: true,
-        template: {
-          select: {
-            signatureRequired: true,
-          },
-        },
+        template: { select: { signatureRequired: true } },
         custodian: {
           select: {
             name: true,
