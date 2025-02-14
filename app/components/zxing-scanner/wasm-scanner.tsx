@@ -193,7 +193,7 @@ export const WasmScanner = ({
         );
       });
 
-      await videoRef.current!.play();
+      await videoRef.current.play();
     } catch (error) {
       setError(
         `Camera error: ${error instanceof Error ? error.message : error}`
