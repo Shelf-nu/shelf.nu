@@ -174,18 +174,26 @@ export const WasmScanner = ({
 
       // Wait for video to be ready
       await new Promise((resolve) => {
-        videoRef.current!.onloadedmetadata = resolve;
+        const handleLoadedMetadata = () => {
+          console.log(
+            "Video dimensions:",
+            videoRef.current!.videoWidth,
+            videoRef.current!.videoHeight
+          );
+          updateCanvasSize();
+          videoRef.current!.removeEventListener(
+            "loadedmetadata",
+            handleLoadedMetadata
+          );
+          resolve(undefined);
+        };
+        videoRef.current!.addEventListener(
+          "loadedmetadata",
+          handleLoadedMetadata
+        );
       });
 
-      await videoRef.current.play();
-      updateCanvasSize();
-
-      // First initialization only
-      if (isInitializing.current) {
-        const track = stream.getVideoTracks()[0];
-        setSelectedDevice(track.getSettings().deviceId);
-        isInitializing.current = false;
-      }
+      await videoRef.current!.play();
     } catch (error) {
       setError(
         `Camera error: ${error instanceof Error ? error.message : error}`
@@ -207,6 +215,15 @@ export const WasmScanner = ({
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+
+    // Ensure canvas matches video source dimensions
+    if (
+      canvas.width !== video.videoWidth ||
+      canvas.height !== video.videoHeight
+    ) {
+      updateCanvasSize();
+    }
+
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
@@ -220,8 +237,7 @@ export const WasmScanner = ({
         animationFrame.current = requestAnimationFrame(processFrame);
         return;
       }
-      console.log("Video dimensions:", video.videoWidth, video.videoHeight);
-      console.log("Canvas dimensions:", canvas.width, canvas.height);
+
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
 
@@ -251,20 +267,20 @@ export const WasmScanner = ({
     if (!paused) {
       animationFrame.current = requestAnimationFrame(processFrame);
     }
-  }, [paused, handleDetection]);
+  }, [paused, updateCanvasSize, handleDetection]);
 
   // Simplified initialization flow
   useEffect(() => {
     const abortController = new AbortController();
 
-    const init = async () => {
+    const initCamera = async () => {
+      isInitializing.current = true;
       await setupCamera();
-      if (!abortController.signal.aborted && !paused) {
+      if (!paused) {
         animationFrame.current = requestAnimationFrame(processFrame);
       }
     };
-
-    void init();
+    void initCamera();
     const resizeObserver = new ResizeObserver(updateCanvasSize);
 
     if (containerRef.current) {
@@ -275,6 +291,7 @@ export const WasmScanner = ({
       abortController.abort();
       cleanup();
       resizeObserver.disconnect();
+      isInitializing.current = false;
     };
   }, [setupCamera, processFrame, paused, cleanup, updateCanvasSize]);
 
@@ -346,29 +363,24 @@ export const WasmScanner = ({
       <div className="relative size-full overflow-hidden">
         {/* Error State Overlay */}
         {error && error !== "" && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
-            <div className="text-center text-white">
-              <p className="mb-4">{error}</p>
-              <p className="mb-4">
-                If the issue persists, please contact support.
-              </p>
-              <Button
-                onClick={() => window.location.reload()}
-                variant="secondary"
-              >
-                Refresh Page
-              </Button>
-            </div>
-          </div>
+          <InfoOverlay>
+            <p className="mb-4">{error}</p>
+            <p className="mb-4">
+              If the issue persists, please contact support.
+            </p>
+            <Button
+              onClick={() => window.location.reload()}
+              variant="secondary"
+            >
+              Reload Page
+            </Button>
+          </InfoOverlay>
         )}
 
         {isLoading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80">
-            <div className="text-center text-white ">
-              <Spinner className="mx-auto mb-2" />
-              Initializing camera...
-            </div>
-          </div>
+          <InfoOverlay>
+            <Initializing />
+          </InfoOverlay>
         )}
 
         <video
@@ -376,7 +388,7 @@ export const WasmScanner = ({
           autoPlay
           playsInline
           muted
-          className="pointer-events-none size-full object-cover" // No classes as we handle scaling dynamically when camera is ready
+          className="pointer-events-none size-full object-cover"
           onError={(e) => {
             setError(`Video error: ${e.currentTarget.error?.message}`);
             setIsLoading(false);
@@ -436,3 +448,40 @@ export const WasmScanner = ({
     </div>
   );
 };
+
+function InfoOverlay({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
+      <div className="text-center text-white ">{children}</div>
+    </div>
+  );
+}
+
+function Initializing() {
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setExpired(true), 7000);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  return (
+    <>
+      <Spinner className="mx-auto mb-2" />
+      {expired
+        ? "Camera initialization is taking longer than expected. Please reload the page"
+        : "Initializing camera..."}
+      {expired && (
+        <div>
+          <Button
+            variant={"secondary"}
+            onClick={() => window.location.reload()}
+            className={"mt-4"}
+          >
+            Reload page
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
