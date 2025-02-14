@@ -28,6 +28,8 @@ import {
   LogoutIcon,
   HelpIcon,
   Profile,
+  CopyIcon,
+  SignIcon,
   UserIcon,
   GpsMarkerIcon,
   DuplicateIcon,
@@ -90,10 +92,14 @@ export type IconType =
   | "download"
   | "print"
   | "settings"
+  | "send"
+  | "deactivate"
   | "logout"
   | "help"
   | "profile"
   | "send"
+  | "copy"
+  | "sign"
   | "user"
   | "calendar"
   | "graph"
@@ -121,7 +127,8 @@ export type IconType =
   | "unavailable"
   | "change"
   | "booking-exist"
-  | "download-qr";
+  | "download-qr"
+  | "deactivate";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -161,6 +168,8 @@ export const iconsMap: IconsMap = {
   profile: <Profile />,
   logout: <LogoutIcon />,
   send: <SendIcon />,
+  copy: <CopyIcon />,
+  sign: <SignIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
   bookings: <BookingsIcon />,

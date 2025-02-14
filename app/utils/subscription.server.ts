@@ -366,3 +366,46 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Template Features */
+
+/**
+ * This validates if a user can create more templates
+ */
+export function canCreateMoreTemplates({
+  tierLimit,
+  totalTemplates,
+}: {
+  tierLimit: { maxTemplates: number } | null | undefined;
+  totalTemplates: number;
+}) {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit?.maxTemplates) return false;
+
+  return totalTemplates < tierLimit?.maxTemplates;
+}
+
+export async function assertUserCanCreateMoreTemplates(userId: string) {
+  /** Get the tier limit and check if they can export */
+  const tierLimit = await getUserTierLimit(userId);
+
+  const canCreateMore = canCreateMoreTemplates({
+    tierLimit,
+    totalTemplates: await db.template.count({
+      where: { userId },
+    }),
+  });
+
+  if (!canCreateMore) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: "Your user cannot create more templates",
+      additionalData: { userId },
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/** End template features */
