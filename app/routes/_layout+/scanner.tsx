@@ -49,7 +49,7 @@ export const meta: MetaFunction<typeof loader> = () => [
 
 const QRScanner = () => {
   const navigate = useNavigate();
-  const [qrId, setQrId] = useState<string | null>(null);
+  const [paused, setPaused] = useState<boolean>(false);
   const [scanMessage, setScanMessage] = useState<string>(
     "Processing QR code..."
   );
@@ -59,10 +59,11 @@ const QRScanner = () => {
   const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   function handleQrDetectionSuccess(qrId: string) {
-    setQrId(qrId);
-    setScanMessage("Redirecting to mapped asset...");
-
-    navigate(`/qr/${qrId}`);
+    if (!paused) {
+      setPaused(true);
+      setScanMessage("Redirecting to mapped asset...");
+      navigate(`/qr/${qrId}`);
+    }
   }
 
   return (
@@ -76,7 +77,7 @@ const QRScanner = () => {
           <WasmScanner
             onQrDetectionSuccess={handleQrDetectionSuccess}
             devices={devices}
-            paused={!!qrId}
+            paused={paused}
             scanMessage={scanMessage}
           />
         ) : (
