@@ -1,3 +1,5 @@
+import type { ReadResult } from "zxing-wasm";
+
 /**
  * Common patterns for back camera labels across different devices and operating systems
  */
@@ -98,3 +100,37 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
   // If no preferred matches, return the first back camera
   return backCameras[0];
 }
+
+/**
+ * Draws a detection box around a barcode on a canvas
+ * @param ctx  The canvas rendering context
+ * @param position  The position of the detected barcode
+ * @returns void
+ */
+export const drawDetectionBox = (
+  ctx: CanvasRenderingContext2D,
+  position: ReadResult["position"]
+) => {
+  if (!position) return;
+
+  ctx.beginPath();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#22c55e";
+  ctx.moveTo(position.topLeft.x, position.topLeft.y);
+  ctx.lineTo(position.topRight.x, position.topRight.y);
+  ctx.lineTo(position.bottomRight.x, position.bottomRight.y);
+  ctx.lineTo(position.bottomLeft.x, position.bottomLeft.y);
+  ctx.closePath();
+  ctx.stroke();
+  const corners = [
+    position.topLeft,
+    position.topRight,
+    position.bottomRight,
+    position.bottomLeft,
+  ];
+
+  corners.forEach((corner) => {
+    ctx.fillStyle = "red";
+    ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
+  });
+};

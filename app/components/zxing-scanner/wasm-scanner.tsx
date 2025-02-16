@@ -3,11 +3,10 @@ import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import { readBarcodes } from "zxing-wasm";
-import type { ReadResult } from "zxing-wasm/reader";
 import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { getBestBackCamera } from "./utils";
+import { drawDetectionBox, getBestBackCamera } from "./utils";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
@@ -251,7 +250,7 @@ export const WasmScanner = ({
       if (results.length > 0 && !isProcessingRef.current) {
         const result = results[0];
         drawDetectionBox(ctx, result.position);
-        void handleDetection(result.text);
+        await handleDetection(result.text);
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -317,34 +316,6 @@ export const WasmScanner = ({
     // cleanup(); // Explicit cleanup before switch
     isInitializing.current = true;
     setSelectedDevice(deviceId);
-  };
-
-  const drawDetectionBox = (
-    ctx: CanvasRenderingContext2D,
-    position: ReadResult["position"]
-  ) => {
-    if (!position) return;
-
-    ctx.beginPath();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#22c55e";
-    ctx.moveTo(position.topLeft.x, position.topLeft.y);
-    ctx.lineTo(position.topRight.x, position.topRight.y);
-    ctx.lineTo(position.bottomRight.x, position.bottomRight.y);
-    ctx.lineTo(position.bottomLeft.x, position.bottomLeft.y);
-    ctx.closePath();
-    ctx.stroke();
-    const corners = [
-      position.topLeft,
-      position.topRight,
-      position.bottomRight,
-      position.bottomLeft,
-    ];
-
-    corners.forEach((corner) => {
-      ctx.fillStyle = "red";
-      ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
-    });
   };
 
   return (
