@@ -25,6 +25,7 @@ import { KitIcon, SignIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
@@ -344,7 +345,7 @@ export const AssetsList = ({
       {!isMd && !modeIsSimple ? (
         <AdvancedModeMobileFallback />
       ) : (
-        <>
+        <ListContentWrapper>
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
@@ -360,7 +361,7 @@ export const AssetsList = ({
             }
             headerChildren={headerChildren}
           />
-        </>
+        </ListContentWrapper>
       )}
     </div>
   );
