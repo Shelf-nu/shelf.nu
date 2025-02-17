@@ -9,6 +9,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
+import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
@@ -223,14 +224,8 @@ function PasswordResetForm() {
     <div>Something went wrong. Please refresh the page and try again.</div>
   ) : (
     <Form method="post" ref={zoReset.ref} className="space-y-2">
-      <Input
-        name={zoReset.fields.otp()}
-        disabled={disabled}
-        label="Code"
-        required
-        placeholder="133734"
-        error={zoReset.errors.otp()?.message}
-      />
+      <ShelfOTP error={zoReset.errors.otp()?.message} />
+
       <PasswordInput
         label="New password"
         data-test-id="password"
