@@ -77,7 +77,6 @@ const IntentSchema = z.object({
 const ActionSchemas = {
   resetPassword: z.object({
     type: z.literal("resetPassword"),
-    email: z.string(),
   }),
 
   updateUser: UpdateFormSchema.extend({
@@ -131,16 +130,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "resetPassword": {
         if (payload.type !== "resetPassword")
           throw new Error("Invalid payload type");
-        const { email } = payload;
-
-        await sendResetPasswordLink(email);
 
         /** Logout user after 3 seconds */
         await delay(2000);
 
         context.destroySession();
 
-        return redirect("/login");
+        return redirect("/forgot-password");
       }
       case "updateUser": {
         if (payload.type !== "updateUser")
@@ -490,7 +486,15 @@ export default function UserPage() {
         <h3 className="text-text-lg font-semibold">Password</h3>
         <p className="text-sm text-gray-600">Update your password here</p>
       </div>
-      <PasswordResetForm userEmail={user?.email || ""} />
+      <div>
+        <p>
+          To reset your password you need to use the "forgot password"
+          functionality. Use the link to get logged out and redirected to the
+          forgot password form.
+        </p>
+        <p>You will be logged out 3 seconds after clicking the link.</p>
+      </div>
+      <PasswordResetForm />
 
       <div className="my-6">
         <h3 className="text-text-lg font-semibold">Delete account</h3>
