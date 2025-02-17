@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { Form, useNavigation } from "@remix-run/react";
 import SignatureCanvas from "react-signature-canvas";
 import { isFormProcessing } from "~/utils/form";
-import Input from "../forms/input";
 import { PenIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import { Checkbox } from "../shared/checkbox";

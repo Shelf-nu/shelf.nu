@@ -1,30 +1,24 @@
-import { useCallback } from "react";
-import type { Custody, Template } from "@prisma/client";
 import { AssetStatus, Roles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { Button } from "~/components/shared/button";
+import type { HeaderData } from "~/components/layout/header/types";
 import Agreement from "~/components/sign/agreement";
-import AgreementPopup, {
-  AGREEMENT_POPUP_VISIBLE,
-} from "~/components/sign/agreement-popup";
+import AgreementPopup from "~/components/sign/agreement-popup";
 
 import { db } from "~/database/db.server";
-import { useSearchParams } from "~/hooks/search-params";
 import { getAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import {
-  data,
-  error,
-  getActionMethod,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -107,8 +101,13 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       select: { roles: true },
     });
 
+    const header: HeaderData = {
+      title: `Sign "${template.name}"`,
+    };
+
     return json(
       data({
+        header,
         user,
         currentOrganizationId: organizationId,
         enablePremium: ENABLE_PREMIUM_FEATURES,
@@ -124,29 +123,37 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   }
 };
 
-export async function action({ context, request, params }: ActionFunctionArgs) {
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
+
+export async function action({ context, request }: ActionFunctionArgs) {
   const method = getActionMethod(request);
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
   try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.read,
+    });
+
     switch (method) {
       case "POST": {
-        const authSession = context.getSession();
-        const { userId } = authSession;
+        const { searchParams } = new URL(request.url);
         const user = await db.user.findUniqueOrThrow({
-          where: {
-            id: userId,
-          },
+          where: { id: userId },
           select: {
             firstName: true,
             lastName: true,
           },
         });
 
-        const { assetId } = getParams(
-          params,
-          z.object({
-            assetId: z.string(),
-          })
+        const { assetId } = parseData(
+          searchParams,
+          z.object({ assetId: z.string() })
         );
 
         const { signatureText, signatureImage } = parseData(
@@ -157,31 +164,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         );
 
-        // Update the custody record
-        // @TODO - needs to be caught
-        await db.custody.update({
-          where: {
-            assetId,
-          },
-          data: {
-            signatureImage,
-            signatureText,
-            templateSigned: true,
-          },
+        await db.$transaction(async (tx) => {
+          await tx.custody.update({
+            where: { assetId },
+            data: {
+              signatureImage,
+              signatureText,
+              templateSigned: true,
+            },
+          });
+
+          await tx.asset.update({
+            where: { id: assetId, organizationId },
+            data: { status: AssetStatus.IN_CUSTODY },
+          });
         });
 
-        // Update the asset status
-        // @TODO - needs to be caught
-        await db.asset.update({
-          where: {
-            id: assetId,
-          },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-          },
-        });
-
-        // Send out the notification
         sendNotification({
           title: "Asset signed",
           message: "Your asset has been signed successfully",
@@ -189,7 +187,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        // Create a note
         await createNote({
           content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
           type: "UPDATE",
@@ -200,6 +197,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return redirect(`/assets/${assetId}`);
       }
     }
+
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -209,12 +207,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function Sign() {
   const { template } = useLoaderData<typeof loader>();
-  const [params, setParams] = useSearchParams();
-
-  const showAgreementPopup = useCallback(() => {
-    params.set(AGREEMENT_POPUP_VISIBLE, "true");
-    setParams(params);
-  }, [params, setParams]);
 
   return (
     <div className="flex h-full flex-col md:flex-row">
