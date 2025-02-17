@@ -6,6 +6,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
+import Agreement from "~/components/sign/agreement";
 import AgreementPopup, {
   AGREEMENT_POPUP_VISIBLE,
 } from "~/components/sign/agreement-popup";
@@ -30,17 +31,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { assigneeId, assetId } = getParams(
-      params,
+    const { searchParams } = new URL(request.url);
+
+    const { assigneeId, assetId } = parseData(
+      searchParams,
       z.object({
         assigneeId: z.string(),
         assetId: z.string(),
@@ -67,17 +66,25 @@ export const loader = async ({
     const asset = await getAsset({
       id: assetId,
       organizationId,
+      include: {
+        custody: {
+          include: { template: true },
+        },
+      },
     });
 
-    // @TODO needs fixing -
-    // @ts-ignore
-    const custody = asset.custody as Custody;
+    const custody = asset.custody;
+    const template = custody?.template;
 
-    // @ts-ignore
-    const template = custody.template as Template;
+    if (!custody || !template) {
+      throw new ShelfError({
+        cause: null,
+        label: "Custody",
+        message: "Custody or template does not exists.",
+      });
+    }
 
-    // Fetch the template PDF associated for the custody
-    const templateFile = await db.templateFile.findUniqueOrThrow({
+    const templateFile = await db.templateFile.findUnique({
       where: {
         revision_templateId: {
           revision: custody.associatedTemplateVersion!,
@@ -96,12 +103,8 @@ export const loader = async ({
     }
 
     const user = await db.user.findUniqueOrThrow({
-      where: {
-        id: userId,
-      },
-      select: {
-        roles: true,
-      },
+      where: { id: userId },
+      select: { roles: true },
     });
 
     return json(
@@ -207,6 +210,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function Sign() {
   const { template } = useLoaderData<typeof loader>();
   const [params, setParams] = useSearchParams();
+
   const showAgreementPopup = useCallback(() => {
     params.set(AGREEMENT_POPUP_VISIBLE, "true");
     setParams(params);
@@ -216,35 +220,24 @@ export default function Sign() {
     <div className="flex h-full flex-col md:flex-row">
       <AgreementPopup templateName={template.name} />
       <div className="order-2 grow md:order-1">PDF GOES HERE</div>
-      <div className="order-1 flex max-h-[90vh] w-full flex-col overflow-y-auto overflow-x-clip border-l-DEFAULT border-l-gray-200 md:order-2 md:w-[400px]">
-        <div className="flex w-full items-center justify-between gap-x-2 border-b-DEFAULT border-b-gray-200 p-4">
-          <div title="Home" className="block h-[32px]">
-            <img
-              src="/images/logo-full-color(x2).png"
-              alt="logo"
-              className="h-full"
-            />
-          </div>
-          <Button
-            onClick={showAgreementPopup}
-            className="block md:hidden"
-            variant="primary"
-          >
-            Sign
-          </Button>
+
+      <div className="order-1 flex size-full flex-col overflow-y-auto overflow-x-clip border-l md:order-2 md:w-[400px]">
+        <div className="border-b p-4">
+          <img
+            src="/static/images/logo-full-color(x2).png"
+            alt="logo"
+            className="h-8"
+          />
         </div>
-        <div className="flex flex-col gap-y-2 border-b-DEFAULT border-b-gray-200 p-4">
-          <h1 className="text-lg font-semibold text-gray-800">
-            {template.name}
-          </h1>
+
+        <div className="border-b p-4">
+          <h1 className="mb-1 text-lg font-semibold">{template.name}</h1>
           <p className="text-gray-600">
             {template.description ?? "No description provided"}
           </p>
         </div>
-        {/* @ts-ignore */}
-        {/* {window.innerWidth > twConfig.theme.screens.md.split("px")[0] && (
-          <Agreement />
-        )} */}
+
+        <Agreement />
       </div>
     </div>
   );

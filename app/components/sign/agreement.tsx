@@ -18,7 +18,7 @@ export default function Agreement() {
 
   return (
     <>
-      <div className={`flex gap-x-2 border-b-DEFAULT border-b-gray-200 p-4`}>
+      <div className="flex gap-x-2 border-b p-4">
         <div className="flex h-fit space-x-2">
           <Checkbox id="terms1" />
           <div className="grid gap-1.5 leading-none">
@@ -35,44 +35,44 @@ export default function Agreement() {
           </div>
         </div>
       </div>
+
       <div
         onClick={() => setCanvasClicked(true)}
-        className={`flex h-full min-h-[400px] w-[400px] grow items-center justify-center border-b-DEFAULT border-b-gray-200 p-4`}
+        className="flex size-full min-h-80 grow items-center justify-center border-b"
       >
         {!canvasClicked && (
-          <div className="flex text-gray-300">
+          <div className="flex gap-1 text-gray-300">
             <PenIcon />
             <div>draw your signature here</div>
           </div>
         )}
         {canvasClicked && (
           <SignatureCanvas
-            onEnd={() => setSignatureImage(signatureRef.current!.toDataURL())}
             ref={signatureRef}
+            onEnd={() => setSignatureImage(signatureRef.current!.toDataURL())}
             penColor="gray"
             canvasProps={{
               className: "sigCanvas",
               width: 400,
-              height: 400,
+              height: 320,
             }}
           />
         )}
       </div>
-      <div
-        className={`flex items-center justify-between gap-x-2 border-b-DEFAULT border-b-gray-200 p-4`}
-      >
-        <Input
-          // disabled={disabled}
-          onChange={(e) => setSignatureText(e.target.value)}
-          className="border-0"
-          label={""}
+
+      <div className="flex items-center justify-between gap-x-2 p-4">
+        <input
+          className="flex-1 border-none px-0 py-1 outline-none ring-0 focus-within:ring-0"
           placeholder="or type your name here..."
+          onChange={(event) => {
+            setSignatureText(event.target.value);
+          }}
         />
+
         <Form method="post">
           <input type="hidden" name="signatureImage" value={signatureImage} />
           <input type="hidden" name="signatureText" value={signatureText} />
           <Button
-            type={"submit"}
             disabled={(!signatureImage && !signatureText) || disabled}
             variant="primary"
           >

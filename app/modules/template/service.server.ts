@@ -149,14 +149,12 @@ export async function createTemplateRevision({
   organizationId: User["id"];
 }) {
   try {
-    const template = await db.template.findFirst({
+    const template = await db.template.findUniqueOrThrow({
       where: { id: templateId, organizationId },
     });
 
-    if (!template) return null;
-
     const pdfHash = v4();
-    const newFileName: string = `${organizationId}/${templateId}/${pdfHash}`;
+    const newFileName = `${organizationId}/${templateId}/${pdfHash}`;
     const fileData = await parseFileFormData({
       request,
       bucketName: "templates",

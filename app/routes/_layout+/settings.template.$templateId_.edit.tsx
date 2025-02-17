@@ -172,7 +172,7 @@ export default function TemplateEditPage() {
         hideBreadcrumbs
         classNames="-mt-5"
       />
-      <div className=" items-top flex justify-between">
+      <div className="flex justify-between">
         <TemplateForm
           isEdit
           name={template.name || name}

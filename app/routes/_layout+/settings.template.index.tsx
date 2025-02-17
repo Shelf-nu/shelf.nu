@@ -12,9 +12,11 @@ import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { makeDefault, toggleTemplateActiveState } from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -192,7 +194,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function TemplatePage() {
-  const { items, totalItems } = useLoaderData<typeof loader>();
+  const { items, totalItems, canCreateMoreTemplates } =
+    useLoaderData<typeof loader>();
 
   const hasItems = totalItems > 0;
 
@@ -240,23 +243,17 @@ export default function TemplatePage() {
                   <h3 className="text-md text-gray-900">PDF Templates</h3>
                   <p className="text-sm text-gray-600">{totalItems} items</p>
                 </div>
-                {/* <ControlledActionButton
-                    canUseFeature={canCreateMoreTemplates}
-                    buttonContent={{
-                      title: "Add template",
-                      message: upgradeMessage,
-                      ctaText: "upgrading to team plan",
-                    }}
-                    skipCta={tier.id === TierId.tier_2}
-                    buttonProps={{
-                      to: "new",
-                      role: "link",
-                      icon: "plus",
-                      "aria-label": `new template`,
-                      "data-test-id": "createNewTemplateButton",
-                      variant: "primary",
-                    }}
-                  /> */}
+
+                <When truthy={canCreateMoreTemplates}>
+                  <Button
+                    to="new"
+                    role="link"
+                    icon="plus"
+                    aria-label="new template"
+                  >
+                    Add template
+                  </Button>
+                </When>
               </div>
 
               <div className="w-full flex-1 border-t">

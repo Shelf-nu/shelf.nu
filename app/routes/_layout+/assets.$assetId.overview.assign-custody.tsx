@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Template } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
@@ -101,22 +101,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const asset = await db.asset
       .findUnique({
-        where: { id: assetId },
+        where: { id: assetId, organizationId },
         select: {
-          custody: {
-            select: {
-              id: true,
-            },
-          },
+          custody: { select: { id: true } },
           bookings: {
-            where: {
-              status: {
-                in: [BookingStatus.RESERVED],
-              },
-            },
-            select: {
-              id: true,
-            },
+            where: { status: { in: [BookingStatus.RESERVED] } },
+            select: { id: true },
           },
         },
       })
@@ -148,9 +138,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .findMany({
         where,
         include: { user: true },
-        orderBy: {
-          userId: "asc",
-        },
+        orderBy: { userId: "asc" },
         take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       })
       .catch((cause) => {
@@ -163,16 +151,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
+    const totalTeamMembers = await db.teamMember.count({ where });
+
     // We need to fetch all the templates that belong to the user's current organization
     // and the template type is CUSTODY
     const templates = await db.template.findMany({
       where: {
+        isActive: true, // ignore inactive templates
         organizationId,
         type: TemplateType.CUSTODY,
       },
     });
-
-    const totalTeamMembers = await db.teamMember.count({ where });
 
     return json(
       data({
@@ -197,7 +186,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -221,7 +210,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const user = await getUserByID(userId);
 
-    /** We send the data from the form as a json string, so we can easily have both the name and id
+    /**
+     * We send the data from the form as a json string, so we can easily have both the name and id
      * ID is used to connect the asset to the custodian
      * Name is used to create the note
      */
@@ -232,74 +222,37 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: custodianUserId,
     } = custodian;
 
-    let templateId = null,
-      templateObj = null;
+    if (isSelfService) {
+      const custodian = await db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: { id: true, userId: true },
+      });
+
+      if (custodian?.userId !== user.id) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self user can only assign custody to themselves only.",
+          additionalData: { userId, assetId, custodianId },
+          label: "Assets",
+        });
+      }
+    }
+
+    let templateId: string | null = null,
+      templateObj: Template | null = null;
 
     if (addTemplateEnabled) {
       const template = (parsedData as any).template;
       templateId = template.id;
 
       templateObj = await db.template
-        .findUnique({
-          where: { id: templateId as string },
-        })
+        .findUnique({ where: { id: templateId as string } })
         .catch((cause) => {
           throw new ShelfError({
             cause,
             message:
               "Something went wrong while fetching template. Please try again or contact support.",
-            additionalData: { userId, assetId, custodianId },
-            label: "Assets",
-          });
-        });
-
-      if (isSelfService) {
-        const custodian = await db.teamMember.findUnique({
-          where: { id: custodianId },
-          select: { id: true, userId: true },
-        });
-
-        if (custodian?.userId !== user.id) {
-          throw new ShelfError({
-            cause: null,
-            title: "Action not allowed",
-            message: "Self user can only assign custody to themselves only.",
-            additionalData: { userId, assetId, custodianId },
-            label: "Assets",
-          });
-        }
-      }
-
-      /** In order to do it with a single query
-       * 1. We update the asset status
-       * 2. We create a new custody record for that specific asset
-       * 3. We link it to the custodian
-       */
-      await db.asset
-        .update({
-          where: { id: assetId },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: {
-                custodian: { connect: { id: custodianId } },
-              },
-            },
-          },
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while updating asset. Please try again or contact support.",
             additionalData: { userId, assetId, custodianId },
             label: "Assets",
           });
@@ -326,7 +279,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        */
       asset = await db.asset
         .update({
-          where: { id: assetId },
+          where: { id: assetId, organizationId },
           data: {
             status: templateObj!.signatureRequired
               ? AssetStatus.AVAILABLE
@@ -395,7 +348,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // If the template was specified, and signature was required
-    if (addTemplateEnabled && templateObj!.signatureRequired) {
+    if (addTemplateEnabled && templateObj?.signatureRequired) {
       /** We create the note */
       await createNote({
         content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
@@ -422,7 +375,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetId: asset.id,
       });
 
-      /** @TODO I have set this to void but we have to consider if we want to catch this */
       sendEmail({
         to: custodianEmail,
         subject: `You have been assigned custody over ${asset.title}.`,
@@ -451,8 +403,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         senderId: userId,
       });
 
-      /** @TODO I have set this to void but we have to consider if we want to catch this */
-      void sendEmail({
+      sendEmail({
         to: custodianEmail,
         subject: `You have been assigned custody over ${asset.title}`,
         text: assetCustodyAssignedEmailText({
@@ -504,169 +455,162 @@ export default function Custody() {
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
   return (
-    <>
-      <Form method="post" ref={zo.ref}>
-        <div className="modal-content-wrapper">
-          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-            <UserIcon />
-          </div>
-          <div className="mb-5">
-            <h4>{isSelfService ? "Take" : "Assign"} custody of asset</h4>
-            <p>
-              This asset is currently available. You’re about to assign custody
-              to {isSelfService ? "yourself" : "one of your team members"}.
-            </p>
-          </div>
-          <div className="relative z-50 mb-8">
-            <DynamicSelect
-              hidden={isSelfService}
-              defaultValue={
-                isSelfService
-                  ? JSON.stringify({
-                      id: teamMembers[0].id,
-                      name: resolveTeamMemberName(teamMembers[0]),
-                    })
-                  : undefined
+    <Form className="modal-content-wrapper" method="post" ref={zo.ref}>
+      <div className="">
+        <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+          <UserIcon />
+        </div>
+        <div className="mb-5">
+          <h4>{isSelfService ? "Take" : "Assign"} custody of asset</h4>
+          <p>
+            This asset is currently available. You’re about to assign custody to{" "}
+            {isSelfService ? "yourself" : "one of your team members"}.
+          </p>
+        </div>
+        <div className="relative z-50 mb-8">
+          <DynamicSelect
+            hidden={isSelfService}
+            defaultValue={
+              isSelfService
+                ? JSON.stringify({
+                    id: teamMembers[0].id,
+                    name: resolveTeamMemberName(teamMembers[0]),
+                  })
+                : undefined
+            }
+            disabled={disabled || isSelfService}
+            model={{
+              name: "teamMember",
+              queryKey: "name",
+              deletedAt: null,
+            }}
+            fieldName="custodian"
+            contentLabel="Team members"
+            initialDataKey="teamMembers"
+            countKey="totalTeamMembers"
+            placeholder="Select a team member"
+            allowClear={false}
+            closeOnSelect
+            showSearch={!isSelfService}
+            renderItem={(item) => resolveTeamMemberName(item, true)}
+            transformItem={(item) => ({
+              ...item,
+              id: JSON.stringify({
+                id: item.id,
+                //If there is a user, we use its name, otherwise we use the name of the team member
+                name: resolveTeamMemberName(item),
+                userId: item?.userId,
+                email: item?.user?.email,
+              }),
+            })}
+            onChange={(value) => {
+              if (!value) {
+                return;
               }
-              disabled={disabled || isSelfService}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Select a team member"
-              allowClear={false}
-              closeOnSelect
-              showSearch={!isSelfService}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  //If there is a user, we use its name, otherwise we use the name of the team member
-                  name: resolveTeamMemberName(item),
-                  userId: item?.userId,
-                  email: item?.user?.email,
-                }),
-              })}
-              onChange={(value) => {
-                if (!value) {
-                  return;
-                }
 
-                const id = JSON.parse(value).id;
-                /**
-                 * When the value passed is the same as the current value,
-                 * that means the user is clicking the already selected item to disable it.
-                 * So we clear the state in that case*/
-                if (id === selectedCustodyUser?.id) {
-                  setSelectedCustodyUser(null);
-                  setAddTemplateEnabled(false);
-                } else {
-                  setSelectedCustodyUser(JSON.parse(value));
-                }
-              }}
-            />
+              const id = JSON.parse(value).id;
+              /**
+               * When the value passed is the same as the current value,
+               * that means the user is clicking the already selected item to disable it.
+               * So we clear the state in that case*/
+              if (id === selectedCustodyUser?.id) {
+                setSelectedCustodyUser(null);
+                setAddTemplateEnabled(false);
+              } else {
+                setSelectedCustodyUser(JSON.parse(value));
+              }
+            }}
+          />
+        </div>
+        {shouldDisableSwitch ? (
+          <div className="flex gap-x-2">
+            <CustomTooltip
+              content={
+                <TooltipContent
+                  title={
+                    selectedCustodianHasUser
+                      ? "Please select a custodian"
+                      : "Custodian needs to be a registered user"
+                  }
+                  message={
+                    selectedCustodianHasUser
+                      ? "You need to select a custodian before you can add a PDF template."
+                      : "Signing PDFs is not allowed for NRM and non-users."
+                  }
+                />
+              }
+            >
+              <Switch required={false} disabled={true} />
+            </CustomTooltip>
+            <PdfSwitchLabel hasTemplates={hasTemplates} />
           </div>
-          {shouldDisableSwitch ? (
-            <div className="flex gap-x-2">
-              <CustomTooltip
-                content={
-                  <TooltipContent
-                    title={
-                      selectedCustodianHasUser
-                        ? "Please select a custodian"
-                        : "Custodian needs to be a registered user"
-                    }
-                    message={
-                      selectedCustodianHasUser
-                        ? "You need to select a custodian before you can add a PDF template."
-                        : "Signing PDFs is not allowed for NRM and non-users."
-                    }
-                  />
-                }
-              >
-                <Switch required={false} disabled={true} />
-              </CustomTooltip>
-              <PdfSwitchLabel hasTemplates={hasTemplates} />
-            </div>
-          ) : (
-            <div className="mb-5 flex gap-x-2">
-              <Switch
-                onClick={() => setAddTemplateEnabled((prev) => !prev)}
-                defaultChecked={addTemplateEnabled}
-                required={false}
-                disabled={disabled}
-              />
-              <input
-                type="hidden"
-                name="addTemplateEnabled"
-                value={addTemplateEnabled.toString()}
-              />
-              <PdfSwitchLabel hasTemplates={hasTemplates} />
-            </div>
-          )}
+        ) : (
+          <div className="mb-5 flex gap-x-2">
+            <Switch
+              onClick={() => setAddTemplateEnabled((prev) => !prev)}
+              defaultChecked={addTemplateEnabled}
+              required={false}
+              disabled={disabled}
+            />
+            <input
+              type="hidden"
+              name="addTemplateEnabled"
+              value={addTemplateEnabled.toString()}
+            />
+            <PdfSwitchLabel hasTemplates={hasTemplates} />
+          </div>
+        )}
 
-          {addTemplateEnabled && (
-            <div className="mt-5">
-              <TemplateSelect />
-              {/* @TODO this still needs to be updated with the new approach. This check wont work as this type is not passed to action data */}
-              {/* {actionData?.type && actionData?.type === "TEMPLATE" && (
+        {addTemplateEnabled && (
+          <div className="mt-5">
+            <TemplateSelect />
+            {/* @TODO this still needs to be updated with the new approach. This check wont work as this type is not passed to action data */}
+            {/* {actionData?.type && actionData?.type === "TEMPLATE" && (
                 <div className="text-sm text-error-500">{actionData.error}</div>
               )} */}
-            </div>
-          )}
-
-          {error ? (
-            <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
-          ) : null}
-
-          {hasBookings ? (
-            <WarningBox className="-mt-4 mb-8">
-              <>
-                Asset is part of an{" "}
-                <Link
-                  to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
-                  className="underline"
-                  target="_blank"
-                >
-                  upcoming booking
-                </Link>
-                . You will not be able to check-out your booking if this asset
-                has custody.
-              </>
-            </WarningBox>
-          ) : null}
-
-          <div className="mt-8 flex gap-3">
-            <Button
-              to=".."
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              width="full"
-              type="submit"
-              disabled={
-                disabled ||
-                selectedCustodyUser === null ||
-                selectedCustodyUser?.userId === null
-              }
-            >
-              Confirm
-            </Button>
           </div>
+        )}
+
+        {error ? (
+          <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
+        ) : null}
+
+        {hasBookings ? (
+          <WarningBox className="-mt-4 mb-8">
+            <>
+              Asset is part of an{" "}
+              <Link
+                to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
+                className="underline"
+                target="_blank"
+              >
+                upcoming booking
+              </Link>
+              . You will not be able to check-out your booking if this asset has
+              custody.
+            </>
+          </WarningBox>
+        ) : null}
+
+        <div className="mt-8 flex gap-3">
+          <Button to=".." variant="secondary" width="full" disabled={disabled}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            width="full"
+            type="submit"
+            disabled={
+              disabled ||
+              selectedCustodyUser === null ||
+              selectedCustodyUser?.userId === null
+            }
+          >
+            Confirm
+          </Button>
         </div>
-      </Form>
-    </>
+      </div>
+    </Form>
   );
 }
 
