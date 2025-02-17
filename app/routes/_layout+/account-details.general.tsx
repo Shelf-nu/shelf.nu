@@ -26,10 +26,7 @@ import {
 import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import {
-  refreshAccessToken,
-  sendResetPasswordLink,
-} from "~/modules/auth/service.server";
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import {
   getUserByID,
   updateProfilePicture,
