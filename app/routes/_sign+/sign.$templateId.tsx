@@ -1,4 +1,5 @@
 import { AssetStatus, Roles } from "@prisma/client";
+import { Viewer, Worker } from "@react-pdf-viewer/core";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -24,6 +25,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import "@react-pdf-viewer/core/lib/styles/index.css";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -206,14 +208,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function Sign() {
-  const { template } = useLoaderData<typeof loader>();
+  const { template, templateFile } = useLoaderData<typeof loader>();
 
   return (
     <div className="flex h-full flex-col md:flex-row">
       <AgreementPopup templateName={template.name} />
-      <div className="order-2 grow md:order-1">PDF GOES HERE</div>
+      <div className="order-2 grow scrollbar-thin md:order-1">
+        <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
+          <Viewer fileUrl={templateFile?.url ?? ""} />
+        </Worker>
+      </div>
 
-      <div className="order-1 flex size-full flex-col overflow-y-auto overflow-x-clip border-l md:order-2 md:w-[400px]">
+      <div className="order-1 flex size-full flex-col overflow-y-auto overflow-x-clip border-l scrollbar-thin md:order-2 md:w-[400px]">
         <div className="border-b p-4">
           <img
             src="/static/images/logo-full-color(x2).png"
