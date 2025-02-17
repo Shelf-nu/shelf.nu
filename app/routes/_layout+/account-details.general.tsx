@@ -484,12 +484,11 @@ export default function UserPage() {
         <p className="text-sm text-gray-600">Update your password here</p>
       </div>
       <div>
+        <p>Need to reset your password?</p>
         <p>
-          To reset your password you need to use the "forgot password"
-          functionality. Use the link to get logged out and redirected to the
-          forgot password form.
+          Click below to start the reset process. You'll be logged out and
+          redirected to our password reset page.
         </p>
-        <p>You will be logged out 3 seconds after clicking the link.</p>
       </div>
       <PasswordResetForm />
 

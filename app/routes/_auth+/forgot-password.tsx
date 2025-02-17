@@ -13,6 +13,7 @@ import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 
@@ -22,7 +23,12 @@ import {
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 
 const ForgotPasswordSchema = z.object({
@@ -55,9 +61,14 @@ const OtpSchema = z
     return { password, confirmPassword, otp, email };
   });
 
-export function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context, request }: LoaderFunctionArgs) {
+  const searchParams = getCurrentSearchParams(request);
+
   const title = "Forgot password?";
-  const subHeading = "No worries, we’ll send you reset instructions.";
+  const subHeading =
+    searchParams.has("email") && searchParams.get("email") !== ""
+      ? "Step 2 of 2: Enter OTP and your new password"
+      : "Step 1 of 2: Enter your email";
 
   if (context.isAuthenticated) {
     return redirect("/assets");
@@ -113,7 +124,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         await sendResetPasswordLink(email);
 
-        return json(data({ email }));
+        return redirect("/forgot-password?email=" + email);
       }
       case "confirm-otp": {
         const { email, otp, password } = parseData(
@@ -160,9 +171,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function ForgotPassword() {
   const zo = useZorm("ForgotPasswordForm", ForgotPasswordSchema);
-
   const actionData = useActionData<typeof action>();
-
+  const [searchParams] = useSearchParams();
+  const email = searchParams.get("email") || "";
   const emailError =
     zo.errors.email()?.message || actionData?.error?.message || "";
   const disabled = useDisabled();
@@ -170,57 +181,77 @@ export default function ForgotPassword() {
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full">
-        {!actionData || actionData.error ? (
-          <Form ref={zo.ref} method="post" className="space-y-2" replace>
-            <input type="hidden" name="intent" value="request-otp" />
-            <div>
-              <Input
-                label="Email address"
-                data-test-id="email"
-                name={zo.fields.email()}
-                type="email"
-                autoComplete="email"
-                inputClassName="w-full"
-                placeholder="zaans@huisje.com"
-                disabled={disabled}
-                error={emailError}
-              />
-            </div>
+        {actionData?.error || !email || email === "" ? (
+          <div>
+            <p className="mb-4 text-center">
+              Enter your email address and we'll send you a one-time code to
+              reset your password.
+            </p>
+            <Form ref={zo.ref} method="post" className="space-y-2" replace>
+              <input type="hidden" name="intent" value="request-otp" />
+              <div>
+                <Input
+                  label="Email address"
+                  data-test-id="email"
+                  name={zo.fields.email()}
+                  type="email"
+                  autoComplete="email"
+                  inputClassName="w-full"
+                  placeholder="zaans@huisje.com"
+                  disabled={disabled}
+                  error={emailError}
+                />
+              </div>
 
-            <Button
-              data-test-id="send-password-reset-link"
-              width="full"
-              type="submit"
-              disabled={disabled}
-            >
-              {!disabled ? "Reset password" : "Sending code..."}
-            </Button>
-          </Form>
+              <Button
+                data-test-id="send-password-reset-link"
+                width="full"
+                type="submit"
+                disabled={disabled}
+              >
+                {!disabled ? "Reset password" : "Sending code..."}
+              </Button>
+            </Form>
+            <p className="mt-2 text-center text-gray-500">
+              Tip: Check your spam folder if you don't see the email within a
+              few minutes.
+            </p>
+          </div>
         ) : (
           <>
             <p className="mb-2">
-              We have sent an OTP to{" "}
-              <span className="font-semibold">{actionData.email}</span>. Please
-              enter the OTP to reset your password.
+              We've sent a 6-digit code to{" "}
+              <span className="font-semibold">{email}</span>.
             </p>
-            <PasswordResetForm />
+            <ol className="mb-4 list-inside list-decimal">
+              <li>Enter the code from your email</li>
+              <li>Enter your new password</li>
+              <li>Confirm your new password</li>
+            </ol>
+            <PasswordResetForm email={email} />
           </>
         )}
         <div className="pt-4 text-center">
-          <Button variant="link" to={"/login"}>
-            Back to Log in
-          </Button>
+          {email ? (
+            <Button variant="link" to={"/forgot-password"}>
+              Request new code
+            </Button>
+          ) : (
+            <Button variant="link" to={"/login"}>
+              Back to login
+            </Button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function PasswordResetForm() {
+function PasswordResetForm({ email }: { email: string }) {
   const zoReset = useZorm("ResetPasswordForm", OtpSchema);
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
-  return !actionData || actionData.error ? (
+  return !email || email === "" || actionData?.error ? (
     <div>Something went wrong. Please refresh the page and try again.</div>
   ) : (
     <Form method="post" ref={zoReset.ref} className="space-y-2">
@@ -249,7 +280,7 @@ function PasswordResetForm() {
         required
       />
 
-      <input type="hidden" name="email" value={actionData.email} />
+      <input type="hidden" name="email" value={email} />
       <input type="hidden" name="intent" value="confirm-otp" />
 
       <Button
