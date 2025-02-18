@@ -26,10 +26,7 @@ import {
 import { sendEmail } from "~/emails/mail.server";
 import { useUserData } from "~/hooks/use-user-data";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import {
-  refreshAccessToken,
-  sendResetPasswordLink,
-} from "~/modules/auth/service.server";
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import {
   getUserByID,
   updateProfilePicture,
@@ -77,7 +74,6 @@ const IntentSchema = z.object({
 const ActionSchemas = {
   resetPassword: z.object({
     type: z.literal("resetPassword"),
-    email: z.string(),
   }),
 
   updateUser: UpdateFormSchema.extend({
@@ -131,16 +127,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "resetPassword": {
         if (payload.type !== "resetPassword")
           throw new Error("Invalid payload type");
-        const { email } = payload;
-
-        await sendResetPasswordLink(email);
 
         /** Logout user after 3 seconds */
         await delay(2000);
 
         context.destroySession();
 
-        return redirect("/login");
+        return redirect("/forgot-password");
       }
       case "updateUser": {
         if (payload.type !== "updateUser")
@@ -490,7 +483,14 @@ export default function UserPage() {
         <h3 className="text-text-lg font-semibold">Password</h3>
         <p className="text-sm text-gray-600">Update your password here</p>
       </div>
-      <PasswordResetForm userEmail={user?.email || ""} />
+      <div>
+        <p>Need to reset your password?</p>
+        <p>
+          Click below to start the reset process. You'll be logged out and
+          redirected to our password reset page.
+        </p>
+      </div>
+      <PasswordResetForm />
 
       <div className="my-6">
         <h3 className="text-text-lg font-semibold">Delete account</h3>

@@ -82,6 +82,7 @@
     "framer-motion": "^11.0.5",
     "html-to-image": "1.11.11",
     "iconv-lite": "^0.6.3",
+    "input-otp": "^1.4.2",
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^4.4.0",
     "jotai": "^2.7.1",
