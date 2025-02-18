@@ -3,7 +3,7 @@ import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { Button } from "../shared/button";
 
 export const CurrentPlanDetails = () => {
-  const { activeProduct, expiration, subscription, isTrialSubscription } =
+  const { activeProduct, expiration, activeSubscription, isTrialSubscription } =
     useLoaderData<typeof loader>();
 
   return (
@@ -14,7 +14,7 @@ export const CurrentPlanDetails = () => {
       </p>
 
       <div>
-        {subscription?.canceled_at ? (
+        {activeSubscription?.canceled_at ? (
           <>
             <p>
               Your plan has been canceled and will be active until{" "}

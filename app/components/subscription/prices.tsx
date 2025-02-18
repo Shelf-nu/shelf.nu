@@ -48,8 +48,9 @@ export const Price = ({
   price: Price;
   previousPlanName?: string;
 }) => {
-  const { subscription, isTrialSubscription } = useLoaderData<typeof loader>();
-  const activePlan = subscription?.items.data[0]?.plan;
+  const { activeSubscription, isTrialSubscription } =
+    useLoaderData<typeof loader>();
+  const activePlan = activeSubscription?.items.data[0]?.plan;
   const isFreePlan = price.id === "free";
   const isTeamPlan = price.product.metadata.shelf_tier === "tier_2";
   const features = price.product.metadata.features?.split(",") || [];
@@ -57,12 +58,12 @@ export const Price = ({
     <div className="subscription-plan mb-12 w-full xl:mb-0 xl:max-w-[410px]">
       <PriceBox
         activePlan={activePlan}
-        subscription={subscription}
+        subscription={activeSubscription}
         price={price}
         isTrialSubscription={isTrialSubscription}
       />
       <div className="mb-8">
-        <PriceCta price={price} subscription={subscription} />
+        <PriceCta price={price} subscription={activeSubscription} />
       </div>
       {features ? (
         <>
