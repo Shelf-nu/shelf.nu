@@ -67,10 +67,9 @@ function SubscriptionBox({
 
   /** Cost for singular price. To get the total we still need to multiply by quantity */
   const costPerPrice =
-    isActive && item?.price?.billing_scheme === "per_unit"
+    isActive || isTrial
       ? (item?.price?.unit_amount * subscription?.quantity) / 100
       : 0;
-
   return (
     <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -131,12 +130,16 @@ function SubscriptionBox({
             </div>
           </div>
         </div>
-        <div>
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(costPerPrice)}{" "}
-          / {interval}
+        <div className="text-right">
+          <div>
+            {new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+            }).format(costPerPrice)}{" "}
+            / {interval}
+          </div>
+
+          {isTrial && <div className="text-gray-500">after trial ends</div>}
         </div>
       </div>
     </div>
