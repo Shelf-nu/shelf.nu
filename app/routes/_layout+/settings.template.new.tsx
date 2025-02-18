@@ -79,23 +79,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           NewTemplateFormSchema
         );
 
-        // @TODO - this is not the correct way to check for file should be handled in schema
-        if (pdf.type === "application/octet-stream") {
-          return json(
-            {
-              errors: [
-                {
-                  code: "custom",
-                  message: "File is required.",
-                },
-              ],
-            },
-            {
-              status: 400,
-            }
-          );
-        }
-
         const { id } = await createTemplate({
           name,
           type,

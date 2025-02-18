@@ -28,7 +28,9 @@ export const ASSET_OVERVIEW_FIELDS = {
   location: true,
   custody: {
     select: {
+      template: true,
       createdAt: true,
+      templateSigned: true,
       custodian: {
         include: {
           user: true,

@@ -11,6 +11,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import AwaitingSignCard from "~/components/assets/awaiting-sign-card";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -265,6 +266,10 @@ export default function AssetOverview() {
     action: PermissionAction.update,
   });
 
+  const isAwaitingSignature =
+    asset.custody?.template?.signatureRequired &&
+    !asset.custody?.templateSigned;
+
   return (
     <div>
       <ContextualModal />
@@ -502,15 +507,19 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userHasPermission({
-              roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
-            })}
-          />
+          {isAwaitingSignature ? (
+            <AwaitingSignCard asset={asset} />
+          ) : (
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            />
+          )}
 
           {asset && (
             <QrPreview

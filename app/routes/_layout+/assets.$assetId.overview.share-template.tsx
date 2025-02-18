@@ -1,15 +1,16 @@
-import { CopyIcon } from "@radix-ui/react-icons";
+import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
-import styles from "~/styles/layout/custom-modal.css";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -49,6 +50,7 @@ export const loader = async ({
                   name: true,
                   user: {
                     select: {
+                      id: true,
                       email: true,
                     },
                   },
@@ -87,6 +89,8 @@ export const loader = async ({
         label: "Assets",
       });
 
+    const signUrl = `${SERVER_URL}/sign/${template.id}?assigneeId=${asset.custody?.custodian?.user?.id}&assetId=${assetId}`;
+
     return json(
       data({
         showModal: true,
@@ -95,6 +99,7 @@ export const loader = async ({
         assetId,
         assetName: asset.title,
         custodianEmail: asset.custody?.custodian?.user?.email,
+        signUrl,
       })
     );
   } catch (cause) {
@@ -102,10 +107,6 @@ export const loader = async ({
     throw json(error(reason), { status: reason.status });
   }
 };
-
-export function links() {
-  return [{ rel: "stylesheet", href: styles }];
-}
 
 export const action = async ({
   request,
@@ -153,63 +154,73 @@ export const action = async ({
 };
 
 export default function ShareTemplate() {
-  const { template, custodianName, assetId, assetName, custodianEmail } =
+  const { template, custodianName, assetName, custodianEmail, signUrl } =
     useLoaderData<typeof loader>();
+  const [isCopied, setIsCopied] = useState(false);
+
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
 
+  async function handleCopy() {
+    await navigator.clipboard.writeText(signUrl).then(() => {
+      setIsCopied(true);
+
+      setTimeout(() => {
+        setIsCopied(false);
+      }, 1000);
+    });
+  }
+
   return (
     <div className="modal-content-wrapper">
-      <div className="mb-3">
-        <ShareAssetIcon />
-      </div>
-      <div className="flex flex-col">
-        <h4>{template.name}</h4>
-        <p className="mt-1 text-gray-600">
-          This PDF template page has been published.{" "}
-          <span className="font-semibold">{custodianName}</span> will receive an
-          email and will be able to visit this page to read (and sign) the
-          document. You can visit the asset page to open this modal in case you
-          need to acquire the share link or re-send the email.{" "}
-        </p>
-        <div className="mt-5 font-semibold text-gray-600">Share link</div>
-        <div className="mb-5 mt-1 flex items-end gap-x-2">
-          <Input
-            className="cursor-text"
-            value={`https://app.shelf.nu/sign/${assetId}`}
-            disabled
-            label={""}
-          />
+      <ShareAssetIcon className="mb-3" />
+
+      <h4 className="mb-1">{template.name}</h4>
+      <p className="mb-5 text-gray-600">
+        This PDF template page has been published.{" "}
+        <span className="font-semibold">{custodianName}</span> will receive an
+        email and will be able to visit this page to read (and sign) the
+        document. You can visit the asset page to open this modal in case you
+        need to acquire the share link or re-send the email.{" "}
+      </p>
+      <div className="font-semibold text-gray-600">Share link</div>
+
+      <div className="mb-5 flex items-end gap-x-2">
+        <Input
+          readOnly
+          className="flex-1 cursor-text"
+          value={signUrl}
+          disabled
+          label=""
+        />
+
+        <Button onClick={handleCopy} variant="secondary" className="h-fit p-3">
+          {isCopied ? (
+            <CheckIcon className="size-4" />
+          ) : (
+            <CopyIcon className="size-4" />
+          )}
+        </Button>
+
+        <Form method="post">
+          <input hidden name="assetName" value={assetName} />
+          <input hidden name="templateName" value={template.name} />
+          <input hidden name="email" value={custodianEmail} />
           <Button
-            onClick={() =>
-              navigator.clipboard.writeText(
-                `https://app.shelf.nu/sign/${assetId}`
-              )
-            }
+            disabled={disabled}
+            type={"submit"}
             variant="secondary"
-            className="h-fit p-3"
+            className="h-fit p-[9px]"
           >
-            <CopyIcon />
+            <SendRotatedIcon />
           </Button>
-          <Form method="post">
-            <input hidden name="assetName" value={assetName} />
-            <input hidden name="templateName" value={template.name} />
-            <input hidden name="email" value={custodianEmail} />
-            <Button
-              disabled={disabled}
-              type={"submit"}
-              variant="secondary"
-              className="h-fit p-[9px]"
-            >
-              <SendRotatedIcon />
-            </Button>
-          </Form>
-        </div>
-        <Link to={`..`}>
-          <Button variant="secondary" className="h-fit w-full">
-            Close
-          </Button>
-        </Link>
+        </Form>
+      </div>
+
+      <div className="flex flex-col">
+        <Button to=".." variant="secondary" className="h-fit w-full">
+          Close
+        </Button>
       </div>
     </div>
   );

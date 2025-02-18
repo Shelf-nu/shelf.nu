@@ -39,44 +39,33 @@ export const base = z.object({
 });
 
 export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
-  z
-    .object({
-      isEdit: z.literal("false"),
-      pdf: z
-        .any()
-        .refine(
-          (val: File) => val.type !== "application/octet-stream",
-          "A file is required"
-        )
-        .refine(
-          (val: File) => val.size <= MAX_FILE_SIZE,
-          "File size is too big"
-        )
-        .refine(
-          (val: File) => val.type === "application/pdf",
-          "Only .pdf is accepted"
-        ),
-    })
-    .merge(base),
-  z
-    .object({
-      isEdit: z.literal("true"),
-      pdf: z
-        .any()
-        .refine(
-          (val: File) =>
-            val.type !== "application/octet-stream" ||
-            val.size <= MAX_FILE_SIZE,
-          "File size is too big"
-        )
-        .refine(
-          (val: File) =>
-            val.type === "application/octet-stream" ||
-            val.type === "application/pdf",
-          "Only .pdf is accepted"
-        ),
-    })
-    .merge(base),
+  base.extend({
+    isEdit: z.literal("false"),
+    pdf: z
+      .custom<File>()
+      .refine(
+        (val) => val.type !== "application/octet-stream",
+        "A file is required"
+      )
+      .refine((val) => val.size <= MAX_FILE_SIZE, "File size is too big")
+      .refine((val) => val.type === "application/pdf", "Only .pdf is accepted"),
+  }),
+  base.extend({
+    isEdit: z.literal("true"),
+    pdf: z
+      .custom<File>()
+      .refine(
+        (val) =>
+          val.type !== "application/octet-stream" || val.size <= MAX_FILE_SIZE,
+        "File size is too big"
+      )
+      .refine(
+        (val) =>
+          val.type === "application/octet-stream" ||
+          val.type === "application/pdf",
+        "Only .pdf is accepted"
+      ),
+  }),
 ]);
 
 interface Props {

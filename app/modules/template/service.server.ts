@@ -1,9 +1,5 @@
-import {
-  AssetStatus,
-  type Organization,
-  type Template,
-  type User,
-} from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
+import type { Prisma, Organization, Template, User } from "@prisma/client";
 import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -43,11 +39,9 @@ export async function createTemplate({
         },
       },
       isDefault: sameExistingTemplateCount === 0,
-    };
+    } satisfies Prisma.TemplateCreateInput;
 
-    const template = await db.template.create({ data });
-
-    return template;
+    return await db.template.create({ data });
   } catch (cause) {
     throw new ShelfError({
       cause,
