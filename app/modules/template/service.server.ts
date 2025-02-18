@@ -1,8 +1,14 @@
 import { AssetStatus } from "@prisma/client";
-import type { Prisma, Organization, Template, User } from "@prisma/client";
+import type {
+  Prisma,
+  Organization,
+  Template,
+  User,
+  Asset,
+} from "@prisma/client";
 import { v4 } from "uuid";
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
 import { createNote } from "../note/service.server";
 
@@ -325,6 +331,74 @@ export async function getTemplates({
       title: "Error fetching templates",
       message:
         "Something went wrong while fetching the templates. Please try again or contact support.",
+      additionalData: { organizationId },
+      label: "Template",
+    });
+  }
+}
+
+export async function getTemplateByAssetIdWithCustodian({
+  assetId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  organizationId: Asset["organizationId"];
+}) {
+  try {
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { id: assetId, organizationId },
+      select: {
+        id: true,
+        title: true,
+        custody: {
+          include: {
+            template: true,
+            custodian: {
+              select: {
+                name: true,
+                user: { select: { id: true, email: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const template = asset.custody?.template;
+    const custodian = asset.custody?.custodian;
+
+    if (!template) {
+      throw new ShelfError({
+        cause: null,
+        message: "Template not found.",
+        label: "Assets",
+      });
+    }
+
+    if (!custodian) {
+      throw new ShelfError({
+        cause: null,
+        message: "Custodian not found.",
+        label: "Assets",
+      });
+    }
+
+    return {
+      asset: {
+        id: asset.id,
+        title: asset.title,
+      },
+      template,
+      custodian,
+    };
+  } catch (cause) {
+    const message = isLikeShelfError(cause)
+      ? cause.message
+      : "Something went wrong while fetching the templates. Please try again or contact support.";
+    throw new ShelfError({
+      cause,
+      title: "Error fetching templates",
+      message,
       additionalData: { organizationId },
       label: "Template",
     });
