@@ -15,11 +15,18 @@ import AgreementPopup from "~/components/sign/agreement-popup";
 import { db } from "~/database/db.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
+import { getTemplateById } from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -129,7 +136,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const method = getActionMethod(request);
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -141,6 +148,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.template,
       action: PermissionAction.read,
     });
+
+    const { templateId } = getParams(
+      params,
+      z.object({ templateId: z.string() })
+    );
 
     switch (method) {
       case "POST": {
@@ -166,6 +178,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           })
         );
 
+        const template = await getTemplateById(templateId);
+
         await db.$transaction(async (tx) => {
           await tx.custody.update({
             where: { assetId },
@@ -190,13 +204,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         await createNote({
-          content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
+          content: `**${user.firstName} ${user.lastName}** has signed [${template.name}](/assets/${assetId}/activity/view-receipt)`,
           type: "UPDATE",
           userId: userId,
           assetId: assetId,
         });
 
-        return redirect(`/assets/${assetId}`);
+        return redirect(`/assets/${assetId}/overview`);
       }
     }
 
