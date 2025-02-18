@@ -239,6 +239,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   <ItemComponent
                     item={item}
                     extraProps={extraItemComponentProps}
+                    bulkActions={bulkActions}
                   />
                 </ListItem>
               ))}

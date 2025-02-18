@@ -125,6 +125,7 @@ export default function IndexLoginForm() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const acceptedInvite = searchParams.get("acceptedInvite");
+  const passwordReset = searchParams.get("password_reset");
   const data = useActionData<typeof action>();
 
   const navigation = useNavigation();
@@ -136,6 +137,13 @@ export default function IndexLoginForm() {
         <div className="mb-8 text-center text-success-600">
           Successfully accepted workspace invite. Please login to see your new
           workspace.
+        </div>
+      ) : null}
+
+      {passwordReset ? (
+        <div className="mb-8 text-center text-success-600">
+          You have successfully reset your password. You can now use your new
+          password to login.
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">

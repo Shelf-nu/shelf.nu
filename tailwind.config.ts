@@ -285,6 +285,10 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.5" },
         },
+        "caret-blink": {
+          "0%,70%,100%": { opacity: "1" },
+          "20%,50%": { opacity: "0" },
+        },
       },
     },
     container: {
@@ -298,6 +302,7 @@ export default {
       slideIn: "slideIn 150ms cubic-bezier(0.16, 1, 0.3, 1)",
       swipeOut: "swipeOut 100ms ease-out",
       pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+      "caret-blink": "caret-blink 1.25s ease-out infinite",
     },
     aspectRatio: {
       auto: "auto",

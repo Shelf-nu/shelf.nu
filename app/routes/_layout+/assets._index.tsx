@@ -366,7 +366,13 @@ export const AssetsList = ({
   );
 };
 
-const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
+const ListAssetContent = ({
+  item,
+  bulkActions,
+}: {
+  item: AssetsFromViewItem;
+  bulkActions?: React.ReactNode;
+}) => {
   const { category, tags, custody, location, kit } = item;
   const { roles } = useUserRoleHelper();
   return (
@@ -374,7 +380,10 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          className="flex justify-between gap-3 py-4  md:justify-normal md:pl-0 md:pr-6"
+          className={tw(
+            "flex justify-between gap-3 py-4  md:justify-normal",
+            bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
+          )}
           to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
