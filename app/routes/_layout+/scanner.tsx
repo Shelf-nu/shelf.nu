@@ -59,8 +59,8 @@ const QRScanner = () => {
   const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   function handleQrDetectionSuccess(qrId: string) {
+    setPaused(true);
     if (!paused) {
-      setPaused(true);
       setScanMessage("Redirecting to mapped asset...");
       navigate(`/qr/${qrId}`);
     }
@@ -78,6 +78,7 @@ const QRScanner = () => {
             onQrDetectionSuccess={handleQrDetectionSuccess}
             devices={devices}
             paused={paused}
+            setPaused={setPaused}
             scanMessage={scanMessage}
           />
         ) : (

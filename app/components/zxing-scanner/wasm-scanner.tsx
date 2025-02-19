@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
-import { readBarcodes } from "zxing-wasm";
-import { isQrId } from "~/utils/id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { drawDetectionBox, getBestBackCamera } from "./utils";
+import { getBestBackCamera, processFrame, setupCamera } from "./utils";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
-  onQrDetectionSuccess?: (qrId: string, error?: string) => void | Promise<void>;
+  onQrDetectionSuccess: (qrId: string, error?: string) => void | Promise<void>;
   devices: MediaDeviceInfo[];
   isLoading?: boolean;
   backButtonText?: string;
@@ -19,13 +17,8 @@ type WasmScannerProps = {
   hideBackButtonText?: boolean;
   className?: string;
   overlayClassName?: string;
-  paused?: boolean;
-
-  /**
-   * If true, scanner will continue processing after successful detection
-   * If false (default), scanner will cleanup and stop after successful detection
-   */
-  continuousScanning?: boolean;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
 
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
@@ -34,274 +27,73 @@ type WasmScannerProps = {
 export const WasmScanner = ({
   devices,
   onQrDetectionSuccess,
-  isLoading: incomingIsLoading,
   backButtonText = "Back",
   allowNonShelfCodes = false,
   hideBackButtonText = false,
   className,
   overlayClassName,
-  paused = false,
+  paused,
+  setPaused,
   scanMessage,
-  continuousScanning = false,
 }: WasmScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedDevice, setSelectedDevice] = useState<string>();
-  const streamRef = useRef<MediaStream | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<
+    string | null | undefined
+  >();
   const animationFrame = useRef<number>(0);
-  // Processing ref to prevent multiple detections
-  const isProcessingRef = useRef<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isInitializing = useRef(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  /**
-   * Cleanup function to stop all ongoing processes and release camera
-   */
-  const cleanup = useCallback(() => {
-    // Cancel any pending animation frames
-    if (animationFrame.current) {
-      cancelAnimationFrame(animationFrame.current);
-      animationFrame.current = 0;
-    }
-
-    // Stop and remove all tracks from the stream
-    if (streamRef.current) {
-      const tracks = streamRef.current.getTracks();
-      tracks.forEach((track) => {
-        track.stop();
-        streamRef.current?.removeTrack(track);
+  useEffect(() => {
+    const setupCameraAsync = async () => {
+      await setupCamera({
+        videoRef,
+        canvasRef,
+        toggleLoading: setIsLoading,
+        selectedDevice,
+        setError,
       });
-      streamRef.current = null;
-    }
+    };
 
-    // Clear video source
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  }, []);
+    void setupCameraAsync();
+  }, [videoRef, canvasRef, selectedDevice]);
 
-  const handleDetection = useCallback(
-    async (result: string) => {
-      if (!result || incomingIsLoading || isProcessingRef.current) return;
+  useEffect(() => {
+    const processFrameAsync = async () => {
+      await processFrame({
+        videoRef,
+        canvasRef,
+        animationFrame,
+        paused,
+        setPaused,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+      });
+    };
 
-      isProcessingRef.current = true;
+    void processFrameAsync();
+  }, [
+    videoRef,
+    canvasRef,
+    animationFrame,
+    paused,
+    setPaused,
+    onQrDetectionSuccess,
+    allowNonShelfCodes,
+  ]);
 
-      try {
-        const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-        const match = result.match(regex);
-
-        if (!match && !allowNonShelfCodes) {
-          await onQrDetectionSuccess?.(
-            result,
-            "Scanned code is not a valid Shelf QR code."
-          );
-          return;
-        }
-
-        if (typeof navigator.vibrate === "function") {
-          navigator.vibrate(200);
-        }
-
-        const qrId = match ? match[2] : result;
-        if (match && !isQrId(qrId)) {
-          await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
-          return;
-        }
-
-        // Only cleanup if not in continuous scanning mode
-        if (!continuousScanning) {
-          cleanup();
-        }
-
-        await onQrDetectionSuccess?.(qrId);
-      } finally {
-        isProcessingRef.current = false;
+  useEffect(
+    () => () => {
+      // Cleanup to prevent memory leaks
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
       }
     },
-    [
-      incomingIsLoading,
-      allowNonShelfCodes,
-      onQrDetectionSuccess,
-      cleanup,
-      continuousScanning,
-    ]
+    [animationFrame]
   );
-
-  const updateCanvasSize = useCallback(() => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-  }, []);
-
-  const setupCamera = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const currentVideoTrack = streamRef.current?.getVideoTracks()[0];
-      // Skip redundant initialization
-      if (
-        currentVideoTrack?.readyState === "live" &&
-        currentVideoTrack?.getSettings().deviceId === selectedDevice
-      ) {
-        return;
-      }
-
-      // Cleanup previous stream
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
-
-      const constraints = selectedDevice
-        ? { deviceId: { exact: selectedDevice } }
-        : { facingMode: "environment" };
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: constraints,
-        audio: false,
-      });
-
-      // Handle component unmount while waiting for camera
-      if (!videoRef.current) return;
-
-      streamRef.current = stream;
-      videoRef.current.srcObject = stream;
-
-      // Wait for video to be ready
-      await new Promise((resolve) => {
-        const handleLoadedMetadata = () => {
-          updateCanvasSize();
-          videoRef.current!.removeEventListener(
-            "loadedmetadata",
-            handleLoadedMetadata
-          );
-          resolve(undefined);
-        };
-        videoRef.current!.addEventListener(
-          "loadedmetadata",
-          handleLoadedMetadata
-        );
-      });
-
-      await videoRef.current.play();
-    } catch (error) {
-      setError(
-        `Camera error: ${error instanceof Error ? error.message : error}`
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedDevice, updateCanvasSize]);
-
-  const processFrame = useCallback(async () => {
-    if (
-      !videoRef.current ||
-      !canvasRef.current ||
-      paused ||
-      isProcessingRef.current
-    ) {
-      return;
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    // Ensure canvas matches video source dimensions
-    if (
-      canvas.width !== video.videoWidth ||
-      canvas.height !== video.videoHeight
-    ) {
-      updateCanvasSize();
-    }
-
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
-
-    try {
-      // Check if video is actually playing and has valid dimensions
-      if (
-        video.readyState !== video.HAVE_ENOUGH_DATA ||
-        !video.videoWidth ||
-        !video.videoHeight
-      ) {
-        animationFrame.current = requestAnimationFrame(processFrame);
-        return;
-      }
-
-      const videoWidth = video.videoWidth;
-      const videoHeight = video.videoHeight;
-
-      canvas.width = videoWidth;
-      canvas.height = videoHeight;
-      ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-      const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
-
-      const results = await readBarcodes(imageData, {
-        tryHarder: true,
-        formats: ["QRCode"],
-        maxNumberOfSymbols: 1,
-      });
-
-      if (results.length > 0 && !isProcessingRef.current) {
-        const result = results[0];
-        drawDetectionBox(ctx, result.position);
-        await handleDetection(result.text);
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("Frame processing error:", error);
-    }
-
-    // Always request next frame unless paused
-    if (!paused) {
-      animationFrame.current = requestAnimationFrame(processFrame);
-    }
-  }, [paused, updateCanvasSize, handleDetection]);
-
-  // Simplified initialization flow
-  useEffect(() => {
-    const abortController = new AbortController();
-
-    const initCamera = async () => {
-      isInitializing.current = true;
-      await setupCamera();
-      if (!paused) {
-        animationFrame.current = requestAnimationFrame(processFrame);
-      }
-    };
-    void initCamera();
-    const resizeObserver = new ResizeObserver(updateCanvasSize);
-
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      abortController.abort();
-      cleanup();
-      resizeObserver.disconnect();
-      isInitializing.current = false;
-    };
-  }, [setupCamera, processFrame, paused, cleanup, updateCanvasSize]);
-
-  // Handle device selection changes
-  useEffect(() => {
-    if (selectedDevice) {
-      const initCamera = async () => {
-        isInitializing.current = true;
-        await setupCamera();
-        if (!paused) {
-          animationFrame.current = requestAnimationFrame(processFrame);
-        }
-      };
-      void initCamera();
-    }
-  }, [paused, processFrame, selectedDevice, setupCamera]);
 
   // Initialize default device selection
   useEffect(() => {
@@ -311,12 +103,18 @@ export const WasmScanner = ({
       setSelectedDevice(environmentDevice?.deviceId || devices[0]?.deviceId);
     }
   }, [devices, selectedDevice]);
+  // This ccould be a good improvement
+  // useEffect(() => {
+  //   async function playVideo() {
+  //     if (paused) {
+  //       videoRef.current?.pause();
+  //     } else {
+  //       await videoRef.current?.play();
+  //     }
+  //   }
 
-  const handleDeviceChange = (deviceId: string) => {
-    // cleanup(); // Explicit cleanup before switch
-    isInitializing.current = true;
-    setSelectedDevice(deviceId);
-  };
+  //   void playVideo();
+  // }, [paused]);
 
   return (
     <div
@@ -380,8 +178,8 @@ export const WasmScanner = ({
 
           <div>
             <select
-              value={selectedDevice}
-              onChange={(e) => handleDeviceChange(e.target.value)}
+              value={selectedDevice || devices[0]?.deviceId}
+              onChange={(e) => setSelectedDevice(e.target.value)}
               className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
             >
               {devices.map((device, index) => (
@@ -399,7 +197,6 @@ export const WasmScanner = ({
             overlayClassName
           )}
         >
-          {/* {true && ( */}
           {paused && (
             <div className="flex h-full flex-col items-center justify-center bg-white p-4 text-center">
               <h5>Code detected</h5>

@@ -119,6 +119,7 @@ export default function RelinkQrCodeDialog({
                 allowNonShelfCodes
                 hideBackButtonText
                 paused={!!newQrId}
+                setPaused={() => {}}
               />
             ) : (
               <DevicesPermissionComponent />

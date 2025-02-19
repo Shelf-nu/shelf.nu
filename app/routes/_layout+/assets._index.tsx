@@ -387,7 +387,7 @@ const ListAssetContent = ({
           to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center relative">
+            <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
