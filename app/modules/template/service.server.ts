@@ -356,7 +356,14 @@ export async function getTemplateByAssetIdWithCustodian({
             custodian: {
               select: {
                 name: true,
-                user: { select: { id: true, email: true } },
+                user: {
+                  select: {
+                    id: true,
+                    email: true,
+                    firstName: true,
+                    lastName: true,
+                  },
+                },
               },
             },
           },
