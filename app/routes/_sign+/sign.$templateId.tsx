@@ -1,4 +1,4 @@
-import { AssetStatus, Roles } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { Viewer, Worker } from "@react-pdf-viewer/core";
 import type {
   ActionFunctionArgs,
@@ -10,15 +10,16 @@ import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import Agreement from "~/components/sign/agreement";
-import AgreementPopup from "~/components/sign/agreement-popup";
 
+import AgreementDialog from "~/components/sign/agreement-dialog";
 import { db } from "~/database/db.server";
-import { getAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
-import { getTemplateById } from "~/modules/template";
+import {
+  getTemplateByAssetIdWithCustodian,
+  getTemplateById,
+} from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   data,
@@ -34,11 +35,18 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import "@react-pdf-viewer/core/lib/styles/index.css";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.read,
+    });
+
     const { searchParams } = new URL(request.url);
 
     const { assigneeId, assetId } = parseData(
@@ -48,13 +56,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         assetId: z.string(),
       })
     );
-
-    const { organizationId } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.template,
-      action: PermissionAction.read,
-    });
 
     if (userId !== assigneeId) {
       throw new ShelfError({
@@ -66,24 +67,16 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       });
     }
 
-    const asset = await getAsset({
-      id: assetId,
+    const { custody, template } = await getTemplateByAssetIdWithCustodian({
+      assetId,
       organizationId,
-      include: {
-        custody: {
-          include: { template: true },
-        },
-      },
     });
-
-    const custody = asset.custody;
-    const template = custody?.template;
-
-    if (!custody || !template) {
+    if (custody.templateSigned) {
       throw new ShelfError({
         cause: null,
-        label: "Custody",
-        message: "Custody or template does not exists.",
+        message: "Asset custody has already been signed",
+        status: 400,
+        label: "Assets",
       });
     }
 
@@ -96,19 +89,14 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       },
     });
 
-    if (!template) {
+    if (!templateFile) {
       throw new ShelfError({
         cause: null,
-        message: "Template not found",
+        message: "Template file not found",
         status: 404,
         label: "Template",
       });
     }
-
-    const user = await db.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: { roles: true },
-    });
 
     const header: HeaderData = {
       title: `Sign "${template.name}"`,
@@ -117,20 +105,15 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     return json(
       data({
         header,
-        user,
-        currentOrganizationId: organizationId,
-        enablePremium: ENABLE_PREMIUM_FEATURES,
-        custody,
         template,
         templateFile,
-        isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
       })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
   }
-};
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
@@ -226,20 +209,21 @@ export default function Sign() {
 
   return (
     <div className="flex h-full flex-col md:flex-row">
-      <AgreementPopup templateName={template.name} />
-      <div className="order-2 grow scrollbar-thin md:order-1">
+      <div className="order-2 grow overflow-y-auto md:order-1">
         <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
           <Viewer fileUrl={templateFile?.url ?? ""} />
         </Worker>
       </div>
 
       <div className="order-1 flex size-full flex-col overflow-y-auto overflow-x-clip border-l scrollbar-thin md:order-2 md:w-[400px]">
-        <div className="border-b p-4">
+        <div className="flex items-center justify-between border-b p-4">
           <img
             src="/static/images/logo-full-color(x2).png"
             alt="logo"
             className="h-8"
           />
+
+          <AgreementDialog className="md:hidden" />
         </div>
 
         <div className="border-b p-4">
@@ -249,7 +233,7 @@ export default function Sign() {
           </p>
         </div>
 
-        <Agreement />
+        <Agreement className="hidden md:block" />
       </div>
     </div>
   );

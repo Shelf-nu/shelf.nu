@@ -365,7 +365,8 @@ export async function getTemplateByAssetIdWithCustodian({
     });
 
     const template = asset.custody?.template;
-    const custodian = asset.custody?.custodian;
+    const custody = asset.custody;
+    const custodian = custody?.custodian;
 
     if (!template) {
       throw new ShelfError({
@@ -389,6 +390,7 @@ export async function getTemplateByAssetIdWithCustodian({
         title: asset.title,
       },
       template,
+      custody,
       custodian,
     };
   } catch (cause) {

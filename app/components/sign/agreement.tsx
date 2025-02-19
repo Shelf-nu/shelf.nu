@@ -1,12 +1,25 @@
 import { useRef, useState } from "react";
 import { Form, useNavigation } from "@remix-run/react";
 import SignatureCanvas from "react-signature-canvas";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
 import { isFormProcessing } from "~/utils/form";
 import { PenIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import { Checkbox } from "../shared/checkbox";
+import When from "../when/when";
 
-export default function Agreement() {
+type AgreementProps = {
+  className?: string;
+};
+
+const SignValidationSchema = z.object({
+  terms: z
+    .string({ required_error: "Please accept the terms." })
+    .transform((value) => value === "on"),
+});
+
+export default function Agreement({ className }: AgreementProps) {
   const [canvasClicked, setCanvasClicked] = useState(false);
   const signatureRef = useRef<null | SignatureCanvas>(null);
   const navigation = useNavigation();
@@ -15,11 +28,13 @@ export default function Agreement() {
   const [signatureText, setSignatureText] = useState("");
   const [signatureImage, setSignatureImage] = useState("");
 
+  const zo = useZorm("SignAgreement", SignValidationSchema);
+
   return (
-    <>
-      <div className="flex gap-x-2 border-b p-4">
+    <Form className={className} ref={zo.ref} method="POST">
+      <div className="border-b p-4">
         <div className="flex h-fit space-x-2">
-          <Checkbox id="terms1" />
+          <Checkbox id="terms1" name={zo.fields.terms()} />
           <div className="grid gap-1.5 leading-none">
             <label
               htmlFor="terms1"
@@ -33,6 +48,10 @@ export default function Agreement() {
             </p>
           </div>
         </div>
+
+        <When truthy={Boolean(zo.errors.terms()?.message)}>
+          <p className="text-sm text-error-500">{zo.errors.terms()?.message}</p>
+        </When>
       </div>
 
       <div
@@ -68,17 +87,16 @@ export default function Agreement() {
           }}
         />
 
-        <Form method="post">
-          <input type="hidden" name="signatureImage" value={signatureImage} />
-          <input type="hidden" name="signatureText" value={signatureText} />
-          <Button
-            disabled={(!signatureImage && !signatureText) || disabled}
-            variant="primary"
-          >
-            Sign
-          </Button>
-        </Form>
+        <input type="hidden" name="signatureImage" value={signatureImage} />
+        <input type="hidden" name="signatureText" value={signatureText} />
+
+        <Button
+          disabled={(!signatureImage && !signatureText) || disabled}
+          variant="primary"
+        >
+          Sign
+        </Button>
       </div>
-    </>
+    </Form>
   );
 }
