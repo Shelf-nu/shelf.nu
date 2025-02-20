@@ -485,9 +485,14 @@ export async function updateUserFromSSO(
       transitions,
     };
   } catch (cause) {
+    let message = `Failed to update SSO user: ${email}.`;
+
+    if (isLikeShelfError(cause)) {
+      message = message + ` ${cause.message}`;
+    }
     throw new ShelfError({
       cause,
-      message: `Failed to update SSO user: ${email}`,
+      message,
       additionalData: {
         email,
         userId,
