@@ -175,7 +175,8 @@ export default function ScanAssetsForBookings() {
             onQrDetectionSuccess={handleQrDetectionSuccess}
             backButtonText="Booking"
             allowNonShelfCodes
-            continuousScanning={true}
+            paused={false}
+            setPaused={() => {}}
           />
         ) : (
           <DevicesPermissionComponent />

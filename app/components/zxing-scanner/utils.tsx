@@ -1,4 +1,5 @@
-import type { ReadResult } from "zxing-wasm";
+import { readBarcodes, type ReadResult } from "zxing-wasm";
+import { isQrId } from "~/utils/id";
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -133,4 +134,209 @@ export const drawDetectionBox = (
     ctx.fillStyle = "red";
     ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
   });
+};
+
+/** Sets up the camera, for the scanner to work */
+export const setupCamera = async ({
+  videoRef,
+  canvasRef,
+  toggleLoading,
+  selectedDevice,
+  setError,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  toggleLoading: (loading: boolean) => void;
+  selectedDevice: string | null | undefined;
+  setError: (error: string) => void;
+}) => {
+  try {
+    toggleLoading(true);
+
+    const constraints = selectedDevice
+      ? { deviceId: { exact: selectedDevice } }
+      : { facingMode: "environment" };
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: constraints,
+      audio: false,
+    });
+    const videoElement = videoRef.current;
+    // Handle component unmount while waiting for camera
+    if (!videoElement) return;
+
+    videoElement.srcObject = stream;
+
+    videoElement.onloadedmetadata = async () => {
+      await videoElement.play();
+      updateCanvasSize({ videoRef, canvasRef });
+    };
+  } catch (error) {
+    setError(`Camera error: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    toggleLoading(false);
+  }
+};
+
+export const processFrame = async ({
+  videoRef,
+  canvasRef,
+  animationFrame,
+  paused,
+  setPaused,
+  onQrDetectionSuccess,
+  allowNonShelfCodes,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  animationFrame: React.MutableRefObject<number>;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
+  onQrDetectionSuccess: (
+    qrId: string,
+    message?: string
+  ) => void | Promise<void>;
+  allowNonShelfCodes: boolean;
+}) => {
+  if (!videoRef.current || !canvasRef.current || paused) {
+    /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
+    if (animationFrame.current) {
+      cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = 0;
+    }
+    return;
+  }
+  const video = videoRef.current;
+  const canvas = canvasRef.current;
+
+  // Ensure canvas matches video source dimensions
+  if (
+    canvas.width !== video.videoWidth ||
+    canvas.height !== video.videoHeight
+  ) {
+    updateCanvasSize({ videoRef, canvasRef });
+  }
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+
+  try {
+    // Check if video is actually playing and has valid dimensions
+    if (
+      (video.readyState !== video.HAVE_ENOUGH_DATA ||
+        !video.videoWidth ||
+        !video.videoHeight) &&
+      !paused
+    ) {
+      animationFrame.current = requestAnimationFrame(() =>
+        processFrame({
+          videoRef,
+          canvasRef,
+          animationFrame,
+          paused,
+          setPaused,
+          onQrDetectionSuccess,
+          allowNonShelfCodes,
+        })
+      );
+      return;
+    }
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+    ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+
+    const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+
+    const results = await readBarcodes(imageData, {
+      tryHarder: true,
+      formats: ["QRCode"],
+      maxNumberOfSymbols: 1,
+    });
+
+    if (results.length > 0) {
+      const result = results[0];
+      drawDetectionBox(ctx, result.position);
+      await handleDetection({
+        result: result.text,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+        paused,
+      });
+      setPaused(true);
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Frame processing error:", error);
+  }
+
+  // Always request next frame unless paused
+  if (!paused) {
+    animationFrame.current = requestAnimationFrame(() =>
+      processFrame({
+        videoRef,
+        canvasRef,
+        animationFrame,
+        paused,
+        setPaused,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+      })
+    );
+  }
+};
+
+const handleDetection = async ({
+  result,
+  allowNonShelfCodes,
+  onQrDetectionSuccess,
+  paused,
+}: {
+  result: string;
+  allowNonShelfCodes: boolean;
+  onQrDetectionSuccess?: (
+    qrId: string,
+    message?: string
+  ) => void | Promise<void>;
+  paused: boolean;
+}) => {
+  if (!result || paused) return;
+
+  const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+  const match = result.match(regex);
+
+  if (!match && !allowNonShelfCodes) {
+    await onQrDetectionSuccess?.(
+      result,
+      "Scanned code is not a valid Shelf QR code."
+    );
+    return;
+  }
+
+  const qrId = match ? match[2] : result;
+  if (match && !isQrId(qrId)) {
+    await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+    return;
+  }
+
+  await onQrDetectionSuccess?.(qrId);
+};
+
+/** Updates the canvas size to match the video size */
+const updateCanvasSize = ({
+  videoRef,
+  canvasRef,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+}) => {
+  if (!videoRef.current) return;
+  const video = videoRef.current;
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
 };
