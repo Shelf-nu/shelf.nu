@@ -1,10 +1,12 @@
+import { useRef } from "react";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { getTemplateByAssetIdWithCustodian } from "~/modules/template";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, useHints } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
 import {
@@ -70,6 +72,14 @@ export default function ViewReceipt() {
   const { asset, custodian, custody, organization, template } =
     useLoaderData<typeof loader>();
 
+  const hints = useHints();
+
+  const receiptRef = useRef<HTMLDivElement>(null);
+
+  const downloadReceipt = useReactToPrint({
+    content: () => receiptRef.current,
+  });
+
   return (
     <div className="-m-6">
       <div className="border-b px-6 py-4">
@@ -83,7 +93,7 @@ export default function ViewReceipt() {
         </p>
       </div>
 
-      <div className="bg-gray-50 px-10 py-8">
+      <div ref={receiptRef} className="bg-gray-50 px-10 py-8">
         <div className="border bg-white p-8">
           <div className="mb-10 flex items-center justify-between gap-4">
             <img
@@ -93,7 +103,12 @@ export default function ViewReceipt() {
             />
 
             <p className="text-sm text-gray-500">
-              Generated on {custody.signedOn}
+              Generated on{" "}
+              {new Date().toLocaleString(hints.locale ?? "en-US", {
+                dateStyle: "short",
+                timeStyle: "short",
+                timeZone: hints.timeZone,
+              })}
             </p>
           </div>
 
@@ -138,7 +153,11 @@ export default function ViewReceipt() {
       </div>
 
       <div className="border-t px-6 py-4">
-        <Button variant="secondary" className="w-full">
+        <Button
+          variant="secondary"
+          className="w-full"
+          onClick={downloadReceipt}
+        >
           Download
         </Button>
       </div>
