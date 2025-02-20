@@ -103,18 +103,6 @@ export const WasmScanner = ({
       setSelectedDevice(environmentDevice?.deviceId || devices[0]?.deviceId);
     }
   }, [devices, selectedDevice]);
-  // This ccould be a good improvement
-  // useEffect(() => {
-  //   async function playVideo() {
-  //     if (paused) {
-  //       videoRef.current?.pause();
-  //     } else {
-  //       await videoRef.current?.play();
-  //     }
-  //   }
-
-  //   void playVideo();
-  // }, [paused]);
 
   return (
     <div
