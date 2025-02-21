@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -55,14 +55,19 @@ const QRScanner = () => {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
-  // const { devices, DevicesPermissionComponent } = useVideoDevices();
+  const isNavigating = useRef(false); // Add a ref to track navigation status
 
   function handleQrDetectionSuccess(qrId: string) {
+    // If navigation is already in progress, return early to prevent multiple navigations
+    if (isNavigating.current) return;
+
+    // Set the navigation flag to true to indicate navigation has started
+    isNavigating.current = true;
+
     setPaused(true);
-    if (!paused) {
-      setScanMessage("Redirecting to mapped asset...");
-      navigate(`/qr/${qrId}`);
-    }
+
+    setScanMessage("Redirecting to mapped asset...");
+    navigate(`/qr/${qrId}`);
   }
 
   return (

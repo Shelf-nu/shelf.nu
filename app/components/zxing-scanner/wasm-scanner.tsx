@@ -67,23 +67,45 @@ export const WasmScanner = ({
         videoElement.removeEventListener("loadedmetadata", handleMetadata);
       };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => {
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+      }
+    };
+  }, [allowNonShelfCodes, onQrDetectionSuccess, paused, setPaused]);
 
-  // Stop the animation loop when paused
+  // Effect to handle pause and resume
   useEffect(() => {
-    if (paused && animationFrame.current) {
-      cancelAnimationFrame(animationFrame.current);
-      animationFrame.current = 0;
+    if (paused) {
+      // Cancel the animation frame when paused
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+        animationFrame.current = 0;
+      }
+    } else {
+      // Start processing frames when unpaused
+      const videoElement = videoRef.current?.video;
+      const canvasElement = canvasRef.current;
+      if (videoElement && canvasElement) {
+        const handleMetadata = async () => {
+          // Video metadata is loaded, safe to start capturing
+          if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+            await processFrame({
+              video: videoElement,
+              canvas: canvasElement,
+              animationFrame,
+              paused,
+              setPaused,
+              onQrDetectionSuccess,
+              allowNonShelfCodes,
+              setError,
+            });
+          }
+        };
+        void handleMetadata();
+      }
     }
-  }, [paused]);
-
-  // Clean up the animation loop on component unmount
-  useEffect(() => {
-    if (animationFrame.current) {
-      cancelAnimationFrame(animationFrame.current);
-    }
-  }, []);
+  }, [paused, allowNonShelfCodes, onQrDetectionSuccess, setPaused]);
 
   return (
     <div
