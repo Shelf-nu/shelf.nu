@@ -9,9 +9,14 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { MAX_IMAGE_UPLOAD_SIZE } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
-import type { AdditionalData, ErrorLabel } from "./error";
-import { isLikeShelfError, ShelfError } from "./error";
+import {
+  isLikeShelfError,
+  ShelfError,
+  type AdditionalData,
+  type ErrorLabel,
+} from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { getFileArrayBuffer } from "./getFileArrayBuffer";
 import {
   cacheOptimizedImage,
   type CachedImage,
@@ -20,7 +25,7 @@ import { Logger } from "./logger";
 
 const label: ErrorLabel = "File storage";
 
-export function getPublicFileURL({
+export async function getPublicFileURL({
   filename,
   bucketName = "profile-pictures",
 }: {
@@ -28,6 +33,7 @@ export function getPublicFileURL({
   bucketName?: string;
 }) {
   try {
+    await bucketExists(bucketName);
     const { data } = getSupabaseAdmin()
       .storage.from(bucketName)
       .getPublicUrl(filename);
@@ -50,6 +56,8 @@ export async function createSignedUrl({
   filename: string;
   bucketName?: string;
 }) {
+  await bucketExists(bucketName);
+
   try {
     // Check if there is a leading slash and we need to remove it as signing will not work with the slash included
     if (filename.startsWith("/")) {
@@ -76,16 +84,30 @@ export async function createSignedUrl({
   }
 }
 
+async function bucketExists(bucketName: string) {
+  const { error } = await getSupabaseAdmin().storage.getBucket(bucketName);
+
+  if (error) {
+    throw new ShelfError({
+      label: "Storage",
+      cause: null,
+      message: `Storage bucket "${bucketName}" does not exist. If the issue persists, please contact administrator.`,
+    });
+  }
+}
+
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
   { filename, contentType, bucketName, resizeOptions }: UploadOptions
 ) {
   try {
-    const file = await cropImage(fileData, resizeOptions);
+    let file = resizeOptions
+      ? await cropImage(fileData, resizeOptions)
+      : await getFileArrayBuffer(fileData);
 
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
-      .upload(filename, file, { contentType, upsert: true });
+      .upload(filename, file, { contentType });
 
     if (error) {
       throw error;
@@ -122,20 +144,23 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
 }) {
   try {
+    await bucketExists(bucketName);
+
     const uploadHandler = unstable_composeUploadHandlers(
       async ({ contentType, data, filename }) => {
-        if (!contentType?.includes("image")) {
+        if (!contentType) return undefined;
+        if (contentType?.includes("image") && contentType.includes("pdf"))
           return undefined;
-        }
+        const fileExtension = contentType.includes("pdf")
+          ? "pdf"
+          : filename?.split(".").pop();
 
-        const fileExtension = filename?.split(".").pop();
         const uploadedFilePath = await uploadFile(data, {
           filename: `${newFileName}.${fileExtension}`,
           contentType,
           bucketName,
           resizeOptions,
         });
-
         return uploadedFilePath;
       }
     );
