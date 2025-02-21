@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
-import Webcam from "react-webcam";
+import Webcam from "react-webcam"; // Adjust import path as needed
 import { ClientOnly } from "remix-utils/client-only";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
@@ -19,8 +19,6 @@ type WasmScannerProps = {
   overlayClassName?: string;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-
-  /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
 };
 
@@ -40,35 +38,77 @@ export const WasmScanner = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState<string | undefined>(undefined);
 
-  // Start the animation loop when the video starts playing
+  // Enumerate devices after requesting camera permission
+  const enumerateDevicesWithPermission = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((track) => track.stop());
+
+      const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = mediaDevices.filter(
+        ({ kind }) => kind === "videoinput"
+      );
+      setDevices(videoDevices);
+
+      const defaultDevice =
+        videoDevices.find((d) => d.label.toLowerCase().includes("back")) ||
+        videoDevices[0];
+      setDeviceId(defaultDevice?.deviceId);
+      setIsLoading(false);
+    } catch (err) {
+      setError(
+        `Failed to access camera: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void enumerateDevicesWithPermission();
+  }, [enumerateDevicesWithPermission]);
+
+  // Start the animation loop when the video is ready
   useEffect(() => {
     const videoElement = videoRef.current?.video;
     const canvasElement = canvasRef.current;
-    if (videoElement && canvasElement) {
-      const handleMetadata = async () => {
-        // Video metadata is loaded, safe to start capturing
-        if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-          await processFrame({
-            video: videoElement,
-            canvas: canvasElement,
-            animationFrame,
-            paused,
-            setPaused,
-            onQrDetectionSuccess,
-            allowNonShelfCodes,
-            setError,
-          });
-        }
-      };
-      videoElement.addEventListener("loadedmetadata", handleMetadata);
-      return () => {
-        videoElement.removeEventListener("loadedmetadata", handleMetadata);
-      };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    if (!videoElement || !canvasElement || isLoading) return;
+
+    const handleMetadata = async () => {
+      if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+        await processFrame({
+          video: videoElement,
+          canvas: canvasElement,
+          animationFrame,
+          paused,
+          setPaused,
+          onQrDetectionSuccess,
+          allowNonShelfCodes,
+          setError,
+        });
+      }
+    };
+
+    videoElement.addEventListener("loadedmetadata", handleMetadata);
+    return () => {
+      videoElement.removeEventListener("loadedmetadata", handleMetadata);
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+      }
+    };
+  }, [
+    deviceId, // Re-run when device changes
+    isLoading, // Wait until loading is complete
+    paused,
+    onQrDetectionSuccess,
+    allowNonShelfCodes,
+  ]);
 
   // Stop the animation loop when paused
   useEffect(() => {
@@ -78,12 +118,15 @@ export const WasmScanner = ({
     }
   }, [paused]);
 
-  // Clean up the animation loop on component unmount
-  useEffect(() => {
-    if (animationFrame.current) {
-      cancelAnimationFrame(animationFrame.current);
-    }
-  }, []);
+  // Clean up on unmount
+  useEffect(
+    () => () => {
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+      }
+    },
+    []
+  );
 
   return (
     <div
@@ -94,7 +137,6 @@ export const WasmScanner = ({
       )}
     >
       <div className="relative size-full overflow-hidden">
-        {/* Error State Overlay */}
         {error && error !== "" && (
           <InfoOverlay>
             <p className="mb-4">{error}</p>
@@ -116,28 +158,30 @@ export const WasmScanner = ({
           </InfoOverlay>
         )}
 
-        <Webcam
-          ref={videoRef}
-          audio={false}
-          videoConstraints={{ facingMode: "environment" }}
-          onUserMediaError={(e) => {
-            setError(`Camera error: ${e instanceof Error ? e.message : e}`);
-            setIsLoading(false);
-          }}
-          onUserMedia={() => {
-            const video = videoRef.current?.video;
-            const canvas = canvasRef.current;
-
-            if (!video || !canvas) {
-              setError("Canvas or video element not found");
+        {!isLoading && deviceId && (
+          <Webcam
+            ref={videoRef}
+            audio={false}
+            videoConstraints={{
+              deviceId: { exact: deviceId },
+            }}
+            onUserMediaError={(e) => {
+              setError(`Camera error: ${e instanceof Error ? e.message : e}`);
               setIsLoading(false);
-              return;
-            }
-            updateCanvasSize({ video, canvas });
-            setIsLoading(false);
-          }}
-          className="pointer-events-none size-full object-cover"
-        />
+            }}
+            onUserMedia={() => {
+              const video = videoRef.current?.video;
+              const canvas = canvasRef.current;
+              if (!video || !canvas) {
+                setError("Canvas or video element not found");
+                setIsLoading(false);
+                return;
+              }
+              updateCanvasSize({ video, canvas });
+            }}
+            className="pointer-events-none size-full object-cover"
+          />
+        )}
 
         <canvas
           ref={canvasRef}
@@ -154,6 +198,22 @@ export const WasmScanner = ({
                 <TriangleLeftIcon className="size-[14px]" />
                 <span className="mt-[-0.5px]">{backButtonText}</span>
               </Link>
+            )}
+          </div>
+          <div>
+            {devices.length > 1 && (
+              <select
+                value={deviceId || ""}
+                onChange={(e) => setDeviceId(e.target.value)}
+                className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
+                aria-label="Select camera device"
+              >
+                {devices.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Camera ${index + 1}`}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
         </div>
@@ -179,19 +239,15 @@ export const WasmScanner = ({
   );
 };
 
+// Assuming these are unchanged
 function InfoOverlay({ children }: { children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
-      <div className="text-center text-white ">{children}</div>
+      <div className="text-center text-white">{children}</div>
     </div>
   );
 }
 
-/**
- * Visible while camera is loading
- * Displays a spinner and a message
- * If the process takes more than 10 seconds we can safely assume something went wrong and we give the user the option to reload the page
- */
 function Initializing() {
   const [expired, setExpired] = useState(false);
 
@@ -213,7 +269,7 @@ function Initializing() {
             onClick={() => window.location.reload()}
             className={"mt-4"}
           >
-            Reload page
+            Reload Page
           </Button>
         </div>
       )}

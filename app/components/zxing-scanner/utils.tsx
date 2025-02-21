@@ -151,15 +151,11 @@ export const processFrame = async ({
   animationFrame: React.MutableRefObject<number>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  onQrDetectionSuccess: (
-    qrId: string,
-    message?: string
-  ) => void | Promise<void>;
+  onQrDetectionSuccess: (qrId: string, error?: string) => void | Promise<void>;
   allowNonShelfCodes: boolean;
-  setError: (error: string) => void;
+  setError: (error: string | null) => void;
 }) => {
   if (paused) {
-    /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
     if (animationFrame.current) {
       cancelAnimationFrame(animationFrame.current);
       animationFrame.current = 0;
@@ -168,13 +164,16 @@ export const processFrame = async ({
   }
 
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return;
+  if (!ctx) {
+    setError("Failed to get canvas context");
+    return;
+  }
+
   try {
     if (
-      (video.readyState !== video.HAVE_ENOUGH_DATA ||
-        !video.videoWidth ||
-        !video.videoHeight) &&
-      !paused
+      video.readyState !== video.HAVE_ENOUGH_DATA ||
+      !video.videoWidth ||
+      !video.videoHeight
     ) {
       animationFrame.current = requestAnimationFrame(() =>
         processFrame({
@@ -191,14 +190,16 @@ export const processFrame = async ({
       return;
     }
 
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
 
-    canvas.width = videoWidth;
-    canvas.height = videoHeight;
-    ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-    const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+    const imageData = ctx.getImageData(
+      0,
+      0,
+      video.videoWidth,
+      video.videoHeight
+    );
     const results = await readBarcodes(imageData, {
       tryHarder: true,
       formats: ["QRCode"],
@@ -217,7 +218,6 @@ export const processFrame = async ({
       setPaused(true);
     }
   } catch (error) {
-    // eslint-disable-next-line no-console
     setError(
       `Frame processing error: ${
         error instanceof Error ? error.message : String(error)
@@ -225,7 +225,6 @@ export const processFrame = async ({
     );
   }
 
-  // Always request next frame unless paused
   if (!paused) {
     animationFrame.current = requestAnimationFrame(() =>
       processFrame({
