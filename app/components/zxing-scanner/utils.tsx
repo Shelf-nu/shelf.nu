@@ -136,59 +136,18 @@ export const drawDetectionBox = (
   });
 };
 
-/** Sets up the camera, for the scanner to work */
-export const setupCamera = async ({
-  videoRef,
-  canvasRef,
-  toggleLoading,
-  selectedDevice,
-  setError,
-}: {
-  videoRef: React.RefObject<HTMLVideoElement>;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
-  toggleLoading: (loading: boolean) => void;
-  selectedDevice: string | null | undefined;
-  setError: (error: string) => void;
-}) => {
-  try {
-    toggleLoading(true);
-
-    const constraints = selectedDevice
-      ? { deviceId: { exact: selectedDevice } }
-      : { facingMode: "environment" };
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: constraints,
-      audio: false,
-    });
-    const videoElement = videoRef.current;
-    // Handle component unmount while waiting for camera
-    if (!videoElement) return;
-
-    videoElement.srcObject = stream;
-
-    videoElement.onloadedmetadata = async () => {
-      await videoElement.play();
-      updateCanvasSize({ videoRef, canvasRef });
-    };
-  } catch (error) {
-    setError(`Camera error: ${error instanceof Error ? error.message : error}`);
-  } finally {
-    toggleLoading(false);
-  }
-};
-
 export const processFrame = async ({
-  videoRef,
-  canvasRef,
+  video,
+  canvas,
   animationFrame,
   paused,
   setPaused,
   onQrDetectionSuccess,
   allowNonShelfCodes,
+  setError,
 }: {
-  videoRef: React.RefObject<HTMLVideoElement>;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  video: HTMLVideoElement;
+  canvas: HTMLCanvasElement;
   animationFrame: React.MutableRefObject<number>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
@@ -197,8 +156,9 @@ export const processFrame = async ({
     message?: string
   ) => void | Promise<void>;
   allowNonShelfCodes: boolean;
+  setError: (error: string) => void;
 }) => {
-  if (!videoRef.current || !canvasRef.current || paused) {
+  if (paused) {
     /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
     if (animationFrame.current) {
       cancelAnimationFrame(animationFrame.current);
@@ -206,22 +166,10 @@ export const processFrame = async ({
     }
     return;
   }
-  const video = videoRef.current;
-  const canvas = canvasRef.current;
-
-  // Ensure canvas matches video source dimensions
-  if (
-    canvas.width !== video.videoWidth ||
-    canvas.height !== video.videoHeight
-  ) {
-    updateCanvasSize({ videoRef, canvasRef });
-  }
 
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
-
   try {
-    // Check if video is actually playing and has valid dimensions
     if (
       (video.readyState !== video.HAVE_ENOUGH_DATA ||
         !video.videoWidth ||
@@ -230,13 +178,14 @@ export const processFrame = async ({
     ) {
       animationFrame.current = requestAnimationFrame(() =>
         processFrame({
-          videoRef,
-          canvasRef,
+          video,
+          canvas,
           animationFrame,
           paused,
           setPaused,
           onQrDetectionSuccess,
           allowNonShelfCodes,
+          setError,
         })
       );
       return;
@@ -250,7 +199,6 @@ export const processFrame = async ({
     ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
 
     const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
-
     const results = await readBarcodes(imageData, {
       tryHarder: true,
       formats: ["QRCode"],
@@ -270,20 +218,25 @@ export const processFrame = async ({
     }
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error("Frame processing error:", error);
+    setError(
+      `Frame processing error: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 
   // Always request next frame unless paused
   if (!paused) {
     animationFrame.current = requestAnimationFrame(() =>
       processFrame({
-        videoRef,
-        canvasRef,
+        video,
+        canvas,
         animationFrame,
         paused,
         setPaused,
         onQrDetectionSuccess,
         allowNonShelfCodes,
+        setError,
       })
     );
   }
@@ -326,17 +279,14 @@ const handleDetection = async ({
 };
 
 /** Updates the canvas size to match the video size */
-const updateCanvasSize = ({
-  videoRef,
-  canvasRef,
+export const updateCanvasSize = ({
+  video,
+  canvas,
 }: {
-  videoRef: React.RefObject<HTMLVideoElement>;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  video: HTMLVideoElement;
+  canvas: HTMLCanvasElement;
 }) => {
-  if (!videoRef.current) return;
-  const video = videoRef.current;
-  const canvas = canvasRef.current;
-  if (!canvas) return;
+  if (!video || !canvas) return;
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
 };

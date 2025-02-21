@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
+import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { getBestBackCamera, processFrame, setupCamera } from "./utils";
+import { processFrame, updateCanvasSize } from "./utils";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
 type WasmScannerProps = {
   onQrDetectionSuccess: (qrId: string, error?: string) => void | Promise<void>;
-  devices: MediaDeviceInfo[];
   isLoading?: boolean;
   backButtonText?: string;
   allowNonShelfCodes?: boolean;
@@ -25,7 +25,6 @@ type WasmScannerProps = {
 };
 
 export const WasmScanner = ({
-  devices,
   onQrDetectionSuccess,
   backButtonText = "Back",
   allowNonShelfCodes = false,
@@ -36,73 +35,77 @@ export const WasmScanner = ({
   setPaused,
   scanMessage,
 }: WasmScannerProps) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedDevice, setSelectedDevice] = useState<
-    string | null | undefined
-  >();
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
-
   const [isLoading, setIsLoading] = useState(false);
 
+  // Start the animation loop when the video starts playing
   useEffect(() => {
-    const setupCameraAsync = async () => {
-      await setupCamera({
-        videoRef,
-        canvasRef,
-        toggleLoading: setIsLoading,
-        selectedDevice,
-        setError,
-      });
-    };
-
-    void setupCameraAsync();
-  }, [videoRef, canvasRef, selectedDevice]);
-
-  useEffect(() => {
-    const processFrameAsync = async () => {
-      await processFrame({
-        videoRef,
-        canvasRef,
-        animationFrame,
-        paused,
-        setPaused,
-        onQrDetectionSuccess,
-        allowNonShelfCodes,
-      });
-    };
-
-    void processFrameAsync();
-  }, [
-    videoRef,
-    canvasRef,
-    animationFrame,
-    paused,
-    setPaused,
-    onQrDetectionSuccess,
-    allowNonShelfCodes,
-  ]);
-
-  useEffect(
-    () => () => {
-      // Cleanup to prevent memory leaks
+    const videoElement = videoRef.current?.video;
+    const canvasElement = canvasRef.current;
+    if (videoElement && canvasElement) {
+      const handleMetadata = async () => {
+        // Video metadata is loaded, safe to start capturing
+        if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+          await processFrame({
+            video: videoElement,
+            canvas: canvasElement,
+            animationFrame,
+            paused,
+            setPaused,
+            onQrDetectionSuccess,
+            allowNonShelfCodes,
+            setError,
+          });
+        }
+      };
+      videoElement.addEventListener("loadedmetadata", handleMetadata);
+      return () => {
+        videoElement.removeEventListener("loadedmetadata", handleMetadata);
+      };
+    }
+    return () => {
       if (animationFrame.current) {
         cancelAnimationFrame(animationFrame.current);
       }
-    },
-    [animationFrame]
-  );
+    };
+  }, [allowNonShelfCodes, onQrDetectionSuccess, paused, setPaused]);
 
-  // Initialize default device selection
+  // Effect to handle pause and resume
   useEffect(() => {
-    if (devices.length > 0 && !selectedDevice) {
-      // Find first device with environment facing mode (if available)
-      const environmentDevice = getBestBackCamera(devices);
-      setSelectedDevice(environmentDevice?.deviceId || devices[0]?.deviceId);
+    if (paused) {
+      // Cancel the animation frame when paused
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+        animationFrame.current = 0;
+      }
+    } else {
+      // Start processing frames when unpaused
+      const videoElement = videoRef.current?.video;
+      const canvasElement = canvasRef.current;
+      if (videoElement && canvasElement) {
+        const handleMetadata = async () => {
+          // Video metadata is loaded, safe to start capturing
+          if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+            await processFrame({
+              video: videoElement,
+              canvas: canvasElement,
+              animationFrame,
+              paused,
+              setPaused,
+              onQrDetectionSuccess,
+              allowNonShelfCodes,
+              setError,
+            });
+          }
+        };
+        void handleMetadata();
+      }
     }
-  }, [devices, selectedDevice]);
+  }, [paused, allowNonShelfCodes, onQrDetectionSuccess, setPaused]);
 
   return (
     <div
@@ -135,17 +138,29 @@ export const WasmScanner = ({
           </InfoOverlay>
         )}
 
-        <video
+        <Webcam
           ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="pointer-events-none size-full object-cover"
-          onError={(e) => {
-            setError(`Video error: ${e.currentTarget.error?.message}`);
+          audio={false}
+          videoConstraints={{ facingMode: "environment" }}
+          onUserMediaError={(e) => {
+            setError(`Camera error: ${e instanceof Error ? e.message : e}`);
             setIsLoading(false);
           }}
+          onUserMedia={() => {
+            const video = videoRef.current?.video;
+            const canvas = canvasRef.current;
+
+            if (!video || !canvas) {
+              setError("Canvas or video element not found");
+              setIsLoading(false);
+              return;
+            }
+            updateCanvasSize({ video, canvas });
+            setIsLoading(false);
+          }}
+          className="pointer-events-none size-full object-cover"
         />
+
         <canvas
           ref={canvasRef}
           className="pointer-events-none absolute left-0 top-0 size-full object-cover"
@@ -162,20 +177,6 @@ export const WasmScanner = ({
                 <span className="mt-[-0.5px]">{backButtonText}</span>
               </Link>
             )}
-          </div>
-
-          <div>
-            <select
-              value={selectedDevice || devices[0]?.deviceId}
-              onChange={(e) => setSelectedDevice(e.target.value)}
-              className="z-10 rounded border bg-white/10 p-1 text-sm text-white backdrop-blur-sm"
-            >
-              {devices.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Camera ${index + 1}`}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 

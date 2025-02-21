@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -10,7 +10,6 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
-import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -56,14 +55,19 @@ const QRScanner = () => {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 124 : vh - 158;
-  const { devices, DevicesPermissionComponent } = useVideoDevices();
+  const isNavigating = useRef(false); // Add a ref to track navigation status
 
   function handleQrDetectionSuccess(qrId: string) {
+    // If navigation is already in progress, return early to prevent multiple navigations
+    if (isNavigating.current) return;
+
+    // Set the navigation flag to true to indicate navigation has started
+    isNavigating.current = true;
+
     setPaused(true);
-    if (!paused) {
-      setScanMessage("Redirecting to mapped asset...");
-      navigate(`/qr/${qrId}`);
-    }
+
+    setScanMessage("Redirecting to mapped asset...");
+    navigate(`/qr/${qrId}`);
   }
 
   return (
@@ -73,17 +77,12 @@ const QRScanner = () => {
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}
       >
-        {devices ? (
-          <WasmScanner
-            onQrDetectionSuccess={handleQrDetectionSuccess}
-            devices={devices}
-            paused={paused}
-            setPaused={setPaused}
-            scanMessage={scanMessage}
-          />
-        ) : (
-          <DevicesPermissionComponent />
-        )}
+        <WasmScanner
+          onQrDetectionSuccess={handleQrDetectionSuccess}
+          paused={paused}
+          setPaused={setPaused}
+          scanMessage={scanMessage}
+        />
       </div>
     </>
   );

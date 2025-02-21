@@ -5,7 +5,6 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { useVideoDevices } from "~/hooks/use-video-devices";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
@@ -31,7 +30,6 @@ export default function RelinkQrCodeDialog({
     success: boolean;
     error?: { message: string };
   }>();
-  const { devices, DevicesPermissionComponent } = useVideoDevices();
 
   const [currentState, setCurrentState] = useState<CurrentState>("initial");
   const [newQrId, setNewQrId] = useState<string>();
@@ -109,21 +107,16 @@ export default function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
-            {devices ? (
-              <WasmScanner
-                className="h-auto flex-1"
-                overlayClassName="md:h-[320px] max-w-xs"
-                isLoading={false}
-                devices={devices}
-                onQrDetectionSuccess={handleQrDetectionSuccess}
-                allowNonShelfCodes
-                hideBackButtonText
-                paused={!!newQrId}
-                setPaused={() => {}}
-              />
-            ) : (
-              <DevicesPermissionComponent />
-            )}
+            <WasmScanner
+              className="h-auto flex-1"
+              overlayClassName="md:h-[320px] max-w-xs"
+              isLoading={false}
+              onQrDetectionSuccess={handleQrDetectionSuccess}
+              allowNonShelfCodes
+              hideBackButtonText
+              paused={!!newQrId}
+              setPaused={() => {}}
+            />
 
             <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
               <div className="flex-1 truncate text-right">
