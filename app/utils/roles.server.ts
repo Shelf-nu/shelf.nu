@@ -98,7 +98,7 @@ export async function requirePermission({
 export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
-): OrganizationRoles {
+): OrganizationRoles | null {
   // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
   if (ssoDetails.adminGroupId && groupIds.includes(ssoDetails.adminGroupId)) {
     return OrganizationRoles.ADMIN;
@@ -113,13 +113,6 @@ export function getRoleFromGroupId(
   ) {
     return OrganizationRoles.BASE;
   } else {
-    throw new ShelfError({
-      cause: null,
-      title: "Group ID not found",
-      message:
-        "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
-      label: "Auth",
-      additionalData: { ssoDetails, groupIds },
-    });
+    return null;
   }
 }
