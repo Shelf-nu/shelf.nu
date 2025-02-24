@@ -75,6 +75,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           allAssetsInBooking,
         },
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
