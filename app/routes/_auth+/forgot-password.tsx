@@ -146,6 +146,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             message: "Invalid or expired verification code",
             additionalData: { email, otp },
             label: "Auth",
+            shouldBeCaptured: false,
           });
         }
 

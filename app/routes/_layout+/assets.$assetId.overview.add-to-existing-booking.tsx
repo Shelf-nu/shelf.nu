@@ -104,6 +104,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
     const user = await getUserByID(authSession.userId);
