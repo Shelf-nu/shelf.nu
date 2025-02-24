@@ -1,5 +1,6 @@
 import { Link, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
+import { tw } from "~/utils/tw";
 import {
   Select,
   SelectTrigger,
@@ -9,11 +10,15 @@ import {
 } from "../forms/select";
 import { Button } from "../shared/button";
 
-export default function TemplateSelect() {
+type TemplateSelectProps = {
+  className?: string;
+};
+
+export default function TemplateSelect({ className }: TemplateSelectProps) {
   const { templates } = useLoaderData<typeof loader>();
 
   return (
-    <div className="relative w-full">
+    <div className={tw("relative w-full", className)}>
       <Select name="template">
         <SelectTrigger className="text-left">
           <SelectValue placeholder="Select a PDF template" />
@@ -32,10 +37,7 @@ export default function TemplateSelect() {
                 {templates.map((template) => (
                   <SelectItem
                     key={template.id}
-                    value={JSON.stringify({
-                      id: template.id,
-                      name: template.name,
-                    })}
+                    value={template.id}
                     className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
                   >
                     <span className="flex-1 font-medium text-gray-900">

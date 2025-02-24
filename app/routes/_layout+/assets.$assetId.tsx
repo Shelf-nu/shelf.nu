@@ -310,7 +310,7 @@ export default function AssetDetailsPage() {
                   >
                     <Link
                       className="rounded-full bg-gray-200 p-1"
-                      to={`share-template`}
+                      to="overview/share-template"
                     >
                       <Icon icon="sign" />
                     </Link>

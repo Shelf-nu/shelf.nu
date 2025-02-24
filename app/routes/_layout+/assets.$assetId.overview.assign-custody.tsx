@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { Prisma, Template } from "@prisma/client";
 import {
   AssetStatus,
@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { WarningBox } from "~/components/shared/warning-box";
 
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -66,19 +67,14 @@ const CustodianOnlySchema = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
-      email: z.string(),
-      userId: z.string(),
+      email: z.string().email().optional(),
     })
   ),
 });
 
 const CustodianWithTemplateSchema = z.object({
   ...CustodianOnlySchema.shape,
-  template: stringToJSONSchema.pipe(
-    z.object({
-      id: z.string(),
-    })
-  ),
+  template: z.string().min(1, "Template is required."),
 });
 
 const getSchema = (addTemplateEnabled: boolean) =>
@@ -219,7 +215,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id: custodianId,
       name: custodianName,
       email: custodianEmail,
-      userId: custodianUserId,
     } = custodian;
 
     if (isSelfService) {
@@ -239,14 +234,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    let templateId: string | null = null,
-      templateObj: Template | null = null;
+    let template: Template | null = null;
 
     if (addTemplateEnabled) {
-      const template = (parsedData as any).template;
-      templateId = template.id;
+      const templateId = (parsedData as any).template;
 
-      templateObj = await db.template
+      template = await db.template
         .findUnique({ where: { id: templateId as string } })
         .catch((cause) => {
           throw new ShelfError({
@@ -258,7 +251,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
         });
 
-      if (!templateObj)
+      if (!template)
         throw new ShelfError({
           message:
             "Template not found. Please refresh and if the issue persists contact support.",
@@ -269,7 +262,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     let asset = null;
 
-    if (addTemplateEnabled) {
+    if (template) {
       /**
        * In this case, we do the following:
        * 1. We check if the signature is required by the template
@@ -281,14 +274,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .update({
           where: { id: assetId, organizationId },
           data: {
-            status: templateObj!.signatureRequired
+            status: template!.signatureRequired
               ? AssetStatus.AVAILABLE
               : AssetStatus.IN_CUSTODY,
             custody: {
               create: {
-                custodian: { connect: { id: custodianId as string } },
-                template: { connect: { id: templateId as string } },
-                associatedTemplateVersion: templateObj!.lastRevision,
+                custodian: { connect: { id: custodianId } },
+                template: { connect: { id: template.id } },
+                associatedTemplateVersion: template!.lastRevision,
               },
             },
           },
@@ -306,7 +299,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             cause,
             message:
               "Something went wrong while updating asset. Please try again or contact support.",
-            additionalData: { userId, assetId, custodianId, templateId },
+            additionalData: {
+              userId,
+              assetId,
+              custodianId,
+              templateId: template.id,
+            },
             label: "Assets",
           });
         });
@@ -341,17 +339,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             cause,
             message:
               "Something went wrong while updating asset. Please try again or contact support.",
-            additionalData: { userId, assetId, custodianId, templateId },
+            additionalData: { userId, assetId, custodianId },
             label: "Assets",
           });
         });
     }
 
     // If the template was specified, and signature was required
-    if (addTemplateEnabled && templateObj?.signatureRequired) {
+    if (addTemplateEnabled && template?.signatureRequired) {
       /** We create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${template!.name?.trim()}** template before receiving custody.`,
         type: "UPDATE",
         userId: userId,
         assetId: asset.id,
@@ -375,17 +373,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetId: asset.id,
       });
 
-      sendEmail({
-        to: custodianEmail,
-        subject: `You have been assigned custody over ${asset.title}.`,
-        text: assetCustodyAssignedWithTemplateEmailText({
-          assetName: asset.title,
-          assignerName: user.firstName + " " + user.lastName,
-          assetId: asset.id,
-          templateId: templateObj!.id,
-          assigneeId: custodianUserId,
-        }),
-      });
+      /** If there is no email, then custodian is NRM */
+      if (custodianEmail) {
+        sendEmail({
+          to: custodianEmail,
+          subject: `You have been assigned custody over ${asset.title}.`,
+          text: assetCustodyAssignedWithTemplateEmailText({
+            assetName: asset.title,
+            assignerName: user.firstName + " " + user.lastName,
+            assetId: asset.id,
+            templateId: template!.id,
+            assigneeId: custodianId,
+          }),
+        });
+      }
     } else {
       // If the template was not specified
       await createNote({
@@ -403,18 +404,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         senderId: userId,
       });
 
-      sendEmail({
-        to: custodianEmail,
-        subject: `You have been assigned custody over ${asset.title}`,
-        text: assetCustodyAssignedEmailText({
-          assetName: asset.title,
-          assignerName: user.firstName + " " + user.lastName,
-          assetId: asset.id,
-        }),
-      });
+      /** If there is no email, then custodian is NRM */
+      if (custodianEmail) {
+        sendEmail({
+          to: custodianEmail,
+          subject: `You have been assigned custody over ${asset.title}`,
+          text: assetCustodyAssignedEmailText({
+            assetName: asset.title,
+            assignerName: user.firstName + " " + user.lastName,
+            assetId: asset.id,
+          }),
+        });
+      }
     }
 
-    return redirect(`/assets/${assetId}`);
+    return redirect(`/assets/${assetId}/overview/share-template`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return json(error(reason), { status: reason.status });
@@ -427,32 +431,22 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers, templates } = useLoaderData<typeof loader>();
-  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  const hasTemplates = templates.length > 0;
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const actionData = useActionData<typeof action>();
-
+  const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
+  const { isSelfService } = useUserRoleHelper();
+  const [addTemplateEnabled, setAddTemplateEnabled] = useState(false);
   const [selectedCustodyUser, setSelectedCustodyUser] = useState<{
     id: string;
     userId: string | null;
     name: string;
   } | null>(null);
 
-  const selectedCustodianHasUser = useMemo(
-    () => selectedCustodyUser?.userId !== null,
-    [selectedCustodyUser]
-  );
-
-  const shouldDisableSwitch = useMemo(
-    () => selectedCustodyUser === null || !selectedCustodianHasUser,
-    [selectedCustodyUser, selectedCustodianHasUser]
-  );
-
-  const [addTemplateEnabled, setAddTemplateEnabled] = useState(false);
-  const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
-  const { isSelfService } = useUserRoleHelper();
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
+
+  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const hasTemplates = templates.length > 0;
 
   return (
     <Form className="modal-content-wrapper" method="post" ref={zo.ref}>
@@ -497,9 +491,7 @@ export default function Custody() {
               ...item,
               id: JSON.stringify({
                 id: item.id,
-                //If there is a user, we use its name, otherwise we use the name of the team member
                 name: resolveTeamMemberName(item),
-                userId: item?.userId,
                 email: item?.user?.email,
               }),
             })}
@@ -522,21 +514,13 @@ export default function Custody() {
             }}
           />
         </div>
-        {shouldDisableSwitch ? (
+        {!selectedCustodyUser ? (
           <div className="flex gap-x-2">
             <CustomTooltip
               content={
                 <TooltipContent
-                  title={
-                    selectedCustodianHasUser
-                      ? "Please select a custodian"
-                      : "Custodian needs to be a registered user"
-                  }
-                  message={
-                    selectedCustodianHasUser
-                      ? "You need to select a custodian before you can add a PDF template."
-                      : "Signing PDFs is not allowed for NRM and non-users."
-                  }
+                  title="Please select a custodian"
+                  message="You need to select a custodian before you can add a PDF template."
                 />
               }
             >
@@ -561,15 +545,9 @@ export default function Custody() {
           </div>
         )}
 
-        {addTemplateEnabled && (
-          <div className="mt-5">
-            <TemplateSelect />
-            {/* @TODO this still needs to be updated with the new approach. This check wont work as this type is not passed to action data */}
-            {/* {actionData?.type && actionData?.type === "TEMPLATE" && (
-                <div className="text-sm text-error-500">{actionData.error}</div>
-              )} */}
-          </div>
-        )}
+        <When truthy={addTemplateEnabled}>
+          <TemplateSelect className="mt-5" />
+        </When>
 
         {error ? (
           <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
@@ -600,11 +578,7 @@ export default function Custody() {
             variant="primary"
             width="full"
             type="submit"
-            disabled={
-              disabled ||
-              selectedCustodyUser === null ||
-              selectedCustodyUser?.userId === null
-            }
+            disabled={disabled || !selectedCustodyUser}
           >
             Confirm
           </Button>

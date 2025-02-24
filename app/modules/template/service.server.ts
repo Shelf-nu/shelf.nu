@@ -342,7 +342,7 @@ export async function getTemplateByAssetIdWithCustodian({
   organizationId,
 }: {
   assetId: Asset["id"];
-  organizationId: Asset["organizationId"];
+  organizationId?: Asset["organizationId"];
 }) {
   try {
     const asset = await db.asset.findUniqueOrThrow({
@@ -355,6 +355,7 @@ export async function getTemplateByAssetIdWithCustodian({
             template: true,
             custodian: {
               select: {
+                id: true,
                 name: true,
                 user: {
                   select: {
