@@ -1,7 +1,6 @@
 import { InfoIcon } from "lucide-react";
 import type Stripe from "stripe";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
-import { PriceCta } from "./price-cta";
 import type { PriceWithProduct } from "./prices";
 import { DateS } from "../shared/date";
 
@@ -49,27 +48,44 @@ function SubscriptionBox({
     [key: string]: PriceWithProduct[];
   };
 }) {
-  console.log("subscription", subscription);
   const item = subscription.items.data[0];
-
   const subscriptionPrice = findPriceById(prices, item.price.id);
 
-  let planTier, interval;
+  let planTier;
+  let interval = undefined as Stripe.Price.Recurring.Interval | undefined;
   if (subscriptionPrice) {
     // You can safely access product metadata and other fields
     planTier = subscriptionPrice.product.metadata.shelf_tier;
-    interval = subscriptionPrice.recurring?.interval;
+    interval = subscriptionPrice.recurring?.interval as
+      | Stripe.Price.Recurring.Interval
+      | undefined;
   }
-  const isTrial =
-    !!subscription?.trial_end && subscription.status === "trialing";
-  const isActive = subscription.status === "active";
-  const isPaused = subscription.status === "paused";
 
-  /** Cost for singular price. To get the total we still need to multiply by quantity */
+  const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
   const costPerPrice =
     isActive || isTrial
-      ? (item?.price?.unit_amount * subscription?.quantity) / 100
+      ? // @ts-ignore
+        (item?.price?.unit_amount * subscription?.quantity) / 100
       : 0;
+  function renderSubscriptionCost() {
+    /** Cost for singular price. To get the total we still need to multiply by quantity */
+
+    if (isPaused) return "Paused";
+    return (
+      <>
+        <div>
+          {new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+          }).format(costPerPrice)}{" "}
+          / {interval}
+        </div>
+
+        {isTrial && <div className="text-gray-500">after trial ends</div>}
+      </>
+    );
+  }
+
   return (
     <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -78,7 +94,10 @@ function SubscriptionBox({
       <div className="flex w-full items-center justify-between">
         <div>
           <div className="flex gap-2">
-            <div className="mr-5">{subscription.id}</div>
+            <div className="mr-5">
+              {" "}
+              <span className="font-medium">id:</span> {subscription.id}
+            </div>
             {[
               subscription.status,
               planTier === "tier_2" ? "Team plan" : "Plus plan",
@@ -130,17 +149,7 @@ function SubscriptionBox({
             </div>
           </div>
         </div>
-        <div className="text-right">
-          <div>
-            {new Intl.NumberFormat("en-US", {
-              style: "currency",
-              currency: "USD",
-            }).format(costPerPrice)}{" "}
-            / {interval}
-          </div>
-
-          {isTrial && <div className="text-gray-500">after trial ends</div>}
-        </div>
+        <div className="text-right">{renderSubscriptionCost()}</div>
       </div>
     </div>
   );
@@ -175,4 +184,17 @@ function calculateDaysLeft(unixTimestamp: number): number {
   const differenceInMs = trialEndDate.getTime() - currentDate.getTime();
   const differenceInDays = Math.floor(differenceInMs / (1000 * 60 * 60 * 24));
   return differenceInDays;
+}
+
+/**
+ * Determines the status of a subscription based on its properties
+ * @param subscription - The subscription object to check the status of
+ * @returns  An object containing the status of the subscription
+ */
+function getSubscriptionStatus(subscription: Stripe.Subscription) {
+  return {
+    isTrial: !!subscription?.trial_end && subscription.status === "trialing",
+    isActive: subscription.status === "active",
+    isPaused: subscription.status === "paused",
+  };
 }
