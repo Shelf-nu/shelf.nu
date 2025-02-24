@@ -87,6 +87,7 @@ export function extractCSVDataFromContentImport(
         "Invalid headers in csv file. Please fix the headers and try again.",
       additionalData: { defectedHeaders },
       label: "Assets",
+      shouldBeCaptured: false,
     });
   }
 
