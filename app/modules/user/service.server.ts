@@ -266,6 +266,7 @@ export async function createUserFromSSO(
         }
       }
     }
+
     if (roles.length === 0) {
       throw new ShelfError({
         cause: null,
@@ -457,6 +458,7 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
+          desiredRoles.push(desiredRole);
         } else if (desiredRole) {
           desiredRoles.push(desiredRole);
           // User doesn't have access but should - grant it
