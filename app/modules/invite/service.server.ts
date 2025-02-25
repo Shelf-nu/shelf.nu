@@ -9,6 +9,7 @@ import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
+import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
@@ -552,7 +553,7 @@ export async function bulkInviteUsers({
   organizationId,
   extraMessage,
 }: {
-  users: Omit<InviteUserSchema, "teamMemberId">[];
+  users: InviteUserSchema[];
   userId: User["id"];
   organizationId: Organization["id"];
   extraMessage?: string | null;
@@ -567,6 +568,23 @@ export async function bulkInviteUsers({
         validateInvite(payload.email, organizationId)
       )
     );
+
+    const teamMemberIds = uniquePayloads
+      .filter((user) => !!user.teamMemberId)
+      .map((user) => user.teamMemberId!);
+
+    const teamMembers = await db.teamMember.findMany({
+      where: { id: { in: teamMemberIds } },
+      select: { id: true, userId: true },
+    });
+
+    /**
+     * These teamMembers has a user already associated.
+     * So we will skip them from the invite process.
+     * */
+    const teamMembersWithUserId = teamMembers
+      .filter((tm) => !!tm.userId)
+      .map((tm) => tm.id!);
 
     // Batch check for existing users
     const emails = uniquePayloads.map((p) => p.email);
@@ -661,11 +679,20 @@ export async function bulkInviteUsers({
      * - users who have not PENDING invitation and
      * - users who are not part of organization already
      */
-    const validPayloads = uniquePayloads.filter(
+    let validPayloads = uniquePayloads.filter(
       (p) =>
         !existingInviteEmails.includes(p.email) &&
         !existingEmailsInOrg.has(p.email)
     );
+
+    /** Remove the users with teamMemberId who already have a user associated */
+    validPayloads = validPayloads.filter((payload) => {
+      if (!payload.teamMemberId) {
+        return true;
+      }
+
+      return !teamMembersWithUserId.includes(payload.teamMemberId);
+    });
 
     const validPayloadsWithName = validPayloads.map((p) => ({
       ...p,
@@ -683,12 +710,27 @@ export async function bulkInviteUsers({
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
+    function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
+      if (payload.teamMemberId) {
+        return payload.teamMemberId;
+      }
+
+      const createdTm = createdTeamMembers.find(
+        (tm) => tm.name === payload.name
+      );
+      invariant(
+        createdTm,
+        "Unexpected situation! Could not find teamMember in createdTeamMembers."
+      );
+
+      return createdTm.id;
+    }
+
     const invitesToCreate = validPayloadsWithName.map((payload) => ({
       inviterId: userId,
       organizationId,
       inviteeEmail: payload.email,
-      teamMemberId:
-        createdTeamMembers.find((tm) => tm.name === payload.name)?.id ?? "",
+      teamMemberId: getTeamMemberId(payload),
       roles: [payload.role],
       expiresAt,
       inviteCode: generateRandomCode(6),
@@ -725,18 +767,31 @@ export async function bulkInviteUsers({
       senderId: userId,
     });
 
-    const skippedUsers = users.filter(
-      (user) =>
-        existingInviteEmails.includes(user.email) ||
-        existingEmailsInOrg.has(user.email)
-    );
+    const skippedUsers = users.filter((user) => {
+      if (existingInviteEmails.includes(user.email)) {
+        return true;
+      }
+
+      if (existingEmailsInOrg.has(user.email)) {
+        return true;
+      }
+
+      if (
+        user.teamMemberId &&
+        teamMembersWithUserId.includes(user.teamMemberId)
+      ) {
+        return true;
+      }
+
+      return false;
+    });
 
     return {
       inviteSentUsers: validPayloads,
       skippedUsers,
       extraMessage:
         createdInvites.length > 10
-          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasnt received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
+          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasn't received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
           : undefined,
     };
   } catch (cause) {
