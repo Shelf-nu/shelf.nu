@@ -418,7 +418,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    return redirect(`/assets/${assetId}/overview/share-template`);
+    return redirect(
+      template
+        ? `/assets/${assetId}/overview/share-template`
+        : `/assets/${assetId}/overview`
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return json(error(reason), { status: reason.status });

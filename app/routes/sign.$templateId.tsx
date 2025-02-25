@@ -72,7 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-      if (authSession.userId !== assigneeId) {
+      if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
           message: "You are not authorized to sign this asset",
@@ -168,7 +168,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         action: PermissionAction.read,
       });
 
-      if (authSession.userId !== assigneeId) {
+      if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
           message: "You are not authorized to sign this asset",
