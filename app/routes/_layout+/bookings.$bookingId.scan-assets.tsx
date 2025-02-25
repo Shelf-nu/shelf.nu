@@ -16,7 +16,6 @@ import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer";
 import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
-import { useVideoDevices } from "~/hooks/use-video-devices";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -152,7 +151,6 @@ export default function ScanAssetsForBookings() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { devices, DevicesPermissionComponent } = useVideoDevices();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
@@ -168,18 +166,14 @@ export default function ScanAssetsForBookings() {
       <ScannedAssetsDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
-        {devices ? (
-          <WasmScanner
-            isLoading={isLoading}
-            devices={devices}
-            onQrDetectionSuccess={handleQrDetectionSuccess}
-            backButtonText="Booking"
-            allowNonShelfCodes
-            continuousScanning={true}
-          />
-        ) : (
-          <DevicesPermissionComponent />
-        )}
+        <WasmScanner
+          isLoading={isLoading}
+          onQrDetectionSuccess={handleQrDetectionSuccess}
+          backButtonText="Booking"
+          allowNonShelfCodes
+          paused={false}
+          setPaused={() => {}}
+        />
       </div>
     </>
   );

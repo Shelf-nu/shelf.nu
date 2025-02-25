@@ -213,7 +213,7 @@ export default function InviteUserDialog({
                   error={zo.errors.email()?.message}
                   icon="mail"
                   label={"Email address"}
-                  placeholder="rick@rolled.com"
+                  placeholder="zaans@huisje.com"
                   required
                 />
               </div>

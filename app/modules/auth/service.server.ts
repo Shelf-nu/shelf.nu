@@ -230,9 +230,7 @@ export async function sendResetPasswordLink(email: string) {
   try {
     await validateNonSSOUser(email);
 
-    await getSupabaseAdmin().auth.resetPasswordForEmail(email, {
-      redirectTo: `${SERVER_URL}/reset-password`,
-    });
+    await getSupabaseAdmin().auth.resetPasswordForEmail(email);
   } catch (cause) {
     throw new ShelfError({
       cause,

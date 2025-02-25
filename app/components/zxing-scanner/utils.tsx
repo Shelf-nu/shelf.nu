@@ -1,4 +1,5 @@
-import type { ReadResult } from "zxing-wasm";
+import { readBarcodes, type ReadResult } from "zxing-wasm";
+import { isQrId } from "~/utils/id";
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -133,4 +134,159 @@ export const drawDetectionBox = (
     ctx.fillStyle = "red";
     ctx.fillRect(corner.x - 2, corner.y - 2, 4, 4);
   });
+};
+
+export const processFrame = async ({
+  video,
+  canvas,
+  animationFrame,
+  paused,
+  setPaused,
+  onQrDetectionSuccess,
+  allowNonShelfCodes,
+  setError,
+}: {
+  video: HTMLVideoElement;
+  canvas: HTMLCanvasElement;
+  animationFrame: React.MutableRefObject<number>;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
+  onQrDetectionSuccess: (
+    qrId: string,
+    message?: string
+  ) => void | Promise<void>;
+  allowNonShelfCodes: boolean;
+  setError: (error: string) => void;
+}) => {
+  if (paused) {
+    /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
+    if (animationFrame.current) {
+      cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = 0;
+    }
+    return;
+  }
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  try {
+    if (
+      (video.readyState !== video.HAVE_ENOUGH_DATA ||
+        !video.videoWidth ||
+        !video.videoHeight) &&
+      !paused
+    ) {
+      animationFrame.current = requestAnimationFrame(() =>
+        processFrame({
+          video,
+          canvas,
+          animationFrame,
+          paused,
+          setPaused,
+          onQrDetectionSuccess,
+          allowNonShelfCodes,
+          setError,
+        })
+      );
+      return;
+    }
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+    ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+
+    const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+    const results = await readBarcodes(imageData, {
+      tryHarder: true,
+      formats: ["QRCode"],
+      maxNumberOfSymbols: 1,
+    });
+
+    if (results.length > 0) {
+      const result = results[0];
+      drawDetectionBox(ctx, result.position);
+      await handleDetection({
+        result: result.text,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+        paused,
+      });
+      setPaused(true);
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    setError(
+      `Frame processing error: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  // Always request next frame unless paused
+  if (!paused) {
+    animationFrame.current = requestAnimationFrame(() =>
+      processFrame({
+        video,
+        canvas,
+        animationFrame,
+        paused,
+        setPaused,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+        setError,
+      })
+    );
+  }
+};
+
+const handleDetection = async ({
+  result,
+  allowNonShelfCodes,
+  onQrDetectionSuccess,
+  paused,
+}: {
+  result: string;
+  allowNonShelfCodes: boolean;
+  onQrDetectionSuccess?: (
+    qrId: string,
+    message?: string
+  ) => void | Promise<void>;
+  paused: boolean;
+}) => {
+  if (!result || paused) return;
+
+  const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+  const match = result.match(regex);
+
+  if (!match && !allowNonShelfCodes) {
+    await onQrDetectionSuccess?.(
+      result,
+      "Scanned code is not a valid Shelf QR code."
+    );
+    return;
+  }
+
+  const qrId = match ? match[2] : result;
+  if (match && !isQrId(qrId)) {
+    await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+    return;
+  }
+
+  await onQrDetectionSuccess?.(qrId);
+};
+
+/** Updates the canvas size to match the video size */
+export const updateCanvasSize = ({
+  video,
+  canvas,
+}: {
+  video: HTMLVideoElement;
+  canvas: HTMLCanvasElement;
+}) => {
+  if (!video || !canvas) return;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
 };

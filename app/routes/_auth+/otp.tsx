@@ -9,7 +9,7 @@ import { useActionData, useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
-import Input from "~/components/forms/input";
+import { ShelfOTP } from "~/components/forms/otp-input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -168,18 +168,14 @@ export default function OtpPage() {
       <div className="mt-2 flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
           <Form ref={zo.ref} method="post" className="space-y-6">
-            <Input name="otp" label="Code" required placeholder="133734" />
+            <ShelfOTP error={data?.error.message} />
+
             <input
               type="hidden"
               name="email"
               value={searchParams.get("email") || ""}
             />
 
-            {data?.error.message ? (
-              <div className="!mt-1  text-sm text-error-500">
-                {data.error.message}
-              </div>
-            ) : null}
             {message?.message && (
               <p
                 className={tw(

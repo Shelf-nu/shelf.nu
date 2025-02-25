@@ -155,7 +155,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 <Input
                   name={emailZo.fields.email()}
                   type="email"
-                  placeholder="john@doe.com"
+                  placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
                   autoFocus
@@ -166,7 +166,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 <Input
                   name={emailZo.fields.confirmEmail()}
                   type="email"
-                  placeholder="john@doe.com"
+                  placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
                   label="Confirm new email"

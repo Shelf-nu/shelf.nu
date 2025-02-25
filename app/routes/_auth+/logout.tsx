@@ -1,12 +1,20 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
+import { z } from "zod";
 
-import { assertIsPost } from "~/utils/http.server";
+import { assertIsPost, parseData } from "~/utils/http.server";
 
-export function action({ context, request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
+  const { redirectTo } = parseData(
+    await request.formData(),
+    z.object({
+      redirectTo: z.string().optional(),
+    })
+  );
+
   context.destroySession();
-  return redirect("/login");
+  return redirect(redirectTo || "/login");
 }
 
 export function loader() {
