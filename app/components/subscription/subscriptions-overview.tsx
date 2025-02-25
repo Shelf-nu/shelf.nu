@@ -1,8 +1,17 @@
 import { InfoIcon } from "lucide-react";
 import type Stripe from "stripe";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+import { tw } from "~/utils/tw";
+import { CustomerPortalForm } from "./customer-portal-form";
 import type { PriceWithProduct } from "./prices";
+import { HelpIcon } from "../icons/library";
 import { DateS } from "../shared/date";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 
 export function SubscriptionsOverview({
   customer,
@@ -67,9 +76,32 @@ function SubscriptionBox({
       ? // @ts-ignore
         (item?.price?.unit_amount * subscription?.quantity) / 100
       : 0;
+
+  const trialEnded =
+    isPaused &&
+    subscription?.trial_end &&
+    subscription?.trial_end * 1000 > Date.now();
+
   function renderSubscriptionCost() {
     /** Cost for singular price. To get the total we still need to multiply by quantity */
+    if (trialEnded)
+      return (
+        <>
+          <div>Trial ended</div>
 
+          <div className="text-gray-500">
+            <CustomerPortalForm
+              buttonText="Add payment"
+              buttonProps={{
+                variant: "link",
+                className: tw("font-normal underline"),
+              }}
+              className="inline"
+            />{" "}
+            information to start subscription.
+          </div>
+        </>
+      );
     if (isPaused) return "Paused";
     return (
       <>
@@ -81,7 +113,11 @@ function SubscriptionBox({
           / {interval}
         </div>
 
-        {isTrial && <div className="text-gray-500">after trial ends</div>}
+        {isTrial && (
+          <div className="text-gray-500">
+            after trial ends <TrialPaymentTooltip />
+          </div>
+        )}
       </>
     );
   }
@@ -152,6 +188,35 @@ function SubscriptionBox({
         <div className="text-right">{renderSubscriptionCost()}</div>
       </div>
     </div>
+  );
+}
+
+function TrialPaymentTooltip() {
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger className="align-middle">
+          <i className="inline cursor-pointer text-gray-400 hover:text-gray-700">
+            <HelpIcon />
+          </i>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[300px]">
+          <p className="text-sm">
+            You will not be automatically charged when your trial ends, unless
+            you have already added your payment information. To manage your
+            payment methods, please go to the{" "}
+            <CustomerPortalForm
+              buttonText="customer portal"
+              className={tw("inline")}
+              buttonProps={{
+                variant: "link",
+              }}
+            />
+            .
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

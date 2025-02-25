@@ -8,18 +8,8 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
-import { CrispButton } from "~/components/marketing/crisp";
-import { Button } from "~/components/shared/button";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/shared/tabs";
-import { WarningBox } from "~/components/shared/warning-box";
-import { CurrentPlanDetails } from "~/components/subscription/current-plan-details";
+
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
-import { Prices } from "~/components/subscription/prices";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
@@ -201,12 +191,14 @@ export default function SubscriptionPage() {
     tierLimit,
     customer,
   } = useLoaderData<typeof loader>();
-
+  console.log("customer?.subscriptions", customer?.subscriptions);
   const isLegacyPricing =
     activeSubscription?.items?.data[0]?.price?.metadata.legacy === "true";
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
+
+  const hasNoSubscription = customer?.subscriptions.total_count === 0;
 
   // console.log("activeSubscription", activeSubscription);
   //
@@ -245,7 +237,7 @@ export default function SubscriptionPage() {
   return (
     <>
       <div className=" flex flex-col">
-        {!activeSubscription ? (
+        {/* {!activeSubscription ? (
           <div className="mb-8 mt-3">
             <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
               <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -257,7 +249,7 @@ export default function SubscriptionPage() {
               </p>
             </div>
           </div>
-        ) : null}
+        ) : null} */}
 
         {/* {isLegacyPricing && (
             <WarningBox>
@@ -284,9 +276,10 @@ export default function SubscriptionPage() {
             <h3 className="text-text-lg font-semibold">{title}</h3>
             <p className="text-sm text-gray-600">{subTitle}</p>
           </div>
-          {activeSubscription && <CustomerPortalForm />}
+          {!hasNoSubscription && <CustomerPortalForm />}
         </div>
-        {!activeSubscription ? (
+        {/* */}
+        {hasNoSubscription ? (
           <PricingTable prices={prices} />
         ) : (
           <SubscriptionsOverview customer={customer} prices={prices} />
