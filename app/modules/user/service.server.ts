@@ -448,7 +448,10 @@ export async function updateUserFromSSO(
         const existingOrgAccess = existingUserOrganizations.find(
           (uo) => uo.organization.id === org.id
         );
-
+        /** If the role exists, add it to the array */
+        if (desiredRole) {
+          desiredRoles.push(desiredRole);
+        }
         if (existingOrgAccess) {
           // Handle transition for existing access
           const transition = await handleSCIMTransition(
@@ -458,9 +461,7 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
-          desiredRoles.push(desiredRole);
         } else if (desiredRole) {
-          desiredRoles.push(desiredRole);
           // User doesn't have access but should - grant it
           await createUserOrgAssociation(db, {
             userId: user.id,
