@@ -395,6 +395,7 @@ model TeamMember {
   deletedAt      DateTime?
   bookings       Booking[]
   assetReminders AssetReminder[]
+  groupsJoined   Group[]
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -788,4 +789,16 @@ model AssetReminder {
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+}
+
+model Group {
+  id   String @id @default(cuid())
+  name String
+
+  teamMembers TeamMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
 }
