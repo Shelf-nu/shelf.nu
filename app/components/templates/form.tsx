@@ -1,7 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useState } from "react";
 import type { Template, TemplateFile } from "@prisma/client";
-import { TemplateType } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { FileTypeIcon } from "lucide-react";
@@ -13,13 +12,6 @@ import { isFormProcessing } from "~/utils/form";
 import { formatBytes } from "~/utils/format-bytes";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
 import { Switch } from "../forms/switch";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
@@ -31,7 +23,6 @@ const MAX_FILE_SIZE = 5_000_000;
 
 export const base = z.object({
   name: z.string().min(2, "Name is required"),
-  type: z.nativeEnum(TemplateType),
   description: z.string().optional(),
   signatureRequired: z
     .string()
@@ -84,7 +75,6 @@ interface Props {
 export const TemplateForm = ({
   name = "",
   description = "",
-  type = TemplateType.BOOKINGS,
   signatureRequired = false,
   pdfSize,
   pdfUrl,
@@ -98,9 +88,6 @@ export const TemplateForm = ({
   const [, validateFile] = useAtom(validateFileAtom);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
-  const [selectedType, setSelectedType] = useState<TemplateType>(
-    type || TemplateType.BOOKINGS
-  );
   const [pdf, setPdf] = useState<File | null>(null);
 
   const handleFileChange = useCallback(
@@ -142,39 +129,7 @@ export const TemplateForm = ({
           required={true}
         />
       </FormRow>
-      <FormRow rowLabel="Type" className="border-b-0 pb-0" required={true}>
-        <Select
-          name={"type"}
-          defaultValue={selectedType}
-          disabled={disabled}
-          onValueChange={(val) =>
-            setSelectedType(
-              val.toString() === TemplateType.BOOKINGS
-                ? TemplateType.BOOKINGS
-                : TemplateType.CUSTODY
-            )
-          }
-        >
-          <SelectTrigger disabled={isEdit} className="px-3.5 py-3">
-            <SelectValue placeholder="Choose a field type" />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            className="w-full min-w-[300px]"
-            align="start"
-          >
-            <div className=" max-h-[320px] overflow-auto">
-              {[TemplateType.BOOKINGS, TemplateType.CUSTODY].map((value) => (
-                <SelectItem value={value} key={value}>
-                  <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
-                    {value}
-                  </span>
-                </SelectItem>
-              ))}
-            </div>
-          </SelectContent>
-        </Select>
-      </FormRow>
+
       <FormRow
         required={false}
         rowLabel="Ask for signature"

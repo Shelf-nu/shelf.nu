@@ -14,24 +14,23 @@ import { createNote } from "../note/service.server";
 
 export async function createTemplate({
   name,
-  type,
   description,
   signatureRequired,
   userId,
   organizationId,
-}: Pick<Template, "name" | "type" | "description" | "signatureRequired"> & {
+}: Pick<Template, "name" | "description" | "signatureRequired"> & {
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
   try {
     // Count the number of templates of same type for the user
     const sameExistingTemplateCount = await db.template.count({
-      where: { type, userId },
+      where: { type: "CUSTODY", userId },
     });
 
     const data = {
       name,
-      type,
+      type: "CUSTODY",
       description,
       signatureRequired,
       creator: {
@@ -54,7 +53,7 @@ export async function createTemplate({
       title: "Error creating template",
       message:
         "Something went wrong while creating the template. Please try again or contact support.",
-      additionalData: { name, type, description, signatureRequired },
+      additionalData: { name, description, signatureRequired },
       label: "Template",
     });
   }

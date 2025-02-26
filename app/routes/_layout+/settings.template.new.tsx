@@ -74,14 +74,13 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
         const clonedData = request.clone();
 
-        const { name, type, description, signatureRequired, pdf } = parseData(
+        const { name, description, signatureRequired, pdf } = parseData(
           await request.formData(),
           NewTemplateFormSchema
         );
 
         const { id } = await createTemplate({
           name,
-          type,
           description: description ?? "",
           signatureRequired: signatureRequired ?? false,
           userId: authSession.userId,
@@ -123,9 +122,8 @@ export default function AddTemplatePage() {
         title={title ? title : "Untitled template"}
         classNames="-mt-5"
       />
-      <div>
-        <TemplateForm />
-      </div>
+
+      <TemplateForm />
     </>
   );
 }
