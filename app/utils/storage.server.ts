@@ -148,9 +148,14 @@ export async function parseFileFormData({
 
     const uploadHandler = unstable_composeUploadHandlers(
       async ({ contentType, data, filename }) => {
-        if (!contentType) return undefined;
-        if (contentType?.includes("image") && contentType.includes("pdf"))
+        if (!contentType || !filename) {
           return undefined;
+        }
+
+        if (contentType?.includes("image") && contentType.includes("pdf")) {
+          return undefined;
+        }
+
         const fileExtension = contentType.includes("pdf")
           ? "pdf"
           : filename?.split(".").pop();
