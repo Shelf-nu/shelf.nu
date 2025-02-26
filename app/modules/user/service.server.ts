@@ -234,7 +234,7 @@ export async function createUserFromSSO(
 
     // Find organizations that match this domain - handles multiple domains per org
     const organizations = await getOrganizationsBySsoDomain(emailDomain);
-
+    const roles = [];
     // For each matching organization, handle SCIM access if configured
     for (const org of organizations) {
       const { ssoDetails } = org;
@@ -249,7 +249,9 @@ export async function createUserFromSSO(
 
       if (hasGroupMappings) {
         const role = getRoleFromGroupId(ssoDetails, groups);
+
         if (role) {
+          roles.push(role);
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -265,6 +267,17 @@ export async function createUserFromSSO(
       }
     }
 
+    if (roles.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "No groups assigned",
+        message:
+          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
+        label: "Auth",
+        additionalData: { roles, organizations, email, userId },
+      });
+    }
+
     // Return the user and first matching org (if any)
     return { user, org: organizations[0] || null };
   } catch (cause: any) {
@@ -275,6 +288,7 @@ export async function createUserFromSSO(
         email: authSession.email,
         userId: authSession.userId,
         domain: authSession.email.split("@")[1],
+        ...cause.additionalData,
       },
       label: "Auth",
     });
@@ -416,7 +430,7 @@ export async function updateUserFromSSO(
     const existingUserOrganizations = user.userOrganizations;
 
     const transitions: UserOrgTransition[] = [];
-
+    const desiredRoles = [];
     for (const org of domainOrganizations) {
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
@@ -428,13 +442,16 @@ export async function updateUserFromSSO(
       );
 
       if (hasGroupMappings) {
-        // Get desired role based on user's groups
+        // Get desired role based on user's groups. BEcause we are updating the user, we are returning null if group is not found. That will just skip it.
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
         // Find if user already has access to this org
         const existingOrgAccess = existingUserOrganizations.find(
           (uo) => uo.organization.id === org.id
         );
-
+        /** If the role exists, add it to the array */
+        if (desiredRole) {
+          desiredRoles.push(desiredRole);
+        }
         if (existingOrgAccess) {
           // Handle transition for existing access
           const transition = await handleSCIMTransition(
@@ -468,6 +485,16 @@ export async function updateUserFromSSO(
           });
         }
       }
+    }
+    if (desiredRoles.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "No groups assigned",
+        message:
+          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
+        label: "Auth",
+        additionalData: { desiredRoles, domainOrganizations, email, userId },
+      });
     }
 
     // Return first org with SCIM access for redirect

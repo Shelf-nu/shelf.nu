@@ -297,7 +297,7 @@ export const buildCsvExportDataFromAssets = ({
 
   // Get visible columns in the correct order
   const visibleColumns = columns
-    .filter((col) => col.visible)
+    .filter((col) => col.visible && col.name !== "actions")
     .sort((a, b) => a.position - b.position);
 
   // Create headers row using column names
@@ -385,7 +385,8 @@ export const buildCsvExportDataFromAssets = ({
         }
       }
 
-      return formatValueForCsv(value);
+      const isMarkdown = column.cfType === CustomFieldType.MULTILINE_TEXT;
+      return formatValueForCsv(value, isMarkdown);
     })
   );
 
@@ -400,19 +401,22 @@ export const buildCsvExportDataFromAssets = ({
  */
 const cleanMarkdownFormatting = (text: string): string =>
   text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Remove markdown links
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "") // Remove image references
-    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting
-    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets
-    .replace(/\([^)]*\)/g, "") // Remove remaining parentheses
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_match, group1, group2) => group1 + ":" + group2
+    ) // Replace markdown links: [text](url) -> text:url
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "") // Remove image references: ![alt](url)
+    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting characters
+    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets, e.g., [text]
     .replace(/\r?\n/g, " ") // Replace newlines with spaces
     .replace(/\s+/g, " ") // Normalize multiple spaces
+    .replace(/^## /, "") // Remove '## ' from the start
     .trim();
 
 /**
  * Safely formats a value for CSV export by properly escaping and quoting values
  */
-const formatValueForCsv = (value: any): string => {
+const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values
   if (value === null || value === undefined || value === "") {
     return '""';
@@ -435,9 +439,10 @@ const formatValueForCsv = (value: any): string => {
   if (value instanceof Date) {
     stringValue = value.toISOString().split("T")[0];
   }
-
   // Clean any markdown formatting
-  stringValue = cleanMarkdownFormatting(stringValue);
+  if (isMarkdown) {
+    stringValue = cleanMarkdownFormatting(stringValue);
+  }
 
   // Escape quotes by doubling them
   stringValue = stringValue.replace(/"/g, '""');
