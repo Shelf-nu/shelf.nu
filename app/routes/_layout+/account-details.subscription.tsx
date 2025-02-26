@@ -63,6 +63,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
+    console.log("prices", prices);
+
     let activeProduct = null;
     if (customer && activeSubscription) {
       /** Get the active subscription ID */
@@ -191,9 +193,7 @@ export default function SubscriptionPage() {
     tierLimit,
     customer,
   } = useLoaderData<typeof loader>();
-  console.log("customer?.subscriptions", customer?.subscriptions);
-  const isLegacyPricing =
-    activeSubscription?.items?.data[0]?.price?.metadata.legacy === "true";
+
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
@@ -237,7 +237,7 @@ export default function SubscriptionPage() {
   return (
     <>
       <div className=" flex flex-col">
-        {/* {!activeSubscription ? (
+        {hasNoSubscription ? (
           <div className="mb-8 mt-3">
             <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
               <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -249,7 +249,7 @@ export default function SubscriptionPage() {
               </p>
             </div>
           </div>
-        ) : null} */}
+        ) : null}
 
         {/* {isLegacyPricing && (
             <WarningBox>

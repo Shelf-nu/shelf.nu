@@ -1,10 +1,13 @@
+import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
 import type Stripe from "stripe";
+import { generateRandomCode } from "~/modules/invite/helpers";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { PriceWithProduct } from "./prices";
 import { HelpIcon } from "../icons/library";
+import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import {
   Tooltip,
@@ -59,16 +62,19 @@ function SubscriptionBox({
 }) {
   const item = subscription.items.data[0];
   const subscriptionPrice = findPriceById(prices, item.price.id);
+  const isLegacyPricing = item?.price?.metadata.legacy === "true";
 
-  let planTier;
-  let interval = undefined as Stripe.Price.Recurring.Interval | undefined;
+  let planTier: string | undefined = undefined;
+
   if (subscriptionPrice) {
     // You can safely access product metadata and other fields
     planTier = subscriptionPrice.product.metadata.shelf_tier;
-    interval = subscriptionPrice.recurring?.interval as
-      | Stripe.Price.Recurring.Interval
-      | undefined;
   }
+  const interval =
+    subscriptionPrice?.recurring?.interval ||
+    (item?.price?.recurring?.interval as
+      | Stripe.Price.Recurring.Interval
+      | undefined);
 
   const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
   const costPerPrice =
@@ -81,6 +87,21 @@ function SubscriptionBox({
     isPaused &&
     subscription?.trial_end &&
     subscription?.trial_end * 1000 > Date.now();
+  const detailsArray = useMemo<(string | React.ReactNode)[]>(() => {
+    const arr: (string | React.ReactNode)[] = [
+      subscription.status,
+      planTier === "tier_2" ? "Team plan" : "Plus plan",
+      interval === "year" ? "Yearly billing" : "Monthly billing",
+    ];
+    if (isLegacyPricing) {
+      arr.unshift(
+        <div className="flex items-center gap-1">
+          <span>Legacy pricing</span> <LegacyPricingTooltip />
+        </div>
+      );
+    }
+    return arr;
+  }, [planTier, interval, subscription.status, isLegacyPricing]);
 
   function renderSubscriptionCost() {
     /** Cost for singular price. To get the total we still need to multiply by quantity */
@@ -134,14 +155,17 @@ function SubscriptionBox({
               {" "}
               <span className="font-medium">id:</span> {subscription.id}
             </div>
-            {[
-              subscription.status,
-              planTier === "tier_2" ? "Team plan" : "Plus plan",
-              interval === "year" ? "Yearly billing" : "Monthly billing",
-            ].map((text, index, array) => (
+            {detailsArray.map((content, index, array) => (
               <>
-                <div className="font-semibold uppercase" key={text}>
-                  {text}
+                <div
+                  className="font-semibold uppercase"
+                  key={
+                    typeof content === "string"
+                      ? content
+                      : generateRandomCode(4)
+                  }
+                >
+                  {content}
                 </div>{" "}
                 {index < array.length - 1 && " - "}
               </>
@@ -213,6 +237,36 @@ function TrialPaymentTooltip() {
               }}
             />
             .
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function LegacyPricingTooltip() {
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger className="align-middle">
+          <i className="inline cursor-pointer text-gray-400 hover:text-gray-700">
+            <HelpIcon />
+          </i>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[300px]">
+          <p>
+            You are on a{" "}
+            <Button
+              to="https://www.shelf.nu/legacy-plan-faq"
+              target="_blank"
+              variant="link"
+            >
+              legacy pricing plan
+            </Button>
+            . We have since updated our pricing plans. <br />
+            You can view the new pricing plans in the customer portal. If you
+            cancel your subscription, you will not be able to renew it. For any
+            questions - get in touch with support
           </p>
         </TooltipContent>
       </Tooltip>
