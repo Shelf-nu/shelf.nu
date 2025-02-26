@@ -206,14 +206,14 @@ export default function TemplatePage() {
   // }
 
   return (
-    <div className="w-full rounded-md border bg-white p-4 md:p-10">
-      <h2 className=" text-lg text-gray-900">Templates</h2>
+    <div className="w-full bg-white md:rounded md:border md:px-6 md:py-5">
+      <h2 className="text-lg text-gray-900">Templates</h2>
       <p className="text-sm text-gray-600">Manage all your templates here.</p>
 
-      <Separator className="my-8" />
+      <Separator className="my-4" />
 
       <div className="flex flex-col justify-between gap-4 gap-x-5 md:flex-row">
-        <div className="w-full max-w-72">
+        <div className="w-full md:max-w-72">
           <h3 className="mb-1 text-sm text-gray-600">PDF Templates</h3>
           <p className="text-sm text-gray-600">
             Use these templates to generate a PDF document for assigning custody

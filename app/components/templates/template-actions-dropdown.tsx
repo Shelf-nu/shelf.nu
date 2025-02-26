@@ -6,7 +6,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { VerticalDotsIcon } from "~/components/icons/library";
+import { EllipsisVerticalIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,74 +41,71 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
   const { defaultTemplates } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  return (
-    <>
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger className="outline-none focus-visible:border-0">
-          <i className="inline-block px-3 py-0 text-gray-400 ">
-            <VerticalDotsIcon />
-          </i>
-        </DropdownMenuTrigger>
 
-        <DropdownMenuContent
-          align="end"
-          className="order w-[180px] rounded-md bg-white p-0 text-right"
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger className="outline-none focus-visible:border-0">
+        <EllipsisVerticalIcon className="size-4 text-gray-400" />
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        className="order w-[180px] rounded-md bg-white p-0 text-right"
+      >
+        <DropdownMenuItem
+          onSelect={(e) => e.preventDefault()}
+          className="px-4 py-3"
         >
+          <MakeDefaultButton
+            typeDefault={defaultTemplates[template.type]}
+            template={template}
+          />
+        </DropdownMenuItem>
+        <DropdownMenuItem className="px-4 py-3">
+          <Button
+            to={`${template.id}/edit`}
+            icon="pen"
+            role="link"
+            variant="link"
+            className="justify-start text-gray-700 hover:text-gray-700"
+            width="full"
+          >
+            Edit
+          </Button>
+        </DropdownMenuItem>
+        <Form method="post">
+          <input type="hidden" name="templateId" value={template.id} />
+          <input
+            type="hidden"
+            name="isActive"
+            value={template.isActive ? "yes" : "no"}
+          />
           <DropdownMenuItem
             onSelect={(e) => e.preventDefault()}
             className="px-4 py-3"
           >
-            <MakeDefaultButton
-              typeDefault={defaultTemplates[template.type]}
-              template={template}
-            />
-          </DropdownMenuItem>
-          <DropdownMenuItem className="px-4 py-3">
             <Button
-              to={`${template.id}/edit`}
-              icon="pen"
+              name="intent"
+              value="toggleActive"
+              type="submit"
+              icon="deactivate"
               role="link"
               variant="link"
-              className="justify-start text-gray-700 hover:text-gray-700"
+              className={tw(
+                "justify-start text-gray-700 hover:text-gray-700",
+                template.isDefault || disabled
+                  ? "pointer-events-none border-gray-300 text-gray-300"
+                  : ""
+              )}
               width="full"
+              disabled={disabled || template.isDefault}
             >
-              Edit
+              {template.isActive ? "Deactivate" : "Activate"}
             </Button>
           </DropdownMenuItem>
-          <Form method="post">
-            <input type="hidden" name="templateId" value={template.id} />
-            <input
-              type="hidden"
-              name="isActive"
-              value={template.isActive ? "yes" : "no"}
-            />
-            <DropdownMenuItem
-              onSelect={(e) => e.preventDefault()}
-              className="px-4 py-3"
-            >
-              <Button
-                name="intent"
-                value="toggleActive"
-                type="submit"
-                icon="deactivate"
-                role="link"
-                variant="link"
-                className={tw(
-                  "justify-start text-gray-700 hover:text-gray-700",
-                  template.isDefault || disabled
-                    ? "pointer-events-none border-gray-300 text-gray-300"
-                    : ""
-                )}
-                width="full"
-                disabled={disabled || template.isDefault}
-              >
-                {template.isActive ? "Deactivate" : "Activate"}
-              </Button>
-            </DropdownMenuItem>
-          </Form>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+        </Form>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

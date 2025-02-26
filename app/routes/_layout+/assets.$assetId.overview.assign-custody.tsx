@@ -617,11 +617,15 @@ const PdfSwitchLabel = ({ hasTemplates }: { hasTemplates: boolean }) => (
         ? "Custodian needs to read (and sign) a document before receiving custody."
         : "You need to create templates before you can add them here."}
       {hasTemplates ? (
-        <Link className="text-gray-700 underline" to="#">
+        <Link target="_blank" className="text-gray-700 underline" to="#">
           Learn more
         </Link>
       ) : (
-        <Link className="text-gray-700 underline" to="/settings/template/new">
+        <Link
+          target="_blank"
+          className="text-gray-700 underline"
+          to="/settings/template/new"
+        >
           Create a template
         </Link>
       )}

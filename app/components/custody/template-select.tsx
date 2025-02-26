@@ -59,7 +59,11 @@ export default function TemplateSelect({ className }: TemplateSelectProps) {
       </Select>
       <div className="mt-2 text-sm text-gray-500">
         Manage PDF templates in{" "}
-        <Link className="text-gray-800 underline" to={"/settings/template"}>
+        <Link
+          target="_blank"
+          className="text-gray-800 underline"
+          to={"/settings/template"}
+        >
           settings
         </Link>
       </div>

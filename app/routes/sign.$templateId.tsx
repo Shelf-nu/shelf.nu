@@ -9,8 +9,10 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import * as pdfjs from "pdfjs-dist";
 import { z } from "zod";
+import Icon from "~/components/icons/icon";
 import type { HeaderData } from "~/components/layout/header/types";
 import { useCrisp } from "~/components/marketing/crisp";
+import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 
 import AgreementDialog from "~/components/sign/agreement-dialog";
@@ -45,23 +47,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         assetId,
       });
 
-    if (custody.templateSigned) {
-      throw new ShelfError({
-        cause: null,
-        message: "Asset custody has already been signed",
-        status: 400,
-        label: "Assets",
-      });
-    }
-
     /** If there is a user associated with the custodian then make sure that right user is signing the custody. */
     if (custodian.user) {
-      const authSession = context.getSession();
-      if (!authSession.userId) {
+      const authSession = context.getOptionalSession();
+      if (!authSession?.userId) {
         throw new ShelfError({
           cause: null,
           label: "Template",
-          message: "You are not allowed to sign this custody.",
+          message:
+            "You are not allowed to sign this custody. Please sign in to continue.",
         });
       }
 
@@ -75,7 +69,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
-          message: "You are not authorized to sign this asset",
+          message: "You are not allowed to sign this asset.",
           additionalData: { userId: authSession.userId, assetId, assigneeId },
           label: "Assets",
           status: 401,
@@ -110,6 +104,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         header,
         template,
         templateFile,
+        isTemplateSigned: custody.templateSigned,
       })
     );
   } catch (cause) {
@@ -232,7 +227,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export default function Sign() {
   useCrisp();
-  const { template, templateFile } = useLoaderData<typeof loader>();
+  const { template, templateFile, isTemplateSigned } =
+    useLoaderData<typeof loader>();
+
+  if (isTemplateSigned) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="flex w-96 flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="flex items-center justify-center rounded-full bg-green-50 p-1">
+            <div className="flex items-center justify-center rounded-full bg-green-100 p-2">
+              <Icon icon="sign" className="text-green-600" />
+            </div>
+          </div>
+
+          <div>
+            <h4 className="mb-1">Successfully signed document.</h4>
+            <p>
+              Thank you for signing the document. You can close this page or
+              visit your dashboard.
+            </p>
+          </div>
+
+          <Button className="w-full" variant="secondary" to="/assets">
+            To Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col items-center justify-center bg-[url('/static/images/bg-overlay1.png')] p-4 md:p-14">

@@ -25,6 +25,7 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import When from "../when/when";
 
 const MAX_FILE_SIZE = 5_000_000;
 
@@ -222,10 +223,12 @@ export const TemplateForm = ({
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
         </div>
-        {pdfUrl && (
+
+        <When truthy={!!pdfUrl}>
           <Card className="flex w-full items-center gap-x-5">
-            <div className={"flex grow gap-x-3"}>
+            <div className="flex grow gap-x-3">
               <FileTypeIcon />
+
               <div className="flex flex-col">
                 <a
                   href={pdfUrl}
@@ -240,22 +243,25 @@ export const TemplateForm = ({
                 </span>
               </div>
             </div>
-            <div>
-              <Badge withDot={false} color="#0dec5d">
-                Current (revision: {version})
-              </Badge>
-            </div>
+            <Badge
+              className="min-w-36 justify-center"
+              withDot={false}
+              color="#0dec5d"
+            >
+              Current (revision: {version})
+            </Badge>
           </Card>
-        )}
-        {pdf && (
+        </When>
+
+        <When truthy={!!pdf}>
           <Card className="flex w-full items-start justify-between gap-x-3">
             <FileTypeIcon />
             <div className={"flex w-full grow flex-col"}>
               <span className="text-sm font-semibold text-gray-600">
-                {pdf.name}
+                {pdf?.name}
               </span>
               <span className="text-sm font-light text-gray-700">
-                {formatBytes(pdf.size as number)}
+                {formatBytes(pdf?.size as number)}
               </span>
             </div>
             <Button
@@ -265,9 +271,10 @@ export const TemplateForm = ({
               onClick={() => setPdf(null)}
             />
           </Card>
-        )}
+        </When>
       </FormRow>
-      <input name={"isEdit"} type="hidden" value={isEdit.toString()} />
+      <input name="isEdit" type="hidden" value={isEdit.toString()} />
+
       <div className="text-right">
         <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save"}
