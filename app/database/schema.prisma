@@ -411,7 +411,7 @@ model Custody {
   assetId String @unique
 
   template                  Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  templateId                String?   @unique
+  templateId                String?
   templateSigned            Boolean?  @default(false)
   associatedTemplateVersion Int?
 
