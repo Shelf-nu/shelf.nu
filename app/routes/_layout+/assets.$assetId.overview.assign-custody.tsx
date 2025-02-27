@@ -148,14 +148,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     const totalTeamMembers = await db.teamMember.count({ where });
-
-    // We need to fetch all the templates that belong to the user's current organization
-    // and the template type is CUSTODY
-    const templates = await db.template.findMany({
+    const templatesCount = await db.template.count({
       where: {
-        isActive: true, // ignore inactive templates
-        organizationId,
+        isActive: true,
         type: TemplateType.CUSTODY,
+        organizationId,
       },
     });
 
@@ -164,8 +161,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         showModal: true,
         teamMembers,
         asset,
-        templates,
         totalTeamMembers,
+        hasTemplates: templatesCount > 0,
       })
     );
   } catch (cause) {
@@ -434,7 +431,7 @@ export function links() {
 }
 
 export default function Custody() {
-  const { asset, teamMembers, templates } = useLoaderData<typeof loader>();
+  const { asset, teamMembers, hasTemplates } = useLoaderData<typeof loader>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const actionData = useActionData<typeof action>();
@@ -450,7 +447,6 @@ export default function Custody() {
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  const hasTemplates = templates.length > 0;
 
   return (
     <Form className="modal-content-wrapper" method="post" ref={zo.ref}>

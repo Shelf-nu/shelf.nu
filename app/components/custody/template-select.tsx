@@ -1,4 +1,6 @@
+import type { Template } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
+import useApiQuery from "~/hooks/use-api-query";
 import type { loader } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
 import { tw } from "~/utils/tw";
 import {
@@ -9,17 +11,22 @@ import {
   SelectItem,
 } from "../forms/select";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 type TemplateSelectProps = {
   className?: string;
 };
 
 export default function TemplateSelect({ className }: TemplateSelectProps) {
-  const { templates } = useLoaderData<typeof loader>();
+  const { isLoading, data } = useApiQuery<{ templates: Template[] }>({
+    api: "/api/templates",
+  });
+
+  const templates = data?.templates;
 
   return (
     <div className={tw("relative w-full", className)}>
-      <Select name="template">
+      <Select name="template" disabled={isLoading}>
         <SelectTrigger className="text-left">
           <SelectValue placeholder="Select a PDF template" />
         </SelectTrigger>
@@ -32,9 +39,19 @@ export default function TemplateSelect({ className }: TemplateSelectProps) {
               ref?.addEventListener("touchend", (e) => e.preventDefault())
             }
           >
-            {templates.length > 0 ? (
+            <When
+              truthy={!!templates?.length}
+              fallback={
+                <div>
+                  No team PDF templates found.{" "}
+                  <Button to={"/settings/template"} variant="link">
+                    Create PDF template
+                  </Button>
+                </div>
+              }
+            >
               <div className="max-h-[320px] overflow-auto">
-                {templates.map((template) => (
+                {templates?.map((template) => (
                   <SelectItem
                     key={template.id}
                     value={template.id}
@@ -46,14 +63,7 @@ export default function TemplateSelect({ className }: TemplateSelectProps) {
                   </SelectItem>
                 ))}
               </div>
-            ) : (
-              <div>
-                No team PDF templates found.{" "}
-                <Button to={"/settings/template"} variant="link">
-                  Create PDF template
-                </Button>
-              </div>
-            )}
+            </When>
           </SelectContent>
         </div>
       </Select>
