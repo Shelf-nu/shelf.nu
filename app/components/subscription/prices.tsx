@@ -1,6 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
-import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { FREE_PLAN } from "./helpers";
 import { PriceBox } from "./price-box";
 import { PriceCta } from "./price-cta";
@@ -14,18 +12,25 @@ export type PriceWithProduct = Stripe.Price & {
 export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
   <div className="gap-8 xl:flex xl:justify-center">
     <Price key={FREE_PLAN.id} price={FREE_PLAN} />
-    {prices.map((price, index) => (
-      <Price
-        key={price.id}
-        price={price}
-        previousPlanName={prices[index - 1]?.product.name}
-      />
-    ))}
+    {prices
+      .filter(
+        (p) => p.metadata.show_on_table && p.metadata.show_on_table === "true"
+      )
+      .map((price, index) => (
+        <Price
+          key={price.id}
+          price={price}
+          previousPlanName={prices[index - 1]?.product.name}
+        />
+      ))}
   </div>
 );
 
 export interface Price {
   id: string;
+  metadata?: {
+    show_on_table?: boolean;
+  };
   product: {
     name: string;
     metadata: {
@@ -48,22 +53,15 @@ export const Price = ({
   price: Price;
   previousPlanName?: string;
 }) => {
-  const { activeSubscription, isTrialSubscription } =
-    useLoaderData<typeof loader>();
-  const activePlan = activeSubscription?.items.data[0]?.plan;
   const isFreePlan = price.id === "free";
   const isTeamPlan = price.product.metadata.shelf_tier === "tier_2";
   const features = price.product.metadata.features?.split(",") || [];
+
   return (
     <div className="subscription-plan mb-12 w-full xl:mb-0 xl:max-w-[410px]">
-      <PriceBox
-        activePlan={activePlan}
-        subscription={activeSubscription}
-        price={price}
-        isTrialSubscription={isTrialSubscription}
-      />
+      <PriceBox price={price} />
       <div className="mb-8">
-        <PriceCta price={price} subscription={activeSubscription} />
+        <PriceCta price={price} />
       </div>
       {features ? (
         <>

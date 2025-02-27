@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
 import type Stripe from "stripe";
-import { generateRandomCode } from "~/modules/invite/helpers";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import { CustomerPortalForm } from "./customer-portal-form";
@@ -26,7 +25,6 @@ export function SubscriptionsOverview({
   };
 }) {
   const subscriptionsData = customer?.subscriptions.data;
-
   if (!customer) {
     return (
       <div>
@@ -43,10 +41,9 @@ export function SubscriptionsOverview({
           subscription={subscription}
           key={subscription.id}
           prices={prices}
+          customer={customer}
         />
       ))}
-
-      {/* <CurrentPlanDetails /> */}
     </div>
   );
 }
@@ -54,43 +51,75 @@ export function SubscriptionsOverview({
 function SubscriptionBox({
   subscription,
   prices,
+  customer,
 }: {
   subscription: Stripe.Subscription;
   prices: {
     [key: string]: PriceWithProduct[];
   };
+  customer: CustomerWithSubscriptions;
 }) {
-  const item = subscription.items.data[0];
-  const subscriptionPrice = findPriceById(prices, item.price.id);
-  const isLegacyPricing = item?.price?.metadata.legacy === "true";
+  const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
+  console.log("subscription:", subscription);
+  return (
+    <div>
+      <div className="mb-2">
+        <span className="text-[18px] font-medium">{customer.name}</span> on (
+        {subscription.status})
+      </div>
+      {subscription.items.data.map((item, index) => {
+        console.log(`item ${index}:`, item);
+        return (
+          <Item
+            item={item}
+            subscription={subscription}
+            prices={prices}
+            key={item.id}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
+function Item({
+  item,
+  subscription,
+  prices,
+}: {
+  item: Stripe.SubscriptionItem;
+  subscription: Stripe.Subscription;
+  prices: {
+    [key: string]: PriceWithProduct[];
+  };
+}) {
+  const interval = item.price?.recurring?.interval;
+  const isLegacyPricing = item?.price?.metadata.legacy === "true";
+  const subscriptionPrice = findPriceById(prices, item.price.id);
   let planTier: string | undefined = undefined;
 
   if (subscriptionPrice) {
     // You can safely access product metadata and other fields
     planTier = subscriptionPrice.product.metadata.shelf_tier;
   }
-  const interval =
-    subscriptionPrice?.recurring?.interval ||
-    (item?.price?.recurring?.interval as
-      | Stripe.Price.Recurring.Interval
-      | undefined);
 
   const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
-  const costPerPrice =
-    isActive || isTrial
-      ? // @ts-ignore
-        (item?.price?.unit_amount * subscription?.quantity) / 100
-      : 0;
+  const costPerPrice = item?.price?.unit_amount
+    ? (item?.price?.unit_amount * (item?.quantity || 1)) / 100
+    : 0;
 
   const trialEnded =
     isPaused &&
     subscription?.trial_end &&
     subscription?.trial_end * 1000 > Date.now();
+
   const detailsArray = useMemo<(string | React.ReactNode)[]>(() => {
     const arr: (string | React.ReactNode)[] = [
-      subscription.status,
-      planTier === "tier_2" ? "Team plan" : "Plus plan",
+      planTier === "tier_2"
+        ? "Team plan"
+        : planTier === "tier_1"
+        ? "Plus plan"
+        : subscriptionPrice?.product.name,
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];
     if (isLegacyPricing) {
@@ -101,7 +130,13 @@ function SubscriptionBox({
       );
     }
     return arr;
-  }, [planTier, interval, subscription.status, isLegacyPricing]);
+  }, [
+    planTier,
+    interval,
+    subscription.status,
+    isLegacyPricing,
+    subscriptionPrice,
+  ]);
 
   function renderSubscriptionCost() {
     /** Cost for singular price. To get the total we still need to multiply by quantity */
@@ -148,23 +183,13 @@ function SubscriptionBox({
       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
         <InfoIcon />
       </div>
-      <div className="flex w-full items-center justify-between">
+      <div></div>
+      <div className="flex w-full items-center justify-between" key={item.id}>
         <div>
           <div className="flex gap-2">
-            <div className="mr-5">
-              {" "}
-              <span className="font-medium">id:</span> {subscription.id}
-            </div>
             {detailsArray.map((content, index, array) => (
               <>
-                <div
-                  className="font-semibold uppercase"
-                  key={
-                    typeof content === "string"
-                      ? content
-                      : generateRandomCode(4)
-                  }
-                >
+                <div className="font-semibold uppercase" key={index}>
                   {content}
                 </div>{" "}
                 {index < array.length - 1 && " - "}
@@ -204,8 +229,7 @@ function SubscriptionBox({
             </div>
             <div>
               <span className="font-medium">QUANTITY:</span>{" "}
-              {/* @ts-ignore for some reason stipe type doesnt include quanity. @TODO - resolve this */}
-              {(subscription?.quantity as number) || 1}
+              {(item?.quantity as number) || 1}
             </div>
           </div>
         </div>

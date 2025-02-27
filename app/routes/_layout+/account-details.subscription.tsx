@@ -8,6 +8,7 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
+import { CrispButton } from "~/components/marketing/crisp";
 
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { PricingTable } from "~/components/subscription/pricing-table";
@@ -29,8 +30,6 @@ import {
   createStripeCheckoutSession,
   createStripeCustomer,
   getStripeCustomer,
-  getActiveProduct,
-  getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
@@ -57,23 +56,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
         )) as CustomerWithSubscriptions)
       : null;
 
-    /** Get a normal subscription */
-    const activeSubscription = getCustomerActiveSubscription({ customer });
-
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
-
-    console.log("prices", prices);
-
-    let activeProduct = null;
-    if (customer && activeSubscription) {
-      /** Get the active subscription ID */
-
-      activeProduct = getActiveProduct({
-        prices,
-        priceId: activeSubscription?.items.data[0].plan.id || null,
-      });
-    }
 
     return json(
       data({
@@ -86,20 +70,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         tierLimit,
         prices,
         customer,
-        activeSubscription,
-        activeProduct,
         usedFreeTrial: user.usedFreeTrial,
-        expiration: {
-          date: new Date(
-            (activeSubscription?.current_period_end as number) * 1000
-          ).toLocaleDateString(),
-          time: new Date(
-            (activeSubscription?.current_period_end as number) * 1000
-          ).toLocaleTimeString(),
-        },
-        isTrialSubscription:
-          !!activeSubscription?.trial_end &&
-          activeSubscription.status === "trialing",
       })
     );
   } catch (cause) {
@@ -184,15 +155,8 @@ export const handle = {
 };
 
 export default function SubscriptionPage() {
-  const {
-    title,
-    subTitle,
-    prices,
-    activeSubscription,
-    tier,
-    tierLimit,
-    customer,
-  } = useLoaderData<typeof loader>();
+  const { title, subTitle, prices, tier, tierLimit, customer } =
+    useLoaderData<typeof loader>();
 
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
@@ -200,39 +164,26 @@ export default function SubscriptionPage() {
 
   const hasNoSubscription = customer?.subscriptions.total_count === 0;
 
-  // console.log("activeSubscription", activeSubscription);
-  //
-  // console.log(customer);
-
-  // if (isCustomTier) {
-  //   return (
-  //     <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-  //       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-  //         <InfoIcon />
-  //       </div>
-  //       <p className="text-[14px] font-medium text-gray-700">
-  //         You’re currently using the{" "}
-  //         {isEnterprise ? (
-  //           <>
-  //             <span className="font-semibold">ENTERPRISE</span> version
-  //           </>
-  //         ) : (
-  //           <>
-  //             <span className="font-semibold">CUSTOM</span> plan
-  //           </>
-  //         )}{" "}
-  //         of Shelf.
-  //         <br />
-  //         {isEnterprise && <>That means you have a custom plan. </>}
-  //         To get more information about your plan, please{" "}
-  //         <CrispButton variant="link" className="inline w-auto">
-  //           contact support
-  //         </CrispButton>
-  //         .
-  //       </p>
-  //     </div>
-  //   );
-  // }
+  if (isCustomTier && isEnterprise) {
+    return (
+      <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+        <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+          <InfoIcon />
+        </div>
+        <p className="text-[14px] font-medium text-gray-700">
+          You’re currently using the{" "}
+          <span className="font-semibold">ENTERPRISE</span> version of Shelf.
+          <br />
+          {isEnterprise && <>That means you have a custom plan. </>}
+          To get more information about your plan, please{" "}
+          <CrispButton variant="link" className="inline w-auto">
+            contact support
+          </CrispButton>
+          .
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -250,26 +201,6 @@ export default function SubscriptionPage() {
             </div>
           </div>
         ) : null}
-
-        {/* {isLegacyPricing && (
-            <WarningBox>
-              <p>
-                You are on a{" "}
-                <Button
-                  to="https://www.shelf.nu/legacy-plan-faq"
-                  target="_blank"
-                  variant="link"
-                >
-                  legacy pricing plan
-                </Button>
-                . We have since updated our pricing plans. <br />
-                You can view the new pricing plans in the customer portal. If
-                you cancel your subscription, you will not be able to renew it.
-                <br />
-                For any questions - get in touch with support
-              </p>
-            </WarningBox>
-          )} */}
 
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
           <div className="mb-8 lg:mb-0">

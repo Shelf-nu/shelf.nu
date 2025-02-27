@@ -160,7 +160,6 @@ export async function getStripePricesAndProducts() {
       type: "recurring",
       expand: ["data.product"],
     });
-
     return groupPricesByInterval(pricesResponse.data as PriceWithProduct[]);
   } catch (cause) {
     throw new ShelfError({
@@ -177,10 +176,7 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
   const groupedPrices: { [key: string]: PriceWithProduct[] } = {};
 
   for (const price of prices) {
-    if (
-      price?.recurring?.interval &&
-      price.metadata?.show_on_table === "true"
-    ) {
+    if (price?.recurring?.interval) {
       const interval = price?.recurring?.interval;
       if (!groupedPrices[interval]) {
         groupedPrices[interval] = [];
@@ -274,34 +270,6 @@ export async function createBillingPortalSession({
       label,
     });
   }
-}
-
-export function getActiveProduct({
-  prices,
-  priceId,
-}: {
-  prices: {
-    [key: string]: PriceWithProduct[];
-  };
-  priceId: string | null;
-}) {
-  if (!priceId) return null;
-  // Check in the 'year' array
-  for (const priceObj of prices.year) {
-    if (priceObj.id === priceId) {
-      return priceObj.product;
-    }
-  }
-
-  // Check in the 'month' array
-  for (const priceObj of prices.month) {
-    if (priceObj.id === priceId) {
-      return priceObj.product;
-    }
-  }
-
-  // If no match is found, return null or throw an error, depending on your preference
-  return null;
 }
 
 /** Gets the customer's paid subscription */
