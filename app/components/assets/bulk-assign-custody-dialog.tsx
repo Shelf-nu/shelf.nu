@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import { type loader } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
+import TemplateSelector from "../custody/template-selector";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
@@ -17,9 +19,10 @@ export const BulkAssignCustodySchema = z.object({
 
 export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
-
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<typeof loader>();
+
+  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
 
   return (
     <BulkUpdateDialogContent
@@ -70,6 +73,9 @@ export default function BulkAssignCustodyDialog() {
                 }),
               })}
               renderItem={(item) => resolveTeamMemberName(item, true)}
+              onChange={(value) => {
+                setHasCustodianSelected(!!value);
+              }}
             />
             {zo.errors.custodian()?.message ? (
               <p className="text-sm text-error-500">
@@ -79,6 +85,11 @@ export default function BulkAssignCustodyDialog() {
             {fetcherError ? (
               <p className="text-sm text-error-500">{fetcherError}</p>
             ) : null}
+
+            <TemplateSelector
+              className="mt-5"
+              hasCustodianSelected={hasCustodianSelected}
+            />
           </div>
 
           <div className={tw("flex gap-3", isSelfService && "-mt-8")}>

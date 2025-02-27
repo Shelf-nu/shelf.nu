@@ -1,11 +1,6 @@
 import { useState } from "react";
 import type { Prisma, Template } from "@prisma/client";
-import {
-  AssetStatus,
-  BookingStatus,
-  OrganizationRoles,
-  TemplateType,
-} from "@prisma/client";
+import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -16,16 +11,13 @@ import {
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import TemplateSelect from "~/components/custody/template-select";
+import TemplateSelector from "~/components/custody/template-selector";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { Switch } from "~/components/forms/switch";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { WarningBox } from "~/components/shared/warning-box";
 
-import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -148,13 +140,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     const totalTeamMembers = await db.teamMember.count({ where });
-    const templatesCount = await db.template.count({
-      where: {
-        isActive: true,
-        type: TemplateType.CUSTODY,
-        organizationId,
-      },
-    });
 
     return json(
       data({
@@ -162,7 +147,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         teamMembers,
         asset,
         totalTeamMembers,
-        hasTemplates: templatesCount > 0,
       })
     );
   } catch (cause) {
@@ -431,18 +415,13 @@ export function links() {
 }
 
 export default function Custody() {
-  const { asset, teamMembers, hasTemplates } = useLoaderData<typeof loader>();
+  const { asset, teamMembers } = useLoaderData<typeof loader>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const actionData = useActionData<typeof action>();
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
-  const [addTemplateEnabled, setAddTemplateEnabled] = useState(false);
-  const [selectedCustodyUser, setSelectedCustodyUser] = useState<{
-    id: string;
-    userId: string | null;
-    name: string;
-  } | null>(null);
+  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
 
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
@@ -496,58 +475,15 @@ export default function Custody() {
               }),
             })}
             onChange={(value) => {
-              if (!value) {
-                return;
-              }
-
-              const id = JSON.parse(value).id;
-              /**
-               * When the value passed is the same as the current value,
-               * that means the user is clicking the already selected item to disable it.
-               * So we clear the state in that case*/
-              if (id === selectedCustodyUser?.id) {
-                setSelectedCustodyUser(null);
-                setAddTemplateEnabled(false);
-              } else {
-                setSelectedCustodyUser(JSON.parse(value));
-              }
+              setHasCustodianSelected(!!value);
             }}
           />
         </div>
-        {!selectedCustodyUser ? (
-          <div className="flex gap-x-2">
-            <CustomTooltip
-              content={
-                <TooltipContent
-                  title="Please select a custodian"
-                  message="You need to select a custodian before you can add a PDF template."
-                />
-              }
-            >
-              <Switch required={false} disabled={true} />
-            </CustomTooltip>
-            <PdfSwitchLabel hasTemplates={hasTemplates} />
-          </div>
-        ) : (
-          <div className="mb-5 flex gap-x-2">
-            <Switch
-              onClick={() => setAddTemplateEnabled((prev) => !prev)}
-              defaultChecked={addTemplateEnabled}
-              required={false}
-              disabled={disabled}
-            />
-            <input
-              type="hidden"
-              name="addTemplateEnabled"
-              value={addTemplateEnabled.toString()}
-            />
-            <PdfSwitchLabel hasTemplates={hasTemplates} />
-          </div>
-        )}
 
-        <When truthy={addTemplateEnabled}>
-          <TemplateSelect className="mt-5" />
-        </When>
+        <TemplateSelector
+          className="mt-5"
+          hasCustodianSelected={!!hasCustodianSelected}
+        />
 
         {error ? (
           <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
@@ -578,7 +514,7 @@ export default function Custody() {
             variant="primary"
             width="full"
             type="submit"
-            disabled={disabled || !selectedCustodyUser}
+            disabled={disabled || !hasCustodianSelected}
           >
             Confirm
           </Button>
@@ -587,44 +523,3 @@ export default function Custody() {
     </Form>
   );
 }
-
-function TooltipContent({
-  title,
-  message,
-}: {
-  title: string;
-  message: string;
-}) {
-  return (
-    <div>
-      <div>
-        <div className="text-md mb-2 font-semibold text-gray-700">{title}</div>
-        <div className="text-sm text-gray-500">{message}</div>
-      </div>
-    </div>
-  );
-}
-
-const PdfSwitchLabel = ({ hasTemplates }: { hasTemplates: boolean }) => (
-  <div className="flex flex-col gap-y-1">
-    <div className="text-md font-semibold text-gray-600">Add PDF Template</div>
-    <p className="text-sm text-gray-500">
-      {hasTemplates
-        ? "Custodian needs to read (and sign) a document before receiving custody."
-        : "You need to create templates before you can add them here."}
-      {hasTemplates ? (
-        <Link target="_blank" className="text-gray-700 underline" to="#">
-          Learn more
-        </Link>
-      ) : (
-        <Link
-          target="_blank"
-          className="text-gray-700 underline"
-          to="/settings/template/new"
-        >
-          Create a template
-        </Link>
-      )}
-    </p>
-  </div>
-);
