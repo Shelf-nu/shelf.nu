@@ -36,6 +36,21 @@ export function SubscriptionsOverview({
 
   return (
     <div>
+      {/* <div className="mb-2 flex items-center justify-between">
+        <div>
+          <span className="text-[18px] font-medium">{customer.name}</span>'s
+          subscription(s){" "}
+        </div>
+
+        <CustomerPortalForm
+          buttonText="Manage subscriptions"
+          buttonProps={{
+            variant: "block-link",
+            className: tw("underline"),
+          }}
+          className=""
+        />
+      </div> */}
       {subscriptionsData?.map((subscription) => (
         <SubscriptionBox
           subscription={subscription}
@@ -51,7 +66,6 @@ export function SubscriptionsOverview({
 function SubscriptionBox({
   subscription,
   prices,
-  customer,
 }: {
   subscription: Stripe.Subscription;
   prices: {
@@ -59,25 +73,30 @@ function SubscriptionBox({
   };
   customer: CustomerWithSubscriptions;
 }) {
-  const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
-  console.log("subscription:", subscription);
+  const { isActive } = getSubscriptionStatus(subscription);
+  const total = subscription.items.data.reduce((acc, item) => {
+    const price = findPriceById(prices, item.price.id);
+    return acc + (price?.unit_amount || 0) * (item.quantity || 1);
+  }, 0);
   return (
     <div>
-      <div className="mb-2">
-        <span className="text-[18px] font-medium">{customer.name}</span> on (
-        {subscription.status})
-      </div>
-      {subscription.items.data.map((item, index) => {
-        console.log(`item ${index}:`, item);
-        return (
-          <Item
-            item={item}
-            subscription={subscription}
-            prices={prices}
-            key={item.id}
-          />
-        );
-      })}
+      {subscription.items.data.map((item) => (
+        <Item
+          item={item}
+          subscription={subscription}
+          prices={prices}
+          key={item.id}
+        />
+      ))}
+      {isActive && (
+        <div className="text-right">
+          Total:{" "}
+          {new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+          }).format(total / 100)}
+        </div>
+      )}
     </div>
   );
 }
@@ -120,6 +139,7 @@ function Item({
         : planTier === "tier_1"
         ? "Plus plan"
         : subscriptionPrice?.product.name,
+      subscription.status,
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];
     if (isLegacyPricing) {

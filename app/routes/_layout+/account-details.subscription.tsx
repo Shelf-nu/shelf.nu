@@ -61,7 +61,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     return json(
       data({
-        title: "Subscriptions",
+        title: `Subscriptions`,
         subTitle:
           customer?.subscriptions.total_count === 0
             ? "Pick an account plan that fits your workflow."
@@ -207,7 +207,9 @@ export default function SubscriptionPage() {
             <h3 className="text-text-lg font-semibold">{title}</h3>
             <p className="text-sm text-gray-600">{subTitle}</p>
           </div>
-          {!hasNoSubscription && <CustomerPortalForm />}
+          {!hasNoSubscription && (
+            <CustomerPortalForm buttonText="Manage subscriptions" />
+          )}
         </div>
         {/* */}
         {hasNoSubscription ? (
