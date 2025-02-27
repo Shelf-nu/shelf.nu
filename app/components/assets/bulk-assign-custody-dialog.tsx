@@ -15,6 +15,7 @@ import { Button } from "../shared/button";
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
+  template: z.string().optional(),
 });
 
 export default function BulkAssignCustodyDialog() {
@@ -70,6 +71,7 @@ export default function BulkAssignCustodyDialog() {
                    * @TODO This should be refactored to send the name as some metadata, instaed of like this
                    */
                   name: resolveTeamMemberName(item),
+                  email: item?.user?.email,
                 }),
               })}
               renderItem={(item) => resolveTeamMemberName(item, true)}

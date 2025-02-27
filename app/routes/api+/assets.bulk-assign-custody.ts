@@ -29,7 +29,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams } = parseData(
+    const { assetIds, custodian, currentSearchParams, template } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
@@ -56,8 +56,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       custodianId: custodian.id,
       custodianName: custodian.name,
+      custodianEmail: custodian.email,
       organizationId,
       currentSearchParams,
+      template,
     });
 
     sendNotification({

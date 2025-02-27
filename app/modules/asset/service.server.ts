@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  Template,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -26,6 +27,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
@@ -104,6 +106,7 @@ import {
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { assetCustodyAssignedWithTemplateEmailText } from "../invite/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -2290,16 +2293,20 @@ export async function bulkDeleteAssets({
 
 export async function bulkCheckOutAssets({
   userId,
+  template,
   assetIds,
   custodianId,
   custodianName,
+  custodianEmail,
   organizationId,
   currentSearchParams,
 }: {
   userId: User["id"];
+  template?: Template["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
+  custodianEmail?: User["email"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
 }) {
@@ -2336,6 +2343,43 @@ export async function bulkCheckOutAssets({
       });
     }
 
+    /** Check if the template exists and is in same organization */
+    let templateFound: Pick<
+      Template,
+      "id" | "name" | "signatureRequired" | "lastRevision"
+    > | null = null;
+    if (template) {
+      templateFound = await db.template.findUnique({
+        where: { id: template, organizationId },
+        select: {
+          id: true,
+          name: true,
+          signatureRequired: true,
+          lastRevision: true,
+        },
+      });
+
+      if (!templateFound) {
+        throw new ShelfError({
+          message:
+            "Template not found. Please refresh and if the issue persists contact support.",
+          label: "Assets",
+          cause: null,
+        });
+      }
+    }
+
+    function getContent(asset: string) {
+      const fullName = `**${user.firstName?.trim()} ${user.lastName?.trim()}**`;
+
+      const content =
+        templateFound && templateFound.signatureRequired
+          ? `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateFound.name?.trim()}** template before receiving custody.`
+          : `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**`;
+
+      return content;
+    }
+
     /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
@@ -2348,25 +2392,53 @@ export async function bulkCheckOutAssets({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
+          // Add template in custody if exists
+          ...(templateFound
+            ? {
+                templateId: templateFound.id,
+                associatedTemplateVersion: templateFound.lastRevision,
+              }
+            : {}),
         })),
       });
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
+        data: {
+          status: templateFound?.signatureRequired
+            ? AssetStatus.AVAILABLE
+            : AssetStatus.IN_CUSTODY,
+        },
       });
 
       /** Creating notes for the assets */
       await tx.note.createMany({
         data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: getContent(asset.title),
           type: "UPDATE",
           userId,
           assetId: asset.id,
         })),
       });
     });
+
+    /** Send email */
+    if (templateFound && templateFound.signatureRequired && custodianEmail) {
+      assets.forEach((asset) => {
+        sendEmail({
+          to: custodianEmail,
+          subject: `You have been assigned custody over ${asset.title}.`,
+          text: assetCustodyAssignedWithTemplateEmailText({
+            assetName: asset.title,
+            assignerName: user.firstName + " " + user.lastName,
+            assetId: asset.id,
+            templateId: templateFound.id,
+            assigneeId: custodianId,
+          }),
+        });
+      });
+    }
 
     return true;
   } catch (cause) {
