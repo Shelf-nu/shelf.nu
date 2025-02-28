@@ -303,6 +303,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
               },
             },
             ssoDetails: true,
+            workspaceDisabled: true,
           },
         },
       },
@@ -372,6 +373,31 @@ export async function toggleOrganizationSso({
       message:
         "Something went wrong while toggling organization SSO. Please try again or contact support.",
       additionalData: { organizationId, enabledSso },
+      label,
+    });
+  }
+}
+
+export async function toggleWorkspaceDisabled({
+  organizationId,
+  workspaceDisabled,
+}: {
+  organizationId: string;
+  workspaceDisabled: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId, type: OrganizationType.TEAM },
+      data: {
+        workspaceDisabled,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling organization SSO. Please try again or contact support.",
+      additionalData: { organizationId, workspaceDisabled },
       label,
     });
   }

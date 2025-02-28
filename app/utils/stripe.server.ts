@@ -375,7 +375,6 @@ export const disabledTeamOrg = async ({
 
   /** All account details routes should be accessible always */
   if (url.includes("account-details")) return false;
-
   const tierLimit = await getOrganizationTierLimit({
     organizationId: currentOrganization.id,
     organizations,
