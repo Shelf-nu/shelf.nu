@@ -164,7 +164,11 @@ export default function SubscriptionPage() {
 
   const hasNoSubscription = customer?.subscriptions.total_count === 0;
 
-  if (isCustomTier && isEnterprise) {
+  /**
+   * This handles the case when there is no subscription and custom tier is set.
+   * This is some special cases only used for certain clients. Most users that have customTier also have a subscription
+   */
+  if (isCustomTier && hasNoSubscription) {
     return (
       <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
         <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -172,7 +176,16 @@ export default function SubscriptionPage() {
         </div>
         <p className="text-[14px] font-medium text-gray-700">
           You’re currently using the{" "}
-          <span className="font-semibold">ENTERPRISE</span> version of Shelf.
+          {isEnterprise ? (
+            <>
+              <span className="font-semibold">ENTERPRISE</span> version
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">CUSTOM</span> plan
+            </>
+          )}{" "}
+          of Shelf.
           <br />
           {isEnterprise && <>That means you have a custom plan. </>}
           To get more information about your plan, please{" "}
