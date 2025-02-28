@@ -52,7 +52,7 @@ model User {
   // Relationships
 
   assets            Asset[]
-  templates         Template[]
+  custodyAgreements CustodyAgreement[]
   categories        Category[]
   notes             Note[]
   qrCodes           Qr[]
@@ -401,6 +401,18 @@ model TeamMember {
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
+enum CustodyStatus {
+  ACTIVE
+  FINISHED
+}
+
+enum CustodySignatureStatus {
+  NOT_REQUIRED // no signature required for custody
+  PENDING
+  SIGNED
+  CANCELLED
+}
+
 model Custody {
   id String @id @default(cuid())
 
@@ -410,13 +422,16 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
 
-  template                  Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  templateId                String?
-  templateSigned            Boolean?  @default(false)
-  associatedTemplateVersion Int?
+  status                     CustodyStatus?    @default(ACTIVE)
+  agreement                  CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  agreementId                String?
+  agreementSigned            Boolean?          @default(false)
+  associatedAgreementVersion Int?
 
-  signatureText  String?
-  signatureImage String?
+  signatureStatus   CustodySignatureStatus? @default(NOT_REQUIRED)
+  signatureText     String?
+  signatureImage    String?
+  agreementSignedOn DateTime?
 
   // DateTime
   createdAt DateTime @default(now())
@@ -457,7 +472,7 @@ model Organization {
   updatedAt          DateTime             @updatedAt
   customFields       CustomField[]
   images             Image[]              @relation("owner")
-  templates          Template[]
+  custodyAgreements  CustodyAgreement[]
   bookings           Booking[]
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
@@ -531,64 +546,64 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  maxTemplates     Int      @default(3)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   TierId   @id
+  tier                 Tier?
+  canImportAssets      Boolean  @default(false)
+  canExportAssets      Boolean  @default(false)
+  canImportNRM         Boolean  @default(false)
+  maxCustomFields      Int      @default(0)
+  maxOrganizations     Int      @default(1)
+  maxCustodyAgreements Int      @default(3)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @unique @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  maxTemplates     Int      @default(3)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String   @id @unique @default(cuid())
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId               String?  @unique // This is the foreign key
+  canImportAssets      Boolean  @default(true)
+  canExportAssets      Boolean  @default(true)
+  canImportNRM         Boolean  @default(true)
+  maxCustomFields      Int      @default(1000)
+  maxOrganizations     Int      @default(1)
+  maxCustodyAgreements Int      @default(3)
+  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
-enum TemplateType {
+enum CustodyAgreementType {
   CUSTODY
   BOOKINGS
 }
 
-model Template {
-  id                String       @id @default(cuid())
+model CustodyAgreement {
+  id                String               @id @default(cuid())
   name              String
   description       String?
-  type              TemplateType @default(BOOKINGS)
-  signatureRequired Boolean      @default(false)
-  isDefault         Boolean      @default(false)
-  isActive          Boolean      @default(true)
-  lastRevision      Int          @default(0)
+  type              CustodyAgreementType @default(CUSTODY)
+  signatureRequired Boolean              @default(false)
+  isDefault         Boolean              @default(false)
+  isActive          Boolean              @default(true)
+  lastRevision      Int                  @default(0)
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId  String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdById String
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
 
-  custodies Custody[]
-  files     TemplateFile[]
+  custodies             Custody[]
+  custodyAgreementFiles CustodyAgreementFile[]
 }
 
-model TemplateFile {
+model CustodyAgreementFile {
   id       String @id @default(cuid())
   revision Int
   size     Int // PDF size
@@ -596,10 +611,10 @@ model TemplateFile {
   url      String // PDF file URL
 
   // Relationships
-  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  templateId String
+  custodyAgreement   CustodyAgreement @relation(fields: [custodyAgreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  custodyAgreementId String
 
-  @@unique([revision, templateId])
+  @@unique([revision, custodyAgreementId])
 }
 
 model CustomField {
