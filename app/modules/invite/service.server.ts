@@ -6,6 +6,7 @@ import type {
   User,
 } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
@@ -699,17 +700,34 @@ export async function bulkInviteUsers({
       name: p.email.split("@")[0],
     }));
 
-    const createdTeamMembers = await db.teamMember.createManyAndReturn({
-      data: validPayloadsWithName.map((p) => ({
-        name: p.name,
-        organizationId,
-      })),
-    });
-
     // Prepare invite data
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
+    const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      inviterId: userId,
+      organizationId,
+      inviteeEmail: payload.email,
+      teamMemberId: getTeamMemberId(payload),
+      roles: [payload.role],
+      expiresAt,
+      inviteCode: generateRandomCode(6),
+      status: InviteStatuses.PENDING,
+    }));
+
+    const INVITE_INCLUDE = {
+      inviter: { select: { firstName: true, lastName: true } },
+      organization: true,
+    } satisfies Prisma.InviteInclude;
+
+    let createdTeamMembers: TeamMember[] = [];
+    let createdInvites: Array<
+      Prisma.InviteGetPayload<{ include: typeof INVITE_INCLUDE }>
+    > = [];
+
+    /**
+     * This helper function returns the correct  teamMemberId required for creating an invite
+     */
     function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
       if (payload.teamMemberId) {
         return payload.teamMemberId;
@@ -726,24 +744,20 @@ export async function bulkInviteUsers({
       return createdTm.id;
     }
 
-    const invitesToCreate = validPayloadsWithName.map((payload) => ({
-      inviterId: userId,
-      organizationId,
-      inviteeEmail: payload.email,
-      teamMemberId: getTeamMemberId(payload),
-      roles: [payload.role],
-      expiresAt,
-      inviteCode: generateRandomCode(6),
-      status: InviteStatuses.PENDING,
-    }));
+    await db.$transaction(async (tx) => {
+      // Bulk create all required team members
+      createdTeamMembers = await tx.teamMember.createManyAndReturn({
+        data: validPayloadsWithName.map((p) => ({
+          name: p.name,
+          organizationId,
+        })),
+      });
 
-    // Bulk create invites
-    const createdInvites = await db.invite.createManyAndReturn({
-      data: invitesToCreate,
-      include: {
-        inviter: { select: { firstName: true, lastName: true } },
-        organization: true,
-      },
+      // Bulk create invites
+      createdInvites = await tx.invite.createManyAndReturn({
+        data: invitesToCreate,
+        include: INVITE_INCLUDE,
+      });
     });
 
     // Queue emails for sending - no need to await since it's handled by queue
@@ -795,9 +809,22 @@ export async function bulkInviteUsers({
           : undefined,
     };
   } catch (cause) {
+    let message = "Something went wrong while inviting users.";
+
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
+    if (
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2003"
+    ) {
+      message = "Received invalid teamMemberId in csv";
+    }
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while inviting users.",
+      message,
       label,
       additionalData: { users },
     });
