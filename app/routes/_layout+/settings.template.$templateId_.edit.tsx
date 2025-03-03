@@ -8,12 +8,12 @@ import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import {
+  NewAgreementFormSchema,
+  AgreementForm,
+} from "~/components/agreements/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import {
-  NewTemplateFormSchema,
-  TemplateForm,
-} from "~/components/agreements/form";
 import {
   getCustodyAgreementById,
   updateCustodyAgreement,
@@ -122,7 +122,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const { name, description, signatureRequired, pdf } = parseData(
           await request.formData(),
-          NewTemplateFormSchema
+          NewAgreementFormSchema
         );
 
         await updateCustodyAgreement({
@@ -174,7 +174,7 @@ export default function TemplateEditPage() {
         classNames="-mt-5"
       />
       <div className="flex justify-between">
-        <TemplateForm
+        <AgreementForm
           isEdit
           name={template.name || name}
           description={template.description}

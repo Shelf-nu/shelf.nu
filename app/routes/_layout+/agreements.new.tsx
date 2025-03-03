@@ -1,16 +1,13 @@
-import { error } from "console";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useAtomValue } from "jotai";
-
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import Header from "~/components/layout/header";
-
 import {
-  NewTemplateFormSchema,
-  TemplateForm,
+  NewAgreementFormSchema,
+  AgreementForm,
 } from "~/components/agreements/form";
-
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import {
   createCustodyAgreement,
   createCustodyAgreementRevision,
@@ -18,7 +15,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
-import { data, getActionMethod, parseData } from "~/utils/http.server";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -26,31 +23,25 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
 
-const title = "New Template";
+const title = "New Agreement";
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId } = context.getSession();
+
   try {
     await assertUserCanCreateMoreAgreements(userId);
 
-    const header = {
-      title,
-    };
+    const header: HeaderData = { title };
 
-    return json(
-      data({
-        header,
-      })
-    );
+    return json(data({ header }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    throw json(error(reason), { status: reason.status });
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data?.header?.title) : "" },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const handle = {
@@ -79,7 +70,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
         const { name, description, signatureRequired, pdf } = parseData(
           await request.formData(),
-          NewTemplateFormSchema
+          NewAgreementFormSchema
         );
 
         const { id } = await createCustodyAgreement({
@@ -99,15 +90,16 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         });
 
         sendNotification({
-          title: "Template created",
-          message: "Your template has been created successfully",
+          title: "Agreement created",
+          message: "Your agreement has been created successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
 
-        return redirect(`/settings/template`);
+        return redirect("/agreements");
       }
     }
+
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -115,18 +107,14 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   }
 }
 
-export default function AddTemplatePage() {
+export default function NewAgreement() {
   const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <>
-      <Header
-        hideBreadcrumbs
-        title={title ? title : "Untitled template"}
-        classNames="-mt-5"
-      />
+      <Header classNames="mb-4" title={title ? title : "Untitled agreement"} />
 
-      <TemplateForm />
+      <AgreementForm className="rounded-md border bg-white p-4" />
     </>
   );
 }

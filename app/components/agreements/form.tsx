@@ -10,6 +10,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils/form";
 import { formatBytes } from "~/utils/format-bytes";
+import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
@@ -30,7 +31,7 @@ export const base = z.object({
     .transform((val) => (val === "on" ? true : false)),
 });
 
-export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
+export const NewAgreementFormSchema = z.discriminatedUnion("isEdit", [
   base.extend({
     isEdit: z.literal("false"),
     pdf: z
@@ -70,9 +71,10 @@ interface Props {
   pdfName?: CustodyAgreementFile["name"];
   version?: CustodyAgreementFile["revision"];
   isEdit?: boolean;
+  className?: string;
 }
 
-export const TemplateForm = ({
+export const AgreementForm = ({
   name = "",
   description = "",
   signatureRequired = false,
@@ -81,9 +83,10 @@ export const TemplateForm = ({
   pdfName,
   version,
   isEdit = false,
+  className,
 }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewTemplateFormSchema);
+  const zo = useZorm("NewQuestionWizardScreen", NewAgreementFormSchema);
   const disabled = isFormProcessing(navigation.state);
   const [, validateFile] = useAtom(validateFileAtom);
 
@@ -111,7 +114,7 @@ export const TemplateForm = ({
     <Form
       ref={zo.ref}
       method="post"
-      className="flex w-full flex-col gap-2"
+      className={tw("flex w-full flex-col gap-2", className)}
       encType="multipart/form-data"
     >
       <FormRow rowLabel="Name" className="border-b-0 pb-0" required={true}>
