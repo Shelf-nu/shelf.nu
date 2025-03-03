@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useState } from "react";
-import type { Template, TemplateFile } from "@prisma/client";
+import type { CustodyAgreement, CustodyAgreementFile } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { FileTypeIcon } from "lucide-react";
@@ -61,14 +61,14 @@ export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
 ]);
 
 interface Props {
-  name?: Template["name"];
-  description?: Template["description"];
-  type?: Template["type"];
-  signatureRequired?: Template["signatureRequired"];
-  pdfUrl?: TemplateFile["url"];
-  pdfSize?: TemplateFile["size"];
-  pdfName?: TemplateFile["name"];
-  version?: TemplateFile["revision"];
+  name?: CustodyAgreement["name"];
+  description?: CustodyAgreement["description"];
+  type?: CustodyAgreement["type"];
+  signatureRequired?: CustodyAgreement["signatureRequired"];
+  pdfUrl?: CustodyAgreementFile["url"];
+  pdfSize?: CustodyAgreementFile["size"];
+  pdfName?: CustodyAgreementFile["name"];
+  version?: CustodyAgreementFile["revision"];
   isEdit?: boolean;
 }
 

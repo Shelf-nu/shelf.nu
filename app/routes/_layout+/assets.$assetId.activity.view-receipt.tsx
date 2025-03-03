@@ -5,7 +5,7 @@ import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
-import { getTemplateByAssetIdWithCustodian } from "~/modules/template";
+import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
 import { getDateTimeFormat, useHints } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -25,17 +25,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
-    const { asset, template, custody, custodian } =
-      await getTemplateByAssetIdWithCustodian({
+    const { asset, custodyAgreement, custody, custodian } =
+      await getAgreementByAssetIdWithCustodian({
         assetId,
         organizationId,
       });
 
-    if (!custody.templateSigned) {
+    if (!custody.agreementSigned) {
       throw new ShelfError({
         cause: null,
         message:
@@ -53,7 +53,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         showModal: true,
         asset,
-        template,
+        custodyAgreement,
         custody: {
           ...custody,
           signedOn,
@@ -69,7 +69,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function ViewReceipt() {
-  const { asset, custodian, custody, organization, template } =
+  const { asset, custodian, custody, organization, custodyAgreement } =
     useLoaderData<typeof loader>();
 
   const hints = useHints();
@@ -83,7 +83,7 @@ export default function ViewReceipt() {
   return (
     <div className="-m-6">
       <div className="border-b px-6 py-4">
-        <h4>Signature receipt - ({template.name})</h4>
+        <h4>Signature receipt - ({custodyAgreement.name})</h4>
         <p className="text-gray-600">
           This document was signed by{" "}
           <span className="font-medium text-black">
@@ -114,7 +114,7 @@ export default function ViewReceipt() {
 
           <div className="mb-4">
             <h3 className="text-gray-600">{organization.name}</h3>
-            <h2>Signature receipt ({template.name})</h2>
+            <h2>Signature receipt ({custodyAgreement.name})</h2>
           </div>
 
           <div className="grid grid-cols-3 border">
@@ -133,7 +133,9 @@ export default function ViewReceipt() {
             <Separator className="col-span-3" />
 
             <p className="p-2 font-medium">Document</p>
-            <p className="col-span-2 py-2 text-gray-600">{template.name}</p>
+            <p className="col-span-2 py-2 text-gray-600">
+              {custodyAgreement.name}
+            </p>
             <Separator className="col-span-3" />
 
             <p className="p-2 font-medium">Signature</p>

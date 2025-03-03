@@ -367,32 +367,32 @@ export async function assertUserCanInviteUsersToWorkspace({
 }
 /** End Team Features */
 
-/** Template Features */
+/** Agreement Features */
 
 /**
- * This validates if a user can create more templates
+ * This validates if a user can create more agreements
  */
-export function canCreateMoreTemplates({
+export function canCreateMoreAgreements({
   tierLimit,
-  totalTemplates,
+  totalAgreements,
 }: {
-  tierLimit: { maxTemplates: number } | null | undefined;
-  totalTemplates: number;
+  tierLimit: { maxCustodyAgreements: number } | null | undefined;
+  totalAgreements: number;
 }) {
   if (!premiumIsEnabled) return true;
-  if (!tierLimit?.maxTemplates) return false;
+  if (!tierLimit?.maxCustodyAgreements) return false;
 
-  return totalTemplates < tierLimit?.maxTemplates;
+  return totalAgreements < tierLimit?.maxCustodyAgreements;
 }
 
-export async function assertUserCanCreateMoreTemplates(userId: string) {
+export async function assertUserCanCreateMoreAgreements(userId: string) {
   /** Get the tier limit and check if they can export */
   const tierLimit = await getUserTierLimit(userId);
 
-  const canCreateMore = canCreateMoreTemplates({
+  const canCreateMore = canCreateMoreAgreements({
     tierLimit,
-    totalTemplates: await db.template.count({
-      where: { userId },
+    totalAgreements: await db.custodyAgreement.count({
+      where: { createdById: userId },
     }),
   });
 
@@ -400,7 +400,7 @@ export async function assertUserCanCreateMoreTemplates(userId: string) {
     throw new ShelfError({
       cause: null,
       title: "Not allowed",
-      message: "Your user cannot create more templates",
+      message: "Your user cannot create more agreements",
       additionalData: { userId },
       label,
       shouldBeCaptured: false,
@@ -408,4 +408,4 @@ export async function assertUserCanCreateMoreTemplates(userId: string) {
   }
 }
 
-/** End template features */
+/** End agreement features */

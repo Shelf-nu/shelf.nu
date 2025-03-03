@@ -1,5 +1,4 @@
-import type { Template } from "@prisma/client";
-import { TemplateType } from "@prisma/client";
+import { CustodyAgreementType, type CustodyAgreement } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -18,7 +17,10 @@ import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { makeDefault, toggleTemplateActiveState } from "~/modules/template";
+import {
+  makeCustodyAgreementDefault,
+  toggleCustodyAgreementActiveState,
+} from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -28,7 +30,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canCreateMoreTemplates } from "~/utils/subscription.server";
+import { canCreateMoreAgreements } from "~/utils/subscription.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -38,7 +40,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
@@ -52,7 +54,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
           tier: {
             include: { tierLimit: true },
           },
-          templates: {
+          custodyAgreements: {
             where: { organizationId },
             orderBy: { createdAt: "desc" },
           },
@@ -63,7 +65,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
           cause,
           message: "An error occured while fetching the user",
           additionalData: { userId },
-          label: "Template",
+          label: "Custody Agreement",
         });
       });
 
@@ -72,9 +74,9 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       plural: "Templates",
     };
 
-    const templates = user.templates;
+    const templates = user.custodyAgreements;
 
-    const defaultTemplates: { [key: string]: Template } = {};
+    const defaultTemplates: { [key: string]: CustodyAgreement } = {};
     templates.forEach((template) => {
       if (template.isDefault) defaultTemplates[template.type] = template;
     });
@@ -84,9 +86,9 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         userId,
         tier: user.tier,
         modelName,
-        canCreateMoreTemplates: canCreateMoreTemplates({
+        canCreateMoreTemplates: canCreateMoreAgreements({
           tierLimit: user.tier.tierLimit,
-          totalTemplates: templates.length,
+          totalAgreements: templates.length,
         }),
         items: templates,
         totalItems: templates.length,
@@ -112,7 +114,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const { organizationId: orgId } = await requirePermission({
           userId: authSession.userId,
           request,
-          entity: PermissionEntity.template,
+          entity: PermissionEntity.custodyAgreement,
           action: PermissionAction.update,
         });
         organizationId = orgId;
@@ -138,7 +140,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               })
             );
 
-            await toggleTemplateActiveState({
+            await toggleCustodyAgreementActiveState({
               id: templateId,
               active: !isActive,
               organizationId: organizationId,
@@ -160,11 +162,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
               formData,
               z.object({
                 templateId: z.string(),
-                templateType: z.nativeEnum(TemplateType),
+                templateType: z.nativeEnum(CustodyAgreementType),
               })
             );
 
-            await makeDefault({
+            await makeCustodyAgreementDefault({
               id: templateId,
               type: templateType,
               organizationId,
@@ -287,7 +289,10 @@ export default function TemplatePage() {
 const TemplateRow = ({
   item,
 }: {
-  item: Pick<Template, "id" | "name" | "type" | "isDefault" | "isActive">;
+  item: Pick<
+    CustodyAgreement,
+    "id" | "name" | "type" | "isDefault" | "isActive"
+  >;
 }) => (
   <>
     <Td className="w-full">
@@ -316,7 +321,7 @@ const TemplateRow = ({
       </Badge>
     </Td>
     <Td>
-      <TemplateActionsDropdown template={item} />
+      <TemplateActionsDropdown agreement={item} />
     </Td>
   </>
 );

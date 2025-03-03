@@ -1,4 +1,4 @@
-import { TemplateType } from "@prisma/client";
+import { CustodyAgreementType } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
@@ -16,19 +16,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
-    const templates = await db.template.findMany({
+    const agreements = await db.custodyAgreement.findMany({
       where: {
         isActive: true,
         organizationId,
-        type: TemplateType.CUSTODY,
+        type: CustodyAgreementType.CUSTODY,
       },
     });
 
-    return json(data({ templates }));
+    return json(data({ agreements }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

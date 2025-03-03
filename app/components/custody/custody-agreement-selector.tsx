@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Template } from "@prisma/client";
+import type { CustodyAgreement } from "@prisma/client";
 import { Link } from "@remix-run/react";
 import useApiQuery from "~/hooks/use-api-query";
 import { tw } from "~/utils/tw";
@@ -15,24 +15,24 @@ import { Button } from "../shared/button";
 import { CustomTooltip } from "../shared/custom-tooltip";
 import When from "../when/when";
 
-type TemplateSelectorProps = {
+type CustodyAgreementSelectorProps = {
   className?: string;
   hasCustodianSelected: boolean;
   disabled?: boolean;
 };
 
-export default function TemplateSelector({
+export default function CustodyAgreementSelector({
   className,
   hasCustodianSelected,
   disabled,
-}: TemplateSelectorProps) {
-  const [addTemplateEnabled, setAddTemplateEnabled] = useState(false);
-  const { isLoading, data } = useApiQuery<{ templates: Template[] }>({
-    api: "/api/templates",
-    enabled: addTemplateEnabled,
+}: CustodyAgreementSelectorProps) {
+  const [addAgreementEnabled, setAddAgreementEnabled] = useState(false);
+  const { isLoading, data } = useApiQuery<{ agreements: CustodyAgreement[] }>({
+    api: "/api/custody-agreements",
+    enabled: addAgreementEnabled,
   });
 
-  const templates = data?.templates;
+  const agreements = data?.agreements;
 
   if (!hasCustodianSelected) {
     return (
@@ -41,13 +41,13 @@ export default function TemplateSelector({
           content={
             <TooltipContent
               title="Please select a custodian"
-              message="You need to select a custodian before you can add a PDF template."
+              message="You need to select a custodian before you can add a PDF agreement."
             />
           }
         >
           <Switch required={false} disabled={!hasCustodianSelected} />
         </CustomTooltip>
-        <PdfSwitchLabel hasTemplates={!!templates?.length} />
+        <PdfSwitchLabel hasAgreements={!!agreements?.length} />
       </div>
     );
   }
@@ -56,23 +56,23 @@ export default function TemplateSelector({
     <div className={tw("w-full", className)}>
       <div className="mb-5 flex gap-x-2">
         <Switch
-          onClick={() => setAddTemplateEnabled((prev) => !prev)}
-          defaultChecked={addTemplateEnabled}
+          onClick={() => setAddAgreementEnabled((prev) => !prev)}
+          defaultChecked={addAgreementEnabled}
           required={false}
           disabled={disabled}
         />
         <input
           type="hidden"
-          name="addTemplateEnabled"
-          value={addTemplateEnabled.toString()}
+          name="addAgreementEnabled"
+          value={addAgreementEnabled.toString()}
         />
-        <PdfSwitchLabel hasTemplates={!!templates?.length} />
+        <PdfSwitchLabel hasAgreements={!!agreements?.length} />
       </div>
 
-      <When truthy={addTemplateEnabled}>
-        <Select name="template" disabled={isLoading}>
+      <When truthy={addAgreementEnabled}>
+        <Select name="custodyAgreement" disabled={isLoading}>
           <SelectTrigger className="text-left">
-            <SelectValue placeholder="Select a PDF template" />
+            <SelectValue placeholder="Select a PDF agreement" />
           </SelectTrigger>
 
           <SelectContent
@@ -84,40 +84,38 @@ export default function TemplateSelector({
             }
           >
             <When
-              truthy={!!templates?.length}
+              truthy={!!agreements?.length}
               fallback={
                 <div>
-                  No team PDF templates found.{" "}
-                  <Button to="/settings/template" variant="link">
-                    Create PDF template
+                  No agreements found.{" "}
+                  <Button to="/agreements/new" variant="link">
+                    Create new agreement
                   </Button>
                 </div>
               }
             >
               <div className="max-h-[320px] overflow-auto">
-                {templates?.map((template) => (
+                {agreements?.map((agreement) => (
                   <SelectItem
-                    key={template.id}
-                    value={template.id}
+                    key={agreement.id}
+                    value={agreement.id}
                     className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
                   >
-                    {template.name}
+                    {agreement.name}
                   </SelectItem>
                 ))}
               </div>
             </When>
           </SelectContent>
         </Select>
-        <div className="mt-2 text-sm text-gray-500">
-          Manage PDF templates in{" "}
-          <Link
-            target="_blank"
-            className="text-gray-800 underline"
-            to={"/settings/template"}
-          >
-            settings
-          </Link>
-        </div>
+
+        <Link
+          target="_blank"
+          className="mt-2 text-sm text-gray-800 underline"
+          to="/agreements"
+        >
+          Manage PDF agreements
+        </Link>
       </When>
     </div>
   );
@@ -140,17 +138,17 @@ export function TooltipContent({
   );
 }
 
-function PdfSwitchLabel({ hasTemplates }: { hasTemplates: boolean }) {
+function PdfSwitchLabel({ hasAgreements }: { hasAgreements: boolean }) {
   return (
     <div className="flex flex-col gap-y-1">
       <div className="text-md font-semibold text-gray-600">
-        Add PDF Template
+        Add PDF Agreement
       </div>
       <p className="text-sm text-gray-500">
-        {hasTemplates
+        {hasAgreements
           ? "Custodian needs to read (and sign) a document before receiving custody."
-          : "You need to create templates before you can add them here."}
-        {hasTemplates ? (
+          : "You need to create an agreement before you can add them here."}
+        {hasAgreements ? (
           <Link target="_blank" className="text-gray-700 underline" to="#">
             Learn more
           </Link>
@@ -158,9 +156,9 @@ function PdfSwitchLabel({ hasTemplates }: { hasTemplates: boolean }) {
           <Link
             target="_blank"
             className="text-gray-700 underline"
-            to="/settings/template/new"
+            to="/agreements/new"
           >
-            Create a template
+            Create an agreement
           </Link>
         )}
       </p>

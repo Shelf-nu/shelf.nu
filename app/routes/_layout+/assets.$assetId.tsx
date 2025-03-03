@@ -82,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         custody: {
           include: {
             custodian: true,
-            template: { select: { signatureRequired: true } },
+            agreement: { select: { signatureRequired: true } },
           },
         },
         kit: true,
@@ -290,8 +290,8 @@ export default function AssetDetailsPage() {
                 status={asset.status}
                 availableToBook={asset.availableToBook}
               />
-              {asset.custody?.template?.signatureRequired &&
-                !asset.custody.templateSigned && (
+              {asset.custody?.agreement?.signatureRequired &&
+                !asset.custody.agreementSigned && (
                   <CustomTooltip
                     content={
                       <div className="max-w-[260px] text-left sm:max-w-[320px]">

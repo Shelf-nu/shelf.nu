@@ -10,7 +10,7 @@ type AgreementDialogProps = {
 };
 
 export default function AgreementDialog({ className }: AgreementDialogProps) {
-  const { template } = useLoaderData<typeof loader>();
+  const { custodyAgreement } = useLoaderData<typeof loader>();
   const [isOpen, setIsOpen] = useState(false);
 
   function handleOpen() {
@@ -32,9 +32,11 @@ export default function AgreementDialog({ className }: AgreementDialogProps) {
         onClose={handleClose}
         title={
           <div>
-            <h1 className="mb-1 text-lg font-semibold">{template.name}</h1>
+            <h1 className="mb-1 text-lg font-semibold">
+              {custodyAgreement.name}
+            </h1>
             <p className="text-gray-600">
-              {template.description ?? "No description provided"}
+              {custodyAgreement.description ?? "No description provided"}
             </p>
           </div>
         }

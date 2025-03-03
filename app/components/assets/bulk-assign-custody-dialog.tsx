@@ -8,14 +8,14 @@ import { type loader } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
-import TemplateSelector from "../custody/template-selector";
+import CustodyAgreementSelector from "../custody/custody-agreement-selector";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
-  template: z.string().optional(),
+  custodyAgreement: z.string().optional(),
 });
 
 export default function BulkAssignCustodyDialog() {
@@ -88,7 +88,7 @@ export default function BulkAssignCustodyDialog() {
               <p className="text-sm text-error-500">{fetcherError}</p>
             ) : null}
 
-            <TemplateSelector
+            <CustodyAgreementSelector
               className="mt-5"
               hasCustodianSelected={hasCustodianSelected}
             />

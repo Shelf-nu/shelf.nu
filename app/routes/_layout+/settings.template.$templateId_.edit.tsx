@@ -15,11 +15,11 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 import {
-  getTemplateById,
-  updateTemplate,
-  createTemplateRevision,
-  getLatestTemplateFile,
-} from "~/modules/template";
+  getCustodyAgreementById,
+  updateCustodyAgreement,
+  createCustodyAgreementRevision,
+  getLatestCustodyAgreementFile,
+} from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -53,7 +53,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     await requirePermission({
       userId: authSession.userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.update,
     });
 
@@ -62,7 +62,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         cause: null,
         message: "Template ID is required",
         status: 400,
-        label: "Template",
+        label: "Custody Agreement",
         additionalData: {
           userId,
           params,
@@ -70,8 +70,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       });
     }
 
-    const template = await getTemplateById(id);
-    const latestTemplateFileRevision = await getLatestTemplateFile(id);
+    const template = await getCustodyAgreementById(id);
+    const latestTemplateFileRevision = await getLatestCustodyAgreementFile(id);
 
     const header: HeaderData = {
       title: `Edit | ${template.name}`,
@@ -104,7 +104,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const authSession = context.getSession();
+        const { userId } = context.getSession();
 
         const id = getParams(
           params,
@@ -112,9 +112,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ).templateId;
 
         const { organizationId } = await requirePermission({
-          userId: authSession.userId,
+          userId,
           request,
-          entity: PermissionEntity.template,
+          entity: PermissionEntity.custodyAgreement,
           action: PermissionAction.update,
         });
 
@@ -125,19 +125,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           NewTemplateFormSchema
         );
 
-        await updateTemplate({
+        await updateCustodyAgreement({
           id,
           name,
           description: description ?? "",
           signatureRequired: signatureRequired ?? false,
-          userId: authSession.userId,
+          userId,
+          organizationId,
         });
 
-        await createTemplateRevision({
+        await createCustodyAgreementRevision({
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,
-          templateId: id,
+          custodyAgreementId: id,
           organizationId,
         });
 
@@ -145,7 +146,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Template updated",
           message: "Your template has been updated successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return redirect("/settings/template");

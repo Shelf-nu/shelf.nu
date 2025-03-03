@@ -29,10 +29,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams, template } = parseData(
-      formData,
-      BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
-    );
+    const { assetIds, custodian, currentSearchParams, custodyAgreement } =
+      parseData(
+        formData,
+        BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
+      );
 
     if (role === OrganizationRoles.SELF_SERVICE) {
       const teamMember = await db.teamMember.findUnique({
@@ -59,7 +60,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       custodianEmail: custodian.email,
       organizationId,
       currentSearchParams,
-      template,
+      custodyAgreement,
     });
 
     sendNotification({

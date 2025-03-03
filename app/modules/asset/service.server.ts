@@ -12,7 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
-  Template,
+  CustodyAgreement,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -2293,7 +2293,7 @@ export async function bulkDeleteAssets({
 
 export async function bulkCheckOutAssets({
   userId,
-  template,
+  custodyAgreement,
   assetIds,
   custodianId,
   custodianName,
@@ -2302,7 +2302,7 @@ export async function bulkCheckOutAssets({
   currentSearchParams,
 }: {
   userId: User["id"];
-  template?: Template["id"];
+  custodyAgreement?: CustodyAgreement["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
@@ -2345,12 +2345,12 @@ export async function bulkCheckOutAssets({
 
     /** Check if the template exists and is in same organization */
     let templateFound: Pick<
-      Template,
+      CustodyAgreement,
       "id" | "name" | "signatureRequired" | "lastRevision"
     > | null = null;
-    if (template) {
-      templateFound = await db.template.findUnique({
-        where: { id: template, organizationId },
+    if (custodyAgreement) {
+      templateFound = await db.custodyAgreement.findUnique({
+        where: { id: custodyAgreement, organizationId },
         select: {
           id: true,
           name: true,
@@ -2362,7 +2362,7 @@ export async function bulkCheckOutAssets({
       if (!templateFound) {
         throw new ShelfError({
           message:
-            "Template not found. Please refresh and if the issue persists contact support.",
+            "Agreement not found. Please refresh and if the issue persists contact support.",
           label: "Assets",
           cause: null,
         });

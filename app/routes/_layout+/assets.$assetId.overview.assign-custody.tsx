@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Prisma, Template } from "@prisma/client";
+import type { CustodyAgreement, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
@@ -11,7 +11,7 @@ import {
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import TemplateSelector from "~/components/custody/template-selector";
+import CustodyAgreementSelector from "~/components/custody/custody-agreement-selector";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
@@ -215,12 +215,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    let template: Template | null = null;
+    let custodyAgreement: CustodyAgreement | null = null;
 
     if (addTemplateEnabled) {
       const templateId = (parsedData as any).template;
 
-      template = await db.template
+      custodyAgreement = await db.custodyAgreement
         .findUnique({ where: { id: templateId as string } })
         .catch((cause) => {
           throw new ShelfError({
@@ -232,7 +232,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
         });
 
-      if (!template)
+      if (!custodyAgreement)
         throw new ShelfError({
           message:
             "Template not found. Please refresh and if the issue persists contact support.",
@@ -243,7 +243,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     let asset = null;
 
-    if (template) {
+    if (custodyAgreement) {
       /**
        * In this case, we do the following:
        * 1. We check if the signature is required by the template
@@ -255,14 +255,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .update({
           where: { id: assetId, organizationId },
           data: {
-            status: template!.signatureRequired
+            status: custodyAgreement!.signatureRequired
               ? AssetStatus.AVAILABLE
               : AssetStatus.IN_CUSTODY,
             custody: {
               create: {
                 custodian: { connect: { id: custodianId } },
-                template: { connect: { id: template.id } },
-                associatedTemplateVersion: template!.lastRevision,
+                agreement: { connect: { id: custodyAgreement.id } },
+                associatedAgreementVersion: custodyAgreement!.lastRevision,
               },
             },
           },
@@ -284,7 +284,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               userId,
               assetId,
               custodianId,
-              templateId: template.id,
+              templateId: custodyAgreement.id,
             },
             label: "Assets",
           });
@@ -327,10 +327,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // If the template was specified, and signature was required
-    if (addTemplateEnabled && template?.signatureRequired) {
+    if (addTemplateEnabled && custodyAgreement?.signatureRequired) {
       /** We create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${template!.name?.trim()}** template before receiving custody.`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${custodyAgreement!.name?.trim()}** template before receiving custody.`,
         type: "UPDATE",
         userId: userId,
         assetId: asset.id,
@@ -363,7 +363,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assetName: asset.title,
             assignerName: user.firstName + " " + user.lastName,
             assetId: asset.id,
-            templateId: template!.id,
+            templateId: custodyAgreement!.id,
             assigneeId: custodianId,
           }),
         });
@@ -400,7 +400,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     return redirect(
-      template
+      custodyAgreement
         ? `/assets/${assetId}/overview/share-template`
         : `/assets/${assetId}/overview`
     );
@@ -480,7 +480,7 @@ export default function Custody() {
           />
         </div>
 
-        <TemplateSelector
+        <CustodyAgreementSelector
           className="mt-5"
           hasCustodianSelected={!!hasCustodianSelected}
         />

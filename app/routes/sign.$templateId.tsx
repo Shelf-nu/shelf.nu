@@ -18,7 +18,7 @@ import Agreement from "~/components/sign/agreement";
 import AgreementDialog from "~/components/sign/agreement-dialog";
 import { db } from "~/database/db.server";
 import { createNote } from "~/modules/note/service.server";
-import { getTemplateByAssetIdWithCustodian } from "~/modules/template";
+import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -42,8 +42,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       })
     );
 
-    const { custodian, custody, template } =
-      await getTemplateByAssetIdWithCustodian({
+    const { custodian, custody, custodyAgreement } =
+      await getAgreementByAssetIdWithCustodian({
         assetId,
       });
 
@@ -53,7 +53,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       if (!authSession?.userId) {
         throw new ShelfError({
           cause: null,
-          label: "Template",
+          label: "Custody Agreement",
           message:
             "You are not allowed to sign this custody. Please sign in to continue.",
         });
@@ -62,7 +62,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await requirePermission({
         userId: authSession.userId,
         request,
-        entity: PermissionEntity.template,
+        entity: PermissionEntity.custodyAgreement,
         action: PermissionAction.read,
       });
 
@@ -77,34 +77,34 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }
     }
 
-    const templateFile = await db.templateFile.findUnique({
+    const custodyAgreementFile = await db.custodyAgreementFile.findUnique({
       where: {
-        revision_templateId: {
-          revision: custody.associatedTemplateVersion!,
-          templateId: custody.templateId!,
+        revision_custodyAgreementId: {
+          revision: custody.associatedAgreementVersion!,
+          custodyAgreementId: custody.agreementId!,
         },
       },
     });
 
-    if (!templateFile) {
+    if (!custodyAgreementFile) {
       throw new ShelfError({
         cause: null,
-        message: "Template file not found",
+        message: "Custody Agreement file not found",
         status: 404,
-        label: "Template",
+        label: "Custody Agreement",
       });
     }
 
     const header: HeaderData = {
-      title: `Sign "${template.name}"`,
+      title: `Sign "${custodyAgreement.name}"`,
     };
 
     return json(
       data({
         header,
-        template,
-        templateFile,
-        isTemplateSigned: custody.templateSigned,
+        custodyAgreement,
+        custodyAgreementFile,
+        isAgreementSigned: custody.agreementSigned,
       })
     );
   } catch (cause) {
@@ -132,12 +132,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const { custodian, custody, template } =
-      await getTemplateByAssetIdWithCustodian({
+    const { custodian, custody, custodyAgreement } =
+      await getAgreementByAssetIdWithCustodian({
         assetId,
       });
 
-    if (custody.templateSigned) {
+    if (custody.agreementSigned) {
       throw new ShelfError({
         cause: null,
         message: "Asset custody has already been signed",
@@ -151,7 +151,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (!authSession?.userId) {
         throw new ShelfError({
           cause: null,
-          label: "Template",
+          label: "Custody Agreement",
           message: "You must be authenticated to sign this custody.",
         });
       }
@@ -159,14 +159,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       await requirePermission({
         userId: authSession.userId,
         request,
-        entity: PermissionEntity.template,
+        entity: PermissionEntity.custodyAgreement,
         action: PermissionAction.read,
       });
 
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
-          message: "You are not authorized to sign this asset",
+          message: "You are not authorized to sign this custody",
           additionalData: { userId: authSession.userId, assetId, assigneeId },
           label: "Assets",
           status: 401,
@@ -188,7 +188,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         data: {
           signatureImage,
           signatureText,
-          templateSigned: true,
+          agreementSigned: true,
+          agreementSignedOn: new Date(),
+          status: "ACTIVE",
+          signatureStatus: "SIGNED",
         },
       });
 
@@ -209,10 +212,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await createNote({
       content: `**${resolveTeamMemberName(custodian)}** has signed [${
-        template.name
+        custodyAgreement.name
       }](/assets/${assetId}/activity/view-receipt)`,
       type: "UPDATE",
-      userId: authSession?.userId ?? template.userId,
+      userId: authSession?.userId ?? custodyAgreement.createdById,
       assetId: assetId,
     });
 
@@ -227,10 +230,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export default function Sign() {
   useCrisp();
-  const { template, templateFile, isTemplateSigned } =
+  const { custodyAgreement, custodyAgreementFile, isAgreementSigned } =
     useLoaderData<typeof loader>();
 
-  if (isTemplateSigned) {
+  if (isAgreementSigned) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="flex w-96 flex-col items-center justify-center gap-4 p-6 text-center">
@@ -264,7 +267,7 @@ export default function Sign() {
             <Worker
               workerUrl={`https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`}
             >
-              <Viewer fileUrl={templateFile?.url ?? ""} />
+              <Viewer fileUrl={custodyAgreementFile?.url ?? ""} />
             </Worker>
           </div>
 
@@ -280,9 +283,11 @@ export default function Sign() {
             </div>
 
             <div className="border-b p-4">
-              <h1 className="mb-1 text-lg font-semibold">{template.name}</h1>
+              <h1 className="mb-1 text-lg font-semibold">
+                {custodyAgreement.name}
+              </h1>
               <p className="text-gray-600">
-                {template.description ?? "No description provided"}
+                {custodyAgreement.description ?? "No description provided"}
               </p>
             </div>
 

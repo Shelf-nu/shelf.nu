@@ -424,8 +424,8 @@ const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
-                {item.custody?.template?.signatureRequired &&
-                  !item.custody.templateSigned && (
+                {item.custody?.agreement?.signatureRequired &&
+                  !item.custody.agreementSigned && (
                     <CustomTooltip
                       content={
                         <div className="flex flex-col gap-y-2 p-3">

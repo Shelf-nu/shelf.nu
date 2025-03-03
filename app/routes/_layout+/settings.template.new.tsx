@@ -11,7 +11,10 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 
-import { createTemplate, createTemplateRevision } from "~/modules/template";
+import {
+  createCustodyAgreement,
+  createCustodyAgreementRevision,
+} from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -21,7 +24,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { assertUserCanCreateMoreTemplates } from "~/utils/subscription.server";
+import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
 
 const title = "New Template";
 
@@ -29,7 +32,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    await assertUserCanCreateMoreTemplates(userId);
+    await assertUserCanCreateMoreAgreements(userId);
 
     const header = {
       title,
@@ -63,12 +66,12 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     switch (method) {
       case "POST": {
-        await assertUserCanCreateMoreTemplates(userId);
+        await assertUserCanCreateMoreAgreements(userId);
 
         const { organizationId } = await requirePermission({
           userId: authSession.userId,
           request,
-          entity: PermissionEntity.template,
+          entity: PermissionEntity.custodyAgreement,
           action: PermissionAction.create,
         });
 
@@ -79,7 +82,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           NewTemplateFormSchema
         );
 
-        const { id } = await createTemplate({
+        const { id } = await createCustodyAgreement({
           name,
           description: description ?? "",
           signatureRequired: signatureRequired ?? false,
@@ -87,11 +90,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           organizationId,
         });
 
-        await createTemplateRevision({
+        await createCustodyAgreementRevision({
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,
-          templateId: id,
+          custodyAgreementId: id,
           organizationId,
         });
 

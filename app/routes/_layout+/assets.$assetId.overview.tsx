@@ -267,8 +267,8 @@ export default function AssetOverview() {
   });
 
   const isAwaitingSignature =
-    asset.custody?.template?.signatureRequired &&
-    !asset.custody?.templateSigned;
+    asset.custody?.agreement?.signatureRequired &&
+    !asset.custody?.agreementSigned;
 
   return (
     <div>

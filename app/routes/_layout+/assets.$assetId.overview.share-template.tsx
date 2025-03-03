@@ -9,8 +9,8 @@ import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { sendEmail } from "~/emails/mail.server";
+import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
 import { assetCustodyAssignedWithTemplateEmailText } from "~/modules/invite/helpers";
-import { getTemplateByAssetIdWithCustodian } from "~/modules/template";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -33,22 +33,23 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
-    const { template, custodian } = await getTemplateByAssetIdWithCustodian({
-      assetId,
-      organizationId,
-    });
+    const { custodyAgreement, custodian } =
+      await getAgreementByAssetIdWithCustodian({
+        assetId,
+        organizationId,
+      });
 
-    const signUrl = `${SERVER_URL}/sign/${template.id}?assigneeId=${custodian.id}&assetId=${assetId}`;
+    const signUrl = `${SERVER_URL}/sign/${custodyAgreement.id}?assigneeId=${custodian.id}&assetId=${assetId}`;
     const isCustodianNrm = !custodian.user;
 
     return json(
       data({
         showModal: true,
-        template,
+        custodyAgreement,
         custodian,
         signUrl,
         isCustodianNrm,
@@ -70,12 +71,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.template,
+      entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
-    const { asset, custodian, template } =
-      await getTemplateByAssetIdWithCustodian({
+    const { asset, custodian, custodyAgreement } =
+      await getAgreementByAssetIdWithCustodian({
         assetId,
         organizationId,
       });
@@ -84,7 +85,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Email cannot be send to non-registered members.",
-        label: "Template",
+        label: "Custody Agreement",
       });
     }
 
@@ -102,7 +103,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         assetName: asset.title,
         assignerName: resolveTeamMemberName(custodian),
         assetId: asset.id,
-        templateId: template.id,
+        templateId: custodyAgreement.id,
         assigneeId: custodian?.user?.id ?? "",
       }),
     });
@@ -122,7 +123,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 }
 
 export default function ShareTemplate() {
-  const { template, custodian, signUrl, isCustodianNrm } =
+  const { custodyAgreement, custodian, signUrl, isCustodianNrm } =
     useLoaderData<typeof loader>();
   const [isCopied, setIsCopied] = useState(false);
 
@@ -143,7 +144,7 @@ export default function ShareTemplate() {
     <div className="modal-content-wrapper">
       <ShareAssetIcon className="mb-3" />
 
-      <h4 className="mb-1">{template.name}</h4>
+      <h4 className="mb-1">{custodyAgreement.name}</h4>
       <p className="mb-5 text-gray-600">
         This PDF template page has been published.{" "}
         <span className="font-semibold">

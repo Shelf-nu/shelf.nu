@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Template } from "@prisma/client";
+import type { CustodyAgreement } from "@prisma/client";
 import {
   Form,
   useActionData,
@@ -32,12 +32,16 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 
-type TTemplate = Pick<
-  Template,
+type TCustodyAgreement = Pick<
+  CustodyAgreement,
   "id" | "isActive" | "isDefault" | "type" | "name"
 >;
 
-export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
+export function TemplateActionsDropdown({
+  agreement,
+}: {
+  agreement: TCustodyAgreement;
+}) {
   const { defaultTemplates } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -57,13 +61,13 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
           className="px-4 py-3"
         >
           <MakeDefaultButton
-            typeDefault={defaultTemplates[template.type]}
-            template={template}
+            typeDefault={defaultTemplates[agreement.type]}
+            template={agreement}
           />
         </DropdownMenuItem>
         <DropdownMenuItem className="px-4 py-3">
           <Button
-            to={`${template.id}/edit`}
+            to={`${agreement.id}/edit`}
             icon="pen"
             role="link"
             variant="link"
@@ -74,11 +78,11 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
           </Button>
         </DropdownMenuItem>
         <Form method="post">
-          <input type="hidden" name="templateId" value={template.id} />
+          <input type="hidden" name="templateId" value={agreement.id} />
           <input
             type="hidden"
             name="isActive"
-            value={template.isActive ? "yes" : "no"}
+            value={agreement.isActive ? "yes" : "no"}
           />
           <DropdownMenuItem
             onSelect={(e) => e.preventDefault()}
@@ -93,14 +97,14 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
               variant="link"
               className={tw(
                 "justify-start text-gray-700 hover:text-gray-700",
-                template.isDefault || disabled
+                agreement.isDefault || disabled
                   ? "pointer-events-none border-gray-300 text-gray-300"
                   : ""
               )}
               width="full"
-              disabled={disabled || template.isDefault}
+              disabled={disabled || agreement.isDefault}
             >
-              {template.isActive ? "Deactivate" : "Activate"}
+              {agreement.isActive ? "Deactivate" : "Activate"}
             </Button>
           </DropdownMenuItem>
         </Form>
@@ -114,9 +118,9 @@ const MakeDefaultButton = ({
   template,
 }: {
   /** The default template for the current type */
-  typeDefault: TTemplate;
+  typeDefault: TCustodyAgreement;
   /** The template to set as default */
-  template: TTemplate;
+  template: TCustodyAgreement;
 }) => {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
