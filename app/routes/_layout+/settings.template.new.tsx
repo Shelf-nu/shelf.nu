@@ -9,7 +9,7 @@ import Header from "~/components/layout/header";
 import {
   NewTemplateFormSchema,
   TemplateForm,
-} from "~/components/templates/form";
+} from "~/components/agreements/form";
 
 import {
   createCustodyAgreement,

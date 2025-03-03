@@ -13,13 +13,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-
+import type { loader, action } from "~/routes/_layout+/agreements.index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import type {
-  loader,
-  action,
-} from "../../routes/_layout+/settings.template.index";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -37,12 +33,12 @@ type TCustodyAgreement = Pick<
   "id" | "isActive" | "isDefault" | "type" | "name"
 >;
 
-export function TemplateActionsDropdown({
+export function AgreementsActionsDropdown({
   agreement,
 }: {
   agreement: TCustodyAgreement;
 }) {
-  const { defaultTemplates } = useLoaderData<typeof loader>();
+  const { defaultAgreements } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
@@ -61,7 +57,7 @@ export function TemplateActionsDropdown({
           className="px-4 py-3"
         >
           <MakeDefaultButton
-            typeDefault={defaultTemplates[agreement.type]}
+            typeDefault={defaultAgreements[agreement.type]}
             template={agreement}
           />
         </DropdownMenuItem>

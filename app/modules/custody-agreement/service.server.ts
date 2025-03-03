@@ -1,12 +1,11 @@
-import { AssetStatus } from "@prisma/client";
 import type {
   Prisma,
   Organization,
   User,
   Asset,
   CustodyAgreement,
-  CustodyAgreementType,
 } from "@prisma/client";
+import { AssetStatus, CustodyAgreementType } from "@prisma/client";
 import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -239,17 +238,15 @@ export function toggleCustodyAgreementActiveState({
 
 export async function makeCustodyAgreementDefault({
   id,
-  type,
   organizationId,
 }: {
   id: CustodyAgreement["id"];
-  type: CustodyAgreementType;
   organizationId: Organization["id"];
 }) {
   try {
     // Make all the agreements of the same type of the user non-default
     await db.custodyAgreement.updateMany({
-      where: { type, organizationId },
+      where: { type: CustodyAgreementType.CUSTODY, organizationId },
       data: { isDefault: false },
     });
 

@@ -13,7 +13,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import {
   NewTemplateFormSchema,
   TemplateForm,
-} from "~/components/templates/form";
+} from "~/components/agreements/form";
 import {
   getCustodyAgreementById,
   updateCustodyAgreement,

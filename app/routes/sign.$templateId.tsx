@@ -17,8 +17,8 @@ import Agreement from "~/components/sign/agreement";
 
 import AgreementDialog from "~/components/sign/agreement-dialog";
 import { db } from "~/database/db.server";
-import { createNote } from "~/modules/note/service.server";
 import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
+import { createNote } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
