@@ -1,29 +1,28 @@
+import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
-  LoaderFunctionArgs,
   MetaFunction,
+  LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
-  NewAgreementFormSchema,
   AgreementForm,
+  NewAgreementFormSchema,
 } from "~/components/agreements/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  getCustodyAgreementById,
-  updateCustodyAgreement,
   createCustodyAgreementRevision,
+  getCustodyAgreementById,
   getLatestCustodyAgreementFile,
+  updateCustodyAgreement,
 } from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
   data,
   error,
@@ -39,48 +38,36 @@ import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   try {
-    const authSession = context.getSession();
-    const { userId } = authSession;
+    const { userId } = context.getSession();
 
-    const { templateId: id } = getParams(
+    const { agreementId } = getParams(
       params,
-      z.object({ templateId: z.string() }),
-      {
-        additionalData: { userId },
-      }
+      z.object({ agreementId: z.string() }),
+      { additionalData: { userId } }
     );
 
-    await requirePermission({
-      userId: authSession.userId,
+    const { organizationId } = await requirePermission({
+      userId,
       request,
       entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.update,
     });
 
-    if (!id) {
-      throw new ShelfError({
-        cause: null,
-        message: "Template ID is required",
-        status: 400,
-        label: "Custody Agreement",
-        additionalData: {
-          userId,
-          params,
-        },
-      });
-    }
-
-    const template = await getCustodyAgreementById(id);
-    const latestTemplateFileRevision = await getLatestCustodyAgreementFile(id);
+    const agreement = await getCustodyAgreementById({
+      id: agreementId,
+      organizationId,
+    });
+    const latestAgreementFileRevision =
+      await getLatestCustodyAgreementFile(agreementId);
 
     const header: HeaderData = {
-      title: `Edit | ${template.name}`,
+      title: `Edit | ${agreement.name}`,
     };
 
     return json(
       data({
-        template,
-        latestTemplateFileRevision,
+        agreement,
+        latestAgreementFileRevision,
         header,
       })
     );
@@ -106,10 +93,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "POST": {
         const { userId } = context.getSession();
 
-        const id = getParams(
+        const { agreementId } = getParams(
           params,
-          z.object({ templateId: z.string() })
-        ).templateId;
+          z.object({ agreementId: z.string() })
+        );
 
         const { organizationId } = await requirePermission({
           userId,
@@ -126,7 +113,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         await updateCustodyAgreement({
-          id,
+          id: agreementId,
           name,
           description: description ?? "",
           signatureRequired: signatureRequired ?? false,
@@ -138,18 +125,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,
-          custodyAgreementId: id,
+          custodyAgreementId: agreementId,
           organizationId,
         });
 
         sendNotification({
-          title: "Template updated",
-          message: "Your template has been updated successfully",
+          title: "Agreement updated",
+          message: "Your agreement has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
 
-        return redirect("/settings/template");
+        return redirect("/agreements");
       }
     }
 
@@ -160,32 +147,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
-export default function TemplateEditPage() {
+export default function EditAgreement() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { template, latestTemplateFileRevision } =
+
+  const { agreement, latestAgreementFileRevision } =
     useLoaderData<typeof loader>();
 
   return (
     <>
-      <Header
-        title={hasName ? name : template.name}
-        hideBreadcrumbs
-        classNames="-mt-5"
+      <Header classNames="mb-4" title={hasName ? name : agreement.name} />
+
+      <AgreementForm
+        className="rounded-md border bg-white p-4"
+        isEdit
+        name={agreement.name || name}
+        description={agreement.description}
+        type={agreement.type}
+        signatureRequired={agreement.signatureRequired}
+        pdfUrl={latestAgreementFileRevision!.url}
+        pdfSize={latestAgreementFileRevision!.size}
+        pdfName={latestAgreementFileRevision!.name}
+        version={latestAgreementFileRevision!.revision}
       />
-      <div className="flex justify-between">
-        <AgreementForm
-          isEdit
-          name={template.name || name}
-          description={template.description}
-          type={template.type}
-          signatureRequired={template.signatureRequired}
-          pdfUrl={latestTemplateFileRevision!.url}
-          pdfSize={latestTemplateFileRevision!.size}
-          pdfName={latestTemplateFileRevision!.name}
-          version={latestTemplateFileRevision!.revision}
-        />
-      </div>
     </>
   );
 }

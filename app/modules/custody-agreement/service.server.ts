@@ -267,10 +267,16 @@ export async function makeCustodyAgreementDefault({
   }
 }
 
-export async function getCustodyAgreementById(id: CustodyAgreement["id"]) {
+export async function getCustodyAgreementById({
+  id,
+  organizationId,
+}: {
+  id: CustodyAgreement["id"];
+  organizationId: CustodyAgreement["organizationId"];
+}) {
   try {
     const agreement = await db.custodyAgreement.findUniqueOrThrow({
-      where: { id },
+      where: { id, organizationId },
     });
 
     return agreement;
