@@ -5,7 +5,7 @@ import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
-import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
+import { getAgreementByAssetId } from "~/modules/custody-agreement";
 import { getDateTimeFormat, useHints } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -30,7 +30,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const { asset, custodyAgreement, custody, custodian } =
-      await getAgreementByAssetIdWithCustodian({
+      await getAgreementByAssetId({
         assetId,
         organizationId,
       });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { type loader } from "~/routes/sign.$templateId";
+import { type loader } from "~/routes/sign.$custodyId";
 import Agreement from "./agreement";
 import { Dialog } from "../layout/dialog";
 import { Button } from "../shared/button";

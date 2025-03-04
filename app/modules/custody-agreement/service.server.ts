@@ -4,6 +4,7 @@ import type {
   User,
   Asset,
   CustodyAgreement,
+  Custody,
 } from "@prisma/client";
 import { AssetStatus, CustodyAgreementType } from "@prisma/client";
 import { v4 } from "uuid";
@@ -12,6 +13,8 @@ import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
 import { resolveTeamMemberName } from "~/utils/user";
 import { createNote } from "../note/service.server";
+
+const label = "Custody Agreement";
 
 export async function createCustodyAgreement({
   name,
@@ -46,7 +49,7 @@ export async function createCustodyAgreement({
       message:
         "Something went wrong while creating the custody agreement. Please try again or contact support.",
       additionalData: { name, description, signatureRequired },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -135,7 +138,7 @@ export async function updateCustodyAgreement({
       message:
         "Something went wrong while updating the custody agreement. Please try again or contact support.",
       additionalData: { id },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -204,7 +207,7 @@ export async function createCustodyAgreementRevision({
       message:
         "Something went wrong while updating the custody agreement PDF. Please try again or contact support.",
       additionalData: { custodyAgreementId },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -231,7 +234,7 @@ export function toggleCustodyAgreementActiveState({
       message:
         "Something went wrong while making the custody agreement active/inactive. Please try again or contact support.",
       additionalData: { id },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -262,7 +265,7 @@ export async function makeCustodyAgreementDefault({
       message:
         "Something went wrong while making the custody agreement default. Please try again or contact support.",
       additionalData: { id },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -287,7 +290,7 @@ export async function getCustodyAgreementById({
       message:
         "The agreement you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -309,7 +312,7 @@ export async function getLatestCustodyAgreementFile(
       message:
         "Something went wrong while fetching the custody agreement file. Please try again or contact support.",
       additionalData: { id },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
@@ -349,49 +352,65 @@ export async function getCustodyAgreements({
       message:
         "Something went wrong while fetching the custody agreements. Please try again or contact support.",
       additionalData: { organizationId },
-      label: "Custody Agreement",
+      label,
     });
   }
 }
 
-export async function getAgreementByAssetIdWithCustodian({
-  assetId,
+export async function getAgreementByCustodyId({
+  custodyId,
   organizationId,
 }: {
-  assetId: Asset["id"];
+  custodyId: Custody["id"];
   organizationId?: Asset["organizationId"];
 }) {
   try {
-    const asset = await db.asset.findUniqueOrThrow({
-      where: { id: assetId, organizationId },
-      select: {
-        id: true,
-        title: true,
-        custody: {
+    const custody = await db.custody.findUnique({
+      where: { id: custodyId },
+      include: {
+        asset: { select: { id: true, title: true, organizationId: true } },
+        agreement: true,
+        custodian: {
           include: {
-            agreement: true,
-            custodian: {
+            user: {
               select: {
                 id: true,
-                name: true,
-                user: {
-                  select: {
-                    id: true,
-                    email: true,
-                    firstName: true,
-                    lastName: true,
-                  },
-                },
+                firstName: true,
+                lastName: true,
+                email: true,
               },
             },
           },
         },
       },
     });
+    if (!custody) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "Custody not found",
+        label,
+      });
+    }
 
-    const custodyAgreement = asset.custody?.agreement;
-    const custody = asset.custody;
-    const custodian = custody?.custodian;
+    if (organizationId && organizationId !== custody.asset.organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message: "This custody belongs to any other organization.",
+        label,
+      });
+    }
+
+    const custodyAgreement = custody.agreement;
+    if (!custodyAgreement) {
+      throw new ShelfError({
+        cause: null,
+        message: "There is not agreement associated with this custody.",
+        label,
+      });
+    }
+
+    const custodian = custody.custodian;
 
     if (!custodyAgreement) {
       throw new ShelfError({
@@ -410,10 +429,7 @@ export async function getAgreementByAssetIdWithCustodian({
     }
 
     return {
-      asset: {
-        id: asset.id,
-        title: asset.title,
-      },
+      asset: custody.asset,
       custodyAgreement,
       custody,
       custodian,
@@ -427,7 +443,45 @@ export async function getAgreementByAssetIdWithCustodian({
       title: "Error fetching agreement",
       message,
       additionalData: { organizationId },
-      label: "Custody Agreement",
+      label,
+    });
+  }
+}
+
+export async function getAgreementByAssetId({
+  assetId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  organizationId: Asset["organizationId"];
+}) {
+  try {
+    const custody = await db.custody.findUnique({
+      where: { assetId },
+    });
+
+    if (!custody) {
+      throw new ShelfError({
+        cause: null,
+        message: "There is no custody over this asset",
+        label,
+      });
+    }
+
+    return await getAgreementByCustodyId({
+      custodyId: custody.id,
+      organizationId,
+    });
+  } catch (cause) {
+    const message = isLikeShelfError(cause)
+      ? cause.message
+      : "Something went wrong while fetching the custody agreement. Please try again or contact support.";
+    throw new ShelfError({
+      cause,
+      title: "Error fetching agreement",
+      message,
+      additionalData: { organizationId },
+      label,
     });
   }
 }

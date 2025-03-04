@@ -445,7 +445,7 @@ const ListAssetContent = ({
                     >
                       <Link
                         className="rounded-full bg-gray-200 p-1"
-                        to={`${item.id}/share-agreement`}
+                        to={`${item.id}/overview/share-agreement`}
                       >
                         <SignIcon />
                       </Link>

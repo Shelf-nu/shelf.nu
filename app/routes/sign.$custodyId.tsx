@@ -17,12 +17,18 @@ import Agreement from "~/components/sign/agreement";
 
 import AgreementDialog from "~/components/sign/agreement-dialog";
 import { db } from "~/database/db.server";
-import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
+import { getAgreementByCustodyId } from "~/modules/custody-agreement";
 import { createNote } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -31,21 +37,12 @@ import { requirePermission } from "~/utils/roles.server";
 import "@react-pdf-viewer/core/lib/styles/index.css";
 import { resolveTeamMemberName } from "~/utils/user";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const { assigneeId, assetId } = parseData(
-      searchParams,
-      z.object({
-        assigneeId: z.string(),
-        assetId: z.string(),
-      })
-    );
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
+  try {
     const { custodian, custody, custodyAgreement } =
-      await getAgreementByAssetIdWithCustodian({
-        assetId,
-      });
+      await getAgreementByCustodyId({ custodyId });
 
     /** If there is a user associated with the custodian then make sure that right user is signing the custody. */
     if (custodian.user) {
@@ -70,7 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         throw new ShelfError({
           cause: null,
           message: "You are not allowed to sign this asset.",
-          additionalData: { userId: authSession.userId, assetId, assigneeId },
+          additionalData: { userId: authSession.userId },
           label: "Assets",
           status: 401,
         });
@@ -117,25 +114,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getOptionalSession();
+
+  const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
   try {
     assertIsPost(request);
 
-    const { searchParams } = new URL(request.url);
-    const { assigneeId, assetId } = parseData(
-      searchParams,
-      z.object({
-        assigneeId: z.string(),
-        assetId: z.string(),
-      })
-    );
-
     const { custodian, custody, custodyAgreement } =
-      await getAgreementByAssetIdWithCustodian({
-        assetId,
-      });
+      await getAgreementByCustodyId({ custodyId });
 
     if (custody.agreementSigned) {
       throw new ShelfError({
@@ -167,7 +155,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         throw new ShelfError({
           cause: null,
           message: "You are not authorized to sign this custody",
-          additionalData: { userId: authSession.userId, assetId, assigneeId },
+          additionalData: { userId: authSession.userId },
           label: "Assets",
           status: 401,
         });
@@ -184,7 +172,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await db.$transaction(async (tx) => {
       await tx.custody.update({
-        where: { assetId },
+        where: { id: custody.id },
         data: {
           signatureImage,
           signatureText,
@@ -196,7 +184,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
 
       await tx.asset.update({
-        where: { id: assetId },
+        where: { id: custody.asset.id },
         data: { status: AssetStatus.IN_CUSTODY },
       });
     });
@@ -213,14 +201,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await createNote({
       content: `**${resolveTeamMemberName(custodian)}** has signed [${
         custodyAgreement.name
-      }](/assets/${assetId}/activity/view-receipt)`,
+      }](/assets/${custody.asset.id}/activity/view-receipt)`,
       type: "UPDATE",
       userId: authSession?.userId ?? custodyAgreement.createdById,
-      assetId: assetId,
+      assetId: custody.asset.id,
     });
 
     return redirect(
-      authSession?.userId ? `/assets/${assetId}/overview` : "/login"
+      authSession?.userId ? `/assets/${custody.asset.id}/overview` : "/login"
     );
   } catch (cause) {
     const reason = makeShelfError(cause);

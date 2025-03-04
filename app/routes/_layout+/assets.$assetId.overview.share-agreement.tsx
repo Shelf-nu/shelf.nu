@@ -9,7 +9,7 @@ import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { sendEmail } from "~/emails/mail.server";
-import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
+import { getAgreementByAssetId } from "~/modules/custody-agreement";
 import { assetCustodyAssignedWithAgreementEmailText } from "~/modules/invite/helpers";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { SERVER_URL } from "~/utils/env";
@@ -38,7 +38,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     });
 
     const { custody, custodyAgreement, custodian } =
-      await getAgreementByAssetIdWithCustodian({
+      await getAgreementByAssetId({
         assetId,
         organizationId,
       });
@@ -62,9 +62,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-
+  const { userId } = context.getSession();
   const { assetId } = getParams(params, z.object({ assetId: z.string() }));
 
   try {
@@ -75,11 +73,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { asset, custodian, custody } =
-      await getAgreementByAssetIdWithCustodian({
-        assetId,
-        organizationId,
-      });
+    const { asset, custodian, custody } = await getAgreementByAssetId({
+      assetId,
+      organizationId,
+    });
 
     if (!custodian.user) {
       throw new ShelfError({
@@ -93,7 +90,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       title: "Sending email...",
       message: "Sending a link to the custodian to sign the agreement.",
       icon: { name: "spinner", variant: "primary" },
-      senderId: authSession.userId,
+      senderId: userId,
     });
 
     sendEmail({
@@ -111,7 +108,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       title: "Asset shared",
       message: "An email has been sent to the custodian.",
       icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
+      senderId: userId,
     });
 
     return redirect(`/assets/${assetId}/overview`);
