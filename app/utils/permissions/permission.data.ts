@@ -36,6 +36,7 @@ export enum PermissionEntity {
   custody = "custody",
   assetReminders = "assetReminders",
   custodyAgreement = "custodyAgreement",
+  receipts = "receipts",
 }
 
 //this will come from DB eventually
@@ -69,6 +70,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.custodyAgreement]: [PermissionAction.read],
+    [PermissionEntity.receipts]: [],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -101,5 +103,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [PermissionAction.read],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.custodyAgreement]: [PermissionAction.read],
+    [PermissionEntity.receipts]: [PermissionAction.read],
   },
 };
