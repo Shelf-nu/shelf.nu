@@ -15,7 +15,7 @@ import { Button } from "../shared/button";
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
-  custodyAgreement: z.string().optional(),
+  agreement: z.string().optional(),
 });
 
 export default function BulkAssignCustodyDialog() {

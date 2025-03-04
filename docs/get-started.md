@@ -214,11 +214,11 @@ For File storage we use the S3 buckets service provided by supabase. We do this 
 1. Create a bucket called `assets`
 2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'assets'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
 
-### Templates
+### Custody Agreements
 
-1. Create a bucket called `templates`
+1. Create a bucket called `custody-agreements`
 2. Make it a public bucket
-3. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'templates'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+3. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'custody-agreements'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
 
 ### Kits
 

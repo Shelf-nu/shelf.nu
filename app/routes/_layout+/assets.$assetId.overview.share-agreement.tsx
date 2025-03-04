@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByAssetIdWithCustodian } from "~/modules/custody-agreement";
-import { assetCustodyAssignedWithTemplateEmailText } from "~/modules/invite/helpers";
+import { assetCustodyAssignedWithAgreementEmailText } from "~/modules/invite/helpers";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -37,13 +37,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { custodyAgreement, custodian } =
+    const { custody, custodyAgreement, custodian } =
       await getAgreementByAssetIdWithCustodian({
         assetId,
         organizationId,
       });
 
-    const signUrl = `${SERVER_URL}/sign/${custodyAgreement.id}?assigneeId=${custodian.id}&assetId=${assetId}`;
+    const signUrl = `${SERVER_URL}/sign/${custody.id}`;
     const isCustodianNrm = !custodian.user;
 
     return json(
@@ -75,7 +75,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { asset, custodian, custodyAgreement } =
+    const { asset, custodian, custody } =
       await getAgreementByAssetIdWithCustodian({
         assetId,
         organizationId,
@@ -91,7 +91,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Sending email...",
-      message: "Sending a link to the custodian to sign the template.",
+      message: "Sending a link to the custodian to sign the agreement.",
       icon: { name: "spinner", variant: "primary" },
       senderId: authSession.userId,
     });
@@ -99,12 +99,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     sendEmail({
       to: custodian?.user?.email ?? "",
       subject: `You have been assigned custody over ${asset.title}.`,
-      text: assetCustodyAssignedWithTemplateEmailText({
+      text: assetCustodyAssignedWithAgreementEmailText({
         assetName: asset.title,
         assignerName: resolveTeamMemberName(custodian),
         assetId: asset.id,
-        templateId: custodyAgreement.id,
-        assigneeId: custodian?.user?.id ?? "",
+        custodyId: custody.id,
       }),
     });
 
@@ -122,7 +121,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   }
 }
 
-export default function ShareTemplate() {
+export default function ShareAgreement() {
   const { custodyAgreement, custodian, signUrl, isCustodianNrm } =
     useLoaderData<typeof loader>();
   const [isCopied, setIsCopied] = useState(false);
@@ -146,7 +145,7 @@ export default function ShareTemplate() {
 
       <h4 className="mb-1">{custodyAgreement.name}</h4>
       <p className="mb-5 text-gray-600">
-        This PDF template page has been published.{" "}
+        This PDF agreement page has been published.{" "}
         <span className="font-semibold">
           {resolveTeamMemberName(custodian)}
         </span>{" "}

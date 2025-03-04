@@ -58,7 +58,7 @@ export function AgreementsActionsDropdown({
         >
           <MakeDefaultButton
             typeDefault={defaultAgreements[agreement.type]}
-            template={agreement}
+            agreement={agreement}
           />
         </DropdownMenuItem>
         <DropdownMenuItem className="px-4 py-3">
@@ -73,8 +73,8 @@ export function AgreementsActionsDropdown({
             Edit
           </Button>
         </DropdownMenuItem>
-        <Form method="post">
-          <input type="hidden" name="templateId" value={agreement.id} />
+        <Form method="post" className="size-full">
+          <input type="hidden" name="agreementId" value={agreement.id} />
           <input
             type="hidden"
             name="isActive"
@@ -111,12 +111,12 @@ export function AgreementsActionsDropdown({
 
 const MakeDefaultButton = ({
   typeDefault,
-  template,
+  agreement,
 }: {
-  /** The default template for the current type */
+  /** The default agreement for the current type */
   typeDefault: TCustodyAgreement;
-  /** The template to set as default */
-  template: TCustodyAgreement;
+  /** The agreement to set as default */
+  agreement: TCustodyAgreement;
 }) => {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -128,7 +128,7 @@ const MakeDefaultButton = ({
   const actionData = useActionData<typeof action>();
 
   /**
-   * Close the dialog when the default template is changed based on action response
+   * Close the dialog when the default agreement is changed based on action response
    */
   useEffect(() => {
     if (actionData?.changedDefault) {
@@ -136,18 +136,18 @@ const MakeDefaultButton = ({
     }
   }, [actionData]);
 
+  const isDisabled = disabled || agreement.isDefault || !agreement.isActive;
+
   return (
     <>
-      <AlertDialog key={template.id} open={open} onOpenChange={setOpen}>
+      <AlertDialog key={agreement.id} open={open} onOpenChange={setOpen}>
         <AlertDialogTrigger asChild>
           <Button
-            disabled={disabled || template.isDefault || !template.isActive}
+            disabled={isDisabled}
             variant="link"
             className={tw(
               "w-full justify-start rounded-none border-b-2 text-gray-700 hover:bg-gray-100 hover:text-gray-700",
-              disabled || template.isDefault || !template.isActive
-                ? "pointer-events-none border-gray-300 text-gray-300"
-                : ""
+              isDisabled && "pointer-events-none border-gray-300 text-gray-300"
             )}
             icon={"star"}
             title={"Make default"}
@@ -157,13 +157,13 @@ const MakeDefaultButton = ({
         </AlertDialogTrigger>
         <AlertDialogContent className="relative w-full">
           <AlertDialogHeader>
-            <AlertDialogTitle>Change default template?</AlertDialogTitle>
+            <AlertDialogTitle>Change default agreement?</AlertDialogTitle>
             <AlertDialogDescription>
               <span className="font-semibold">{typeDefault.name}</span> is
-              already set as the default template for this type. Are you sure
+              already set as the default agreement for this type. Are you sure
               you want to set{" "}
-              <span className="font-semibold">{template.name}</span> as the
-              default template?
+              <span className="font-semibold">{agreement.name}</span> as the
+              default agreement?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -171,8 +171,7 @@ const MakeDefaultButton = ({
               <Button variant="secondary">Cancel</Button>
             </AlertDialogCancel>
             <Form method="post">
-              <input type="hidden" name="templateId" value={template.id} />
-              <input type="hidden" name="templateType" value={template.type} />
+              <input type="hidden" name="agreementId" value={agreement.id} />
               <Button
                 type="submit"
                 name="intent"

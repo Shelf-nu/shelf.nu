@@ -106,7 +106,7 @@ import {
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
-import { assetCustodyAssignedWithTemplateEmailText } from "../invite/helpers";
+import { assetCustodyAssignedWithAgreementEmailText } from "../invite/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -2343,13 +2343,13 @@ export async function bulkCheckOutAssets({
       });
     }
 
-    /** Check if the template exists and is in same organization */
-    let templateFound: Pick<
+    /** Check if the agreement exists and is in same organization */
+    let agreementFound: Pick<
       CustodyAgreement,
       "id" | "name" | "signatureRequired" | "lastRevision"
     > | null = null;
     if (custodyAgreement) {
-      templateFound = await db.custodyAgreement.findUnique({
+      agreementFound = await db.custodyAgreement.findUnique({
         where: { id: custodyAgreement, organizationId },
         select: {
           id: true,
@@ -2359,7 +2359,7 @@ export async function bulkCheckOutAssets({
         },
       });
 
-      if (!templateFound) {
+      if (!agreementFound) {
         throw new ShelfError({
           message:
             "Agreement not found. Please refresh and if the issue persists contact support.",
@@ -2373,12 +2373,19 @@ export async function bulkCheckOutAssets({
       const fullName = `**${user.firstName?.trim()} ${user.lastName?.trim()}**`;
 
       const content =
-        templateFound && templateFound.signatureRequired
-          ? `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateFound.name?.trim()}** template before receiving custody.`
+        agreementFound && agreementFound.signatureRequired
+          ? `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`
           : `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**`;
 
       return content;
     }
+
+    let custodies: Prisma.CustodyGetPayload<{
+      select: {
+        id: true;
+        asset: { select: { id: true; title: true } };
+      };
+    }>[] = [];
 
     /**
      * updateMany does not allow to create nested relationship rows
@@ -2388,25 +2395,26 @@ export async function bulkCheckOutAssets({
      */
     await db.$transaction(async (tx) => {
       /** Creating custodies over assets */
-      await tx.custody.createMany({
+      custodies = await tx.custody.createManyAndReturn({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
-          // Add template in custody if exists
-          ...(templateFound
+          // Add agreement in custody if exists
+          ...(agreementFound
             ? {
-                templateId: templateFound.id,
-                associatedTemplateVersion: templateFound.lastRevision,
+                agreementId: agreementFound.id,
+                associatedAgreementVersion: agreementFound.lastRevision,
               }
             : {}),
         })),
+        select: { id: true, asset: { select: { id: true, title: true } } },
       });
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: {
-          status: templateFound?.signatureRequired
+          status: agreementFound?.signatureRequired
             ? AssetStatus.AVAILABLE
             : AssetStatus.IN_CUSTODY,
         },
@@ -2424,17 +2432,16 @@ export async function bulkCheckOutAssets({
     });
 
     /** Send email */
-    if (templateFound && templateFound.signatureRequired && custodianEmail) {
-      assets.forEach((asset) => {
+    if (agreementFound && agreementFound.signatureRequired && custodianEmail) {
+      custodies.forEach((custody) => {
         sendEmail({
           to: custodianEmail,
-          subject: `You have been assigned custody over ${asset.title}.`,
-          text: assetCustodyAssignedWithTemplateEmailText({
-            assetName: asset.title,
+          subject: `You have been assigned custody over ${custody.asset.title}.`,
+          text: assetCustodyAssignedWithAgreementEmailText({
+            assetName: custody.asset.title,
             assignerName: user.firstName + " " + user.lastName,
-            assetId: asset.id,
-            templateId: templateFound.id,
-            assigneeId: custodianId,
+            assetId: custody.asset.id,
+            custodyId: custody.id,
           }),
         });
       });

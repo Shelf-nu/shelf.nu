@@ -219,10 +219,6 @@ export function useSidebarNavItems() {
           to: "/settings/general",
         },
         {
-          title: "Templates",
-          to: "/settings/template",
-        },
-        {
           title: "Custom fields",
           to: "/settings/custom-fields",
         },

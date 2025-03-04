@@ -70,7 +70,7 @@ export default function CustodyAgreementSelector({
       </div>
 
       <When truthy={addAgreementEnabled}>
-        <Select name="custodyAgreement" disabled={isLoading}>
+        <Select name="agreement" disabled={isLoading}>
           <SelectTrigger className="text-left">
             <SelectValue placeholder="Select a PDF agreement" />
           </SelectTrigger>
@@ -111,7 +111,7 @@ export default function CustodyAgreementSelector({
 
         <Link
           target="_blank"
-          className="mt-2 text-sm text-gray-800 underline"
+          className="mt-2 block text-sm text-gray-800 underline"
           to="/agreements"
         >
           Manage PDF agreements

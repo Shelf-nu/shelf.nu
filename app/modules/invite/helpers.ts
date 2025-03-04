@@ -91,48 +91,21 @@ Thanks,
 The Shelf Team
 `;
 
-export const assetCustodySignatureRequiredEmailText = ({
+export const assetCustodyAssignedWithAgreementEmailText = ({
   assetName,
   assignerName,
   assetId,
-  templateId,
-  assigneeId,
+  custodyId,
 }: {
   assetName: string;
   assignerName: string;
   assetId: string;
-  templateId: string;
-  assigneeId: string;
-}) => `Howdy,
-
-${assignerName} has requested your signature for ${assetName}.
-Please click the link below to view the signing template:
-${SERVER_URL}/sign/${templateId}?assigneeId=${assigneeId}&assetId=${assetId}
-
-To view the asset, please click the link below:
-${SERVER_URL}/assets/${assetId}
-
-Thanks,
-The Shelf Team
-`;
-
-export const assetCustodyAssignedWithTemplateEmailText = ({
-  assetName,
-  assignerName,
-  assetId,
-  templateId,
-  assigneeId,
-}: {
-  assetName: string;
-  assignerName: string;
-  assetId: string;
-  templateId: string;
-  assigneeId: string;
+  custodyId: string;
 }) => `Howdy,
 
 ${assignerName} has assigned you as custodian for ${assetName}.
 Please click the link below to view the signing template:
-${SERVER_URL}/sign/${templateId}?assigneeId=${assigneeId}&assetId=${assetId}
+${SERVER_URL}/sign/${custodyId}
 
 To view the asset, please click the link below:
 ${SERVER_URL}/assets/${assetId}

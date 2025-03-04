@@ -28,7 +28,7 @@ export default function AwaitingSignCard({ asset }: AwaitingSignProps) {
           {resolveTeamMemberName(asset.custody.custodian)}
         </p>
 
-        <Button to="share-template" variant="link-gray">
+        <Button to="share-agreement" variant="link-gray">
           Share document
         </Button>
       </div>

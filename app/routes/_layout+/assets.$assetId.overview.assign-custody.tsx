@@ -24,7 +24,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   assetCustodyAssignedEmailText,
-  assetCustodyAssignedWithTemplateEmailText,
+  assetCustodyAssignedWithAgreementEmailText,
 } from "~/modules/invite/helpers";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -49,7 +49,7 @@ import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 const DiscriminatorSchema = z.object({
-  addTemplateEnabled: z
+  addAgreementEnabled: z
     .string()
     .transform((value) => (value === "true" ? true : false)),
 });
@@ -64,13 +64,13 @@ const CustodianOnlySchema = z.object({
   ),
 });
 
-const CustodianWithTemplateSchema = z.object({
+const CustodianWithAgreementSchema = z.object({
   ...CustodianOnlySchema.shape,
-  template: z.string().min(1, "Template is required."),
+  agreement: z.string().min(1, "Agreement is required."),
 });
 
-const getSchema = (addTemplateEnabled: boolean) =>
-  addTemplateEnabled ? CustodianWithTemplateSchema : CustodianOnlySchema;
+const getSchema = (addAgreementEnabled: boolean) =>
+  addAgreementEnabled ? CustodianWithAgreementSchema : CustodianOnlySchema;
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -172,12 +172,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { addTemplateEnabled } = parseData(formData, DiscriminatorSchema, {
+    const { addAgreementEnabled } = parseData(formData, DiscriminatorSchema, {
       additionalData: { userId, assetId },
       message: "Internal error. Please try again or contact support.",
     });
 
-    const parsedData = parseData(formData, getSchema(addTemplateEnabled), {
+    const parsedData = parseData(formData, getSchema(addAgreementEnabled), {
       additionalData: { userId, assetId },
       message: "Error while parsing data.",
     });
@@ -217,16 +217,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     let custodyAgreement: CustodyAgreement | null = null;
 
-    if (addTemplateEnabled) {
-      const templateId = (parsedData as any).template;
+    if (addAgreementEnabled) {
+      const agreementId = (parsedData as any).agreement;
 
       custodyAgreement = await db.custodyAgreement
-        .findUnique({ where: { id: templateId as string } })
+        .findUnique({ where: { id: agreementId as string } })
         .catch((cause) => {
           throw new ShelfError({
             cause,
             message:
-              "Something went wrong while fetching template. Please try again or contact support.",
+              "Something went wrong while fetching agreement. Please try again or contact support.",
             additionalData: { userId, assetId, custodianId },
             label: "Assets",
           });
@@ -235,7 +235,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (!custodyAgreement)
         throw new ShelfError({
           message:
-            "Template not found. Please refresh and if the issue persists contact support.",
+            "Agreement not found. Please refresh and if the issue persists contact support.",
           label: "Assets",
           cause: null,
         });
@@ -246,9 +246,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (custodyAgreement) {
       /**
        * In this case, we do the following:
-       * 1. We check if the signature is required by the template
+       * 1. We check if the signature is required by the agreement
        * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
-       * 3. We create a new custody record for that specific asset and the template
+       * 3. We create a new custody record for that specific asset and the agreement
        * 4. We link it to the custodian
        */
       asset = await db.asset
@@ -267,6 +267,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
           include: {
+            custody: { select: { id: true } },
             user: {
               select: {
                 firstName: true,
@@ -284,7 +285,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               userId,
               assetId,
               custodianId,
-              templateId: custodyAgreement.id,
+              agreementId: custodyAgreement.id,
             },
             label: "Assets",
           });
@@ -307,6 +308,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
           include: {
+            custody: { select: { id: true } },
             user: {
               select: {
                 firstName: true,
@@ -326,11 +328,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
     }
 
-    // If the template was specified, and signature was required
-    if (addTemplateEnabled && custodyAgreement?.signatureRequired) {
+    // If the agreement was specified, and signature was required
+    if (addAgreementEnabled && custodyAgreement?.signatureRequired) {
       /** We create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${custodyAgreement!.name?.trim()}** template before receiving custody.`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${custodyAgreement!.name?.trim()}** agreement before receiving custody.`,
         type: "UPDATE",
         userId: userId,
         assetId: asset.id,
@@ -339,7 +341,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       sendNotification({
         title: `‘${asset.title}’ would go in custody of ${custodianName}`,
         message:
-          "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
+          "This asset will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
       });
@@ -355,21 +357,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       /** If there is no email, then custodian is NRM */
-      if (custodianEmail) {
+      if (custodianEmail && asset?.custody?.id) {
         sendEmail({
           to: custodianEmail,
           subject: `You have been assigned custody over ${asset.title}.`,
-          text: assetCustodyAssignedWithTemplateEmailText({
+          text: assetCustodyAssignedWithAgreementEmailText({
             assetName: asset.title,
             assignerName: user.firstName + " " + user.lastName,
             assetId: asset.id,
-            templateId: custodyAgreement!.id,
-            assigneeId: custodianId,
+            custodyId: asset.custody.id,
           }),
         });
       }
     } else {
-      // If the template was not specified
+      // If the agreement was not specified
       await createNote({
         content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
         type: "UPDATE",
@@ -401,7 +402,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     return redirect(
       custodyAgreement
-        ? `/assets/${assetId}/overview/share-template`
+        ? `/assets/${assetId}/overview/share-agreement`
         : `/assets/${assetId}/overview`
     );
   } catch (cause) {
