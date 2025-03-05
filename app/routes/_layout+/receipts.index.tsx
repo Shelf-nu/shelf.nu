@@ -5,6 +5,7 @@ import type {
   SerializeFrom,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import CustodyReceiptDialog from "~/components/custody/custody-receipt-dialog";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { EmptyState } from "~/components/list/empty-state";
@@ -13,6 +14,7 @@ import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Table, Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -32,7 +34,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.receipts,
@@ -57,7 +59,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
         },
-        agreement: { select: { id: true, name: true } },
+        agreement: {
+          select: {
+            id: true,
+            name: true,
+            // File with highest revision number is our latest file because we do not allow
+            // further changes in agreement if any custody is signed.
+            custodyAgreementFiles: {
+              select: { url: true },
+              orderBy: { revision: "desc" },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
@@ -83,6 +97,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           (typeof receipts)[number] & { requestedOn: string; signedOn: string }
         >,
         totalItems: receipts.length,
+        organization: {
+          name: currentOrganization.name,
+        },
       })
     );
   } catch (cause) {
@@ -97,11 +114,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function Receipts() {
   const { items, totalItems } = useLoaderData<typeof loader>();
+  const [_, setSearchParams] = useSearchParams();
+
   const hasItems = items.length > 0;
 
   return (
     <>
       <Header classNames="mb-4" />
+      <CustodyReceiptDialog />
 
       <div className="flex w-full flex-col items-center rounded border bg-white">
         {!hasItems ? (
@@ -141,7 +161,16 @@ export default function Receipts() {
                 />
                 <tbody>
                   {items.map((receipt) => (
-                    <ListItem item={receipt} key={receipt.id}>
+                    <ListItem
+                      item={receipt}
+                      key={receipt.id}
+                      navigate={(custodyId) => {
+                        setSearchParams((prev) => {
+                          prev.set("custodyId", custodyId);
+                          return prev;
+                        });
+                      }}
+                    >
                       <ReceiptRow item={receipt} />
                     </ListItem>
                   ))}

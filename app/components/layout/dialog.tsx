@@ -11,6 +11,7 @@ export const Dialog = ({
   onClose,
   className,
   headerClassName,
+  contentClassName,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -18,6 +19,7 @@ export const Dialog = ({
   onClose: Function;
   className?: string;
   headerClassName?: string;
+  contentClassName?: string;
 }) =>
   open ? (
     <div
@@ -29,7 +31,7 @@ export const Dialog = ({
       }}
     >
       <dialog className={tw("dialog", className)} open>
-        <div className="flex h-full flex-col bg-white">
+        <div className={tw("flex h-full flex-col bg-white", contentClassName)}>
           <div
             className={tw(
               "dialog-header flex items-start justify-between bg-white px-6 py-3",
