@@ -15,7 +15,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer";
-import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
+import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -152,7 +152,7 @@ export default function ScanAssetsForBookings() {
   const isLoading = isFormProcessing(navigation.state);
 
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 140 : vh - 100;
+  const height = isMd ? vh - 67 : vh - 100;
 
   function handleQrDetectionSuccess(qrId: string, error?: string) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
@@ -166,7 +166,7 @@ export default function ScanAssetsForBookings() {
       <ScannedAssetsDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
-        <WasmScanner
+        <CodeScanner
           isLoading={isLoading}
           onQrDetectionSuccess={handleQrDetectionSuccess}
           backButtonText="Booking"
