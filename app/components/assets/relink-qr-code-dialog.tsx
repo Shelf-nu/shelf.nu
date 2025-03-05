@@ -12,7 +12,7 @@ import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
-import { WasmScanner } from "../zxing-scanner/wasm-scanner";
+import { CodeScanner } from "../zxing-scanner/code-scanner";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;
@@ -107,7 +107,7 @@ export default function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
-            <WasmScanner
+            <CodeScanner
               className="h-auto flex-1"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}

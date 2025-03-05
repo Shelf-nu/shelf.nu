@@ -15,7 +15,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer";
-import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
+import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -166,7 +166,7 @@ export default function ScanAssetsForBookings() {
       <ScannedAssetsDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
-        <WasmScanner
+        <CodeScanner
           isLoading={isLoading}
           onQrDetectionSuccess={handleQrDetectionSuccess}
           backButtonText="Booking"
