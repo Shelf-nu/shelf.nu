@@ -53,7 +53,6 @@ export const CodeScanner = ({
   const { isMd } = useViewportHeight();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // @TODO: default mode based on screen size
   const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
 
   const handleModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
