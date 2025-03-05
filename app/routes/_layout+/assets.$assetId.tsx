@@ -5,7 +5,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData, Outlet } from "@remix-run/react";
+import { Link, useLoaderData, Outlet } from "@remix-run/react";
 import { DateTime } from "luxon";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
@@ -15,9 +15,11 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
+import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -77,7 +79,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: {
-        custody: { include: { custodian: true } },
+        custody: {
+          include: {
+            custodian: true,
+            agreement: { select: { signatureRequired: true } },
+          },
+        },
         kit: true,
         qrCodes: true,
       },
@@ -277,11 +284,39 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className="flex gap-2">
-            <AssetStatusBadge
-              status={asset.status}
-              availableToBook={asset.availableToBook}
-            />
+          <div className=" mt-3 flex gap-2">
+            <div className="flex items-center gap-x-1">
+              <AssetStatusBadge
+                status={asset.status}
+                availableToBook={asset.availableToBook}
+              />
+              {asset.custody?.agreement?.signatureRequired &&
+                !asset.custody.agreementSigned && (
+                  <CustomTooltip
+                    content={
+                      <div className="max-w-[260px] text-left sm:max-w-[320px]">
+                        <h6 className="mb-1 text-xs font-semibold text-gray-700">
+                          Awaiting signature to complete custody assignment
+                        </h6>
+                        <div className="whitespace-normal text-xs font-medium text-gray-500">
+                          Asset status will change after signing. To cancel
+                          custody assignment, go to{" "}
+                          <span className="font-semibold text-gray-600">
+                            {"Actions > Check in"}
+                          </span>
+                        </div>
+                      </div>
+                    }
+                  >
+                    <Link
+                      className="rounded-full bg-gray-200 p-1"
+                      to="overview/share-agreement"
+                    >
+                      <Icon icon="sign" />
+                    </Link>
+                  </CustomTooltip>
+                )}
+            </div>
           </div>
         }
       >

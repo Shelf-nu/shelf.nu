@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  CustodyAgreement,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -26,6 +27,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
@@ -104,6 +106,7 @@ import {
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { assetCustodyAssignedWithAgreementEmailText } from "../invite/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -2290,16 +2293,20 @@ export async function bulkDeleteAssets({
 
 export async function bulkCheckOutAssets({
   userId,
+  custodyAgreement,
   assetIds,
   custodianId,
   custodianName,
+  custodianEmail,
   organizationId,
   currentSearchParams,
 }: {
   userId: User["id"];
+  custodyAgreement?: CustodyAgreement["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
+  custodianEmail?: User["email"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
 }) {
@@ -2336,6 +2343,50 @@ export async function bulkCheckOutAssets({
       });
     }
 
+    /** Check if the agreement exists and is in same organization */
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired" | "lastRevision"
+    > | null = null;
+    if (custodyAgreement) {
+      agreementFound = await db.custodyAgreement.findUnique({
+        where: { id: custodyAgreement, organizationId },
+        select: {
+          id: true,
+          name: true,
+          signatureRequired: true,
+          lastRevision: true,
+        },
+      });
+
+      if (!agreementFound) {
+        throw new ShelfError({
+          message:
+            "Agreement not found. Please refresh and if the issue persists contact support.",
+          label: "Assets",
+          cause: null,
+        });
+      }
+    }
+
+    function getContent(asset: string) {
+      const fullName = `**${user.firstName?.trim()} ${user.lastName?.trim()}**`;
+
+      const content =
+        agreementFound && agreementFound.signatureRequired
+          ? `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`
+          : `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**`;
+
+      return content;
+    }
+
+    let custodies: Prisma.CustodyGetPayload<{
+      select: {
+        id: true;
+        asset: { select: { id: true; title: true } };
+      };
+    }>[] = [];
+
     /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
@@ -2344,29 +2395,57 @@ export async function bulkCheckOutAssets({
      */
     await db.$transaction(async (tx) => {
       /** Creating custodies over assets */
-      await tx.custody.createMany({
+      custodies = await tx.custody.createManyAndReturn({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
+          // Add agreement in custody if exists
+          ...(agreementFound
+            ? {
+                agreementId: agreementFound.id,
+                associatedAgreementVersion: agreementFound.lastRevision,
+              }
+            : {}),
         })),
+        select: { id: true, asset: { select: { id: true, title: true } } },
       });
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.AVAILABLE
+            : AssetStatus.IN_CUSTODY,
+        },
       });
 
       /** Creating notes for the assets */
       await tx.note.createMany({
         data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: getContent(asset.title),
           type: "UPDATE",
           userId,
           assetId: asset.id,
         })),
       });
     });
+
+    /** Send email */
+    if (agreementFound && agreementFound.signatureRequired && custodianEmail) {
+      custodies.forEach((custody) => {
+        sendEmail({
+          to: custodianEmail,
+          subject: `You have been assigned custody over ${custody.asset.title}.`,
+          text: assetCustodyAssignedWithAgreementEmailText({
+            assetName: custody.asset.title,
+            assignerName: user.firstName + " " + user.lastName,
+            assetId: custody.asset.id,
+            custodyId: custody.id,
+          }),
+        });
+      });
+    }
 
     return true;
   } catch (cause) {

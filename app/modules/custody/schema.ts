@@ -4,6 +4,7 @@ import { z } from "zod";
 const baseCustodianShape = z.object({
   id: z.string(),
   name: z.string(),
+  email: z.string().email().optional(),
 });
 
 export type BaseCustodianShape = z.infer<typeof baseCustodianShape>;

@@ -11,6 +11,7 @@ import {
   MapPinIcon,
   MessageCircleIcon,
   PackageOpenIcon,
+  PenLineIcon,
   QrCodeIcon,
   ScanBarcodeIcon,
   SettingsIcon,
@@ -163,6 +164,22 @@ export function useSidebarNavItems() {
       Icon: AlarmClockIcon,
       hidden: isBaseOrSelfService,
       to: "/reminders",
+    },
+    {
+      type: "parent",
+      title: "Signed Custody",
+      Icon: PenLineIcon,
+      children: [
+        {
+          title: "Agreements",
+          to: "/agreements",
+          hidden: isBaseOrSelfService,
+        },
+        {
+          title: "Receipts",
+          to: "/receipts",
+        },
+      ],
     },
     {
       type: "label",

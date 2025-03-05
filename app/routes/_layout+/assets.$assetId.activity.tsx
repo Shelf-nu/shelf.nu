@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { z } from "zod";
 import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
+import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -109,6 +110,8 @@ export default function AssetActivity() {
           </div>
         </div>
       )}
+
+      <ContextualModal />
     </div>
   );
 }

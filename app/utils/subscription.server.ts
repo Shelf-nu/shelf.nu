@@ -366,3 +366,46 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Agreement Features */
+
+/**
+ * This validates if a user can create more agreements
+ */
+export function canCreateMoreAgreements({
+  tierLimit,
+  totalAgreements,
+}: {
+  tierLimit: { maxCustodyAgreements: number } | null | undefined;
+  totalAgreements: number;
+}) {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit?.maxCustodyAgreements) return false;
+
+  return totalAgreements < tierLimit?.maxCustodyAgreements;
+}
+
+export async function assertUserCanCreateMoreAgreements(userId: string) {
+  /** Get the tier limit and check if they can export */
+  const tierLimit = await getUserTierLimit(userId);
+
+  const canCreateMore = canCreateMoreAgreements({
+    tierLimit,
+    totalAgreements: await db.custodyAgreement.count({
+      where: { createdById: userId },
+    }),
+  });
+
+  if (!canCreateMore) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: "Your user cannot create more agreements",
+      additionalData: { userId },
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/** End agreement features */
