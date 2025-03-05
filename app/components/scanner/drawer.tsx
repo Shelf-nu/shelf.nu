@@ -3,6 +3,7 @@ import type { Asset, Kit, Prisma } from "@prisma/client";
 import { Form, useLoaderData, useRouteLoaderData } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAtomValue, useSetAtom } from "jotai";
+import { ChevronUpIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -147,7 +148,12 @@ export default function ScannedAssetsDrawer({
               }}
             >
               {/* Drag me */}
-              <div className="mx-auto my-1 h-2 w-[30px] rounded-full bg-gray-500/50" />
+              <ChevronUpIcon
+                className={tw(
+                  "mx-auto text-gray-500",
+                  expanded && "rotate-180 "
+                )}
+              />
             </motion.div>
 
             {/* Header */}
