@@ -54,7 +54,7 @@ const QRScanner = () => {
   );
 
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 124 : vh - 102;
+  const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false); // Add a ref to track navigation status
 
   function handleQrDetectionSuccess(qrId: string) {
@@ -72,7 +72,7 @@ const QRScanner = () => {
 
   return (
     <>
-      <Header title="QR code scanner" hidePageDescription={!isMd} />
+      <Header title="QR code scanner" hidePageDescription={true} />
       <div
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}

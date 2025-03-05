@@ -152,7 +152,7 @@ export default function ScanAssetsForBookings() {
   const isLoading = isFormProcessing(navigation.state);
 
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 140 : vh - 100;
+  const height = isMd ? vh - 67 : vh - 100;
 
   function handleQrDetectionSuccess(qrId: string, error?: string) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */

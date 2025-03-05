@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
+import lodash from "lodash";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { processFrame, updateCanvasSize } from "./utils";
+import { handleDetection, processFrame, updateCanvasSize } from "./utils";
+import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -21,10 +23,17 @@ type CodeScannerProps = {
   overlayClassName?: string;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
+
+  /** Custom class for the scanner mode */
+  scannerModeClassName?: string;
+
+  /** Custom callback for the scanner mode */
+  scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
 };
+
+type Mode = "camera" | "scanner";
 
 export const CodeScanner = ({
   onQrDetectionSuccess,
@@ -36,15 +45,25 @@ export const CodeScanner = ({
   paused,
   setPaused,
   scanMessage,
+
+  scannerModeClassName,
+  scannerModeCallback,
 }: CodeScannerProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const { isMd } = useViewportHeight();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // @TODO: default mode
-  const [mode, setMode] = useState<"camera" | "scanner">(
-    isMd ? "scanner" : "camera"
-  );
+  // @TODO: default mode based on screen size
+  const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
+
+  const handleModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (e.target.value === "camera") {
+      setIsLoading(true);
+      setMode(e.target.value as Mode);
+    } else {
+      setMode(e.target.value as Mode);
+    }
+  };
 
   return (
     <div
@@ -67,23 +86,28 @@ export const CodeScanner = ({
               </Link>
             )}
           </div>
-          <div>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as any)}
-              className={tw(
-                "z-10 rounded border bg-white/10 p-1 text-sm  backdrop-blur-sm",
-                mode === "scanner" ? "text-black" : "text-white"
-              )}
-            >
-              <option value="camera" className="p-1 text-black">
-                Mode: camera
-              </option>
-              <option value="scanner" className="p-1 text-black">
-                Mode: Scanner
-              </option>
-            </select>
-          </div>
+
+          {/* We only show option to switch to scanner on big screens. Its not possible on mobile */}
+          {isMd && (
+            <div>
+              <select
+                value={mode}
+                onChange={handleModeChange}
+                className={tw(
+                  "z-10 rounded border  py-1 text-sm  backdrop-blur-sm",
+                  "bg-black/20 text-white"
+                )}
+                disabled={isLoading || paused}
+              >
+                <option value="camera" className="p-1 text-black">
+                  Mode: camera
+                </option>
+                <option value="scanner" className="p-1 text-black">
+                  Mode: Barcode scanner
+                </option>
+              </select>
+            </div>
+          )}
         </div>
 
         {isLoading && (
@@ -93,54 +117,131 @@ export const CodeScanner = ({
         )}
 
         {mode === "scanner" ? (
-          <ScannerMode />
+          <ScannerMode
+            onQrDetectionSuccess={onQrDetectionSuccess}
+            allowNonShelfCodes={allowNonShelfCodes}
+            paused={paused}
+            className={scannerModeClassName}
+            callback={scannerModeCallback}
+          />
         ) : (
           <CameraMode
             setIsLoading={setIsLoading}
-            overlayClassName={overlayClassName}
             paused={paused}
-            scanMessage={scanMessage}
             setPaused={setPaused}
             onQrDetectionSuccess={onQrDetectionSuccess}
             allowNonShelfCodes={allowNonShelfCodes}
           />
+        )}
+        {paused && (
+          <div
+            className={tw(
+              "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded ",
+              overlayClassName
+            )}
+          >
+            <div className="flex h-full flex-col items-center justify-center rounded bg-white p-4 text-center shadow-md">
+              <h5>Code detected</h5>
+              <ClientOnly fallback={null}>
+                {() => <SuccessAnimation />}
+              </ClientOnly>
+              <p>{scanMessage || "Scanner paused"}</p>
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
 };
 
-function ScannerMode({}) {
+function ScannerMode({
+  onQrDetectionSuccess,
+  allowNonShelfCodes = false,
+  paused,
+  className,
+  callback,
+}: {
+  onQrDetectionSuccess: (qrId: string) => void;
+  allowNonShelfCodes: boolean;
+  paused: boolean;
+  className?: string;
+  /**
+   * Optional callback to pass.
+   * Will run after handleDetection
+   * Receives the input element as argument
+   * By default if not passed, input element will always be cleared after handleDetection
+   * */
+  callback?: (input: HTMLInputElement, paused: boolean) => void;
+}) {
+  const [inputIsFocused, setInputIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleBlur = () => {
-    inputRef?.current?.focus();
-  };
+  const debouncedHandleInputChange = lodash.debounce(
+    async (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const input = e.target as HTMLInputElement;
+      const result = extractQrIdFromValue(input.value);
+      await handleDetection({
+        result,
+        onQrDetectionSuccess,
+        allowNonShelfCodes,
+        paused,
+      });
+
+      // Run the callback if passed
+      if (callback) {
+        callback(input, paused);
+      } else {
+        /** Clean up the input */
+        input.value = "";
+      }
+    },
+    50
+  );
 
   return (
-    <div className="flex flex-col items-center pt-[10px] text-center">
-      <p>Waiting for scan...</p>
-      <Input autoFocus name="code" label="code" hideLabel onBlur={handleBlur} />
+    <div
+      className={tw(
+        "flex h-full flex-col items-center bg-gray-600 pt-[20px] text-center",
+        className
+      )}
+    >
+      <Input
+        ref={inputRef}
+        autoFocus
+        className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
+        inputClassName="scanner-mode-input max-w-[260px]"
+        disabled={paused}
+        name="code"
+        label={
+          paused
+            ? "Scanner paused"
+            : inputIsFocused
+            ? "Waiting for scan..."
+            : "Please click on the text field before scanning"
+        }
+        onChange={debouncedHandleInputChange}
+        onFocus={() => setInputIsFocused(true)}
+        onBlur={() => setInputIsFocused(false)}
+      />
+      <p className="mt-4 max-w-[260px] text-white/70">
+        Focus the field and use your barcode scanner to scan any Shelf QR code.
+      </p>
     </div>
   );
 }
 
 function CameraMode({
   setIsLoading,
-  overlayClassName,
   paused,
-  scanMessage,
   setPaused,
   onQrDetectionSuccess,
-  allowNonShelfCodes,
+  allowNonShelfCodes = false,
 }: {
   setIsLoading: (loading: boolean) => void;
-  overlayClassName?: string;
   paused: boolean;
-  scanMessage?: string;
   setPaused: (paused: boolean) => void;
   onQrDetectionSuccess: (qrId: string) => void;
-  allowNonShelfCodes?: boolean;
+  allowNonShelfCodes: boolean;
 }) {
   const videoRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -211,6 +312,7 @@ function CameraMode({
       }
     }
   }, [paused, allowNonShelfCodes, onQrDetectionSuccess, setPaused]);
+
   return (
     <>
       {/* Error State Overlay */}
@@ -223,6 +325,7 @@ function CameraMode({
           </Button>
         </InfoOverlay>
       )}
+
       <Webcam
         ref={videoRef}
         audio={false}
@@ -235,13 +338,25 @@ function CameraMode({
           const video = videoRef.current?.video;
           const canvas = canvasRef.current;
 
+          /** Error when there is no video element.  */
           if (!video || !canvas) {
             setError("Canvas or video element not found");
             setIsLoading(false);
             return;
           }
-          updateCanvasSize({ video, canvas });
-          setIsLoading(false);
+
+          /** ONce the video can play, update canvas and stop the loading */
+          video.addEventListener("canplay", () => {
+            updateCanvasSize({ video, canvas });
+            setIsLoading(false);
+          });
+
+          video.addEventListener("error", (e) => {
+            setError(
+              `Error playing video: ${e instanceof Error ? e.message : e}`
+            );
+            setIsLoading(false);
+          });
         }}
         className="pointer-events-none size-full object-cover"
       />
@@ -250,30 +365,13 @@ function CameraMode({
         ref={canvasRef}
         className="pointer-events-none absolute left-0 top-0 size-full object-cover"
       />
-
-      <div
-        className={tw(
-          "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded border-4 border-white shadow-camera-overlay",
-          overlayClassName
-        )}
-      >
-        {paused && (
-          <div className="flex h-full flex-col items-center justify-center bg-white p-4 text-center">
-            <h5>Code detected</h5>
-            <ClientOnly fallback={null}>
-              {() => <SuccessAnimation />}
-            </ClientOnly>
-            <p>{scanMessage || "Scanner paused"}</p>
-          </div>
-        )}
-      </div>
     </>
   );
 }
 
 function InfoOverlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
+    <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
       <div className="text-center text-white ">{children}</div>
     </div>
   );
