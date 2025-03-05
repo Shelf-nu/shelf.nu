@@ -21,7 +21,6 @@ import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   assetCustodyAssignedEmailText,
   assetCustodyAssignedWithAgreementEmailText,
@@ -48,13 +47,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
-const DiscriminatorSchema = z.object({
-  addAgreementEnabled: z
-    .string()
-    .transform((value) => (value === "true" ? true : false)),
-});
-
-const CustodianOnlySchema = z.object({
+const AssignCustodySchema = z.object({
   custodian: stringToJSONSchema.pipe(
     z.object({
       id: z.string(),
@@ -62,15 +55,8 @@ const CustodianOnlySchema = z.object({
       email: z.string().email().optional(),
     })
   ),
+  agreement: z.string().optional(),
 });
-
-const CustodianWithAgreementSchema = z.object({
-  ...CustodianOnlySchema.shape,
-  agreement: z.string().min(1, "Agreement is required."),
-});
-
-const getSchema = (addAgreementEnabled: boolean) =>
-  addAgreementEnabled ? CustodianWithAgreementSchema : CustodianOnlySchema;
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -172,18 +158,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { addAgreementEnabled } = parseData(formData, DiscriminatorSchema, {
-      additionalData: { userId, assetId },
-      message: "Internal error. Please try again or contact support.",
-    });
-
-    const parsedData = parseData(formData, getSchema(addAgreementEnabled), {
+    const { custodian, agreement } = parseData(formData, AssignCustodySchema, {
       additionalData: { userId, assetId },
       message: "Error while parsing data.",
     });
-
-    const { custodian } = parsedData;
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const user = await getUserByID(userId);
 
@@ -198,6 +176,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       email: custodianEmail,
     } = custodian;
 
+    /**
+     * Validate SELF_SERVICE user custody
+     * Self service users are allowed to assign custody to themselves only
+     * */
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
     if (isSelfService) {
       const custodian = await db.teamMember.findUnique({
         where: { id: custodianId },
@@ -215,145 +198,84 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    let custodyAgreement: CustodyAgreement | null = null;
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired" | "lastRevision"
+    > | null = null;
 
-    if (addAgreementEnabled) {
-      const agreementId = (parsedData as any).agreement;
+    /** Find and validate the agreement if it is provided */
+    if (agreement) {
+      agreementFound = await db.custodyAgreement.findUnique({
+        where: { id: agreement, organizationId },
+        select: {
+          id: true,
+          name: true,
+          signatureRequired: true,
+          lastRevision: true,
+        },
+      });
 
-      custodyAgreement = await db.custodyAgreement
-        .findUnique({ where: { id: agreementId as string } })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while fetching agreement. Please try again or contact support.",
-            additionalData: { userId, assetId, custodianId },
-            label: "Assets",
-          });
-        });
-
-      if (!custodyAgreement)
+      if (!agreementFound) {
         throw new ShelfError({
+          cause: null,
           message:
             "Agreement not found. Please refresh and if the issue persists contact support.",
           label: "Assets",
-          cause: null,
         });
+      }
     }
 
-    let asset = null;
-
-    if (custodyAgreement) {
-      /**
-       * In this case, we do the following:
-       * 1. We check if the signature is required by the agreement
-       * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
-       * 3. We create a new custody record for that specific asset and the agreement
-       * 4. We link it to the custodian
-       */
-      asset = await db.asset
-        .update({
-          where: { id: assetId, organizationId },
-          data: {
-            status: custodyAgreement!.signatureRequired
-              ? AssetStatus.AVAILABLE
-              : AssetStatus.IN_CUSTODY,
-            custody: {
-              create: {
-                custodian: { connect: { id: custodianId } },
-                agreement: { connect: { id: custodyAgreement.id } },
-                associatedAgreementVersion: custodyAgreement!.lastRevision,
-              },
-            },
+    /**
+     * 1. We check if the signature is required by the agreement
+     * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
+     * 3. We create a new custody record for that specific asset and the agreement (if provided)
+     * 4. We link it to the custodian
+     */
+    const asset = await db.asset.update({
+      where: { id: assetId, organizationId },
+      data: {
+        status: agreementFound?.signatureRequired
+          ? AssetStatus.AVAILABLE
+          : AssetStatus.IN_CUSTODY,
+        custody: {
+          create: {
+            custodian: { connect: { id: custodianId } },
+            ...(agreementFound
+              ? {
+                  agreement: { connect: { id: agreementFound.id } },
+                  associatedAgreementVersion: agreementFound.lastRevision,
+                }
+              : {}),
           },
-          include: {
-            custody: { select: { id: true } },
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
+        },
+      },
+      include: {
+        custody: {
+          select: {
+            id: true,
+            asset: { select: { id: true, title: true } },
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while updating asset. Please try again or contact support.",
-            additionalData: {
-              userId,
-              assetId,
-              custodianId,
-              agreementId: custodyAgreement.id,
-            },
-            label: "Assets",
-          });
-        });
-    } else {
-      /** In order to do it with a single query
-       * 1. We update the asset status
-       * 2. We create a new custody record for that specific asset
-       * 3. We link it to the custodian
-       */
-      asset = await db.asset
-        .update({
-          where: { id: assetId },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: {
-                custodian: { connect: { id: custodianId } },
-              },
-            },
-          },
-          include: {
-            custody: { select: { id: true } },
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while updating asset. Please try again or contact support.",
-            additionalData: { userId, assetId, custodianId },
-            label: "Assets",
-          });
-        });
-    }
+        },
+      },
+    });
 
     // If the agreement was specified, and signature was required
-    if (addAgreementEnabled && custodyAgreement?.signatureRequired) {
-      /** We create the note */
+    if (agreementFound && agreementFound.signatureRequired) {
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${custodyAgreement!.name?.trim()}** agreement before receiving custody.`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+          isSelfService ? "taken" : `given **${custodianName.trim()}**`
+        } custody over **${asset.title.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`,
         type: "UPDATE",
         userId: userId,
         assetId: asset.id,
       });
 
       sendNotification({
-        title: `‘${asset.title}’ would go in custody of ${custodianName}`,
+        title: `'${asset.title}' would go in custody of ${custodianName}`,
         message:
           "This asset will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
-      });
-
-      /** Once the asset is updated, we create the note */
-      await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
-          isSelfService ? "taken" : `given **${custodianName.trim()}**`
-        } custody over **${asset.title.trim()}**`,
-        type: "UPDATE",
-        userId: userId,
-        assetId: asset.id,
       });
 
       /** If there is no email, then custodian is NRM */
@@ -372,14 +294,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     } else {
       // If the agreement was not specified
       await createNote({
-        content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+          isSelfService ? "taken" : `given **${custodianName.trim()}**`
+        } custody over **${asset.title.trim()}**`,
         type: "UPDATE",
         userId: userId,
         assetId: asset.id,
       });
 
       sendNotification({
-        title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+        title: `'${asset.title}' is now in custody of ${custodianName}`,
         message:
           "Remember, this asset will be unavailable until custody is manually released.",
         icon: { name: "success", variant: "success" },
@@ -401,7 +325,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     return redirect(
-      custodyAgreement
+      agreementFound
         ? `/assets/${assetId}/overview/share-agreement`
         : `/assets/${assetId}/overview`
     );
@@ -420,7 +344,7 @@ export default function Custody() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const actionData = useActionData<typeof action>();
-  const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
+  const zo = useZorm("AssignAssetCustody", AssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
   const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
 
