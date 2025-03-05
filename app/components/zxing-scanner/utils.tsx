@@ -242,7 +242,7 @@ export const processFrame = async ({
   }
 };
 
-const handleDetection = async ({
+export const handleDetection = async ({
   result,
   allowNonShelfCodes,
   onQrDetectionSuccess,
