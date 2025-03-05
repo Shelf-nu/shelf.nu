@@ -100,37 +100,23 @@ export default function SelectPlan() {
       </div>
 
       <div className="mb-8 flex w-full flex-col items-stretch gap-3 md:flex-row [&_.price-box]:!mb-0 [&_.price-box]:py-4 [&_.price-slogan]:hidden">
-        {prices.map((price) => (
-          <PlanBox
-            key={price.id}
-            plan={price.recurring?.interval as "month" | "year"}
-            selectedPlan={selectedPlan}
-            setSelectedPlan={() =>
-              setSelectedPlan(price.recurring?.interval as "month" | "year")
-            }
-          >
-            <PriceBox
-              price={price}
-              activePlan={undefined}
-              subscription={null}
-              isTrialSubscription={false}
-              customPlanName={
-                price.recurring?.interval === "year" ? (
-                  <div className="text-center">
-                    Yearly{" "}
-                    <span className="block rounded-[16px] bg-primary-100 px-2 py-1 text-xs font-medium text-primary-700">
-                      Save 54%
-                    </span>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    Monthly <span className="block h-6"></span>
-                  </div>
-                )
+        {prices
+          .filter(
+            (p) =>
+              p.metadata.show_on_table && p.metadata.show_on_table === "true"
+          )
+          .map((price) => (
+            <PlanBox
+              key={price.id}
+              plan={price.recurring?.interval as "month" | "year"}
+              selectedPlan={selectedPlan}
+              setSelectedPlan={() =>
+                setSelectedPlan(price.recurring?.interval as "month" | "year")
               }
-            />
-          </PlanBox>
-        ))}
+            >
+              <PriceBox price={price} />
+            </PlanBox>
+          ))}
       </div>
       <p className="mb-4 text-[12px] text-gray-600">
         You will not be directly billed. When the trial period has ended your

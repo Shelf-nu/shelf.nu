@@ -9,17 +9,10 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
-import { Button } from "~/components/shared/button";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/shared/tabs";
-import { WarningBox } from "~/components/shared/warning-box";
-import { CurrentPlanDetails } from "~/components/subscription/current-plan-details";
+
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
-import { Prices } from "~/components/subscription/prices";
+import { PricingTable } from "~/components/subscription/pricing-table";
+import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
@@ -37,8 +30,6 @@ import {
   createStripeCheckoutSession,
   createStripeCustomer,
   getStripeCustomer,
-  getActiveProduct,
-  getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
@@ -65,43 +56,21 @@ export async function loader({ context }: LoaderFunctionArgs) {
         )) as CustomerWithSubscriptions)
       : null;
 
-    /** Get a normal subscription */
-    const subscription = getCustomerActiveSubscription({ customer });
-
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
-    let activeProduct = null;
-    if (customer && subscription) {
-      /** Get the active subscription ID */
-
-      activeProduct = getActiveProduct({
-        prices,
-        priceId: subscription?.items.data[0].plan.id || null,
-      });
-    }
-
     return json(
       data({
-        title: "Subscription",
-        subTitle: "Pick an account plan that fits your workflow.",
+        title: `Subscriptions`,
+        subTitle:
+          customer?.subscriptions.total_count === 0
+            ? "Pick an account plan that fits your workflow."
+            : "Manage your account plan.",
         tier: user.tierId,
         tierLimit,
         prices,
         customer,
-        subscription: subscription,
-        activeProduct,
         usedFreeTrial: user.usedFreeTrial,
-        expiration: {
-          date: new Date(
-            (subscription?.current_period_end as number) * 1000
-          ).toLocaleDateString(),
-          time: new Date(
-            (subscription?.current_period_end as number) * 1000
-          ).toLocaleTimeString(),
-        },
-        isTrialSubscription:
-          !!subscription?.trial_end && subscription.status === "trialing",
       })
     );
   } catch (cause) {
@@ -185,17 +154,21 @@ export const handle = {
   ),
 };
 
-export default function UserPage() {
-  const { title, subTitle, prices, subscription, tier, tierLimit } =
+export default function SubscriptionPage() {
+  const { title, subTitle, prices, tier, tierLimit, customer } =
     useLoaderData<typeof loader>();
-  const isLegacyPricing =
-    subscription?.items?.data[0]?.price?.metadata.legacy === "true";
 
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
 
-  if (isCustomTier) {
+  const hasNoSubscription = customer?.subscriptions.total_count === 0;
+
+  /**
+   * This handles the case when there is no subscription and custom tier is set.
+   * This is some special cases only used for certain clients. Most users that have customTier also have a subscription
+   */
+  if (isCustomTier && hasNoSubscription) {
     return (
       <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
         <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -228,69 +201,35 @@ export default function UserPage() {
   return (
     <>
       <div className=" flex flex-col">
-        <div className="mb-8 mt-3">
-          <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-            <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-              <InfoIcon />
-            </div>
-            {!subscription ? (
+        {hasNoSubscription ? (
+          <div className="mb-8 mt-3">
+            <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                <InfoIcon />
+              </div>
               <p className="text-[14px] font-medium text-gray-700">
                 You’re currently using the{" "}
                 <span className="font-semibold">FREE</span> version of Shelf
               </p>
-            ) : (
-              <CurrentPlanDetails />
-            )}
+            </div>
           </div>
-          {isLegacyPricing && (
-            <WarningBox>
-              <p>
-                You are on a{" "}
-                <Button
-                  to="https://www.shelf.nu/legacy-plan-faq"
-                  target="_blank"
-                  variant="link"
-                >
-                  legacy pricing plan
-                </Button>
-                . We have since updated our pricing plans. <br />
-                You can view the new pricing plans in the customer portal. If
-                you cancel your subscription, you will not be able to renew it.
-                <br />
-                For any questions - get in touch with support
-              </p>
-            </WarningBox>
-          )}
-        </div>
+        ) : null}
 
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
           <div className="mb-8 lg:mb-0">
             <h3 className="text-text-lg font-semibold">{title}</h3>
             <p className="text-sm text-gray-600">{subTitle}</p>
           </div>
-          {subscription && <CustomerPortalForm />}
+          {!hasNoSubscription && (
+            <CustomerPortalForm buttonText="Manage subscriptions" />
+          )}
         </div>
-
-        <Tabs
-          defaultValue={subscription?.items.data[0]?.plan.interval || "year"}
-          className="flex w-full flex-col"
-        >
-          <TabsList className="center mx-auto mb-8">
-            <TabsTrigger value="year">
-              Yearly{" "}
-              <span className="ml-2 rounded-[16px] bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">
-                Save 54%
-              </span>
-            </TabsTrigger>
-            <TabsTrigger value="month">Monthly</TabsTrigger>
-          </TabsList>
-          <TabsContent value="year">
-            <Prices prices={prices["year"]} />
-          </TabsContent>
-          <TabsContent value="month">
-            <Prices prices={prices["month"]} />
-          </TabsContent>
-        </Tabs>
+        {/* */}
+        {hasNoSubscription ? (
+          <PricingTable prices={prices} />
+        ) : (
+          <SubscriptionsOverview customer={customer} prices={prices} />
+        )}
       </div>
       <SuccessfulSubscriptionModal />
     </>
