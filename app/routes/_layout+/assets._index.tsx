@@ -1,4 +1,4 @@
-import { type Tag } from "@prisma/client";
+import { CustodySignatureStatus, type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -21,14 +21,14 @@ import AssetQuickActions from "~/components/assets/assets-index/asset-quick-acti
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
-import { KitIcon, SignIcon } from "~/components/icons/library";
+import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
+import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
@@ -424,33 +424,14 @@ const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
-                {item.custody?.agreement?.signatureRequired &&
-                  !item.custody.agreementSigned && (
-                    <CustomTooltip
-                      content={
-                        <div className="flex flex-col gap-y-2 p-3">
-                          <span className="text-sm text-gray-700">
-                            Awaiting signature to complete custody assignment
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            Asset status will change after signing. To cancel
-                            custody assignment, choose{" "}
-                            <span className="font-semibold text-gray-600">
-                              {"Actions > Check in"}
-                            </span>{" "}
-                            action
-                          </span>
-                        </div>
-                      }
-                    >
-                      <Link
-                        className="rounded-full bg-gray-200 p-1"
-                        to={`${item.id}/overview/share-agreement`}
-                      >
-                        <SignIcon />
-                      </Link>
-                    </CustomTooltip>
-                  )}
+                <When
+                  truthy={
+                    item.custody?.signatureStatus ===
+                    CustodySignatureStatus.PENDING
+                  }
+                >
+                  <AwaitingSignatureTooltip assetId={item.id} />
+                </When>
               </div>
             </div>
           </div>

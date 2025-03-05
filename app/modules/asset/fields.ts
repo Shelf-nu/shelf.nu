@@ -102,6 +102,7 @@ export const assetIndexFields = ({
     },
     custody: {
       select: {
+        signatureStatus: true,
         agreementSigned: true,
         agreement: { select: { signatureRequired: true } },
         custodian: {

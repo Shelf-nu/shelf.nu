@@ -1,6 +1,11 @@
 import { useState } from "react";
 import type { CustodyAgreement, Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  CustodySignatureStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -225,21 +230,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    /**
-     * 1. We check if the signature is required by the agreement
-     * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
-     * 3. We create a new custody record for that specific asset and the agreement (if provided)
-     * 4. We link it to the custodian
-     */
     const asset = await db.asset.update({
       where: { id: assetId, organizationId },
       data: {
+        /**
+         * If agreement requires a signature then asset will still be AVAILABLE until user signs the custody
+         * otherwise it will be IN_CUSTODY directly
+         */
         status: agreementFound?.signatureRequired
           ? AssetStatus.AVAILABLE
           : AssetStatus.IN_CUSTODY,
         custody: {
           create: {
+            /**
+             * If agreement requires a signature then signature status is PENDING
+             * otherwise signature status is NOT_REQUIRED
+             */
+            signatureStatus: agreementFound?.signatureRequired
+              ? CustodySignatureStatus.PENDING
+              : CustodySignatureStatus.NOT_REQUIRED,
             custodian: { connect: { id: custodianId } },
+            /**
+             * If we have an agreement then we attach it to the custody
+             * otherwise we are ok with our custody
+             */
             ...(agreementFound
               ? {
                   agreement: { connect: { id: agreementFound.id } },
