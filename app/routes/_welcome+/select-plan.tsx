@@ -24,7 +24,7 @@ import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getStripeCustomer,
-  getStripePricesAndProducts,
+  getStripePricesForTrialPlanSelection,
 } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 
@@ -54,21 +54,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       : null;
 
     /* Get the prices and products from Stripe */
-    const prices = await getStripePricesAndProducts();
+    const prices = await getStripePricesForTrialPlanSelection();
 
     return json(
       data({
         title: "Subscription",
         subTitle: "Pick an account plan that fits your workflow.",
         /** Filter out the montly and yearly prices to only have prices for team plan */
-        prices: [
-          ...prices.month.filter(
-            (price) => price.product.metadata.shelf_tier === "tier_2"
-          ),
-          ...prices.year.filter(
-            (price) => price.product.metadata.shelf_tier === "tier_2"
-          ),
-        ],
+        prices,
         customer,
       })
     );
@@ -83,6 +76,7 @@ export default function SelectPlan() {
   const [selectedPlan, setSelectedPlan] = useState<"year" | "month" | null>(
     "year"
   );
+
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
 
@@ -100,23 +94,18 @@ export default function SelectPlan() {
       </div>
 
       <div className="mb-8 flex w-full flex-col items-stretch gap-3 md:flex-row [&_.price-box]:!mb-0 [&_.price-box]:py-4 [&_.price-slogan]:hidden">
-        {prices
-          .filter(
-            (p) =>
-              p.metadata.show_on_table && p.metadata.show_on_table === "true"
-          )
-          .map((price) => (
-            <PlanBox
-              key={price.id}
-              plan={price.recurring?.interval as "month" | "year"}
-              selectedPlan={selectedPlan}
-              setSelectedPlan={() =>
-                setSelectedPlan(price.recurring?.interval as "month" | "year")
-              }
-            >
-              <PriceBox price={price} />
-            </PlanBox>
-          ))}
+        {prices.map((price) => (
+          <PlanBox
+            key={price.id}
+            plan={price.recurring?.interval as "month" | "year"}
+            selectedPlan={selectedPlan}
+            setSelectedPlan={() =>
+              setSelectedPlan(price.recurring?.interval as "month" | "year")
+            }
+          >
+            <PriceBox price={price} />
+          </PlanBox>
+        ))}
       </div>
       <p className="mb-4 text-[12px] text-gray-600">
         You will not be directly billed. When the trial period has ended your

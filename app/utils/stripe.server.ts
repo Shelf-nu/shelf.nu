@@ -171,6 +171,41 @@ export async function getStripePricesAndProducts() {
   }
 }
 
+/** Fetches prices and products from stripe */
+export async function getStripePricesForTrialPlanSelection() {
+  try {
+    const pricesResponse = await stripe.prices.list({
+      active: true,
+      type: "recurring",
+      expand: ["data.product"],
+    });
+    const groupedPrices = groupPricesByInterval(
+      pricesResponse.data as PriceWithProduct[]
+    );
+    return [
+      ...groupedPrices.month.filter(
+        (price) =>
+          price.product.metadata.shelf_tier === "tier_2" &&
+          price.metadata.show_on_table === "true" &&
+          price.metadata.legacy !== "true"
+      ),
+      ...groupedPrices.year.filter(
+        (price) =>
+          price.product.metadata.shelf_tier === "tier_2" &&
+          price.metadata.show_on_table === "true" &&
+          price.metadata.legacy !== "true"
+      ),
+    ];
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching prices and products from Stripe. Please try again later or contact support.",
+      label,
+    });
+  }
+}
+
 // Function to group prices by recurring interval
 function groupPricesByInterval(prices: PriceWithProduct[]) {
   const groupedPrices: { [key: string]: PriceWithProduct[] } = {};

@@ -36,21 +36,6 @@ export function SubscriptionsOverview({
 
   return (
     <div>
-      {/* <div className="mb-2 flex items-center justify-between">
-        <div>
-          <span className="text-[18px] font-medium">{customer.name}</span>'s
-          subscription(s){" "}
-        </div>
-
-        <CustomerPortalForm
-          buttonText="Manage subscriptions"
-          buttonProps={{
-            variant: "block-link",
-            className: tw("underline"),
-          }}
-          className=""
-        />
-      </div> */}
       {subscriptionsData?.map((subscription) => (
         <SubscriptionBox
           subscription={subscription}
@@ -113,7 +98,7 @@ function Item({
   };
 }) {
   const interval = item.price?.recurring?.interval;
-  const isLegacyPricing = item?.price?.metadata.legacy === "true";
+  const isLegacyPricing = item?.price?.metadata?.legacy === "true";
   const subscriptionPrice = findPriceById(prices, item.price.id);
   let planTier: string | undefined = undefined;
 

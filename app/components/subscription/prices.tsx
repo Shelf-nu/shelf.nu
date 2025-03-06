@@ -14,7 +14,10 @@ export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
     <Price key={FREE_PLAN.id} price={FREE_PLAN} />
     {prices
       .filter(
-        (p) => p.metadata.show_on_table && p.metadata.show_on_table === "true"
+        (p) =>
+          p.metadata.show_on_table &&
+          p.metadata.show_on_table === "true" &&
+          p.metadata.legacy !== "true"
       )
       .map((price, index) => (
         <Price
