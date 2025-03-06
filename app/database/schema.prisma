@@ -110,14 +110,15 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
-  notes        Note[]
-  qrCodes      Qr[]
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
-  bookings     Booking[]
-  reminders    AssetReminder[]
+  custody         Custody?
+  notes           Note[]
+  qrCodes         Qr[]
+  reports         ReportFound[]
+  tags            Tag[]
+  customFields    AssetCustomFieldValue[]
+  bookings        Booking[]
+  reminders       AssetReminder[]
+  custodyReceipts CustodyReceipt[]
 
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -391,19 +392,15 @@ model TeamMember {
   userId          String?
   kitCustodies    KitCustody[]
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
-  bookings       Booking[]
-  assetReminders AssetReminder[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  bookings        Booking[]
+  assetReminders  AssetReminder[]
+  custodyReceipts CustodyReceipt[]
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
-}
-
-enum CustodyStatus {
-  ACTIVE
-  FINISHED
 }
 
 enum CustodySignatureStatus {
@@ -422,7 +419,6 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
 
-  status                     CustodyStatus?    @default(ACTIVE)
   agreement                  CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   agreementId                String?
   agreementSigned            Boolean?          @default(false)
@@ -477,6 +473,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  custodyReceipts    CustodyReceipt[]
 }
 
 model UserOrganization {
@@ -601,6 +598,7 @@ model CustodyAgreement {
 
   custodies             Custody[]
   custodyAgreementFiles CustodyAgreementFile[]
+  custodyReceipts       CustodyReceipt[]
 }
 
 model CustodyAgreementFile {
@@ -858,4 +856,41 @@ model AssetReminder {
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+}
+
+enum CustodyStatus {
+  ACTIVE
+  CANCELLED
+  FINISHED
+}
+
+// A receipt is generated when a custody is assigned
+// Our main custody is deleted once it is release, but we can track it now with CustodyReceipt 
+model CustodyReceipt {
+  id String @id @default(cuid())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  custodian   TeamMember @relation(fields: [custodianId], references: [id])
+  custodianId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  agreement   CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  agreementId String?
+
+  custodyStatus   CustodyStatus          @default(ACTIVE)
+  signatureStatus CustodySignatureStatus
+
+  agreementSigned            Boolean @default(false)
+  associatedAgreementVersion Int?
+
+  signatureText     String?
+  signatureImage    String?
+  agreementSignedOn DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

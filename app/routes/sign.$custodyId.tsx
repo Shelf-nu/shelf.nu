@@ -178,7 +178,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           signatureText,
           agreementSigned: true,
           agreementSignedOn: new Date(),
-          status: "ACTIVE",
           signatureStatus: "SIGNED",
         },
       });

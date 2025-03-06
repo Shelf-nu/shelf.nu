@@ -17,10 +17,7 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
-import {
-  CUSTODY_STATUS_COLOR,
-  SIGN_STATUS_COLOR,
-} from "~/utils/custody-agreement";
+import { SIGN_STATUS_COLOR } from "~/utils/custody-agreement";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -190,7 +187,6 @@ function ReceiptRow({
   item: SerializeFrom<typeof loader>["items"][number];
 }) {
   const signColor = SIGN_STATUS_COLOR[item.signatureStatus!];
-  const statusColor = CUSTODY_STATUS_COLOR[item.status!];
 
   return (
     <>
@@ -200,9 +196,7 @@ function ReceiptRow({
       <Td>
         <Badge color={signColor}>{item.signatureStatus}</Badge>
       </Td>
-      <Td>
-        <Badge color={statusColor}>{item.status}</Badge>
-      </Td>
+      <Td>-</Td>
       <Td>{item.requestedOn}</Td>
       <Td>{item.signedOn}</Td>
     </>
