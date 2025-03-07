@@ -17,6 +17,7 @@ import type {
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
@@ -2392,6 +2393,7 @@ export async function bulkCheckOutAssets({
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
      * 2. Update status of all assets to IN_CUSTODY
+     * 3. Create CustodyReceipt
      */
     await db.$transaction(async (tx) => {
       /** Creating custodies over assets */
@@ -2399,6 +2401,9 @@ export async function bulkCheckOutAssets({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
           // Add agreement in custody if exists
           ...(agreementFound
             ? {
@@ -2408,6 +2413,24 @@ export async function bulkCheckOutAssets({
             : {}),
         })),
         select: { id: true, asset: { select: { id: true, title: true } } },
+      });
+
+      /** Creating a custody receipt */
+      await tx.custodyReceipt.createMany({
+        data: assets.map((asset) => ({
+          assetId: asset.id,
+          custodianId,
+          organizationId,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          ...(agreementFound
+            ? {
+                agreementId: agreementFound.id,
+                associatedAgreementVersion: agreementFound.lastRevision,
+              }
+            : {}),
+        })),
       });
 
       /** Updating status of assets to IN_CUSTODY */

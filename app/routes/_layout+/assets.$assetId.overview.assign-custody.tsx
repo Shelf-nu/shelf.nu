@@ -230,47 +230,73 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    const asset = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        /**
-         * If agreement requires a signature then asset will still be AVAILABLE until user signs the custody
-         * otherwise it will be IN_CUSTODY directly
-         */
-        status: agreementFound?.signatureRequired
-          ? AssetStatus.AVAILABLE
-          : AssetStatus.IN_CUSTODY,
-        custody: {
-          create: {
-            /**
-             * If agreement requires a signature then signature status is PENDING
-             * otherwise signature status is NOT_REQUIRED
-             */
-            signatureStatus: agreementFound?.signatureRequired
-              ? CustodySignatureStatus.PENDING
-              : CustodySignatureStatus.NOT_REQUIRED,
-            custodian: { connect: { id: custodianId } },
-            /**
-             * If we have an agreement then we attach it to the custody
-             * otherwise we are ok with our custody
-             */
-            ...(agreementFound
-              ? {
-                  agreement: { connect: { id: agreementFound.id } },
-                  associatedAgreementVersion: agreementFound.lastRevision,
-                }
-              : {}),
+    /**
+     * New approach for handling custodies:
+     * Previously, we only deleted the custody, but with the introduction of the
+     * Signing feature, we now need to track receipts.
+     *
+     * To achieve this, we follow these steps:
+     * 1. Create a custody record.
+     * 2. Update the asset status based on `signatureRequired`.
+     * 3. Create a `CustodyReceipt` to track receipts.
+     */
+    const asset = await db.$transaction(async (tx) => {
+      const updatedAsset = await tx.asset.update({
+        where: { id: assetId, organizationId },
+        data: {
+          /**
+           * If agreement requires a signature then asset will still be AVAILABLE until user signs the custody
+           * otherwise it will be IN_CUSTODY directly
+           */
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.AVAILABLE
+            : AssetStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: custodianId } },
+              /**
+               * If agreement requires a signature then signature status is PENDING
+               * otherwise signature status is NOT_REQUIRED
+               */
+              signatureStatus: agreementFound?.signatureRequired
+                ? CustodySignatureStatus.PENDING
+                : CustodySignatureStatus.NOT_REQUIRED,
+              ...(agreementFound
+                ? {
+                    agreement: { connect: { id: agreementFound.id } },
+                    associatedAgreementVersion: agreementFound.lastRevision,
+                  }
+                : {}),
+            },
           },
         },
-      },
-      include: {
-        custody: {
-          select: {
-            id: true,
-            asset: { select: { id: true, title: true } },
+        include: {
+          custody: {
+            select: {
+              id: true,
+              asset: { select: { id: true, title: true } },
+            },
           },
         },
-      },
+      });
+
+      /** We also create CustodyReceipt */
+      await tx.custodyReceipt.create({
+        data: {
+          assetId,
+          custodianId,
+          organizationId,
+          ...(agreementFound
+            ? {
+                signatureStatus: CustodySignatureStatus.PENDING,
+                agreementId: agreementFound.id,
+                associatedAgreementVersion: agreementFound.lastRevision,
+              }
+            : { signatureStatus: CustodySignatureStatus.NOT_REQUIRED }),
+        },
+      });
+
+      return updatedAsset;
     });
 
     // If the agreement was specified, and signature was required
