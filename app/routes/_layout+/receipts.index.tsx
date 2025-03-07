@@ -1,3 +1,4 @@
+import { CustodySignatureStatus } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -17,7 +18,10 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
-import { SIGN_STATUS_COLOR } from "~/utils/custody-agreement";
+import {
+  CUSTODY_STATUS_COLOR,
+  SIGN_STATUS_COLOR,
+} from "~/utils/custody-agreement";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -38,9 +42,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    /** Receipts are basically custodies which have signed agreements */
-    let receipts = await db.custody.findMany({
-      where: { asset: { organizationId }, agreementSigned: true },
+    let receipts = await db.custodyReceipt.findMany({
+      where: { organizationId, agreement: { signatureRequired: true } },
       include: {
         asset: { select: { id: true, title: true } },
         custodian: {
@@ -70,6 +73,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
         },
       },
+      orderBy: { createdAt: "desc" },
     });
 
     const datetime = getDateTimeFormat(request, {
@@ -80,7 +84,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     receipts = receipts.map((receipt) => ({
       ...receipt,
       requestedOn: datetime.format(receipt.createdAt),
-      signedOn: datetime.format(receipt.agreementSignedOn!),
+      signedOn: receipt.agreementSignedOn
+        ? datetime.format(receipt.agreementSignedOn)
+        : undefined,
     }));
 
     const header: HeaderData = {
@@ -161,9 +167,9 @@ export default function Receipts() {
                     <ListItem
                       item={receipt}
                       key={receipt.id}
-                      navigate={(custodyId) => {
+                      navigate={(receiptId) => {
                         setSearchParams((prev) => {
-                          prev.set("custodyId", custodyId);
+                          prev.set("receiptId", receiptId);
                           return prev;
                         });
                       }}
@@ -186,7 +192,8 @@ function ReceiptRow({
 }: {
   item: SerializeFrom<typeof loader>["items"][number];
 }) {
-  const signColor = SIGN_STATUS_COLOR[item.signatureStatus!];
+  const signColor = SIGN_STATUS_COLOR[item.signatureStatus];
+  const custodyColor = CUSTODY_STATUS_COLOR[item.custodyStatus];
 
   return (
     <>
@@ -196,9 +203,16 @@ function ReceiptRow({
       <Td>
         <Badge color={signColor}>{item.signatureStatus}</Badge>
       </Td>
-      <Td>-</Td>
+      <Td>
+        {item.signatureStatus === CustodySignatureStatus.PENDING ||
+        item.signatureStatus === CustodySignatureStatus.CANCELLED ? (
+          "-"
+        ) : (
+          <Badge color={custodyColor}>{item.custodyStatus}</Badge>
+        )}
+      </Td>
       <Td>{item.requestedOn}</Td>
-      <Td>{item.signedOn}</Td>
+      <Td>{item.signedOn ?? "-"}</Td>
     </>
   );
 }

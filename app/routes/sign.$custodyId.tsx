@@ -200,7 +200,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     await createNote({
       content: `**${resolveTeamMemberName(custodian)}** has signed [${
         custodyAgreement.name
-      }](/receipts?custodyId=${custody.id})`,
+      }](/receipts?receiptId=${custody.id})`,
       type: "UPDATE",
       userId: authSession?.userId ?? custodyAgreement.createdById,
       assetId: custody.asset.id,
