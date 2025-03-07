@@ -3,7 +3,7 @@ import colors from "tailwindcss/colors";
 
 export const CUSTODY_STATUS_COLOR: Record<CustodyStatus, string> = {
   ACTIVE: colors.yellow["500"],
-  FINISHED: colors.green["500"],
+  FINISHED: colors.gray["500"],
   CANCELLED: colors.red["500"],
 };
 

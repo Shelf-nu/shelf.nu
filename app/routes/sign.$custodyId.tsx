@@ -1,4 +1,8 @@
-import { AssetStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
+} from "@prisma/client";
 import { Viewer, Worker } from "@react-pdf-viewer/core";
 import type {
   ActionFunctionArgs,
@@ -122,7 +126,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { custodian, custody, custodyAgreement } =
+    const { custodian, custody, custodyAgreement, asset } =
       await getAgreementByCustodyId({ custodyId });
 
     if (custody.agreementSigned) {
@@ -178,13 +182,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           signatureText,
           agreementSigned: true,
           agreementSignedOn: new Date(),
-          signatureStatus: "SIGNED",
+          signatureStatus: CustodySignatureStatus.SIGNED,
         },
       });
 
       await tx.asset.update({
         where: { id: custody.asset.id },
         data: { status: AssetStatus.IN_CUSTODY },
+      });
+
+      /** At this point, we must have a CustodyReceipt for the custody, if not then it is a bug in our system */
+      const custodyReceipt = await tx.custodyReceipt.findFirst({
+        where: { assetId: asset.id, custodyStatus: CustodyStatus.ACTIVE },
+        select: { id: true },
+      });
+      if (!custodyReceipt) {
+        throw new ShelfError({
+          cause: null,
+          label: "Custody Agreement",
+          message: "Could not find custody receipt, please contact support.",
+        });
+      }
+
+      await tx.custodyReceipt.update({
+        where: { id: custodyReceipt.id },
+        data: {
+          custodyStatus: CustodyStatus.ACTIVE,
+          signatureStatus: CustodySignatureStatus.SIGNED,
+          signatureImage,
+          signatureText,
+          agreementSigned: true,
+          agreementSignedOn: new Date(),
+        },
       });
     });
 
