@@ -18,6 +18,7 @@ import {
   AssetStatus,
   BookingStatus,
   CustodySignatureStatus,
+  CustodyStatus,
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
@@ -2514,8 +2515,17 @@ export async function bulkCheckInAssets({
         select: {
           id: true,
           title: true,
+          custodyReceipts: {
+            where: { custodyStatus: CustodyStatus.ACTIVE },
+            select: { id: true },
+          },
           custody: {
-            select: { id: true, custodian: { include: { user: true } } },
+            select: {
+              id: true,
+              custodian: { include: { user: true } },
+              agreementSigned: true,
+              agreement: { select: { signatureRequired: true } },
+            },
           },
         },
       }),
@@ -2539,6 +2549,7 @@ export async function bulkCheckInAssets({
      * so we have to make two queries to bulk release custody of assets
      * 1. Delete all custodies for all assets
      * 2. Update status of all assets to AVAILABLE
+     * 3. Update the CustodyReceipt status
      */
     await db.$transaction(async (tx) => {
       /** Deleting custodies over assets */
@@ -2566,6 +2577,29 @@ export async function bulkCheckInAssets({
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      /** Updating status of CustodyReceipt */
+      await Promise.all(
+        assets.map((asset) => {
+          const receiptId = asset.custodyReceipts[0].id;
+          const custodyRequireSignButNotSinged =
+            asset.custody?.agreement &&
+            asset.custody.agreement.signatureRequired &&
+            !asset.custody.agreementSigned;
+
+          return tx.custodyReceipt.update({
+            where: { id: receiptId },
+            data: {
+              custodyStatus: custodyRequireSignButNotSinged
+                ? CustodyStatus.CANCELLED
+                : CustodyStatus.FINISHED,
+              signatureStatus: custodyRequireSignButNotSinged
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+            },
+          });
+        })
+      );
 
       /** Creating notes for the assets */
       await tx.note.createMany({
