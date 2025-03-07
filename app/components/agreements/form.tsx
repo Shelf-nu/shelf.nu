@@ -128,7 +128,7 @@ export const AgreementForm = ({
           onChange={updateTitle}
           className="w-full"
           defaultValue={name || ""}
-          placeholder="Booking Arrangement 2023"
+          placeholder="Custody Arrangement 2023"
           required={true}
         />
       </FormRow>
@@ -160,7 +160,7 @@ export const AgreementForm = ({
           error={zo.errors.description()?.message}
           className="w-full border-b-0 pb-0"
           defaultValue={description || ""}
-          placeholder="Store the booking arrangement for 2023"
+          placeholder="Store the custody arrangement for 2023"
           required={false}
         />
       </FormRow>

@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { useNavigate } from "@remix-run/react";
 import Icon from "../icons/icon";
 import { CustomTooltip } from "../shared/custom-tooltip";
 
@@ -9,6 +9,8 @@ type AwaitingSignatureTooltipProps = {
 export default function AwaitingSignatureTooltip({
   assetId,
 }: AwaitingSignatureTooltipProps) {
+  const navigate = useNavigate();
+
   return (
     <CustomTooltip
       content={
@@ -26,12 +28,16 @@ export default function AwaitingSignatureTooltip({
         </div>
       }
     >
-      <Link
+      <button
         className="rounded-full bg-gray-200 p-1"
-        to={`/assets/${assetId}/overview/share-agreement`}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          navigate(`/assets/${assetId}/overview/share-agreement`);
+        }}
       >
         <Icon icon="sign" />
-      </Link>
+      </button>
     </CustomTooltip>
   );
 }

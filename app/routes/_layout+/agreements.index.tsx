@@ -205,9 +205,9 @@ export default function Agreements() {
             <h3 className="mb-1 text-sm text-gray-600">PDF Agreements</h3>
             <p className="text-sm text-gray-600">
               Use these agreements to generate a PDF document for assigning
-              custody and your bookings. You can even set them up to require an
-              electronic signature. Default means that this agreement will be
-              first selected.
+              custodies. You can even set them up to require an electronic
+              signature. Default means that this agreement will be first
+              selected.
             </p>
           </div>
           <div className="flex w-full flex-col items-center rounded border">

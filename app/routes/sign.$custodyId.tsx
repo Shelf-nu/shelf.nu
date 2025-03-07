@@ -56,7 +56,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           cause: null,
           label: "Custody Agreement",
           message:
-            "You are not allowed to sign this custody. Please sign in to continue.",
+            "This custody agreement requires you to be logged in to sign it.",
+          title: "Not allowed",
         });
       }
 
@@ -70,6 +71,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
+          title: "Not allowed",
           message: "You are not allowed to sign this asset.",
           additionalData: { userId: authSession.userId },
           label: "Assets",
