@@ -205,7 +205,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     let agreementFound: Pick<
       CustodyAgreement,
-      "id" | "name" | "signatureRequired" | "lastRevision"
+      "id" | "name" | "signatureRequired"
     > | null = null;
 
     /** Find and validate the agreement if it is provided */
@@ -216,7 +216,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           name: true,
           signatureRequired: true,
-          lastRevision: true,
         },
       });
 
@@ -264,7 +263,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               ...(agreementFound
                 ? {
                     agreement: { connect: { id: agreementFound.id } },
-                    associatedAgreementVersion: agreementFound.lastRevision,
                   }
                 : {}),
             },
@@ -290,7 +288,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             ? {
                 signatureStatus: CustodySignatureStatus.PENDING,
                 agreementId: agreementFound.id,
-                associatedAgreementVersion: agreementFound.lastRevision,
               }
             : { signatureStatus: CustodySignatureStatus.NOT_REQUIRED }),
         },

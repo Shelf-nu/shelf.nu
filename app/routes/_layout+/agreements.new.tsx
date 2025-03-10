@@ -10,7 +10,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
   createCustodyAgreement,
-  createCustodyAgreementRevision,
+  updateAgreementFile,
 } from "~/modules/custody-agreement";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -91,7 +91,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           organizationId,
         });
 
-        await createCustodyAgreementRevision({
+        await updateAgreementFile({
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,

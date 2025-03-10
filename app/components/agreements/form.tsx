@@ -14,7 +14,6 @@ import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
-import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -69,9 +68,9 @@ interface Props {
   pdfUrl?: CustodyAgreementFile["url"];
   pdfSize?: CustodyAgreementFile["size"];
   pdfName?: CustodyAgreementFile["name"];
-  version?: CustodyAgreementFile["revision"];
   isEdit?: boolean;
   className?: string;
+  canUpdateAgreementFile?: boolean;
 }
 
 export const AgreementForm = ({
@@ -81,9 +80,9 @@ export const AgreementForm = ({
   pdfSize,
   pdfUrl,
   pdfName,
-  version,
   isEdit = false,
   className,
+  canUpdateAgreementFile = true,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewAgreementFormSchema);
@@ -164,73 +163,74 @@ export const AgreementForm = ({
           required={false}
         />
       </FormRow>
-      <FormRow required={!isEdit} rowLabel="Upload PDF">
-        <div>
-          <p className="hidden lg:block">Accepts PDF (max. 5 MB)</p>
-          <Input
-            required={!isEdit}
-            disabled={disabled}
-            accept="application/pdf,.pdf"
-            name={"pdf"}
-            type="file"
-            onChange={handleFileChange}
-            label={""}
-            hideLabel
-            error={zo.errors.pdf()?.message}
-            className="mt-2"
-            inputClassName="border-0 shadow-none p-0 rounded-none"
-          />
-        </div>
 
-        <When truthy={!!pdfUrl}>
-          <Card className="flex w-full items-center gap-x-5">
-            <div className="flex grow gap-x-3">
+      <When truthy={canUpdateAgreementFile}>
+        <FormRow required={!isEdit} rowLabel="Upload PDF">
+          <div>
+            <p className="hidden lg:block">Accepts PDF (max. 5 MB)</p>
+            <Input
+              required={!isEdit}
+              disabled={disabled}
+              accept="application/pdf,.pdf"
+              name={"pdf"}
+              type="file"
+              onChange={handleFileChange}
+              label={""}
+              hideLabel
+              error={zo.errors.pdf()?.message}
+              className="mt-2"
+              inputClassName="border-0 shadow-none p-0 rounded-none"
+            />
+          </div>
+        </FormRow>
+      </When>
+
+      <When truthy={!!pdfUrl || !!pdf}>
+        <FormRow rowLabel="">
+          <When truthy={!!pdfUrl}>
+            <Card className="flex w-full items-center gap-x-5">
+              <div className="flex grow gap-x-3">
+                <FileTypeIcon />
+
+                <div className="flex flex-col">
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="grow text-sm font-semibold text-gray-600"
+                  >
+                    {pdfName}
+                  </a>
+                  <span className="text-sm font-light text-gray-700">
+                    {formatBytes(pdfSize! as number)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+          </When>
+
+          <When truthy={!!pdf}>
+            <Card className="flex w-full items-start justify-between gap-x-3">
               <FileTypeIcon />
-
-              <div className="flex flex-col">
-                <a
-                  href={pdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grow text-sm font-semibold text-gray-600"
-                >
-                  {pdfName}
-                </a>
+              <div className={"flex w-full grow flex-col"}>
+                <span className="text-sm font-semibold text-gray-600">
+                  {pdf?.name}
+                </span>
                 <span className="text-sm font-light text-gray-700">
-                  {formatBytes(pdfSize! as number)}
+                  {formatBytes(pdf?.size as number)}
                 </span>
               </div>
-            </div>
-            <Badge
-              className="min-w-36 justify-center"
-              withDot={false}
-              color="#0dec5d"
-            >
-              Current (revision: {version})
-            </Badge>
-          </Card>
-        </When>
+              <Button
+                variant="text"
+                icon="x"
+                className="border-0 p-1 text-primary-700 hover:text-primary-800"
+                onClick={() => setPdf(null)}
+              />
+            </Card>
+          </When>
+        </FormRow>
+      </When>
 
-        <When truthy={!!pdf}>
-          <Card className="flex w-full items-start justify-between gap-x-3">
-            <FileTypeIcon />
-            <div className={"flex w-full grow flex-col"}>
-              <span className="text-sm font-semibold text-gray-600">
-                {pdf?.name}
-              </span>
-              <span className="text-sm font-light text-gray-700">
-                {formatBytes(pdf?.size as number)}
-              </span>
-            </div>
-            <Button
-              variant="text"
-              icon="x"
-              className="border-0 p-1 text-primary-700 hover:text-primary-800"
-              onClick={() => setPdf(null)}
-            />
-          </Card>
-        </When>
-      </FormRow>
       <input name="isEdit" type="hidden" value={isEdit.toString()} />
 
       <div className="text-right">

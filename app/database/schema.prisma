@@ -419,10 +419,9 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
 
-  agreement                  CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  agreementId                String?
-  agreementSigned            Boolean?          @default(false)
-  associatedAgreementVersion Int?
+  agreement       CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  agreementId     String?
+  agreementSigned Boolean?          @default(false)
 
   signatureStatus   CustodySignatureStatus? @default(NOT_REQUIRED)
   signatureText     String?
@@ -584,7 +583,6 @@ model CustodyAgreement {
   signatureRequired Boolean              @default(false)
   isDefault         Boolean              @default(false)
   isActive          Boolean              @default(true)
-  lastRevision      Int                  @default(0)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -602,17 +600,16 @@ model CustodyAgreement {
 }
 
 model CustodyAgreementFile {
-  id       String @id @default(cuid())
-  revision Int
-  size     Int // PDF size
-  name     String // PDF file name
-  url      String // PDF file URL
+  id   String @id @default(cuid())
+  size Int // PDF size
+  name String // PDF file name
+  url  String // PDF file URL
 
   // Relationships
   custodyAgreement   CustodyAgreement @relation(fields: [custodyAgreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   custodyAgreementId String
 
-  @@unique([revision, custodyAgreementId])
+  @@unique([custodyAgreementId])
 }
 
 model CustomField {
@@ -884,8 +881,7 @@ model CustodyReceipt {
   custodyStatus   CustodyStatus          @default(ACTIVE)
   signatureStatus CustodySignatureStatus
 
-  agreementSigned            Boolean @default(false)
-  associatedAgreementVersion Int?
+  agreementSigned Boolean @default(false)
 
   signatureText     String?
   signatureImage    String?

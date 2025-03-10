@@ -420,4 +420,18 @@ export async function assertUserCanCreateMoreAgreements({
   }
 }
 
+export function canUseSignedCustody(
+  currentOrganization: Pick<Organization, "type">
+) {
+  if (!premiumIsEnabled) {
+    return true;
+  }
+
+  if (currentOrganization.type !== OrganizationType.TEAM) {
+    return false;
+  }
+
+  return true;
+}
+
 /** End agreement features */

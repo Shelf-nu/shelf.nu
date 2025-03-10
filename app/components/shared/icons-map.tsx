@@ -1,5 +1,5 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, StarIcon } from "lucide-react";
 import { Spinner } from "./spinner";
 
 import {
@@ -128,7 +128,8 @@ export type IconType =
   | "change"
   | "booking-exist"
   | "download-qr"
-  | "deactivate";
+  | "deactivate"
+  | "star";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -198,6 +199,7 @@ export const iconsMap: IconsMap = {
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
   "download-qr": <DownloadIcon />,
+  star: <StarIcon />,
 };
 
 export default iconsMap;

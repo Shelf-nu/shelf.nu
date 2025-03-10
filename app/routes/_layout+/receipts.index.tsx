@@ -63,11 +63,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           select: {
             id: true,
             name: true,
-            // File with highest revision number is our latest file because we do not allow
-            // further changes in agreement if any custody is signed.
+            // This is only one file associated with an agreement.
+            // User cannot update agreement file if there is a Custody with Agreement
             custodyAgreementFiles: {
               select: { url: true },
-              orderBy: { revision: "desc" },
               take: 1,
             },
           },

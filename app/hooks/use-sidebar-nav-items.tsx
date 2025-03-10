@@ -60,7 +60,7 @@ export type NavItem =
   | ButtonNavItem;
 
 export function useSidebarNavItems() {
-  const { isAdmin, canUseBookings, subscription } =
+  const { isAdmin, canUseBookings, subscription, canUseSignedCustody } =
     useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
   const currentOrganization = useCurrentOrganization();
@@ -86,6 +86,28 @@ export function useSidebarNavItems() {
       ),
     };
   }, [canUseBookings, subscription]);
+
+  const signedCustodyIsDisabled = useMemo(() => {
+    if (canUseSignedCustody) {
+      return false;
+    }
+
+    return {
+      reason: (
+        <div>
+          <h5>Disabled</h5>
+          <p>
+            Signed custody is a premium feature. It is only available for Team
+            workspaces.
+          </p>
+
+          <When truthy={!!subscription} fallback={<UpgradeMessage />}>
+            <p>Please switch to your team workspace to access this feature.</p>
+          </When>
+        </div>
+      ),
+    };
+  }, [canUseSignedCustody, subscription]);
 
   const topMenuItems: NavItem[] = [
     {
@@ -169,6 +191,7 @@ export function useSidebarNavItems() {
       type: "parent",
       title: "Signed Custody",
       Icon: PenLineIcon,
+      disabled: signedCustodyIsDisabled,
       children: [
         {
           title: "Agreements",

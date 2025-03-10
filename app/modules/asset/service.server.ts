@@ -2348,7 +2348,7 @@ export async function bulkCheckOutAssets({
     /** Check if the agreement exists and is in same organization */
     let agreementFound: Pick<
       CustodyAgreement,
-      "id" | "name" | "signatureRequired" | "lastRevision"
+      "id" | "name" | "signatureRequired"
     > | null = null;
     if (custodyAgreement) {
       agreementFound = await db.custodyAgreement.findUnique({
@@ -2357,7 +2357,6 @@ export async function bulkCheckOutAssets({
           id: true,
           name: true,
           signatureRequired: true,
-          lastRevision: true,
         },
       });
 
@@ -2409,7 +2408,6 @@ export async function bulkCheckOutAssets({
           ...(agreementFound
             ? {
                 agreementId: agreementFound.id,
-                associatedAgreementVersion: agreementFound.lastRevision,
               }
             : {}),
         })),
@@ -2428,7 +2426,6 @@ export async function bulkCheckOutAssets({
           ...(agreementFound
             ? {
                 agreementId: agreementFound.id,
-                associatedAgreementVersion: agreementFound.lastRevision,
               }
             : {}),
         })),

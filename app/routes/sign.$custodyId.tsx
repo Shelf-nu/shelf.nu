@@ -81,13 +81,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
-    const custodyAgreementFile = await db.custodyAgreementFile.findUnique({
-      where: {
-        revision_custodyAgreementId: {
-          revision: custody.associatedAgreementVersion!,
-          custodyAgreementId: custody.agreementId!,
-        },
-      },
+    const custodyAgreementFile = await db.custodyAgreementFile.findFirst({
+      where: { custodyAgreementId: custodyAgreement.id },
     });
 
     if (!custodyAgreementFile) {

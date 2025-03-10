@@ -143,7 +143,7 @@ export async function updateCustodyAgreement({
   }
 }
 
-export async function createCustodyAgreementRevision({
+export async function updateAgreementFile({
   request,
   pdfName,
   pdfSize,
@@ -157,10 +157,6 @@ export async function createCustodyAgreementRevision({
   organizationId: User["id"];
 }) {
   try {
-    const custodyAgreement = await db.custodyAgreement.findUniqueOrThrow({
-      where: { id: custodyAgreementId, organizationId },
-    });
-
     const pdfHash = v4();
     const newFileName = `${organizationId}/${custodyAgreementId}/${pdfHash}`;
     const fileData = await parseFileFormData({
@@ -170,42 +166,54 @@ export async function createCustodyAgreementRevision({
     });
 
     const pdf = fileData.get("pdf") as string;
+    if (!pdf) {
+      return null;
+    }
 
-    if (!pdf) return null;
+    const canUpdateAgreementFile = await canUserUpdateAgreementFile({
+      agreementId: custodyAgreementId,
+      organizationId,
+    });
+    if (!canUpdateAgreementFile) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "You cannot update agreement file because a custody with this agreement already exists.",
+      });
+    }
+
+    const custodyAgreement = await db.custodyAgreement.findUniqueOrThrow({
+      where: { id: custodyAgreementId, organizationId },
+      select: { id: true, custodyAgreementFiles: { select: { id: true } } },
+    });
+    const agreementFile = custodyAgreement.custodyAgreementFiles[0];
 
     const publicUrl = await getPublicFileURL({
       bucketName: "custody-agreements",
       filename: newFileName,
     });
 
-    const [updatedAgreement, newRevision] = await db.$transaction([
-      // Update the latest revision of the agreement
-      db.custodyAgreement.update({
-        where: { id: custodyAgreementId, organizationId },
-        data: {
-          lastRevision: custodyAgreement.lastRevision + 1,
-        },
-      }),
+    /** Update the pdf file in CustodyAgreementFile */
+    const data = {
+      name: pdfName,
+      size: pdfSize,
+      url: `${publicUrl}.pdf`,
+      custodyAgreementId,
+    };
 
-      // Create a new revision of the agreement PDF
-      db.custodyAgreementFile.create({
-        data: {
-          name: pdfName,
-          size: pdfSize,
-          url: `${publicUrl}.pdf`,
-          revision: custodyAgreement.lastRevision + 1,
-          custodyAgreementId,
-        },
-      }),
-    ]);
-
-    return { updatedAgreement, newRevision };
+    await db.custodyAgreementFile.upsert({
+      where: { id: agreementFile?.id ?? "create-new" },
+      update: data,
+      create: data,
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "Error updating agreement PDF",
-      message:
-        "Something went wrong while updating the custody agreement PDF. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the custody agreement PDF. Please try again or contact support.",
       additionalData: { custodyAgreementId },
       label,
     });
@@ -299,9 +307,9 @@ export async function getLatestCustodyAgreementFile(
   id: CustodyAgreement["id"]
 ) {
   try {
+    /** There is only one agreement file associated with an Agreement */
     const agreementFile = await db.custodyAgreementFile.findFirst({
       where: { custodyAgreementId: id },
-      orderBy: { revision: "desc" },
     });
 
     return agreementFile;
@@ -482,6 +490,35 @@ export async function getAgreementByAssetId({
       message,
       additionalData: { organizationId },
       label,
+    });
+  }
+}
+
+export async function canUserUpdateAgreementFile({
+  agreementId,
+  organizationId,
+}: {
+  agreementId: CustodyAgreement["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    /**
+     * A user can update the agreement file only if no CustodyReceipt exists for this agreement.
+     */
+    const receipts = await db.custodyReceipt.count({
+      where: {
+        organizationId,
+        agreementId,
+      },
+    });
+
+    return receipts === 0;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message:
+        "Something went wrong while checking if you can update agreement file.",
     });
   }
 }

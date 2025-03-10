@@ -15,7 +15,8 @@ import {
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  createCustodyAgreementRevision,
+  canUserUpdateAgreementFile,
+  updateAgreementFile,
   getCustodyAgreementById,
   getLatestCustodyAgreementFile,
   updateCustodyAgreement,
@@ -57,8 +58,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       id: agreementId,
       organizationId,
     });
-    const latestAgreementFileRevision =
-      await getLatestCustodyAgreementFile(agreementId);
+
+    const agreementFile = await getLatestCustodyAgreementFile(agreementId);
+
+    const canUpdateAgreementFile = await canUserUpdateAgreementFile({
+      agreementId: agreement.id,
+      organizationId,
+    });
 
     const header: HeaderData = {
       title: `Edit | ${agreement.name}`,
@@ -67,7 +73,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     return json(
       data({
         agreement,
-        latestAgreementFileRevision,
+        agreementFile,
+        canUpdateAgreementFile,
         header,
       })
     );
@@ -121,7 +128,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
         });
 
-        await createCustodyAgreementRevision({
+        await updateAgreementFile({
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,
@@ -151,7 +158,7 @@ export default function EditAgreement() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
 
-  const { agreement, latestAgreementFileRevision } =
+  const { agreement, agreementFile, canUpdateAgreementFile } =
     useLoaderData<typeof loader>();
 
   return (
@@ -165,10 +172,10 @@ export default function EditAgreement() {
         description={agreement.description}
         type={agreement.type}
         signatureRequired={agreement.signatureRequired}
-        pdfUrl={latestAgreementFileRevision!.url}
-        pdfSize={latestAgreementFileRevision!.size}
-        pdfName={latestAgreementFileRevision!.name}
-        version={latestAgreementFileRevision!.revision}
+        pdfUrl={agreementFile!.url}
+        pdfSize={agreementFile!.size}
+        pdfName={agreementFile!.name}
+        canUpdateAgreementFile={canUpdateAgreementFile}
       />
     </>
   );

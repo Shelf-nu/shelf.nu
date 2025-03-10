@@ -149,8 +149,8 @@ const MakeDefaultButton = ({
               "w-full justify-start rounded-none border-b-2 text-gray-700 hover:bg-gray-100 hover:text-gray-700",
               isDisabled && "pointer-events-none border-gray-300 text-gray-300"
             )}
-            icon={"star"}
-            title={"Make default"}
+            icon="star"
+            title="Make default"
           >
             Make default
           </Button>
