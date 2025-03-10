@@ -16,12 +16,12 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { Table, Td, Th } from "~/components/table";
-import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import {
   makeCustodyAgreementDefault,
   toggleCustodyAgreementActiveState,
 } from "~/modules/custody-agreement";
-import { getUserByID } from "~/modules/user/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -37,31 +37,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
 
-    const user = await getUserByID(userId, {
-      tier: { include: { tierLimit: true } },
-      custodyAgreements: {
+    const [agreements, totalAgreements, tierLimit] = await Promise.all([
+      db.custodyAgreement.findMany({
         where: { organizationId },
         orderBy: { createdAt: "desc" },
-      },
+      }),
+      db.custodyAgreement.count({
+        where: { organizationId },
+      }),
+      getOrganizationTierLimit({ organizations, organizationId }),
+    ]);
+
+    const canCreateAgreements = canCreateMoreAgreements({
+      tierLimit,
+      totalAgreements,
     });
 
-    const modelName = {
-      singular: "Agreement",
-      plural: "Agreements",
-    };
-
-    const header: HeaderData = {
-      title: "Agreements",
-    };
-
-    const agreements = user.custodyAgreements;
     const defaultAgreements = agreements.reduce(
       (acc, curr) => {
         if (curr.isDefault) {
@@ -76,14 +74,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {} as Record<string, CustodyAgreement>
     );
 
+    const modelName = {
+      singular: "Agreement",
+      plural: "Agreements",
+    };
+
+    const header: HeaderData = {
+      title: "Agreements",
+    };
+
     return json(
       data({
         modelName,
         header,
-        canCreateMoreAgreements: canCreateMoreAgreements({
-          tierLimit: user.tier.tierLimit,
-          totalAgreements: agreements.length,
-        }),
+        canCreateMoreAgreements: canCreateAgreements,
         items: agreements,
         totalItems: agreements.length,
         defaultAgreements,
@@ -231,16 +235,22 @@ export default function Agreements() {
                     <h3 className="text-md text-gray-900">PDF Agreements</h3>
                     <p className="text-sm text-gray-600">{totalItems} items</p>
                   </div>
-                  <When truthy={canCreateMoreAgreements}>
-                    <Button
-                      to="new"
-                      role="link"
-                      icon="plus"
-                      aria-label="new agreement"
-                    >
-                      Add Agreement
-                    </Button>
-                  </When>
+                  <Button
+                    to="new"
+                    role="link"
+                    icon="plus"
+                    aria-label="new agreement"
+                    disabled={
+                      !canCreateMoreAgreements
+                        ? {
+                            reason:
+                              "You have reached the limit for creating agreements. Please upgrade to create more agreements.",
+                          }
+                        : false
+                    }
+                  >
+                    Add Agreement
+                  </Button>
                 </div>
                 <div className="w-full flex-1 border-t">
                   <Table>
