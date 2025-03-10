@@ -5,6 +5,7 @@ import { tw } from "~/utils/tw";
 import Error404Handler from "./error-404-handler";
 import { parse404ErrorData } from "./utils";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 type ErrorContentProps = { className?: string };
 
@@ -16,11 +17,13 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   let message =
     "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
   let traceId;
+  let showLogin = false;
 
   if (isRouteError(response)) {
     message = response.data.error.message;
     title = response.data.error.title || "Oops, something went wrong";
     traceId = response.data.error.traceId;
+    showLogin = response.data.error.additionalData?.showLogin as boolean;
   }
 
   const error404 = parse404ErrorData(response);
@@ -54,6 +57,14 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
           <Button to="/" variant="secondary" icon="home">
             Back to home
           </Button>
+          <When truthy={showLogin}>
+            <Button
+              variant="secondary"
+              to={`/login?redirectTo=${loc.pathname}`}
+            >
+              Login now
+            </Button>
+          </When>
           <Button to={loc.pathname} reloadDocument>
             Reload page
           </Button>

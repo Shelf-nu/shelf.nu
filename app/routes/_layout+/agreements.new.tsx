@@ -25,11 +25,18 @@ import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
 
 const title = "New Agreement";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    await assertUserCanCreateMoreAgreements(userId);
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.custodyAgreement,
+      action: PermissionAction.create,
+    });
+
+    await assertUserCanCreateMoreAgreements({ organizationId, organizations });
 
     const header: HeaderData = { title };
 
@@ -57,13 +64,16 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     switch (method) {
       case "POST": {
-        await assertUserCanCreateMoreAgreements(userId);
-
-        const { organizationId } = await requirePermission({
-          userId: authSession.userId,
+        const { organizationId, organizations } = await requirePermission({
           request,
+          userId,
           entity: PermissionEntity.custodyAgreement,
           action: PermissionAction.create,
+        });
+
+        await assertUserCanCreateMoreAgreements({
+          organizationId,
+          organizations,
         });
 
         const clonedData = request.clone();

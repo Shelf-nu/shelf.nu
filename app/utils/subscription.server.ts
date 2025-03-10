@@ -1,4 +1,5 @@
-import { OrganizationType, type Organization } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
+import type { Organization } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -385,14 +386,25 @@ export function canCreateMoreAgreements({
   return totalAgreements < tierLimit?.maxCustodyAgreements;
 }
 
-export async function assertUserCanCreateMoreAgreements(userId: string) {
-  /** Get the tier limit and check if they can export */
-  const tierLimit = await getUserTierLimit(userId);
+export async function assertUserCanCreateMoreAgreements({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   const canCreateMore = canCreateMoreAgreements({
     tierLimit,
     totalAgreements: await db.custodyAgreement.count({
-      where: { createdById: userId },
+      where: { organizationId },
     }),
   });
 
@@ -401,7 +413,7 @@ export async function assertUserCanCreateMoreAgreements(userId: string) {
       cause: null,
       title: "Not allowed",
       message: "Your user cannot create more agreements",
-      additionalData: { userId },
+      additionalData: { organizationId },
       label,
       shouldBeCaptured: false,
     });

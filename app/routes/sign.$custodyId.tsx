@@ -58,6 +58,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           message:
             "This custody agreement requires you to be logged in to sign it.",
           title: "Not allowed",
+          additionalData: { showLogin: true },
         });
       }
 

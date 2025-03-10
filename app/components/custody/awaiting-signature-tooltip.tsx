@@ -22,7 +22,7 @@ export default function AwaitingSignatureTooltip({
             Asset status will change after signing. To cancel custody
             assignment, go to{" "}
             <span className="font-semibold text-gray-600">
-              {"Actions > Check in"}
+              {"Actions > Release Custody"}
             </span>
           </div>
         </div>
