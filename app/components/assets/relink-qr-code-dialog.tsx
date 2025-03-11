@@ -12,7 +12,7 @@ import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
-import { WasmScanner } from "../zxing-scanner/wasm-scanner";
+import { CodeScanner } from "../zxing-scanner/code-scanner";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;
@@ -107,8 +107,8 @@ export default function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
-            <WasmScanner
-              className="h-auto flex-1"
+            <CodeScanner
+              className="!h-[450px] [&_.info-overlay]:h-[450px]"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}
               onQrDetectionSuccess={handleQrDetectionSuccess}
@@ -116,6 +116,9 @@ export default function RelinkQrCodeDialog({
               hideBackButtonText
               paused={!!newQrId}
               setPaused={() => {}}
+              scannerModeClassName="h-[450px]"
+              // Do nothing. This is a dummy callback to prevent the input from clearing
+              scannerModeCallback={() => {}}
             />
 
             <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
@@ -156,6 +159,21 @@ export default function RelinkQrCodeDialog({
                 onClick={() => {
                   setNewQrId(undefined);
                   setErrorMessage("");
+                  /**
+                   * We need to do some special handling for the scanner mode
+                   * input. We need to enable the input and focus it so that
+                   * the user can scan a new code.
+                   * */
+                  if (document) {
+                    const input = document.querySelector(
+                      ".scanner-mode-input"
+                    ) as HTMLInputElement;
+                    if (input) {
+                      input.disabled = false;
+                      input.focus();
+                      input.value = "";
+                    }
+                  }
                 }}
               >
                 Rescan

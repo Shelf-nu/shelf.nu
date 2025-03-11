@@ -9,7 +9,7 @@ import { Link, useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { WasmScanner } from "~/components/zxing-scanner/wasm-scanner";
+import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -54,7 +54,7 @@ const QRScanner = () => {
   );
 
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 124 : vh - 158;
+  const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false); // Add a ref to track navigation status
 
   function handleQrDetectionSuccess(qrId: string) {
@@ -72,12 +72,12 @@ const QRScanner = () => {
 
   return (
     <>
-      <Header title="QR code scanner" />
+      <Header title="QR code scanner" hidePageDescription={true} />
       <div
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}
       >
-        <WasmScanner
+        <CodeScanner
           onQrDetectionSuccess={handleQrDetectionSuccess}
           paused={paused}
           setPaused={setPaused}
