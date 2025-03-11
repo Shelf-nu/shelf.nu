@@ -80,7 +80,7 @@ export default function Agreement({ className }: AgreementProps) {
 
       <div className="flex items-center justify-between gap-x-2 p-4">
         <input
-          className="flex-1 border-none px-0 py-1 outline-none ring-0 focus-within:ring-0"
+          className="flex-1 border-none bg-transparent px-0 py-1 outline-none ring-0 focus-within:ring-0"
           placeholder="or type your name here..."
           onChange={(event) => {
             setSignatureText(event.target.value);

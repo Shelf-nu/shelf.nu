@@ -9,7 +9,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import * as pdfjs from "pdfjs-dist";
 import { z } from "zod";
@@ -20,6 +20,7 @@ import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 
 import AgreementDialog from "~/components/sign/agreement-dialog";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getAgreementByCustodyId } from "~/modules/custody-agreement";
 import { createNote } from "~/modules/note/service.server";
@@ -98,12 +99,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `Sign "${custodyAgreement.name}"`,
     };
 
+    const authSession = context.getOptionalSession();
+
     return json(
       data({
         header,
         custodyAgreement,
         custodyAgreementFile,
         isAgreementSigned: custody.agreementSigned,
+        isLoggedIn: !!authSession,
+        asset: custody.asset,
       })
     );
   } catch (cause) {
@@ -233,9 +238,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetId: custody.asset.id,
     });
 
-    return redirect(
-      authSession?.userId ? `/assets/${custody.asset.id}/overview` : "/login"
-    );
+    return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -244,13 +247,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function Sign() {
   useCrisp();
-  const { custodyAgreement, custodyAgreementFile, isAgreementSigned } =
-    useLoaderData<typeof loader>();
+  const {
+    custodyAgreement,
+    custodyAgreementFile,
+    isAgreementSigned,
+    isLoggedIn,
+    asset,
+  } = useLoaderData<typeof loader>();
 
   if (isAgreementSigned) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="flex w-96 flex-col items-center justify-center gap-4 p-6 text-center">
+        <div className="flex w-[450px] flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="flex items-center justify-center rounded-full bg-green-50 p-1">
             <div className="flex items-center justify-center rounded-full bg-green-100 p-2">
               <Icon icon="sign" className="text-green-600" />
@@ -265,9 +273,27 @@ export default function Sign() {
             </p>
           </div>
 
-          <Button className="w-full" variant="secondary" to="/assets">
-            To Dashboard
-          </Button>
+          <When
+            truthy={isLoggedIn}
+            fallback={
+              <Button className="w-full" to="/login">
+                Login now
+              </Button>
+            }
+          >
+            <div className="flex w-full flex-col items-center gap-4 md:flex-row">
+              <Button className="w-full" variant="secondary" to="/dashboard">
+                To Dashboard
+              </Button>
+
+              <Button
+                className="w-full break-keep"
+                to={`/assets/${asset.id}/overview`}
+              >
+                To Asset's Overview
+              </Button>
+            </div>
+          </When>
         </div>
       </div>
     );
