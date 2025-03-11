@@ -404,7 +404,7 @@ export async function assertUserCanCreateMoreAgreements({
   const canCreateMore = canCreateMoreAgreements({
     tierLimit,
     totalAgreements: await db.custodyAgreement.count({
-      where: { organizationId },
+      where: { organizationId, isActive: true },
     }),
   });
 

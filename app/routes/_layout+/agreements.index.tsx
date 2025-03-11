@@ -50,7 +50,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy: { createdAt: "desc" },
       }),
       db.custodyAgreement.count({
-        where: { organizationId },
+        where: { organizationId, isActive: true },
       }),
       getOrganizationTierLimit({ organizations, organizationId }),
     ]);
