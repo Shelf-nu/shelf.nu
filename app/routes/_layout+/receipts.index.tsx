@@ -5,17 +5,16 @@ import type {
   LoaderFunctionArgs,
   SerializeFrom,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import CustodyReceiptDialog from "~/components/custody/custody-receipt-dialog";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { EmptyState } from "~/components/list/empty-state";
-import { ListHeader } from "~/components/list/list-header";
-import { ListItem } from "~/components/list/list-item";
+import { List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
-import { Table, Td, Th } from "~/components/table";
-import { db } from "~/database/db.server";
+import { Td, Th } from "~/components/table";
 import { useSearchParams } from "~/hooks/search-params";
+import { getPaginatedAndFilterableReceipts } from "~/modules/custody-receipt/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -42,38 +41,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    let receipts = await db.custodyReceipt.findMany({
-      where: { organizationId, agreement: { signatureRequired: true } },
-      include: {
-        asset: { select: { id: true, title: true } },
-        custodian: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        agreement: {
-          select: {
-            id: true,
-            name: true,
-            // This is only one file associated with an agreement.
-            // User cannot update agreement file if there is a Custody with Agreement
-            custodyAgreementFiles: {
-              select: { url: true },
-              take: 1,
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    let { receipts, page, perPage, search, totalPages, totalReceipts } =
+      await getPaginatedAndFilterableReceipts({
+        organizationId,
+        request,
+      });
 
     const datetime = getDateTimeFormat(request, {
       dateStyle: "short",
@@ -92,13 +64,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "Receipts",
     };
 
+    const modelName = {
+      singular: "receipt",
+      plural: "receipts",
+    };
+
     return json(
       data({
         header,
         items: receipts as Array<
           (typeof receipts)[number] & { requestedOn: string; signedOn: string }
         >,
-        totalItems: receipts.length,
+        totalItems: totalReceipts,
+        perPage,
+        page,
+        search,
+        totalPages,
+        modelName,
         organization: {
           name: currentOrganization.name,
         },
@@ -115,73 +97,38 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function Receipts() {
-  const { items, totalItems } = useLoaderData<typeof loader>();
   const [_, setSearchParams] = useSearchParams();
-
-  const hasItems = items.length > 0;
 
   return (
     <>
       <Header classNames="mb-4" />
       <CustodyReceiptDialog />
 
-      <div className="flex w-full flex-col items-center rounded border bg-white">
-        {!hasItems ? (
-          <EmptyState
-            customContent={{
-              title: "No receipts found",
-              text: "You do not have any receipts yet.",
-            }}
-            modelName={{
-              singular: "receipt",
-              plural: "receipts",
-            }}
-          />
-        ) : (
-          <>
-            <div className="flex w-full items-center justify-between p-4">
-              <div>
-                <h3 className="text-md text-gray-900">Receipts</h3>
-                <p className="text-sm text-gray-600">{totalItems} items</p>
-              </div>
-            </div>
-            <div className="w-full flex-1 border-t">
-              <Table>
-                <ListHeader
-                  hideFirstColumn
-                  children={
-                    <>
-                      <Th>Asset</Th>
-                      <Th>Custodian</Th>
-                      <Th>Agreement</Th>
-                      <Th>Signature status</Th>
-                      <Th>Custody Status</Th>
-                      <Th>Request Date</Th>
-                      <Th>Signed Date</Th>
-                    </>
-                  }
-                />
-                <tbody>
-                  {items.map((receipt) => (
-                    <ListItem
-                      item={receipt}
-                      key={receipt.id}
-                      navigate={(receiptId) => {
-                        setSearchParams((prev) => {
-                          prev.set("receiptId", receiptId);
-                          return prev;
-                        });
-                      }}
-                    >
-                      <ReceiptRow item={receipt} />
-                    </ListItem>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          </>
-        )}
-      </div>
+      <ListContentWrapper>
+        <Filters />
+
+        <List
+          hideFirstHeaderColumn
+          headerChildren={
+            <>
+              <Th>Asset</Th>
+              <Th>Custodian</Th>
+              <Th>Agreement</Th>
+              <Th>Signature status</Th>
+              <Th>Custody Status</Th>
+              <Th>Request Date</Th>
+              <Th>Signed Date</Th>
+            </>
+          }
+          navigate={(receiptId) => {
+            setSearchParams((prev) => {
+              prev.set("receiptId", receiptId);
+              return prev;
+            });
+          }}
+          ItemComponent={ReceiptRow}
+        />
+      </ListContentWrapper>
     </>
   );
 }
