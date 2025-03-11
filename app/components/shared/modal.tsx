@@ -44,7 +44,7 @@ const AlertDialogContent = React.forwardRef<
       <AlertDialogPrimitive.Content
         ref={ref}
         className={tw(
-          "fixed z-50 grid w-full max-w-md scale-100 gap-4 rounded bg-white p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:zoom-in-90 sm:slide-in-from-bottom-0 md:w-full",
+          "fixed z-50 flex max-h-[90vh] w-full max-w-md scale-100 flex-col gap-4 rounded bg-white p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:zoom-in-90 sm:slide-in-from-bottom-0 md:w-full",
           className
         )}
         {...props}
