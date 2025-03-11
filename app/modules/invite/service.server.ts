@@ -704,54 +704,53 @@ export async function bulkInviteUsers({
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
-    const invitesToCreate = validPayloadsWithName.map((payload) => ({
-      inviterId: userId,
-      organizationId,
-      inviteeEmail: payload.email,
-      teamMemberId: getTeamMemberId(payload),
-      roles: [payload.role],
-      expiresAt,
-      inviteCode: generateRandomCode(6),
-      status: InviteStatuses.PENDING,
-    }));
-
     const INVITE_INCLUDE = {
       inviter: { select: { firstName: true, lastName: true } },
       organization: true,
     } satisfies Prisma.InviteInclude;
 
-    let createdTeamMembers: TeamMember[] = [];
     let createdInvites: Array<
       Prisma.InviteGetPayload<{ include: typeof INVITE_INCLUDE }>
     > = [];
 
-    /**
-     * This helper function returns the correct  teamMemberId required for creating an invite
-     */
-    function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
-      if (payload.teamMemberId) {
-        return payload.teamMemberId;
-      }
-
-      const createdTm = createdTeamMembers.find(
-        (tm) => tm.name === payload.name
-      );
-      invariant(
-        createdTm,
-        "Unexpected situation! Could not find teamMember in createdTeamMembers."
-      );
-
-      return createdTm.id;
-    }
-
     await db.$transaction(async (tx) => {
       // Bulk create all required team members
-      createdTeamMembers = await tx.teamMember.createManyAndReturn({
+      const createdTeamMembers = await tx.teamMember.createManyAndReturn({
         data: validPayloadsWithName.map((p) => ({
           name: p.name,
           organizationId,
         })),
       });
+
+      /**
+       * This helper function returns the correct  teamMemberId required for creating an invite
+       */
+      function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
+        if (payload.teamMemberId) {
+          return payload.teamMemberId;
+        }
+
+        const createdTm = createdTeamMembers.find(
+          (tm) => tm.name === payload.name
+        );
+        invariant(
+          createdTm,
+          "Unexpected situation! Could not find teamMember in createdTeamMembers."
+        );
+
+        return createdTm.id;
+      }
+
+      const invitesToCreate = validPayloadsWithName.map((payload) => ({
+        inviterId: userId,
+        organizationId,
+        inviteeEmail: payload.email,
+        teamMemberId: getTeamMemberId(payload),
+        roles: [payload.role],
+        expiresAt,
+        inviteCode: generateRandomCode(6),
+        status: InviteStatuses.PENDING,
+      }));
 
       // Bulk create invites
       createdInvites = await tx.invite.createManyAndReturn({
