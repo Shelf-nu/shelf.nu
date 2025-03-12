@@ -1,8 +1,13 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
 import { json, useLoaderData } from "@remix-run/react";
 import ContextualModal from "~/components/layout/contextual-modal";
+import type { HeaderData } from "~/components/layout/header/types";
+import { List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { Td, Th } from "~/components/table";
+import { getPaginatedAndFilterableGroups } from "~/modules/user-groups/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -15,12 +20,20 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { currentOrganization } = await requirePermission({
+    const { currentOrganization, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.userGroups,
       action: PermissionAction.read,
     });
+
+    const { groups, totalGroups, page, perPage, search, totalPages } =
+      await getPaginatedAndFilterableGroups({
+        request,
+        organizationId,
+      });
+
+    const header = { title: "Groups" } satisfies HeaderData;
 
     const modelName = {
       singular: "group",
@@ -31,8 +44,19 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       data({
         isPersonalOrg: currentOrganization.type === "PERSONAL",
         orgName: currentOrganization.name,
-        search: "",
+        search,
+        header,
         modelName,
+        items: groups,
+        totalItems: totalGroups,
+        page,
+        perPage,
+        totalPages,
+        searchFieldLabel: "Search groups",
+        searchFieldTooltip: {
+          title: "Search groups",
+          text: "Search groups by name",
+        },
       })
     );
   } catch (cause) {
@@ -53,13 +77,39 @@ export default function Groups() {
         </p>
       </div>
 
-      <Filters>
-        <Button className="w-max" to="new">
-          Create a group
-        </Button>
-      </Filters>
+      <ListContentWrapper>
+        <Filters>
+          <Button className="w-max" to="new">
+            Create a group
+          </Button>
+        </Filters>
+
+        <List
+          ItemComponent={GroupRow}
+          headerChildren={
+            <>
+              <Th>Members</Th>
+              <Th>Actions</Th>
+            </>
+          }
+        />
+      </ListContentWrapper>
 
       <ContextualModal />
     </div>
+  );
+}
+
+function GroupRow({
+  item,
+}: {
+  item: SerializeFrom<typeof loader>["items"][number];
+}) {
+  return (
+    <>
+      <Td>{item.name}</Td>
+      <Td>{item._count.teamMembers}</Td>
+      <Td>Actions</Td>
+    </>
   );
 }

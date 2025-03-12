@@ -59,7 +59,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         "Your group has been created successfully. You can start adding your team members.",
     });
 
-    throw redirect("/settings/groups");
+    return redirect("/settings/groups");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
