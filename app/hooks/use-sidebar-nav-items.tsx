@@ -205,6 +205,7 @@ export function useSidebarNavItems() {
           title: "Custom fields",
           to: "/settings/custom-fields",
         },
+        { title: "Groups", to: "/settings/groups" },
       ],
     },
   ];

@@ -9,6 +9,7 @@ interface Props {
   className?: string;
   subHeading?: string | JSX.Element;
   required?: boolean;
+  contentClassName?: string;
 }
 
 export default function FormRow({
@@ -17,6 +18,7 @@ export default function FormRow({
   subHeading,
   className,
   required = false,
+  contentClassName,
 }: Props) {
   return (
     <div
@@ -34,7 +36,12 @@ export default function FormRow({
         <SubHeading className="text-xs text-gray-600">{subHeading}</SubHeading>
       </div>
 
-      <div className="relative flex w-[512px] max-w-full flex-wrap">
+      <div
+        className={tw(
+          "relative flex w-[512px] max-w-full flex-wrap",
+          contentClassName
+        )}
+      >
         {children}
       </div>
     </div>

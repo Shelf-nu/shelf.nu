@@ -78,6 +78,7 @@ model User {
 
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
+  createdGroups   Group[]
 
   @@unique([email, username])
   @@index([firstName, lastName])
@@ -453,6 +454,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  groups             Group[]
 }
 
 model UserOrganization {
@@ -794,6 +796,12 @@ model AssetReminder {
 model Group {
   id   String @id @default(cuid())
   name String
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
 
   teamMembers TeamMember[]
 

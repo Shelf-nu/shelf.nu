@@ -35,6 +35,7 @@ export default function SettingsPage() {
     { to: "general", content: "General" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
+    { to: "groups", content: "Groups" },
   ];
 
   const { isBaseOrSelfService } = useUserRoleHelper();
