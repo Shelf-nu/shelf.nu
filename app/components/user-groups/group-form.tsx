@@ -1,5 +1,8 @@
+import type { Group } from "@prisma/client";
+import { useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -9,8 +12,12 @@ export const GroupSchema = z.object({
   name: z.string().min(1, "Please enter group name."),
 });
 
-export default function GroupForm() {
+type GroupFormProps = Partial<Pick<Group, "name">>;
+
+export default function GroupForm({ name }: GroupFormProps) {
   const zo = useZorm("user-group", GroupSchema);
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <Form ref={zo.ref} method="POST">
@@ -21,6 +28,7 @@ export default function GroupForm() {
         contentClassName="w-full"
       >
         <Input
+          defaultValue={name}
           label="Name"
           hideLabel
           name={zo.fields.name()}
@@ -32,7 +40,7 @@ export default function GroupForm() {
         />
       </FormRow>
 
-      <Button>Create group</Button>
+      <Button disabled={disabled}>Create group</Button>
     </Form>
   );
 }

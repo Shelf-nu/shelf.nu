@@ -1,82 +1,92 @@
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { UsersIcon } from "lucide-react";
+import { z } from "zod";
 import GroupForm, { GroupSchema } from "~/components/user-groups/group-form";
-import { createNewGroup } from "~/modules/user-groups/service.server";
+import {
+  getGroupById,
+  updateGroup,
+} from "~/modules/user-groups/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export async function loader({ request, context }: LoaderFunctionArgs) {
+const ParamsSchema = z.object({ groupId: z.string() });
+
+export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
+  const { groupId } = getParams(params, ParamsSchema);
 
   try {
-    await requirePermission({
-      userId,
+    const { organizationId } = await requirePermission({
       request,
+      userId,
       entity: PermissionEntity.userGroups,
-      action: PermissionAction.create,
+      action: PermissionAction.update,
     });
 
-    return json(data({ showModal: true }));
+    const group = await getGroupById({ id: groupId, organizationId });
+
+    return json(data({ showModal: true, group }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
   }
 }
 
-export async function action({ request, context }: ActionFunctionArgs) {
+export async function action({ request, context, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
+  const { groupId } = getParams(params, ParamsSchema);
 
   try {
-    assertIsPost(request);
-
     const { organizationId } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.userGroups,
-      action: PermissionAction.create,
+      action: PermissionAction.update,
     });
 
     const formData = await request.formData();
-    const { name } = parseData(formData, GroupSchema);
+    const payload = parseData(formData, GroupSchema);
 
-    await createNewGroup({
-      name,
+    await updateGroup({
+      id: groupId,
       organizationId,
-      createdById: userId,
+      name: payload.name,
     });
 
     sendNotification({
       icon: { name: "success", variant: "success" },
+      title: "Success",
+      message: "Your group is updated successfully.",
       senderId: userId,
-      title: "Group created",
-      message:
-        "Your group has been created successfully. You can start adding your team members.",
     });
 
     return redirect("/settings/groups");
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause, { userId, groupId });
     return json(error(reason), { status: reason.status });
   }
 }
 
-export default function NewGroup() {
+export default function EditGroup() {
+  const { group } = useLoaderData<typeof loader>();
+
   return (
     <div>
       <div className="mb-4 flex size-14 items-center justify-center rounded-full bg-primary-50">
         <UsersIcon className="size-5 text-primary-500" />
       </div>
 
-      <h4 className="mb-4">Create new group</h4>
+      <h4 className="mb-4">Edit {group?.name}</h4>
 
-      <GroupForm />
+      <GroupForm name={group?.name} />
     </div>
   );
 }

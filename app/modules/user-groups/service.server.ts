@@ -129,3 +129,43 @@ export async function deleteGroup({
     });
   }
 }
+
+export async function getGroupById({
+  id,
+  organizationId,
+}: Pick<Group, "id" | "organizationId">) {
+  try {
+    return await db.group.findFirst({
+      where: { id, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while getting group details.",
+    });
+  }
+}
+
+export async function updateGroup({
+  id,
+  organizationId,
+  name,
+}: Pick<Group, "id" | "organizationId" | "name">) {
+  try {
+    return await db.group.update({
+      where: { id, organizationId },
+      data: { name },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating group.",
+    });
+  }
+}
