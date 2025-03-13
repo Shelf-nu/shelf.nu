@@ -23,8 +23,21 @@ export default function ActionsDropdown({
 
         <DropdownMenuContent
           align="start"
-          className="order w-44 rounded-md bg-white p-0 text-right "
+          className="order w-48 rounded-md bg-white p-0 text-right "
         >
+          <DropdownMenuItem asChild>
+            <Button
+              to={`${group.id}/manage-members`}
+              icon="user"
+              role="link"
+              variant="link"
+              className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+              width="full"
+            >
+              Manage Members
+            </Button>
+          </DropdownMenuItem>
+
           <DropdownMenuItem asChild>
             <Button
               to={`${group.id}/edit`}

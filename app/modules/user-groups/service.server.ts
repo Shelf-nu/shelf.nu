@@ -1,4 +1,4 @@
-import type { Group, Prisma } from "@prisma/client";
+import type { Group, Prisma, TeamMember } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -135,9 +135,20 @@ export async function getGroupById({
   organizationId,
 }: Pick<Group, "id" | "organizationId">) {
   try {
-    return await db.group.findFirst({
+    const group = await db.group.findFirst({
       where: { id, organizationId },
+      include: { teamMembers: { select: { id: true } } },
     });
+
+    if (!group) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Group not found",
+      });
+    }
+
+    return group;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -153,11 +164,39 @@ export async function updateGroup({
   id,
   organizationId,
   name,
-}: Pick<Group, "id" | "organizationId" | "name">) {
+  teamMemberIds = [],
+}: Pick<Group, "id" | "organizationId"> & {
+  teamMemberIds?: TeamMember["id"][];
+  name?: Group["name"];
+}) {
   try {
+    /**
+     * If user is updating the teamMembers then make sure
+     * that all the team members exists in the same organization
+     * */
+    if (teamMemberIds?.length) {
+      const teamMembersInOrg = await db.teamMember.count({
+        where: { id: { in: teamMemberIds }, organizationId },
+      });
+
+      if (teamMembersInOrg !== teamMemberIds.length) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: "Some team members does not belong to current organization.",
+        });
+      }
+    }
+
     return await db.group.update({
       where: { id, organizationId },
-      data: { name },
+      data: {
+        name,
+        teamMembers: {
+          set: [],
+          connect: teamMemberIds.map((id) => ({ id })),
+        },
+      },
     });
   } catch (cause) {
     throw new ShelfError({
