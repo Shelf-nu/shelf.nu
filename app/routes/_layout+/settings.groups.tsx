@@ -1,5 +1,11 @@
-import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+  SerializeFrom,
+} from "@remix-run/node";
 import { json, useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -7,9 +13,15 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { getPaginatedAndFilterableGroups } from "~/modules/user-groups/service.server";
+import ActionsDropdown from "~/components/user-groups/actions-dropdown";
+import {
+  deleteGroup,
+  getPaginatedAndFilterableGroups,
+} from "~/modules/user-groups/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -65,6 +77,54 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   }
 };
 
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  {
+    title: data?.header ? appendToMetaTitle(data.header.title) : "",
+  },
+];
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+
+  try {
+    const formData = await request.formData();
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["delete"]) })
+    );
+
+    switch (intent) {
+      case "delete": {
+        const { organizationId } = await requirePermission({
+          request,
+          userId,
+          entity: PermissionEntity.userGroups,
+          action: PermissionAction.delete,
+        });
+
+        const { groupId } = parseData(
+          formData,
+          z.object({ groupId: z.string() })
+        );
+
+        await deleteGroup({ id: groupId, organizationId });
+
+        sendNotification({
+          title: "Success",
+          message: "Your group has been deleted successfully.",
+          senderId: userId,
+          icon: { name: "trash", variant: "error" },
+        });
+
+        return json(data({ success: true }));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}
+
 export default function Groups() {
   const { isPersonalOrg, orgName } = useLoaderData<typeof loader>();
 
@@ -109,7 +169,9 @@ function GroupRow({
     <>
       <Td>{item.name}</Td>
       <Td>{item._count.teamMembers}</Td>
-      <Td>Actions</Td>
+      <Td>
+        <ActionsDropdown group={item} />
+      </Td>
     </>
   );
 }

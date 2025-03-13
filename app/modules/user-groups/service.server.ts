@@ -85,3 +85,47 @@ export async function getPaginatedAndFilterableGroups({
     });
   }
 }
+
+export async function deleteGroup({
+  id,
+  organizationId,
+}: Pick<Group, "id" | "organizationId">) {
+  try {
+    const group = await db.group.findFirst({
+      where: { id, organizationId },
+      select: { id: true, _count: { select: { teamMembers: true } } },
+    });
+
+    // Make sure the group exists in the same organization
+    if (!group) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Group not found",
+      });
+    }
+
+    // Make sure that user is deleting a group which does not have any members
+    if (group._count.teamMembers > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Delete failed",
+        message:
+          "This group contain some team members. Please remove all team members to delete this group.",
+      });
+    }
+
+    return await db.group.delete({
+      where: { id: group.id },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while deleting the group.",
+    });
+  }
+}
