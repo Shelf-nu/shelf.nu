@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 
-import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from "../utils/env";
+import { NODE_ENV, SMTP_HOST, SMTP_PORT, SMTP_PWD, SMTP_USER } from "../utils/env";
 
 let transporter: nodemailer.Transporter;
 
@@ -11,7 +11,7 @@ declare global {
 
 const transporterSettings = {
   host: SMTP_HOST,
-  port: 465,
+  port: SMTP_PORT || 465,
   secure: true, // true for 465, false for other ports
   auth: {
     user: SMTP_USER,
