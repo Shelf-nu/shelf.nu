@@ -141,6 +141,10 @@ export default function ImportUsersDialog({
                   Invited users will receive an email with a link to join the
                   organization.
                 </li>
+                <li>
+                  <b>Optional</b>: You can populate the <b>teamMemberId</b>{" "}
+                  column if you want the user to get linked to an existing NRM.
+                </li>
               </ul>
 
               <h4 className="mt-2">Extra Considerations</h4>
