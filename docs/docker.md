@@ -29,6 +29,7 @@ This will make sure you have a DATABASE that you are ready to connect to.
      -e 'SERVER_URL=http://localhost:3000' \
      -e 'MAPTILER_TOKEN=maptiler-token' \
      -e 'SMTP_HOST=mail.example.com' \
+     -e 'SMTP_PORT=465' \
      -e 'SMTP_USER=some-email@example.com' \
      -e 'SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>' \
      -e 'SMTP_PWD=super-safe-passw0rd' \
