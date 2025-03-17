@@ -41,7 +41,7 @@ declare global {
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
-      SMTP_PORT: string;
+      SMTP_PORT: number;
       SMTP_USER: string;
       SMTP_FROM: string;
       MAINTENANCE_MODE: string;
@@ -61,15 +61,16 @@ type EnvOptions = {
   isSecret?: boolean;
   isRequired?: boolean;
 };
-function getEnv(
-  name: string,
+
+function getEnv<K extends keyof NodeJS.ProcessEnv>(
+  name: K,
   { isRequired, isSecret }: EnvOptions = { isSecret: true, isRequired: true }
-) {
+): NodeJS.ProcessEnv[K] {
   if (isBrowser && isSecret) return "";
 
   const source = (isBrowser ? window.env : process.env) ?? {};
 
-  const value = source[name as keyof typeof source];
+  const value = (source as NodeJS.ProcessEnv)[name];
 
   if (!value && isRequired) {
     throw new ShelfError({
@@ -79,7 +80,7 @@ function getEnv(
     });
   }
 
-  return value;
+  return value as NodeJS.ProcessEnv[K] | undefined;
 }
 
 export const EnvSchema = z.object({
