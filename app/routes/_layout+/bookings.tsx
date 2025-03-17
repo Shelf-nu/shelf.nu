@@ -235,6 +235,8 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
 
 const BOOKING_SORTING_OPTIONS = {
   from: "From Date",
+  to: "To Date",
+  name: "Name",
 } as const;
 
 export default function BookingsIndexPage({
