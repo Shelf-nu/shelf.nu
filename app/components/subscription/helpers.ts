@@ -1,5 +1,8 @@
 export const FREE_PLAN = {
   id: "free",
+  metadata: {
+    show_on_table: true,
+  },
   product: {
     name: "Free",
     metadata: {

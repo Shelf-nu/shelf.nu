@@ -306,6 +306,9 @@ export default function Area51UserPage() {
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Is Owner
               </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Workspace disabled
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -324,6 +327,7 @@ export default function Area51UserPage() {
                   <DateS date={org.createdAt} />
                 </Td>
                 <Td>{org.userId === user.id ? "yes" : "no"}</Td>
+                <Td>{org.workspaceDisabled ? "yes" : "no"}</Td>
               </Tr>
             ))}
           </tbody>
