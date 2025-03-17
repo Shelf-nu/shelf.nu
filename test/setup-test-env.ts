@@ -16,6 +16,7 @@ process.env.STRIPE_PUBLIC_KEY = "stripe-public-key";
 process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET = "stripe-endpoint-secret";
 process.env.SMTP_PWD = "super-safe-passw0rd";
 process.env.SMTP_HOST = "mail.example.com";
+process.env.SMTP_PORT = 465;
 process.env.SMTP_USER = "some-email@example.com";
 process.env.MAPTILER_TOKEN = "maptiler-token";
 process.env.MICROSOFT_CLARITY_ID = "microsoft-clarity-id";
