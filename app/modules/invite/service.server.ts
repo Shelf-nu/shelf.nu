@@ -68,7 +68,7 @@ async function validateInvite(
       throw new ShelfError({
         cause: null,
         message:
-          "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
+          "This email domain uses SSO authentication. The user needs to sign up via SSO to get access to the organization.",
         label: "Invite",
         status: 400,
         shouldBeCaptured: false,
