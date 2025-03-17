@@ -248,6 +248,8 @@ export async function advancedModeLoader({
     totalLocations,
     kits,
     totalKits,
+    tags,
+    totalTags,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -305,6 +307,16 @@ export async function advancedModeLoader({
           : 12,
     }),
     db.kit.count({ where: { organizationId } }),
+
+    // Tags
+    db.tag.findMany({
+      where: { organizationId },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "tags")
+          ? undefined
+          : 12,
+    }),
+    db.tag.count({ where: { organizationId } }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -374,6 +386,8 @@ export async function advancedModeLoader({
       totalLocations,
       kits,
       totalKits,
+      tags,
+      totalTags,
     }),
     {
       headers,

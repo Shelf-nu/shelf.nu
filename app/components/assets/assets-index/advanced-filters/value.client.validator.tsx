@@ -46,7 +46,7 @@ const filterValueSchema = {
       ),
   ]),
   boolean: z.boolean(),
-  array: z.array(z.string()).min(1, "Please select at least one value"),
+  array: z.string().min(1, "Please select at least one value"),
 };
 
 /**

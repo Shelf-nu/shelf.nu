@@ -128,6 +128,7 @@ function AdvancedFilter() {
     useFilterFormValidation(filters, initialFilters);
 
   const validation = getValidationState();
+
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
