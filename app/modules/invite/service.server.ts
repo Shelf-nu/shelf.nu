@@ -6,9 +6,11 @@ import type {
   User,
 } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
+import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
@@ -66,7 +68,7 @@ async function validateInvite(
       throw new ShelfError({
         cause: null,
         message:
-          "This email domain uses SSO authentication. The user needs to sign up via SSO before they can be invited.",
+          "This email domain uses SSO authentication. The user needs to sign up via SSO to get access to the organization.",
         label: "Invite",
         status: 400,
         shouldBeCaptured: false,
@@ -552,7 +554,7 @@ export async function bulkInviteUsers({
   organizationId,
   extraMessage,
 }: {
-  users: Omit<InviteUserSchema, "teamMemberId">[];
+  users: InviteUserSchema[];
   userId: User["id"];
   organizationId: Organization["id"];
   extraMessage?: string | null;
@@ -567,6 +569,23 @@ export async function bulkInviteUsers({
         validateInvite(payload.email, organizationId)
       )
     );
+
+    const teamMemberIds = uniquePayloads
+      .filter((user) => !!user.teamMemberId)
+      .map((user) => user.teamMemberId!);
+
+    const teamMembers = await db.teamMember.findMany({
+      where: { id: { in: teamMemberIds } },
+      select: { id: true, userId: true },
+    });
+
+    /**
+     * These teamMembers has a user already associated.
+     * So we will skip them from the invite process.
+     * */
+    const teamMembersWithUserId = teamMembers
+      .filter((tm) => !!tm.userId)
+      .map((tm) => tm.id!);
 
     // Batch check for existing users
     const emails = uniquePayloads.map((p) => p.email);
@@ -661,47 +680,83 @@ export async function bulkInviteUsers({
      * - users who have not PENDING invitation and
      * - users who are not part of organization already
      */
-    const validPayloads = uniquePayloads.filter(
+    let validPayloads = uniquePayloads.filter(
       (p) =>
         !existingInviteEmails.includes(p.email) &&
         !existingEmailsInOrg.has(p.email)
     );
+
+    /** Remove the users with teamMemberId who already have a user associated */
+    validPayloads = validPayloads.filter((payload) => {
+      if (!payload.teamMemberId) {
+        return true;
+      }
+
+      return !teamMembersWithUserId.includes(payload.teamMemberId);
+    });
 
     const validPayloadsWithName = validPayloads.map((p) => ({
       ...p,
       name: p.email.split("@")[0],
     }));
 
-    const createdTeamMembers = await db.teamMember.createManyAndReturn({
-      data: validPayloadsWithName.map((p) => ({
-        name: p.name,
-        organizationId,
-      })),
-    });
-
     // Prepare invite data
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
-    const invitesToCreate = validPayloadsWithName.map((payload) => ({
-      inviterId: userId,
-      organizationId,
-      inviteeEmail: payload.email,
-      teamMemberId:
-        createdTeamMembers.find((tm) => tm.name === payload.name)?.id ?? "",
-      roles: [payload.role],
-      expiresAt,
-      inviteCode: generateRandomCode(6),
-      status: InviteStatuses.PENDING,
-    }));
+    const INVITE_INCLUDE = {
+      inviter: { select: { firstName: true, lastName: true } },
+      organization: true,
+    } satisfies Prisma.InviteInclude;
 
-    // Bulk create invites
-    const createdInvites = await db.invite.createManyAndReturn({
-      data: invitesToCreate,
-      include: {
-        inviter: { select: { firstName: true, lastName: true } },
-        organization: true,
-      },
+    let createdInvites: Array<
+      Prisma.InviteGetPayload<{ include: typeof INVITE_INCLUDE }>
+    > = [];
+
+    await db.$transaction(async (tx) => {
+      // Bulk create all required team members
+      const createdTeamMembers = await tx.teamMember.createManyAndReturn({
+        data: validPayloadsWithName.map((p) => ({
+          name: p.name,
+          organizationId,
+        })),
+      });
+
+      /**
+       * This helper function returns the correct  teamMemberId required for creating an invite
+       */
+      function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
+        if (payload.teamMemberId) {
+          return payload.teamMemberId;
+        }
+
+        const createdTm = createdTeamMembers.find(
+          (tm) => tm.name === payload.name
+        );
+        invariant(
+          createdTm,
+          "Unexpected situation! Could not find teamMember in createdTeamMembers."
+        );
+
+        return createdTm.id;
+      }
+
+      const invitesToCreate = validPayloadsWithName.map((payload) => ({
+        inviterId: userId,
+        organizationId,
+        inviteeEmail: payload.email,
+        teamMemberId: getTeamMemberId(payload),
+        roles: [payload.role],
+        expiresAt,
+        inviteCode: generateRandomCode(6),
+        status: InviteStatuses.PENDING,
+      }));
+
+      // Bulk create invites
+      createdInvites = await tx.invite.createManyAndReturn({
+        data: invitesToCreate,
+        include: INVITE_INCLUDE,
+      });
     });
 
     // Queue emails for sending - no need to await since it's handled by queue
@@ -725,24 +780,50 @@ export async function bulkInviteUsers({
       senderId: userId,
     });
 
-    const skippedUsers = users.filter(
-      (user) =>
-        existingInviteEmails.includes(user.email) ||
-        existingEmailsInOrg.has(user.email)
-    );
+    const skippedUsers = users.filter((user) => {
+      if (existingInviteEmails.includes(user.email)) {
+        return true;
+      }
+
+      if (existingEmailsInOrg.has(user.email)) {
+        return true;
+      }
+
+      if (
+        user.teamMemberId &&
+        teamMembersWithUserId.includes(user.teamMemberId)
+      ) {
+        return true;
+      }
+
+      return false;
+    });
 
     return {
       inviteSentUsers: validPayloads,
       skippedUsers,
       extraMessage:
         createdInvites.length > 10
-          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasnt received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
+          ? "You are sending more than 10 invites, so some of the emails might get slightly delayed. If one of the invitees hasn't received the email within 5-10 minutes, you can use the Resend invite feature to send the email again."
           : undefined,
     };
   } catch (cause) {
+    let message = "Something went wrong while inviting users.";
+
+    if (isLikeShelfError(cause)) {
+      message = cause.message;
+    }
+
+    if (
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2003"
+    ) {
+      message = "Received invalid teamMemberId in csv";
+    }
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while inviting users.",
+      message,
       label,
       additionalData: { users },
     });
