@@ -206,8 +206,11 @@ export default function NrmSettings() {
             newButtonRoute: "add-member",
             newButtonContent: "Add NRM",
           }}
+          hideFirstHeaderColumn
           headerChildren={
             <>
+              <Th>ID</Th>
+              <Th>Name</Th>
               <Th>Custodies</Th>
               <Th>Actions</Th>
             </>
@@ -235,6 +238,11 @@ function TeamMemberRow({
 }) {
   return (
     <>
+      <Td>
+        <div>
+          <div className="pl-4 md:pl-6">{item.id}</div>
+        </div>
+      </Td>
       <Td className="w-full whitespace-normal">{item.name}</Td>
       <Td className="text-right">
         {item._count.custodies ? item._count.custodies : 0}
