@@ -244,7 +244,7 @@ export default function Agreements() {
                       !canCreateMoreAgreements
                         ? {
                             reason:
-                              "You have reached the limit for creating agreements. Please upgrade to create more agreements.",
+                              "You have reached the limit for creating agreements. Please contact support for information about increasing your limits.",
                           }
                         : false
                     }

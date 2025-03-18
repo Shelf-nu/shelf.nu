@@ -2618,7 +2618,7 @@ export async function bulkCheckInAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking in assets.";
+        : "Something went wrong while releasing custody of assets.";
 
     throw new ShelfError({
       cause,
