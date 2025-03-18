@@ -6,6 +6,7 @@ import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getClientHint } from "~/utils/client-hints";
 import {
   getAdvancedFiltersFromRequest,
@@ -24,9 +25,12 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
+  getEntitiesWithSelectedValues,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
+import { getAllSelectedValuesFromFilters } from "./utils.server";
+import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
@@ -225,6 +229,10 @@ export async function advancedModeLoader({
   const searchParams = filters
     ? currentFilterParams
     : getCurrentSearchParams(request);
+  const allSelectedEntries = searchParams.getAll(
+    "getAll"
+  ) as AllowedModelNames[];
+
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
 
@@ -235,21 +243,32 @@ export async function advancedModeLoader({
     });
   }
 
+  const { selectedTags, selectedCategory, selectedLocation } =
+    getAllSelectedValuesFromFilters(filters, settings.columns as Column[]);
+
+  const {
+    tags,
+    totalTags,
+    categories,
+    totalCategories,
+    locations,
+    totalLocations,
+  } = await getEntitiesWithSelectedValues({
+    organizationId,
+    allSelectedEntries,
+    selectedTagIds: selectedTags,
+    selectedCategoryIds: selectedCategory,
+    selectedLocationIds: selectedLocation,
+  });
+
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
     teamMembersData,
-
-    categories,
-    totalCategories,
-    locations,
-    totalLocations,
     kits,
     totalKits,
-    tags,
-    totalTags,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -278,26 +297,6 @@ export async function advancedModeLoader({
       userId,
     }),
 
-    // Categories
-    db.category.findMany({
-      where: { organizationId },
-      take:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "category")
-          ? undefined
-          : 12,
-    }),
-    db.category.count({ where: { organizationId } }),
-
-    // Locations
-    db.location.findMany({
-      where: { organizationId },
-      take:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "location")
-          ? undefined
-          : 12,
-    }),
-    db.location.count({ where: { organizationId } }),
-
     // Kits
     db.kit.findMany({
       where: { organizationId },
@@ -307,16 +306,6 @@ export async function advancedModeLoader({
           : 12,
     }),
     db.kit.count({ where: { organizationId } }),
-
-    // Tags
-    db.tag.findMany({
-      where: { organizationId },
-      take:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "tags")
-          ? undefined
-          : 12,
-    }),
-    db.tag.count({ where: { organizationId } }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {

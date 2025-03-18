@@ -1336,52 +1336,28 @@ export async function getPaginatedAndFilterableAssets({
   const { perPage } = cookie;
 
   try {
-    const [
-      categoryExcludedSelected,
-      selectedCategories,
-      totalCategories,
-      tagsExcludedSelected,
-      selectedTags,
+    const {
+      tags,
       totalTags,
-      locationExcludedSelected,
-      selectedLocations,
+      categories,
+      totalCategories,
+      locations,
       totalLocations,
-      teamMembersData,
-    ] = await Promise.all([
-      db.category.findMany({
-        where: { organizationId, id: { notIn: categoriesIds } },
-        take: getAllEntries.includes("category") ? undefined : 12,
-      }),
-      db.category.findMany({
-        where: { organizationId, id: { in: categoriesIds } },
-      }),
-      db.category.count({ where: { organizationId } }),
-      db.tag.findMany({
-        where: { organizationId, id: { notIn: tagsIds } },
-        take: getAllEntries.includes("tag") ? undefined : 12,
-      }),
-      db.tag.findMany({
-        where: { organizationId, id: { in: tagsIds } },
-      }),
-      db.tag.count({ where: { organizationId } }),
-      // locations
-      db.location.findMany({
-        where: { organizationId, id: { notIn: locationIds } },
-        take: getAllEntries.includes("location") ? undefined : 12,
-      }),
-      db.location.findMany({
-        where: { organizationId, id: { in: locationIds } },
-      }),
-      db.location.count({ where: { organizationId } }),
-      // team members/custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll: getAllEntries.includes("teamMember"),
-        isSelfService,
-        userId,
-      }),
-    ]);
+    } = await getEntitiesWithSelectedValues({
+      organizationId,
+      allSelectedEntries: getAllEntries,
+      selectedCategoryIds: categoriesIds,
+      selectedTagIds: tagsIds,
+      selectedLocationIds: locationIds,
+    });
+
+    const teamMembersData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: teamMemberIds,
+      getAll: getAllEntries.includes("teamMember"),
+      isSelfService,
+      userId,
+    });
 
     const { assets, totalAssets } = await getAssets({
       organizationId,
@@ -1411,16 +1387,12 @@ export async function getPaginatedAndFilterableAssets({
       totalAssets,
       totalCategories,
       totalTags,
-      categories: excludeCategoriesQuery
-        ? []
-        : [...selectedCategories, ...categoryExcludedSelected],
-      tags: excludeTagsQuery ? [] : [...selectedTags, ...tagsExcludedSelected],
+      categories: excludeCategoriesQuery ? [] : categories,
+      tags: excludeTagsQuery ? [] : tags,
       assets,
       totalPages,
       cookie,
-      locations: excludeLocationQuery
-        ? []
-        : [...selectedLocations, ...locationExcludedSelected],
+      locations: excludeLocationQuery ? [] : locations,
       totalLocations,
       ...teamMembersData,
     };
@@ -2848,4 +2820,83 @@ export async function getAssetsTabLoaderData({
       message: "Something went wrong while fetching assets",
     });
   }
+}
+
+/**
+ * This function returns the categories, tags and locations
+ * including already selected items
+ *
+ * e.g if `id1` is selected for tag then it will return `[id1, ...other tags]` for tags
+ */
+export async function getEntitiesWithSelectedValues({
+  organizationId,
+  allSelectedEntries,
+  selectedTagIds = [],
+  selectedCategoryIds = [],
+  selectedLocationIds = [],
+}: {
+  organizationId: Organization["id"];
+  allSelectedEntries: AllowedModelNames[];
+  selectedTagIds: Array<Tag["id"]>;
+  selectedCategoryIds: Array<Category["id"]>;
+  selectedLocationIds: Array<Location["id"]>;
+}) {
+  const [
+    // Categories
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+
+    // Tags
+    tagsExcludedSelected,
+    selectedTags,
+    totalTags,
+
+    // Locations
+    locationExcludedSelected,
+    selectedLocations,
+    totalLocations,
+  ] = await Promise.all([
+    /** Categories start */
+    db.category.findMany({
+      where: { organizationId, id: { notIn: selectedCategoryIds } },
+      take: allSelectedEntries.includes("category") ? undefined : 12,
+    }),
+    db.category.findMany({
+      where: { organizationId, id: { in: selectedCategoryIds } },
+    }),
+    db.category.count({ where: { organizationId } }),
+    /** Categories end */
+
+    /** Tags start */
+    db.tag.findMany({
+      where: { organizationId, id: { notIn: selectedTagIds } },
+      take: allSelectedEntries.includes("tag") ? undefined : 12,
+    }),
+    db.tag.findMany({
+      where: { organizationId, id: { in: selectedTagIds } },
+    }),
+    db.tag.count({ where: { organizationId } }),
+    /** Tags end */
+
+    /** Location start */
+    db.location.findMany({
+      where: { organizationId, id: { notIn: selectedLocationIds } },
+      take: allSelectedEntries.includes("location") ? undefined : 12,
+    }),
+    db.location.findMany({
+      where: { organizationId, id: { in: selectedLocationIds } },
+    }),
+    db.location.count({ where: { organizationId } }),
+    /** Location end */
+  ]);
+
+  return {
+    categories: [...selectedCategories, ...categoryExcludedSelected],
+    totalCategories,
+    tags: [...selectedTags, ...tagsExcludedSelected],
+    totalTags,
+    locations: [...selectedLocations, ...locationExcludedSelected],
+    totalLocations,
+  };
 }
