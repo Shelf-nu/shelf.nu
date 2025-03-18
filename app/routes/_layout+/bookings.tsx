@@ -19,6 +19,7 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -76,18 +77,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     const searchParams = getCurrentSearchParams(request);
-    const {
-      page,
-      perPageParam,
-      search,
-      status,
-      teamMemberIds,
-      orderDirection,
-    } = getParamsValues(searchParams);
+    const { page, perPageParam, search, status, teamMemberIds } =
+      getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
     const orderBy = searchParams.get("orderBy") ?? "from";
+    const orderDirection = (searchParams.get("orderDirection") ??
+      "asc") as SortingDirection;
 
     /**
      * For self service and base users, we need to get the teamMember to be able to filter by it as well.
