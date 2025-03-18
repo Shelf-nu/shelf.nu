@@ -160,10 +160,19 @@ export const action = async ({
         custodianName: z.string(),
         custodianEmail: z
           .string()
-          .transform((email) => email.toLowerCase())
-          .refine(validEmail, () => ({
-            message: "Custodian email is invalid",
-          }))
+          .transform((email) => email?.toLowerCase())
+          .refine(
+            (email) => {
+              if (!email) {
+                return true;
+              }
+
+              return validEmail(email);
+            },
+            () => ({
+              message: "Custodian email is invalid",
+            })
+          )
           .optional(),
       }),
       {
