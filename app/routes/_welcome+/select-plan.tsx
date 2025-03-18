@@ -24,7 +24,7 @@ import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getStripeCustomer,
-  getStripePricesAndProducts,
+  getStripePricesForTrialPlanSelection,
 } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 
@@ -54,21 +54,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       : null;
 
     /* Get the prices and products from Stripe */
-    const prices = await getStripePricesAndProducts();
+    const prices = await getStripePricesForTrialPlanSelection();
 
     return json(
       data({
         title: "Subscription",
         subTitle: "Pick an account plan that fits your workflow.",
         /** Filter out the montly and yearly prices to only have prices for team plan */
-        prices: [
-          ...prices.month.filter(
-            (price) => price.product.metadata.shelf_tier === "tier_2"
-          ),
-          ...prices.year.filter(
-            (price) => price.product.metadata.shelf_tier === "tier_2"
-          ),
-        ],
+        prices,
         customer,
       })
     );
@@ -83,6 +76,7 @@ export default function SelectPlan() {
   const [selectedPlan, setSelectedPlan] = useState<"year" | "month" | null>(
     "year"
   );
+
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
 
@@ -109,26 +103,7 @@ export default function SelectPlan() {
               setSelectedPlan(price.recurring?.interval as "month" | "year")
             }
           >
-            <PriceBox
-              price={price}
-              activePlan={undefined}
-              subscription={null}
-              isTrialSubscription={false}
-              customPlanName={
-                price.recurring?.interval === "year" ? (
-                  <div className="text-center">
-                    Yearly{" "}
-                    <span className="block rounded-[16px] bg-primary-100 px-2 py-1 text-xs font-medium text-primary-700">
-                      Save 54%
-                    </span>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    Monthly <span className="block h-6"></span>
-                  </div>
-                )
-              }
-            />
+            <PriceBox price={price} />
           </PlanBox>
         ))}
       </div>

@@ -21,7 +21,10 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
-import { toggleOrganizationSso } from "~/modules/organization/service.server";
+import {
+  toggleOrganizationSso,
+  toggleWorkspaceDisabled,
+} from "~/modules/organization/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -91,7 +94,12 @@ export const action = async ({
     const { intent } = parseData(
       await request.clone().formData(),
       z.object({
-        intent: z.enum(["toggleSso", "updateSsoDetails", "content"]),
+        intent: z.enum([
+          "toggleSso",
+          "updateSsoDetails",
+          "content",
+          "disableWorkspace",
+        ]),
       })
     );
 
@@ -109,6 +117,24 @@ export const action = async ({
         await toggleOrganizationSso({ organizationId, enabledSso });
 
         return json(data({ message: "SSO toggled" }));
+      case "disableWorkspace":
+        const { workspaceDisabled } = parseData(
+          await request.formData(),
+          z.object({
+            workspaceDisabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        // console.log("workspaceDisabled", workspaceDisabled);
+        await toggleWorkspaceDisabled({ organizationId, workspaceDisabled });
+
+        return json(
+          data({
+            message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
+          })
+        );
       case "updateSsoDetails":
         const { adminGroupId, selfServiceGroupId, domain } = parseData(
           await request.formData(),
@@ -247,6 +273,28 @@ export default function OrgPage() {
                 title={"Toggle SSO"}
               />
               <input type="hidden" value="toggleSso" name="intent" />
+            </div>
+          </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disabled Workspace</h4>
+          <fetcher.Form
+            method="post"
+            onChange={(e) => fetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Disabled Workspace
+                </p>
+              </div>
+              <Switch
+                name={"workspaceDisabled"}
+                disabled={isFormProcessing(fetcher.state)} // Disable for self service users
+                defaultChecked={organization.workspaceDisabled}
+                required
+                title={"Disabled workspace"}
+              />
+              <input type="hidden" value="disableWorkspace" name="intent" />
             </div>
           </fetcher.Form>
         </div>
