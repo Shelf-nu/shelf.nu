@@ -110,6 +110,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { organizationId, organizations, currentOrganization } =
       await getSelectedOrganisation({ userId: authSession.userId, request });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
+
     return json(
       data({
         user,
@@ -130,11 +131,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
           ? false
-          : await disabledTeamOrg({
+          : currentOrganization.workspaceDisabled ||
+            (await disabledTeamOrg({
               currentOrganization,
               organizations,
               url: request.url,
-            }),
+            })),
       }),
       {
         headers: [setCookie(await userPrefs.serialize(userPrefsCookie))],

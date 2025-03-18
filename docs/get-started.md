@@ -65,6 +65,7 @@ SERVER_URL="http://localhost:3000"
 FINGERPRINT="a-custom-host-fingerprint"
 
 SMTP_HOST="smtp.yourhost.com"
+SMTP_PORT=465
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
 SMTP_FROM="You from example.com" <you@example.com>
@@ -178,6 +179,7 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set FINGERPRINT=$(openssl rand -hex 32)
 
   fly secrets set SMTP_HOST="smtp.yourhost.com"
+  fly secrets set SMTP_PORT=465
   fly secrets set SMTP_USER="you@example.com"
   fly secrets set SMTP_PWD="yourSMTPpassword"
   fly secrets set SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>

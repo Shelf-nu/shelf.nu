@@ -194,7 +194,7 @@ function ScannerMode({
         input.value = "";
       }
     },
-    50
+    300
   );
 
   return (
