@@ -19,6 +19,8 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
@@ -80,6 +82,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    const orderBy = searchParams.get("orderBy") ?? "from";
+    const orderDirection = (searchParams.get("orderDirection") ??
+      "asc") as SortingDirection;
+
     /**
      * For self service and base users, we need to get the teamMember to be able to filter by it as well.
      * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
@@ -127,6 +133,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         }),
         custodianTeamMemberIds: teamMemberIds,
         ...selfServiceData,
+        orderBy,
+        orderDirection,
       }),
 
       // team members/custodian
@@ -222,6 +230,12 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
+const BOOKING_SORTING_OPTIONS = {
+  from: "From Date",
+  to: "To Date",
+  name: "Name",
+} as const;
+
 export default function BookingsIndexPage({
   className,
   disableBulkActions = false,
@@ -292,6 +306,13 @@ export default function BookingsIndexPage({
         <Filters
           slots={{
             "left-of-search": <StatusFilter statusItems={BookingStatus} />,
+            "right-of-search": (
+              <SortBy
+                sortingOptions={BOOKING_SORTING_OPTIONS}
+                defaultSortingBy="from"
+                defaultSortingDirection="asc"
+              />
+            ),
           }}
         >
           <When
