@@ -153,40 +153,41 @@ export const action = async ({
 
     const asset = await releaseCustody({ assetId, organizationId });
 
-    if (!asset.custody) {
-      const formData = await request.formData();
-      const { custodianName, custodianEmail } = parseData(
-        formData,
-        z.object({
-          custodianName: z.string(),
-          custodianEmail: z
-            .string()
-            .transform((email) => email.toLowerCase())
-            .refine(validEmail, () => ({
-              message: "Custodian email is invalid",
-            })),
-        }),
-        {
-          additionalData: { userId, assetId },
-        }
-      );
+    const formData = await request.formData();
+    const { custodianName, custodianEmail } = parseData(
+      formData,
+      z.object({
+        custodianName: z.string(),
+        custodianEmail: z
+          .string()
+          .transform((email) => email.toLowerCase())
+          .refine(validEmail, () => ({
+            message: "Custodian email is invalid",
+          }))
+          .optional(),
+      }),
+      {
+        additionalData: { userId, assetId },
+      }
+    );
 
-      //** Once the asset is updated, we create the note */
-      await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
-          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
-        } custody over **${asset.title?.trim()}**`,
-        type: "UPDATE",
-        userId: asset.userId,
-        assetId: asset.id,
-      });
-      sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
-        message: "This asset is available again.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
-      });
+    await createNote({
+      content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
+        isSelfService ? "their" : `**${custodianName.trim()}'s**`
+      } custody over **${asset.title.trim()}**`,
+      type: "UPDATE",
+      userId: asset.userId,
+      assetId: asset.id,
+    });
 
+    sendNotification({
+      title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+      message: "This asset is available again.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    if (custodianEmail) {
       sendEmail({
         to: custodianEmail,
         subject: `Your custody over ${asset.title} has been revoked`,

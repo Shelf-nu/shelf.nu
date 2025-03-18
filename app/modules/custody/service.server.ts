@@ -54,7 +54,6 @@ export async function releaseCustody({
         data: { status: AssetStatus.AVAILABLE, custody: { delete: true } },
         include: {
           user: { select: { firstName: true, lastName: true } },
-          custody: true,
         },
       });
 

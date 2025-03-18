@@ -2578,11 +2578,20 @@ export async function bulkCheckInAssets({
       /** Updating status of CustodyReceipt */
       await Promise.all(
         assets.map((asset) => {
-          const receiptId = asset.custodyReceipts[0].id;
+          const receiptId = asset.custodyReceipts[0]?.id;
           const custodyRequireSignButNotSinged =
             asset.custody?.agreement &&
             asset.custody.agreement.signatureRequired &&
             !asset.custody.agreementSigned;
+
+          /**
+           * If we do not find a receipt associated with an asset
+           * that means this custody was created before Signed Custody feature.
+           * In that case we do not have to update the receipt.
+           */
+          if (!receiptId) {
+            return null;
+          }
 
           return tx.custodyReceipt.update({
             where: { id: receiptId },
