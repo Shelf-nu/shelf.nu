@@ -2,8 +2,9 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { data, Link, Outlet } from "@remix-run/react";
 import { json } from "react-router";
 import { ErrorContent } from "~/components/errors";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -14,12 +15,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    await requirePermission({
+    const { currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
+
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You cannot use agreements in a personal workspaces. Please create a Team workspace to create agreement..",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
 
     return json(data(null));
   } catch (cause) {
