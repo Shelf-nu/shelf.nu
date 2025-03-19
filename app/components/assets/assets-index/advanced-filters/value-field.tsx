@@ -330,6 +330,22 @@ export function ValueField({
       );
 
     case "array":
+      if (filter.name === "tags") {
+        return (
+          <>
+            <ValueEnumField
+              fieldName={filter.name}
+              value={filter.value as string}
+              handleChange={setFilter}
+              multiSelect={filter.operator !== "contains"}
+              name={fieldName}
+              disabled={disabled}
+            />
+            <ErrorDisplay error={error} />
+          </>
+        );
+      }
+
       return (
         <Input
           {...commonInputProps}
@@ -949,7 +965,7 @@ function LocationEnumField({
   );
 }
 
-/** Component that handles location selection for both single and multi-select scenarios */
+/** Component that handles kit selection for both single and multi-select scenarios */
 function KitEnumField({
   value,
   handleChange,
@@ -1055,6 +1071,110 @@ function KitEnumField({
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
       contentLabel="Kit"
+    />
+  );
+}
+
+/** Component that handles tag selection for multi-select scenario  */
+function TagsField({
+  handleChange,
+  value,
+  disabled,
+  multiSelect,
+  name,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parsing the existing value to get selected Tag Ids
+  const selectedIds = useMemo(() => {
+    if (!value) {
+      return [];
+    }
+
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+
+    return [value];
+  }, [multiSelect, value]);
+
+  const commonProps = {
+    model: {
+      name: "tag" as const,
+      queryKey: "name",
+    },
+    initialDataKey: "tags",
+    countKey: "totalTags",
+    label: "Filter by tag",
+    hideLabel: true,
+    hideCounter: true,
+    withoutValueItem: {
+      id: "untagged",
+      name: "Untagged",
+    },
+    disabled,
+  };
+
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        name={name}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        const tag = data.tags?.find((t) => t.id === id);
+                        return id === "untagged" ? "Untagged" : tag?.name || "";
+                      })
+                      .join(", ")
+                  : "Select Tag"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        placeholder="Select tags"
+        onSelectionChange={(selectedTagIds) => {
+          handleChange(selectedTagIds.join(","));
+        }}
+      />
+    );
+  }
+
+  return (
+    <DynamicSelect
+      {...commonProps}
+      fieldName={name}
+      placeholder={disabled ? "Select a column first" : "Select tag"}
+      defaultValue={value}
+      onChange={(selectedId) => {
+        if (selectedId) {
+          handleChange(selectedId);
+        }
+      }}
+      closeOnSelect
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="tags"
     />
   );
 }
@@ -1167,6 +1287,21 @@ function ValueEnumField({
           disabled={disabled}
         />
         {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "tags") {
+    return (
+      <>
+        <TagsField
+          value={value}
+          handleChange={handleChange}
+          name={name}
+          multiSelect={multiSelect}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-xs text-red-500">{error}</div>}
       </>
     );
   }

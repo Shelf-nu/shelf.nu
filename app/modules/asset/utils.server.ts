@@ -1,8 +1,10 @@
 import type { Asset, AssetStatus, Location, Prisma } from "@prisma/client";
+import _ from "lodash";
 import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { getParamsValues } from "~/utils/list";
+import { parseFilters } from "./query.server";
 import type { AdvancedIndexAsset } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -250,3 +252,35 @@ export const ASSET_CSV_HEADERS = [
   "valuation",
   "qrId",
 ];
+
+type AllSelectedValues = {
+  selectedTags: string[];
+  selectedCategory: string[];
+  selectedLocation: string[];
+};
+
+/**
+ * This function returns all the selected values from filters
+ *
+ * @returns {AllSelectedValues}
+ */
+export function getAllSelectedValuesFromFilters(
+  filters: string = "",
+  columns: Column[]
+) {
+  const parsedFilters = parseFilters(filters, columns);
+  return parsedFilters.reduce((acc, curr) => {
+    /*
+     * We only have to take care of string values because most dropdown has string values only.
+     * If in future we need any other type of selected values, then we can add them here.
+     */
+    if (typeof curr.value !== "string") {
+      return acc;
+    }
+
+    return {
+      ...acc,
+      [`selected${_.capitalize(curr.name)}`]: curr.value.split(",") ?? [],
+    };
+  }, {} as AllSelectedValues);
+}
