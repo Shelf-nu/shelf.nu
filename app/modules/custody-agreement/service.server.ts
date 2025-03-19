@@ -11,7 +11,7 @@ import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
-import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
+import { assertUserCanActivateMoreAgreements } from "~/utils/subscription.server";
 import { resolveTeamMemberName } from "~/utils/user";
 import { createNote } from "../note/service.server";
 
@@ -248,7 +248,7 @@ export async function toggleCustodyAgreementActiveState({
 
     /** If user is activating the agreement then make sure it is under the limit */
     if (!agreement.isActive) {
-      await assertUserCanCreateMoreAgreements({
+      await assertUserCanActivateMoreAgreements({
         organizationId,
         organizations,
       });

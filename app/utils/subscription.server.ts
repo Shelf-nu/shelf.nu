@@ -420,6 +420,43 @@ export async function assertUserCanCreateMoreAgreements({
   }
 }
 
+export async function assertUserCanActivateMoreAgreements({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!premiumIsEnabled) {
+    return;
+  }
+
+  if (!tierLimit.maxActiveCustodyAgreements) {
+    return;
+  }
+
+  const activeAgreements = await db.custodyAgreement.count({
+    where: { organizationId, isActive: true },
+  });
+
+  if (activeAgreements >= tierLimit.maxActiveCustodyAgreements) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      message:
+        "You cannot activate more agreements because you have reached your limit.",
+    });
+  }
+}
+
 export function canUseSignedCustody(
   currentOrganization: Pick<Organization, "type">
 ) {

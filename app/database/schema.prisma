@@ -455,7 +455,7 @@ model Organization {
   enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
-  
+
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
@@ -544,32 +544,34 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id                   TierId   @id
-  tier                 Tier?
-  canImportAssets      Boolean  @default(false)
-  canExportAssets      Boolean  @default(false)
-  canImportNRM         Boolean  @default(false)
-  maxCustomFields      Int      @default(0)
-  maxOrganizations     Int      @default(1)
-  maxCustodyAgreements Int      @default(3)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                         TierId   @id
+  tier                       Tier?
+  canImportAssets            Boolean  @default(false)
+  canExportAssets            Boolean  @default(false)
+  canImportNRM               Boolean  @default(false)
+  maxCustomFields            Int      @default(0)
+  maxOrganizations           Int      @default(1)
+  maxCustodyAgreements       Int      @default(10) // total number of agreements
+  maxActiveCustodyAgreements Int      @default(5)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id                   String   @id @unique @default(cuid())
-  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId               String?  @unique // This is the foreign key
-  canImportAssets      Boolean  @default(true)
-  canExportAssets      Boolean  @default(true)
-  canImportNRM         Boolean  @default(true)
-  maxCustomFields      Int      @default(1000)
-  maxOrganizations     Int      @default(1)
-  maxCustodyAgreements Int      @default(3)
-  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                         String   @id @unique @default(cuid())
+  user                       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId                     String?  @unique // This is the foreign key
+  canImportAssets            Boolean  @default(true)
+  canExportAssets            Boolean  @default(true)
+  canImportNRM               Boolean  @default(true)
+  maxCustomFields            Int      @default(1000)
+  maxOrganizations           Int      @default(1)
+  maxCustodyAgreements       Int      @default(10) // total number of agreements
+  maxActiveCustodyAgreements Int      @default(5)
+  isEnterprise               Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 enum CustodyAgreementType {
