@@ -1,5 +1,5 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, MousePointerClick, QrCode } from "lucide-react";
 import { Spinner } from "./spinner";
 
 import {
@@ -121,7 +121,9 @@ export type IconType =
   | "unavailable"
   | "change"
   | "booking-exist"
-  | "download-qr";
+  | "download-qr"
+  | "qr-code"
+  | "mouse-pointer-click";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -189,6 +191,8 @@ export const iconsMap: IconsMap = {
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
   "download-qr": <DownloadIcon />,
+  "qr-code": <QrCode />,
+  "mouse-pointer-click": <MousePointerClick />,
 };
 
 export default iconsMap;
