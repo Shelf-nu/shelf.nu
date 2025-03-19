@@ -8,6 +8,7 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
@@ -542,6 +543,8 @@ export async function getBookings(params: {
   extraInclude?: Prisma.BookingInclude;
   /** Controls whether entries should be paginated or not */
   takeAll?: boolean;
+  orderBy?: string;
+  orderDirection?: SortingDirection;
 }) {
   const {
     organizationId,
@@ -558,6 +561,8 @@ export async function getBookings(params: {
     userId,
     extraInclude,
     takeAll = false,
+    orderBy = "from",
+    orderDirection = "asc",
   } = params;
 
   try {
@@ -692,7 +697,7 @@ export async function getBookings(params: {
           },
           ...(extraInclude || undefined),
         },
-        orderBy: { from: "asc" },
+        orderBy: { [orderBy]: orderDirection },
       }),
       db.booking.count({ where }),
     ]);
