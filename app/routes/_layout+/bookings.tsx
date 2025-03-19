@@ -8,6 +8,7 @@ import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
+import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
@@ -366,6 +367,11 @@ export default function BookingsIndexPage({
               <Th>To</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
+            </>
+          }
+          headerExtraContent={
+            <>
+              <ExportBookingsButton />
             </>
           }
         />

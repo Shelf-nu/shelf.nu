@@ -1,8 +1,5 @@
-import {
-  CustomFieldType,
-  type Asset,
-  type AssetIndexSettings,
-} from "@prisma/client";
+import type { Prisma, Asset, AssetIndexSettings } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
   unstable_createMemoryUploadHandler,
@@ -12,6 +9,7 @@ import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
 import iconv from "iconv-lite";
+import { db } from "~/database/db.server";
 import {
   fetchAssetsForExport,
   getAdvancedPaginatedAndFilterableAssets,
@@ -25,11 +23,14 @@ import type {
   FixedField,
 } from "~/modules/asset-index-settings/helpers";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { getBookingWhereInput } from "~/modules/booking/utils.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { isLikeShelfError, ShelfError } from "./error";
+import { getCurrentSearchParams } from "./http.server";
 import { ALL_SELECTED_KEY } from "./list";
 import { resolveTeamMemberName } from "./user";
+import { getBookings } from "~/modules/booking/service.server";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -485,3 +486,81 @@ const formatCustomFieldForCsv = (
       return String(fieldValue.raw || "");
   }
 };
+
+export async function exportBookingsFromIndexToCsv({
+  request,
+  bookingsIds,
+  organizationId,
+}: {
+  request: Request;
+  bookingsIds: string[];
+  organizationId: string;
+}) {
+  try {
+    const currentSearchParams = getCurrentSearchParams(request).toString();
+    const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
+
+    /** If all are selected in the list, then we have to consider filter to get the entries */
+    const bookings = hasSelectAll
+      ? getBookings({
+          organizationId,
+          search,
+          userId: authSession?.userId,
+          custodianTeamMemberIds: teamMemberIds,
+          ...selfServiceData,
+          orderBy,
+          orderDirection,
+        }) // Here we need to use the getBookings the same way as in the index with all filters and everything
+      : await db.booking.findMany({
+          where: { id: { in: bookingsIds }, organizationId },
+        });
+
+    // const someBookingNotComplete = bookings.some(
+    //   (b) => b.status !== "COMPLETE"
+    // );
+
+    // /** Bookings must be complete to add them in archive */
+    // if (someBookingNotComplete) {
+    //   throw new ShelfError({
+    //     cause: null,
+    //     message:
+    //       "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+    //     label,
+    //   });
+    // }
+
+    // await db.$transaction(async (tx) => {
+    //   /** Updating status of bookings to ARCHIVED  */
+    //   await tx.booking.updateMany({
+    //     where: { id: { in: bookings.map((b) => b.id) } },
+    //     data: { status: BookingStatus.ARCHIVED },
+    //   });
+    // });
+
+    return "test";
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk archive booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingsIds, organizationId },
+      label: "Booking",
+    });
+  }
+
+  // // Pass both assets and columns to the build function
+  // const csvData = buildCsvExportDataFromAssets({
+  //   assets,
+  //   columns: [
+  //     { name: "name", visible: true, position: 0 },
+  //     ...(settings.columns as Column[]),
+  //   ],
+  // });
+
+  // // Join rows with CRLF as per CSV spec
+  // return csvData.join("\r\n");
+}
