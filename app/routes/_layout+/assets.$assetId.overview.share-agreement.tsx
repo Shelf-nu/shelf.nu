@@ -146,9 +146,13 @@ export default function ShareAgreement() {
         <span className="font-semibold">
           {resolveTeamMemberName(custodian)}
         </span>{" "}
-        will receive an email and will be able to visit this page to read (and
+        {isCustodianNrm
+          ? `will be able to visit this page to read (and sign) the document. Make sure
+          you send them the link. You can visit the asset page to open this modal in
+          case you need to acquire the share link again.`
+          : `will receive an email and will be able to visit this page to read (and
         sign) the document. You can visit the asset page to open this modal in
-        case you need to acquire the share link or re-send the email.{" "}
+        case you need to acquire the share link or re-send the email.`}
       </p>
       <div className="font-semibold text-gray-600">Share link</div>
 
