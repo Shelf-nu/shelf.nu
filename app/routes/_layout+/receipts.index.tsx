@@ -23,6 +23,7 @@ import {
 } from "~/utils/custody-agreement";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -147,14 +148,14 @@ function ReceiptRow({
       <Td>{resolveTeamMemberName(item.custodian)}</Td>
       <Td>{item?.agreement?.name}</Td>
       <Td>
-        <Badge color={signColor}>{item.signatureStatus}</Badge>
+        <Badge color={signColor}>{formatEnum(item.signatureStatus)}</Badge>
       </Td>
       <Td>
         {item.signatureStatus === CustodySignatureStatus.PENDING ||
         item.signatureStatus === CustodySignatureStatus.CANCELLED ? (
           "-"
         ) : (
-          <Badge color={custodyColor}>{item.custodyStatus}</Badge>
+          <Badge color={custodyColor}>{formatEnum(item.custodyStatus)}</Badge>
         )}
       </Td>
       <Td>{item.requestedOn}</Td>

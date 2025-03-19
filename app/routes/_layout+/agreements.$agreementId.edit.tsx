@@ -128,13 +128,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
         });
 
-        await updateAgreementFile({
-          pdfName: pdf.name,
-          pdfSize: pdf.size,
-          request: clonedData,
-          custodyAgreementId: agreementId,
-          organizationId,
-        });
+        if (pdf) {
+          await updateAgreementFile({
+            pdfName: pdf.name,
+            pdfSize: pdf.size,
+            request: clonedData,
+            custodyAgreementId: agreementId,
+            organizationId,
+          });
+        }
 
         sendNotification({
           title: "Agreement updated",

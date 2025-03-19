@@ -91,13 +91,15 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           organizationId,
         });
 
-        await updateAgreementFile({
-          pdfName: pdf.name,
-          pdfSize: pdf.size,
-          request: clonedData,
-          custodyAgreementId: id,
-          organizationId,
-        });
+        if (pdf) {
+          await updateAgreementFile({
+            pdfName: pdf.name,
+            pdfSize: pdf.size,
+            request: clonedData,
+            custodyAgreementId: id,
+            organizationId,
+          });
+        }
 
         sendNotification({
           title: "Agreement created",

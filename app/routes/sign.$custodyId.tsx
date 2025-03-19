@@ -132,6 +132,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { custodian, custody, custodyAgreement, asset } =
       await getAgreementByCustodyId({ custodyId });
 
+    if (!custodyAgreement.signatureRequired) {
+      throw new ShelfError({
+        cause: null,
+        message: "This custody agreement does not require a signature.",
+        label: "Custody Agreement",
+      });
+    }
+
     if (custody.agreementSigned) {
       throw new ShelfError({
         cause: null,
@@ -319,7 +327,9 @@ export default function Sign() {
                 className="h-8"
               />
 
-              <AgreementDialog className="md:hidden" />
+              <When truthy={custodyAgreement.signatureRequired}>
+                <AgreementDialog className="md:hidden" />
+              </When>
             </div>
 
             <div className="border-b p-4">
@@ -331,7 +341,9 @@ export default function Sign() {
               </p>
             </div>
 
-            <Agreement className="hidden md:block" />
+            <When truthy={custodyAgreement.signatureRequired}>
+              <Agreement className="hidden md:block" />
+            </When>
           </div>
         </div>
       </div>

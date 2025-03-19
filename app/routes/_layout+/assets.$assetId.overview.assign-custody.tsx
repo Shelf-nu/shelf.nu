@@ -284,12 +284,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           assetId,
           custodianId,
           organizationId,
-          ...(agreementFound
-            ? {
-                signatureStatus: CustodySignatureStatus.PENDING,
-                agreementId: agreementFound.id,
-              }
-            : { signatureStatus: CustodySignatureStatus.NOT_REQUIRED }),
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
         },
       });
 

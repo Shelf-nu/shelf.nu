@@ -2392,14 +2392,10 @@ export async function bulkCheckOutAssets({
           assetId: asset.id,
           custodianId,
           organizationId,
+          agreementId: agreementFound?.id,
           signatureStatus: agreementFound?.signatureRequired
             ? CustodySignatureStatus.PENDING
             : CustodySignatureStatus.NOT_REQUIRED,
-          ...(agreementFound
-            ? {
-                agreementId: agreementFound.id,
-              }
-            : {}),
         })),
       });
 

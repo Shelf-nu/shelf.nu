@@ -284,7 +284,7 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className=" mt-3 flex gap-2">
+          <div className="flex gap-2">
             <div className="flex items-center gap-x-1">
               <AssetStatusBadge
                 status={asset.status}

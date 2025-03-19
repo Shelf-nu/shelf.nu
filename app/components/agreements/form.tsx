@@ -19,7 +19,7 @@ import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
-const MAX_FILE_SIZE = 5_000_000;
+const MAX_FILE_SIZE = 1024 * 1024 * 5; // 5MB
 
 export const base = z.object({
   name: z.string().min(2, "Name is required"),
@@ -46,17 +46,25 @@ export const NewAgreementFormSchema = z.discriminatedUnion("isEdit", [
     isEdit: z.literal("true"),
     pdf: z
       .custom<File>()
-      .refine(
-        (val) =>
-          val.type !== "application/octet-stream" || val.size <= MAX_FILE_SIZE,
-        "File size is too big"
-      )
-      .refine(
-        (val) =>
-          val.type === "application/octet-stream" ||
-          val.type === "application/pdf",
-        "Only .pdf is accepted"
-      ),
+      .optional()
+      .refine((file) => {
+        if (!file) {
+          return true;
+        }
+
+        return (
+          file.type !== "application/octet-stream" || file.size <= MAX_FILE_SIZE
+        );
+      }, "File size is too big")
+      .refine((file) => {
+        if (!file) {
+          return true;
+        }
+        return (
+          file.type === "application/octet-stream" ||
+          file.type === "application/pdf"
+        );
+      }, "Only .pdf is accepted"),
   }),
 ]);
 
