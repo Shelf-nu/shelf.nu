@@ -11,6 +11,7 @@ import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
+import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
 import { resolveTeamMemberName } from "~/utils/user";
 import { createNote } from "../note/service.server";
 
@@ -220,27 +221,50 @@ export async function updateAgreementFile({
   }
 }
 
-export function toggleCustodyAgreementActiveState({
+export async function toggleCustodyAgreementActiveState({
   id,
   organizationId,
-  active,
+  organizations,
 }: Pick<CustodyAgreement, "id"> & {
   organizationId: Organization["id"];
-  active: boolean;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
 }) {
   try {
-    return db.custodyAgreement.update({
+    const agreement = await db.custodyAgreement.findFirst({
       where: { id, organizationId },
-      data: {
-        isActive: active,
-      },
+      select: { id: true, isActive: true },
+    });
+    if (!agreement) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Agreement not found",
+        message: "The active state of the agreement could not be toggled.",
+      });
+    }
+
+    /** If user is activating the agreement then make sure it is under the limit */
+    if (!agreement.isActive) {
+      await assertUserCanCreateMoreAgreements({
+        organizationId,
+        organizations,
+      });
+    }
+
+    return await db.custodyAgreement.update({
+      where: { id: agreement.id },
+      data: { isActive: !agreement.isActive },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "Error making agreement inactive",
-      message:
-        "Something went wrong while making the custody agreement active/inactive. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while making the custody agreement active/inactive. Please try again or contact support.",
       additionalData: { id },
       label,
     });

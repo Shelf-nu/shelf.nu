@@ -24,8 +24,8 @@ import {
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -104,84 +104,72 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ context, request }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+
   try {
-    const method = getActionMethod(request);
+    assertIsPost(request);
 
-    const authSession = context.getSession();
-    let organizationId = null;
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.custodyAgreement,
+      action: PermissionAction.update,
+    });
 
-    switch (method) {
-      case "POST": {
-        const { organizationId: orgId } = await requirePermission({
-          userId: authSession.userId,
-          request,
-          entity: PermissionEntity.custodyAgreement,
-          action: PermissionAction.update,
-        });
-        organizationId = orgId;
+    const formData = await request.formData();
 
-        const formData = await request.clone().formData();
+    const { intent } = parseData(
+      formData,
+      z.object({
+        intent: z.enum(["toggleActive", "makeDefault"]),
+      })
+    );
 
-        const { intent } = parseData(
-          await request.formData(),
-          z.object({
-            intent: z.enum(["toggleActive", "makeDefault"]),
-          })
+    switch (intent) {
+      case "toggleActive": {
+        const { agreementId } = parseData(
+          formData,
+          z.object({ agreementId: z.string() })
         );
 
-        switch (intent) {
-          case "toggleActive": {
-            const { isActive, agreementId } = parseData(
-              formData,
-              z.object({
-                isActive: z
-                  .string()
-                  .transform((val) => (val === "yes" ? true : false)),
-                agreementId: z.string(),
-              })
-            );
+        const updatedAgreement = await toggleCustodyAgreementActiveState({
+          id: agreementId,
+          organizationId,
+          organizations,
+        });
 
-            await toggleCustodyAgreementActiveState({
-              id: agreementId,
-              active: !isActive,
-              organizationId: organizationId,
-            });
+        sendNotification({
+          title: "Agreement updated",
+          message: `Your agreement has been successfully ${
+            updatedAgreement.isActive ? "activated" : "deactivated"
+          }`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
-            sendNotification({
-              title: "Agreement updated",
-              message: `Your agreement has been successfully ${
-                isActive ? "deactivated" : "activated"
-              }`,
-              icon: { name: "success", variant: "success" },
-              senderId: authSession.userId,
-            });
+        return redirect("/agreements");
+      }
+      case "makeDefault": {
+        const { agreementId } = parseData(
+          formData,
+          z.object({ agreementId: z.string() })
+        );
 
-            return redirect("/agreements");
-          }
-          case "makeDefault": {
-            const { agreementId } = parseData(
-              formData,
-              z.object({ agreementId: z.string() })
-            );
+        await makeCustodyAgreementDefault({
+          id: agreementId,
+          organizationId,
+        });
 
-            await makeCustodyAgreementDefault({
-              id: agreementId,
-              organizationId,
-            });
+        sendNotification({
+          title: "Agreement updated",
+          message: "Your default agreement has been successfully changed.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
-            sendNotification({
-              title: "Agreement updated",
-              message: "Your default agreement has been successfully changed.",
-              icon: { name: "success", variant: "success" },
-              senderId: authSession.userId,
-            });
-
-            return json(data({ changedDefault: true }));
-          }
-        }
+        return json(data({ changedDefault: true }));
       }
     }
-    throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
