@@ -1033,12 +1033,27 @@ export async function softDeleteUser(id: User["id"]) {
       await deleteProfilePicture({ url: user.profilePicture });
     }
 
+    /** Delete the auth user. This should also destroy all their current sessions */
+    const { error } = await getSupabaseAdmin().auth.admin.deleteUser(
+      user.id,
+      true // Soft delete
+    );
+
     /** Send an email to the user that their request has been completed */
     void sendEmail({
       to: user.email,
       subject: "Your account has been deleted",
       text: `Your shelf account has been deleted. \n\n Kind regards, \n Shelf Team\n\n`,
     });
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message: "Failed to delete Auth user",
+        additionalData: { id, error },
+        label: "Auth",
+      });
+    }
   } catch (cause) {
     if (
       cause instanceof PrismaClientKnownRequestError &&
