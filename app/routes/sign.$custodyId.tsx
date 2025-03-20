@@ -3,7 +3,6 @@ import {
   CustodySignatureStatus,
   CustodyStatus,
 } from "@prisma/client";
-import { Viewer, Worker } from "@react-pdf-viewer/core";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -11,11 +10,11 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import * as pdfjs from "pdfjs-dist";
 import { z } from "zod";
 import Icon from "~/components/icons/icon";
 import type { HeaderData } from "~/components/layout/header/types";
 import { useCrisp } from "~/components/marketing/crisp";
+import PdfViewer from "~/components/pdf-viewer/pdf-viewer";
 import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 
@@ -39,7 +38,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import "@react-pdf-viewer/core/lib/styles/index.css";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -311,12 +309,8 @@ export default function Sign() {
     <div className="flex h-screen flex-col items-center justify-center bg-[url('/static/images/bg-overlay1.png')] p-4 md:p-14">
       <div className="size-full border bg-gray-25">
         <div className="flex h-full flex-col md:flex-row">
-          <div className="order-2 grow overflow-y-auto md:order-1">
-            <Worker
-              workerUrl={`https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`}
-            >
-              <Viewer fileUrl={custodyAgreementFile?.url ?? ""} />
-            </Worker>
+          <div className="relative order-2 flex h-full grow overflow-y-auto md:order-1">
+            <PdfViewer url={custodyAgreementFile.url} />
           </div>
 
           <div className="order-1 flex size-full flex-col overflow-y-auto overflow-x-clip border-l scrollbar-thin md:order-2 md:w-[400px]">
