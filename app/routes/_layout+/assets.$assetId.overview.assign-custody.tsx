@@ -295,23 +295,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // If the agreement was specified, and signature was required
-    if (agreementFound && agreementFound.signatureRequired) {
-      await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
-          isSelfService ? "taken" : `given **${custodianName.trim()}**`
-        } custody over **${asset.title.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`,
-        type: "UPDATE",
-        userId: userId,
-        assetId: asset.id,
-      });
+    if (agreementFound) {
+      if (agreementFound.signatureRequired) {
+        await createNote({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+            isSelfService ? "taken" : `given **${custodianName.trim()}**`
+          } custody over **${asset.title.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`,
+          type: "UPDATE",
+          userId: userId,
+          assetId: asset.id,
+        });
 
-      sendNotification({
-        title: `'${asset.title}' would go in custody of ${custodianName}`,
-        message:
-          "This asset will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
-      });
+        sendNotification({
+          title: `'${asset.title}' would go in custody of ${custodianName}`,
+          message:
+            "This asset will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+      }
 
       /** If there is no email, then custodian is NRM */
       if (custodianEmail && asset?.custody?.id) {
@@ -323,6 +325,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assignerName: user.firstName + " " + user.lastName,
             assetId: asset.id,
             custodyId: asset.custody.id,
+            signatureRequired: agreementFound.signatureRequired,
           }),
         });
       }

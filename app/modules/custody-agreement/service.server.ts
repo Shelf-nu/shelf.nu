@@ -23,7 +23,11 @@ export async function createCustodyAgreement({
   signatureRequired,
   userId,
   organizationId,
-}: Pick<CustodyAgreement, "name" | "description" | "signatureRequired"> & {
+  isActive,
+}: Pick<
+  CustodyAgreement,
+  "name" | "description" | "signatureRequired" | "isActive"
+> & {
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
@@ -31,6 +35,8 @@ export async function createCustodyAgreement({
     const sameExistingAgreementCount = await db.custodyAgreement.count({
       where: { type: "CUSTODY", organizationId },
     });
+
+    // const isMaxActiveAgreementsReached =
 
     const data = {
       name,
@@ -40,6 +46,7 @@ export async function createCustodyAgreement({
       createdBy: { connect: { id: userId } },
       organization: { connect: { id: organizationId } },
       isDefault: sameExistingAgreementCount === 0,
+      isActive,
     } satisfies Prisma.CustodyAgreementCreateInput;
 
     return await db.custodyAgreement.create({ data });

@@ -73,10 +73,11 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { asset, custodian, custody } = await getAgreementByAssetId({
-      assetId,
-      organizationId,
-    });
+    const { asset, custodian, custody, custodyAgreement } =
+      await getAgreementByAssetId({
+        assetId,
+        organizationId,
+      });
 
     if (!custodian.user) {
       throw new ShelfError({
@@ -101,6 +102,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         assignerName: resolveTeamMemberName(custodian),
         assetId: asset.id,
         custodyId: custody.id,
+        signatureRequired: custodyAgreement.signatureRequired,
       }),
     });
 

@@ -16,6 +16,7 @@ import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import { CustomTooltip } from "../shared/custom-tooltip";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -172,7 +173,26 @@ export const AgreementForm = ({
         />
       </FormRow>
 
-      <When truthy={canUpdateAgreementFile}>
+      <When
+        truthy={canUpdateAgreementFile}
+        fallback={
+          <FormRow rowLabel="Upload PDF">
+            <CustomTooltip content="This custody agreement has already been used and signed and it's file cannot be changed anymore. If your agreement document has changed, please create a new custody agreement with your new document.">
+              <div>
+                <p className="hidden lg:block">Accepts PDF (max. 5 MB)</p>
+                <Input
+                  disabled
+                  type="file"
+                  label={""}
+                  hideLabel
+                  className="mt-2"
+                  inputClassName="border-0 shadow-none p-0 rounded-none"
+                />
+              </div>
+            </CustomTooltip>
+          </FormRow>
+        }
+      >
         <FormRow required={!isEdit} rowLabel="Upload PDF">
           <div>
             <p className="hidden lg:block">Accepts PDF (max. 5 MB)</p>

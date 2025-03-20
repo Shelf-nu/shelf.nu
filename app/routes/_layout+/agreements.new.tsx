@@ -21,7 +21,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { assertUserCanCreateMoreAgreements } from "~/utils/subscription.server";
+import {
+  assertUserCanCreateMoreAgreements,
+  isMaxActiveAgreementsLimitReached,
+} from "~/utils/subscription.server";
 
 const title = "New Agreement";
 
@@ -83,12 +86,22 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           NewAgreementFormSchema
         );
 
+        /**
+         * If user has reached the limit of maxActiveAgreements then we will create the inactive agreement only
+         */
+        const isMaxActiveAgreementsReached =
+          await isMaxActiveAgreementsLimitReached({
+            organizationId,
+            organizations,
+          });
+
         const { id } = await createCustodyAgreement({
           name,
           description: description ?? "",
           signatureRequired: signatureRequired ?? false,
           userId: authSession.userId,
           organizationId,
+          isActive: !isMaxActiveAgreementsReached,
         });
 
         if (pdf) {

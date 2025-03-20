@@ -2421,7 +2421,7 @@ export async function bulkCheckOutAssets({
     });
 
     /** Send email */
-    if (agreementFound && agreementFound.signatureRequired && custodianEmail) {
+    if (agreementFound && custodianEmail) {
       custodies.forEach((custody) => {
         sendEmail({
           to: custodianEmail,
@@ -2431,6 +2431,7 @@ export async function bulkCheckOutAssets({
             assignerName: user.firstName + " " + user.lastName,
             assetId: custody.asset.id,
             custodyId: custody.id,
+            signatureRequired: agreementFound.signatureRequired,
           }),
         });
       });

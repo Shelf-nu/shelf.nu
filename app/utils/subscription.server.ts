@@ -479,6 +479,36 @@ export async function assertUserCanActivateMoreAgreements({
   }
 }
 
+export async function isMaxActiveAgreementsLimitReached({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!premiumIsEnabled) {
+    return false;
+  }
+
+  if (!tierLimit.maxActiveCustodyAgreements) {
+    return false;
+  }
+
+  const activeAgreements = await db.custodyAgreement.count({
+    where: { organizationId, isActive: true },
+  });
+
+  return activeAgreements >= tierLimit.maxActiveCustodyAgreements;
+}
+
 export function canUseSignedCustody(
   currentOrganization: Pick<Organization, "type">
 ) {

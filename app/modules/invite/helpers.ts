@@ -96,15 +96,19 @@ export const assetCustodyAssignedWithAgreementEmailText = ({
   assignerName,
   assetId,
   custodyId,
+  signatureRequired,
 }: {
   assetName: string;
   assignerName: string;
   assetId: string;
   custodyId: string;
+  signatureRequired: boolean;
 }) => `Howdy,
 
 ${assignerName} has assigned you as custodian for ${assetName}.
-Please click the link below to view the custody agreement and sign it:
+Please click the link below to view the custody agreement ${
+  signatureRequired ? "and sign it" : ""
+}:
 ${SERVER_URL}/sign/${custodyId}
 
 To view the asset, please click the link below:
