@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType } from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -9,9 +9,9 @@ import { json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
-import AwaitingSignCard from "~/components/assets/awaiting-sign-card";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -507,9 +507,9 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {isAwaitingSignature ? (
-            <AwaitingSignCard asset={asset} />
-          ) : (
+          <AgreementStatusCard asset={asset} />
+
+          <When truthy={asset.status === AssetStatus.IN_CUSTODY}>
             <CustodyCard
               booking={booking}
               custody={asset?.custody || null}
@@ -519,7 +519,7 @@ export default function AssetOverview() {
                 action: PermissionAction.read,
               })}
             />
-          )}
+          </When>
 
           {asset && (
             <QrPreview

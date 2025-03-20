@@ -5,11 +5,13 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 
-type AwaitingSignProps = {
+type AgreementStatusCardProps = {
   asset: SerializeFrom<typeof loader>["asset"];
 };
 
-export default function AwaitingSignCard({ asset }: AwaitingSignProps) {
+export default function AgreementStatusCard({
+  asset,
+}: AgreementStatusCardProps) {
   if (!asset.custody) {
     return null;
   }
@@ -24,8 +26,14 @@ export default function AwaitingSignCard({ asset }: AwaitingSignProps) {
 
       <div>
         <p className="font-semibold">
-          Awaiting signature from{" "}
-          {resolveTeamMemberName(asset.custody.custodian)}
+          {asset.custody.agreement?.signatureRequired ? (
+            <>
+              Awaiting signature from{" "}
+              {resolveTeamMemberName(asset.custody.custodian)}
+            </>
+          ) : (
+            asset.custody?.agreement?.name
+          )}
         </p>
 
         <Button to="share-agreement" variant="link-gray">
