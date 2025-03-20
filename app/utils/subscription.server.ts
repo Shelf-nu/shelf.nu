@@ -327,6 +327,28 @@ export const canUseBookings = (
 };
 
 /**
+ * This function checks if the user can use bookings in the current organization
+ * It simply checks the organization type
+ *
+ * Throws error of not allowed
+ */
+export function assertCanUseBookings(
+  currentOrganization: Pick<Organization, "type">
+) {
+  if (!canUseBookings(currentOrganization)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message:
+        "You cannot use bookings in a personal workspace. Please create a Team workspace.",
+      status: 403,
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * This validates if more users can be invited to organization
  * It simply checks the organization type
  */

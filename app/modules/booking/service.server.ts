@@ -14,13 +14,14 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
@@ -146,7 +147,7 @@ async function updateBookingKitStates({
   }
 }
 
-const BOOKING_COMMON_INCLUDE = {
+export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
 } as Prisma.BookingInclude;
@@ -524,6 +525,75 @@ export async function upsertBooking(
   }
 }
 
+export async function getBookingsFilterData({
+  request,
+  isSelfServiceOrBase,
+  userId,
+  organizationId,
+}: {
+  request: Request;
+  isSelfServiceOrBase: boolean;
+  userId: string;
+  organizationId: string;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam, search, status, teamMemberIds } =
+    getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  const orderBy = searchParams.get("orderBy") ?? "from";
+  const orderDirection = (searchParams.get("orderDirection") ??
+    "asc") as SortingDirection;
+
+  /**
+   * For self service and base users, we need to get the teamMember to be able to filter by it as well.
+   * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
+   * This is to ensure that the booking is still visible to the user that was assigned to it.
+   * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
+   * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
+   * Ideally in the future we should remove this as it adds another query to the db
+   * @TODO this can safely be remove 3-6 months after this commit
+   */
+  let selfServiceData = null;
+  if (isSelfServiceOrBase) {
+    const teamMember = await db.teamMember.findFirst({
+      where: {
+        userId,
+        organizationId,
+      },
+    });
+    if (!teamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message:
+          "You are not part of a team in this organization. Please contact your organization admin to resolve this",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+    selfServiceData = {
+      // If the user is self service, we only show bookings that belong to that user)
+      custodianUserId: userId,
+      custodianTeamMemberId: teamMember.id,
+    };
+  }
+
+  return {
+    searchParams,
+    cookie,
+    page,
+    perPage,
+    search,
+    status,
+    teamMemberIds,
+    orderBy,
+    orderDirection,
+    selfServiceData,
+  };
+}
+
 export async function getBookings(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -682,6 +752,7 @@ export async function getBookings(params: {
           ...BOOKING_COMMON_INCLUDE,
           assets: {
             select: {
+              title: true,
               id: true,
               custody: true,
               availableToBook: true,

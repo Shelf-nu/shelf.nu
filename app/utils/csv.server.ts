@@ -1,8 +1,5 @@
-import {
-  CustomFieldType,
-  type Asset,
-  type AssetIndexSettings,
-} from "@prisma/client";
+import type { Asset, AssetIndexSettings } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
   unstable_createMemoryUploadHandler,
@@ -12,6 +9,7 @@ import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
 import iconv from "iconv-lite";
+import { db } from "~/database/db.server";
 import {
   fetchAssetsForExport,
   getAdvancedPaginatedAndFilterableAssets,
@@ -25,8 +23,16 @@ import type {
   FixedField,
 } from "~/modules/asset-index-settings/helpers";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import {
+  BOOKING_COMMON_INCLUDE,
+  formatBookingsDates,
+  getBookings,
+  getBookingsFilterData,
+} from "~/modules/booking/service.server";
+import type { BookingWithCustodians } from "~/modules/booking/types";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
+import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
 import { resolveTeamMemberName } from "./user";
@@ -484,4 +490,201 @@ const formatCustomFieldForCsv = (
     default:
       return String(fieldValue.raw || "");
   }
+};
+
+export async function exportBookingsFromIndexToCsv({
+  request,
+  userId,
+  bookingsIds,
+  organizationId,
+  isSelfServiceOrBase,
+}: {
+  request: Request;
+  userId: string;
+  bookingsIds: string[];
+  organizationId: string;
+  isSelfServiceOrBase: boolean;
+}) {
+  try {
+    const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
+
+    /** If all are selected in the list, then we have to consider filter to get the entries */
+    let bookings;
+    if (hasSelectAll) {
+      // Here we need to use the getBookings the same way as in the index with all filters and everything
+      const {
+        page,
+        search,
+        status,
+        teamMemberIds,
+        orderBy,
+        orderDirection,
+        selfServiceData,
+      } = await getBookingsFilterData({
+        request,
+        isSelfServiceOrBase,
+        userId,
+        organizationId,
+      });
+
+      const bookingsData = await getBookings({
+        page,
+        takeAll: true,
+        organizationId,
+        search,
+        userId,
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
+        }),
+        custodianTeamMemberIds: teamMemberIds,
+        ...selfServiceData,
+        orderBy,
+        orderDirection,
+      });
+      bookings = bookingsData.bookings;
+    } else {
+      bookings = await db.booking.findMany({
+        where: { id: { in: bookingsIds }, organizationId },
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          assets: {
+            select: {
+              title: true,
+            },
+          },
+        },
+      });
+    }
+
+    bookings = formatBookingsDates(bookings, request);
+
+    // Pass both assets and columns to the build function
+    const csvData = buildCsvExportDataFromBookings(
+      bookings as FlexibleBooking[]
+    );
+
+    // // Join rows with CRLF as per CSV spec
+    return csvData.join("\r\n");
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk archive booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingsIds, organizationId },
+      label: "Booking",
+    });
+  }
+}
+
+/** Define some types to use for normalizing bookings across the different fetches */
+type FlexibleAsset = Partial<Asset> & {
+  title: string;
+};
+
+type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
+  assets: FlexibleAsset[];
+  displayFrom?: string;
+  displayTo?: string;
+};
+
+/**
+ * Builds CSV export data from bookings
+ * @param bookings - Array of bookings to export
+ * @returns Array of string arrays representing CSV rows, including headers
+ */
+export const buildCsvExportDataFromBookings = (
+  bookings: FlexibleBooking[]
+): string[][] => {
+  if (!bookings.length) return [];
+
+  // Create headers row using column names
+  const headers = {
+    url: "Booking URL", // custom string
+    id: "Booking ID", // string
+    name: "Name", // string
+    from: "Start date", // date
+    to: "End date", // date
+    custodian: "Custodian",
+    description: "Description", // string
+    asset: "Assets", // New column for assets
+  };
+
+  // Create data rows with assets
+  const rows: string[][] = [];
+
+  bookings.forEach((booking) => {
+    // Get the first asset's title if available
+    const firstAsset =
+      booking.assets && booking.assets.length > 0
+        ? booking.assets[0]
+        : { title: "No assets" };
+
+    // First add the main booking row (including the first asset)
+    const bookingRow = Object.keys(headers).map((column) => {
+      // Handle different column types
+      let value: any;
+
+      // If it's not a custom field, it must be a fixed field or 'name'
+      switch (column) {
+        case "url":
+          value = `${SERVER_URL}/bookings/${booking.id}`;
+          break;
+        case "id":
+          value = booking.id;
+          break;
+        case "name":
+          value = booking.name;
+          break;
+        case "from":
+          value = booking.displayFrom;
+          break;
+        case "to":
+          value = booking.displayTo;
+          break;
+        case "custodian":
+          value = booking.custodianTeamMember
+            ? resolveTeamMemberName(booking.custodianTeamMember)
+            : "";
+          break;
+        case "description":
+          value = booking.description ?? "";
+          break;
+        case "asset":
+          // Include the first asset title in the main booking row
+          value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
+          break;
+        default:
+          value = "";
+      }
+      return formatValueForCsv(value, false);
+    });
+
+    rows.push(bookingRow);
+
+    // Then add remaining asset rows if the booking has more than one asset
+    if (booking.assets && booking.assets.length > 1) {
+      // Start from the second asset (index 1)
+      booking.assets.slice(1).forEach((asset) => {
+        // Create an asset row with empty values for all columns except 'asset'
+        const assetRow = Object.keys(headers).map((column) => {
+          if (column === "asset") {
+            // Assuming asset has a title property
+            return formatValueForCsv(asset.title || "Unnamed Asset", false);
+          }
+          // Empty values for all other columns
+          return formatValueForCsv("", false);
+        });
+
+        rows.push(assetRow);
+      });
+    }
+  });
+
+  // Return headers followed by data rows
+  return [Object.values(headers), ...rows];
 };

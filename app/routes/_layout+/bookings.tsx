@@ -8,6 +8,7 @@ import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
+import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
@@ -19,30 +20,26 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
-import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  formatBookingsDates,
+  getBookings,
+  getBookingsFilterData,
+} from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { bookingStatusColorMap } from "~/utils/bookings";
-import { getDateTimeFormat } from "~/utils/client-hints";
-import {
-  setCookie,
-  updateCookieWithPerPage,
-  userPrefs,
-} from "~/utils/cookies.server";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -59,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { organizationId, isSelfServiceOrBase, currentOrganization } =
       await requirePermission({
-        userId: authSession?.userId,
+        userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.read,
@@ -75,50 +72,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
-    const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status, teamMemberIds } =
-      getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
-
-    const orderBy = searchParams.get("orderBy") ?? "from";
-    const orderDirection = (searchParams.get("orderDirection") ??
-      "asc") as SortingDirection;
-
-    /**
-     * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-     * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
-     * This is to ensure that the booking is still visible to the user that was assigned to it.
-     * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
-     * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
-     * Ideally in the future we should remove this as it adds another query to the db
-     * @TODO this can safely be remove 3-6 months after this commit
-     */
-    let selfServiceData = null;
-    if (isSelfServiceOrBase) {
-      const teamMember = await db.teamMember.findFirst({
-        where: {
-          userId,
-          organizationId,
-        },
-      });
-      if (!teamMember) {
-        throw new ShelfError({
-          cause: null,
-          title: "Team member not found",
-          message:
-            "You are not part of a team in this organization. Please contact your organization admin to resolve this",
-          label: "Booking",
-          shouldBeCaptured: false,
-        });
-      }
-      selfServiceData = {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: authSession?.userId,
-        custodianTeamMemberId: teamMember.id,
-      };
-    }
+    const {
+      page,
+      perPage,
+      search,
+      status,
+      teamMemberIds,
+      orderBy,
+      orderDirection,
+      selfServiceData,
+      searchParams,
+      cookie,
+    } = await getBookingsFilterData({
+      request,
+      isSelfServiceOrBase,
+      userId,
+      organizationId,
+    });
 
     const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
       getBookings({
@@ -126,7 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page,
         perPage,
         search,
-        userId: authSession?.userId,
+        userId: userId,
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],
@@ -160,28 +130,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     /** We format the dates on the server based on the users timezone and locale  */
-    const items = bookings.map((b) => {
-      if (b.from && b.to) {
-        const from = new Date(b.from);
-        const displayFrom = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(from);
-
-        const to = new Date(b.to);
-        const displayTo = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(to);
-
-        return {
-          ...b,
-          displayFrom: displayFrom.split(","),
-          displayTo: displayTo.split(","),
-        };
-      }
-      return b;
-    });
+    const items = formatBookingsDates(bookings, request);
 
     return json(
       data({
@@ -366,6 +315,11 @@ export default function BookingsIndexPage({
               <Th>To</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
+            </>
+          }
+          headerExtraContent={
+            <>
+              <ExportBookingsButton />
             </>
           }
         />
