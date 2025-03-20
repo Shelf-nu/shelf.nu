@@ -266,10 +266,6 @@ export default function AssetOverview() {
     action: PermissionAction.update,
   });
 
-  const isAwaitingSignature =
-    asset.custody?.agreement?.signatureRequired &&
-    !asset.custody?.agreementSigned;
-
   return (
     <div>
       <ContextualModal />
