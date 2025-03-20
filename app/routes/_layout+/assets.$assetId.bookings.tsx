@@ -3,10 +3,12 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  formatBookingsDates,
+  getBookings,
+} from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -97,28 +99,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     /** We format the dates on the server based on the users timezone and locale  */
-    const items = bookings.map((b) => {
-      if (b.from && b.to) {
-        const from = new Date(b.from);
-        const displayFrom = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(from);
-
-        const to = new Date(b.to);
-        const displayTo = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(to);
-
-        return {
-          ...b,
-          displayFrom: displayFrom.split(","),
-          displayTo: displayTo.split(","),
-        };
-      }
-      return b;
-    });
+    const items = formatBookingsDates(bookings, request);
 
     return json(
       data({

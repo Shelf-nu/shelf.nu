@@ -52,6 +52,7 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
       PermissionAction.manageAssets,
+      PermissionAction.export,
     ],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
@@ -85,6 +86,7 @@ export const Role2PermissionMap: {
       PermissionAction.archive,
       PermissionAction.manageAssets,
       PermissionAction.cancel,
+      PermissionAction.export,
     ],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
