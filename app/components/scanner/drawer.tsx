@@ -28,11 +28,13 @@ import { Button } from "../shared/button";
 
 import { Table, Td, Th } from "../table";
 import When from "../when/when";
+import { useGlobalModeViaObserver } from "../zxing-scanner/code-scanner";
 
 type ScannedAssetsDrawerProps = {
   className?: string;
   style?: React.CSSProperties;
   isLoading?: boolean;
+  defaultExpanded?: boolean;
 };
 
 export const addScannedAssetsToBookingSchema = z.object({
@@ -49,6 +51,7 @@ export default function ScannedAssetsDrawer({
   className,
   style,
   isLoading,
+  defaultExpanded = false,
 }: ScannedAssetsDrawerProps) {
   const zo = useZorm(
     "AddScannedAssetsToBooking",
@@ -74,7 +77,9 @@ export default function ScannedAssetsDrawer({
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
 
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(
+    defaultExpanded !== undefined ? defaultExpanded : false
+  );
   const { vh } = useViewportHeight();
 
   const itemsListRef = useRef<HTMLDivElement>(null);
@@ -118,16 +123,27 @@ export default function ScannedAssetsDrawer({
     [clearList, hasItems]
   );
 
+  const mode = useGlobalModeViaObserver();
+  useEffect(() => {
+    setExpanded(mode === "scanner");
+  }, [mode]);
+
   return (
     <Portal>
       <div
         className={tw(
-          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out",
-          minimizedSidebar ? "lg:left-[82px]" : "lg:left-[312px]",
+          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out lg:right-[20px]",
+          minimizedSidebar ? "lg:left-[68px]" : "lg:left-[278px]",
           className
         )}
         style={{
-          height: expanded ? vh - TOP_GAP : hasItems ? 170 : 148,
+          height: expanded
+            ? mode === "scanner"
+              ? vh - 400
+              : vh - TOP_GAP
+            : hasItems
+            ? 170
+            : 148,
         }}
       >
         <div className={tw("h-full")} style={style}>

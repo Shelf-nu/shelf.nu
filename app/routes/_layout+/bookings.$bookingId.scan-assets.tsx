@@ -40,6 +40,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -153,7 +154,6 @@ export default function ScanAssetsForBookings() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
-
   function handleQrDetectionSuccess(qrId: string, error?: string) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
     addItem(qrId, error);
@@ -173,6 +173,9 @@ export default function ScanAssetsForBookings() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
         />
       </div>
     </>

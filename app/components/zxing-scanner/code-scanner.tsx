@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import lodash from "lodash";
+import { Camera, CameraIcon, QrCode, ScanQrCode } from "lucide-react";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
+import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
@@ -26,8 +28,10 @@ type CodeScannerProps = {
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
 
-  /** Custom class for the scanner mode */
-  scannerModeClassName?: string;
+  /** Custom class for the scanner mode.
+   * Can be a string or a function that receives the mode and returns a string
+   */
+  scannerModeClassName?: string | ((mode: Mode) => string);
 
   /** Custom callback for the scanner mode */
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
@@ -55,12 +59,12 @@ export const CodeScanner = ({
 
   const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
 
-  const handleModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    if (e.target.value === "camera") {
+  const handleModeChange = (mode: Mode) => {
+    if (mode === "camera") {
       setIsLoading(true);
-      setMode(e.target.value as Mode);
+      setMode(mode);
     } else {
-      setMode(e.target.value as Mode);
+      setMode(mode);
     }
   };
 
@@ -71,17 +75,18 @@ export const CodeScanner = ({
         "relative size-full min-h-[400px] overflow-hidden",
         className
       )}
+      data-mode={mode}
     >
       <div className="relative size-full overflow-hidden">
-        <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-transparent text-white">
+        <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
           <div>
             {!hideBackButtonText && (
               <Link
                 to=".."
-                className="inline-flex items-center justify-start p-2 text-[11px] leading-[11px] text-white"
+                className="inline-flex items-center justify-start text-[11px] leading-[11px] "
               >
                 <TriangleLeftIcon className="size-[14px]" />
-                <span className="mt-[-0.5px]">{backButtonText}</span>
+                <span>{backButtonText}</span>
               </Link>
             )}
           </div>
@@ -89,22 +94,19 @@ export const CodeScanner = ({
           {/* We only show option to switch to scanner on big screens. Its not possible on mobile */}
           {isMd && (
             <div>
-              <select
-                value={mode}
-                onChange={handleModeChange}
-                className={tw(
-                  "z-10 rounded border  py-1 text-sm  backdrop-blur-sm",
-                  "bg-black/20 text-white"
-                )}
-                disabled={isLoading || paused}
+              <Tabs
+                defaultValue={mode}
+                onValueChange={(mode) => handleModeChange(mode as Mode)}
               >
-                <option value="camera" className="p-1 text-black">
-                  Mode: camera
-                </option>
-                <option value="scanner" className="p-1 text-black">
-                  Mode: Barcode scanner
-                </option>
-              </select>
+                <TabsList>
+                  <TabsTrigger value="scanner" disabled={isLoading || paused}>
+                    <ScanQrCode className="mr-2 size-5" /> Scanner
+                  </TabsTrigger>
+                  <TabsTrigger value="camera" disabled={isLoading || paused}>
+                    <CameraIcon className="mr-2 size-5" /> Camera
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
           )}
         </div>
@@ -120,7 +122,11 @@ export const CodeScanner = ({
             onQrDetectionSuccess={onQrDetectionSuccess}
             allowNonShelfCodes={allowNonShelfCodes}
             paused={paused}
-            className={scannerModeClassName}
+            className={
+              typeof scannerModeClassName === "function"
+                ? scannerModeClassName(mode)
+                : scannerModeClassName
+            }
             callback={scannerModeCallback}
           />
         ) : (
@@ -200,15 +206,23 @@ function ScannerMode({
   return (
     <div
       className={tw(
-        "flex h-full flex-col items-center bg-gray-600 pt-[20px] text-center",
+        "flex h-full flex-col items-center justify-center bg-slate-800 text-center ",
         className
       )}
     >
+      <RadialBg />
+      {/* Pulsating QR Icon */}
+      <div className="relative mx-auto mb-4 size-16">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <QrCode className="size-8  text-white/90" />
+        </div>
+        <div className="animate-ping absolute inset-0 rounded-full border-4 text-white/80 opacity-30"></div>
+      </div>
       <Input
         ref={inputRef}
         autoFocus
         className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
-        inputClassName="scanner-mode-input max-w-[260px]"
+        inputClassName="scanner-mode-input max-w-[460px] min-w-[360px]"
         disabled={paused}
         name="code"
         label={
@@ -218,11 +232,13 @@ function ScannerMode({
             ? "Waiting for scan..."
             : "Please click on the text field before scanning"
         }
+        icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
+        iconClassName={tw("text-gray-600", !inputIsFocused && "animate-bounce")}
         onChange={debouncedHandleInputChange}
         onFocus={() => setInputIsFocused(true)}
         onBlur={() => setInputIsFocused(false)}
       />
-      <p className="mt-4 max-w-[260px] text-white/70">
+      <p className="mt-4 max-w-[360px] text-white/70">
         Focus the field and use your barcode scanner to scan any Shelf QR code.
       </p>
     </div>
@@ -317,6 +333,9 @@ function CameraMode({
       {/* Error State Overlay */}
       {error && error !== "" && (
         <InfoOverlay>
+          <div className="mx-auto mb-6 flex size-32 items-center justify-center rounded-lg border-2 border-dashed border-white/30">
+            <Camera className="size-12 text-white/50" />
+          </div>
           <p className="mb-4">{error}</p>
           <p className="mb-4">If the issue persists, please contact support.</p>
           <Button onClick={() => window.location.reload()} variant="secondary">
@@ -370,8 +389,9 @@ function CameraMode({
 
 function InfoOverlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-gray-900/80 px-5">
-      <div className="text-center text-white ">{children}</div>
+    <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-slate-800 px-5">
+      <RadialBg />
+      <div className="z-10 text-center text-white">{children}</div>
     </div>
   );
 }
@@ -391,6 +411,9 @@ function Initializing() {
 
   return (
     <>
+      <div className="mx-auto mb-6 flex size-32 items-center justify-center rounded-lg border-2 border-dashed border-white/30">
+        <Camera className="size-12 text-white/50" />
+      </div>
       <Spinner className="mx-auto mb-2" />
       {expired
         ? "Camera initialization is taking longer than expected. Please reload the page"
@@ -408,4 +431,57 @@ function Initializing() {
       )}
     </>
   );
+}
+
+function RadialBg() {
+  return (
+    <div className="absolute inset-0">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.3)_0,rgba(59,130,246,0)_50%)]"></div>
+      <div className="absolute inset-0  bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.2)_0,rgba(59,130,246,0)_70%)] "></div>
+      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48Y2lyY2xlIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgY3g9IjEwIiBjeT0iMTAiIHI9IjEiLz48L2c+PC9zdmc+')] opacity-30"></div>
+    </div>
+  );
+}
+
+export function useGlobalModeViaObserver(): Mode {
+  /** Observer to watch for changes in the data-mode attribute */
+  const { isMd } = useViewportHeight();
+  const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
+  const observerRef = useRef<MutationObserver | null>(null);
+
+  useEffect(() => {
+    const targetNode = document.querySelector("div[data-mode]");
+
+    if (targetNode) {
+      const config: MutationObserverInit = {
+        attributes: true,
+        attributeFilter: ["data-mode"],
+      };
+
+      const callback: MutationCallback = (mutations) => {
+        mutations.forEach((mutation) => {
+          if (
+            mutation.type === "attributes" &&
+            mutation.attributeName === "data-mode"
+          ) {
+            const dataMode = targetNode.getAttribute("data-mode");
+            if (dataMode) {
+              setMode(dataMode as Mode);
+            }
+          }
+        });
+      };
+
+      observerRef.current = new MutationObserver(callback);
+      observerRef.current.observe(targetNode, config);
+
+      return () => {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+        }
+      };
+    }
+  }, []);
+
+  return mode;
 }

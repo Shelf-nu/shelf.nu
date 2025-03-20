@@ -25,6 +25,9 @@ export interface InputProps
   /** name of any icon available in icons map */
   icon?: IconType;
 
+  /** Class name for the icon */
+  iconClassName?: string;
+
   /** Add on to the input. Cannot be used together with icon  */
   addOn?: string;
 
@@ -62,13 +65,15 @@ const Input = forwardRef(function Input(
     addOn,
     onChange,
     icon,
+    iconClassName,
     required = false,
     ...rest
   }: InputProps,
   ref
 ) {
   const iconClasses = tw(
-    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]"
+    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]",
+    iconClassName
   );
 
   const addonClasses = tw(
