@@ -8,6 +8,8 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
+import { DateTime } from "luxon";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
@@ -33,6 +35,7 @@ import {
   deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
+import { isBookingEarlyCheckout } from "./helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
@@ -169,6 +172,7 @@ export async function upsertBooking(
     > & {
       assetIds: Asset["id"][];
       isExpired: boolean;
+      checkoutIntent?: CheckoutIntentEnum;
     }
   >,
   hints: ClientHint,
@@ -184,6 +188,7 @@ export async function upsertBooking(
       id,
       description,
       isExpired,
+      checkoutIntent,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -275,10 +280,7 @@ export async function upsertBooking(
         BookingStatus.COMPLETE,
       ].includes(booking.status as any);
 
-      //no need to fetch old booking always, we need only for this case(for now)
-      const oldBooking = isTerminalState
-        ? await db.booking.findFirst({ where: { id } })
-        : null;
+      const oldBooking = await db.booking.findFirst({ where: { id } });
 
       if (isTerminalState) {
         if (
@@ -297,6 +299,22 @@ export async function upsertBooking(
         }
         //cancel any active schedulers
         await cancelScheduler(oldBooking);
+      }
+
+      /**
+       * If user is doing an early checkout of booking then update the
+       * booking's from date accordingly
+       * */
+      if (
+        booking.status === BookingStatus.ONGOING &&
+        isBookingEarlyCheckout(oldBooking!.from!) &&
+        checkoutIntent === CheckoutIntentEnum["checkout-with-adjusted-date"]
+      ) {
+        // Update originFrom to old booking's from date
+        data.originalFrom = oldBooking?.from;
+
+        // Update from date to current date
+        data.from = new Date();
       }
 
       //update
@@ -1825,6 +1843,31 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
       cause: cause,
       message,
       label: "Booking",
+    });
+  }
+}
+
+/** This function checks if the booking is expired or not */
+export async function isBookingExpired({ id }: { id: Booking["id"] }) {
+  try {
+    const booking = await db.booking.findUnique({
+      where: { id },
+      select: { to: true },
+    });
+
+    if (!booking?.to) {
+      return false;
+    }
+
+    const end = DateTime.fromJSDate(booking.to);
+    const now = DateTime.now();
+
+    return end < now;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking if the booking is expired.",
+      label,
     });
   }
 }

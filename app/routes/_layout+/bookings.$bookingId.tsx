@@ -10,6 +10,7 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -23,6 +24,7 @@ import {
   deleteBooking,
   getBooking,
   getBookingFlags,
+  isBookingExpired,
   removeAssets,
   sendBookingUpdateNotification,
   upsertBooking,
@@ -242,7 +244,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent, nameChangeOnly } = parseData(
+    const { intent, nameChangeOnly, checkoutIntent } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -261,6 +263,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .string()
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
+        checkoutIntent: z.nativeEnum(CheckoutIntentEnum).optional(),
       }),
       {
         additionalData: { userId },
@@ -307,26 +310,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           checkOut: BookingStatus.ONGOING,
           checkIn: BookingStatus.COMPLETE,
         };
-        // Parse the isExpired field
-        const { isExpired } = parseData(
-          formData,
-          z.object({
-            isExpired: z
-              .string()
-              .optional()
-              .transform((val) => val === "true"),
-          })
-        );
+
+        const isExpired = await isBookingExpired({ id });
+
         // Modify status if expired during checkout
         const status =
           intent === "checkOut" && isExpired
             ? BookingStatus.OVERDUE
             : intentToStatusMap[intent];
 
-        let upsertBookingData = {
-          organizationId,
-          id,
-        };
+        let upsertBookingData = { organizationId, id };
+
+        if (intent === "checkOut" && checkoutIntent) {
+          Object.assign(upsertBookingData, { checkoutIntent });
+        }
 
         // We are only changing the name so we do things simpler
         if (nameChangeOnly) {
@@ -391,6 +388,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // Make sure to pass isExpired when checking out
           ...(intent === "checkOut" && { isExpired }),
         });
+
         // Update and save the booking
         const booking = await upsertBooking(
           upsertBookingData,
