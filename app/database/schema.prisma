@@ -567,7 +567,7 @@ model CustomTierLimit {
   canImportNRM               Boolean  @default(true)
   maxCustomFields            Int      @default(1000)
   maxOrganizations           Int      @default(1)
-  maxCustodyAgreements       Int      @default(10) // total number of agreements
+  maxCustodyAgreements       Int      @default(20) // total number of agreements
   maxActiveCustodyAgreements Int      @default(5)
   isEnterprise               Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
   createdAt                  DateTime @default(now())

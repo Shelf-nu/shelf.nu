@@ -261,14 +261,15 @@ export async function toggleCustodyAgreementActiveState({
       });
     }
 
-    return await db.custodyAgreement.update({
+    const updatedAgreement = await db.custodyAgreement.update({
       where: { id: agreement.id },
       data: { isActive: !agreement.isActive },
     });
+    return updatedAgreement;
   } catch (cause) {
     throw new ShelfError({
       cause,
-      title: "Error making agreement inactive",
+      title: "Error changing agreement",
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while making the custody agreement active/inactive. Please try again or contact support.",
