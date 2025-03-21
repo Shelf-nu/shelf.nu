@@ -84,16 +84,12 @@ function ConditionalDropdown() {
    * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
    */
   const allAssetsAreInCustody =
-    allSelected ||
-    selectedAssets.every((asset) => asset.status === "IN_CUSTODY");
+    allSelected || selectedAssets.every((asset) => !!asset.custody);
 
   const allAssetsAreAvailable =
-    allSelected ||
-    selectedAssets.every((asset) => asset.status === "AVAILABLE");
+    allSelected || selectedAssets.every((asset) => !asset.custody);
 
-  const someAssetCheckedOut = selectedAssets.some(
-    (asset) => asset.status === "CHECKED_OUT"
-  );
+  const someAssetCheckedOut = selectedAssets.some((asset) => !!asset.custody);
 
   const someAssetPartOfUnavailableKit = selectedAssets.some(
     (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"

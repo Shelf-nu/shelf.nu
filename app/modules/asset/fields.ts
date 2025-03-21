@@ -28,7 +28,9 @@ export const ASSET_OVERVIEW_FIELDS = {
   location: true,
   custody: {
     select: {
+      agreement: true,
       createdAt: true,
+      agreementSigned: true,
       custodian: {
         include: {
           user: true,
@@ -100,6 +102,9 @@ export const assetIndexFields = ({
     },
     custody: {
       select: {
+        signatureStatus: true,
+        agreementSigned: true,
+        agreement: { select: { signatureRequired: true } },
         custodian: {
           select: {
             name: true,

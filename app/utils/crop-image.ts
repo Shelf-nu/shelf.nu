@@ -1,19 +1,16 @@
 import type { ResizeOptions } from "sharp";
 import { ShelfError } from "./error";
+import { getFileArrayBuffer } from "./getFileArrayBuffer";
 
+/** @TODO this should be good, but still better to just be sure to double test it*/
 export const cropImage = async (
   data: AsyncIterable<Uint8Array>,
   options?: ResizeOptions
 ) => {
   try {
-    const chunks = [];
-    for await (const chunk of data) {
-      chunks.push(chunk);
-    }
-
     const sharp = (await import("sharp")).default;
 
-    return await sharp(Buffer.concat(chunks))
+    return await sharp(await getFileArrayBuffer(data))
       .rotate()
       .resize(
         options || {
