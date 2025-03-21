@@ -311,9 +311,6 @@ function ListContent({
                             item?.custody?.custodian?.user?.firstName || null,
                           lastName:
                             item?.custody?.custodian?.user?.lastName || null,
-                          profilePicture:
-                            item?.custody?.custodian?.user?.profilePicture ||
-                            null,
                           email: item?.custody?.custodian?.user?.email || "",
                         }
                       : undefined,
