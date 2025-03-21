@@ -485,8 +485,6 @@ const ListAssetContent = ({
                       ? {
                           firstName: custody.custodian?.user?.firstName || null,
                           lastName: custody.custodian?.user?.lastName || null,
-                          profilePicture:
-                            custody.custodian?.user?.profilePicture || null,
                           email: custody.custodian?.user?.email || "",
                         }
                       : undefined,
