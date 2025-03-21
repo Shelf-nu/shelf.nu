@@ -12,10 +12,11 @@ import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
-import ScannedAssetsDrawer, {
+import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
-} from "~/components/scanner/drawer/uses/scanned-assets-drawer";
+} from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -154,7 +155,10 @@ export default function ScanAssetsForBookings() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
-  function handleQrDetectionSuccess(qrId: string, error?: string) {
+  function handleQrDetectionSuccess({
+    qrId,
+    error,
+  }: OnQrDetectionSuccessProps) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
     addItem(qrId, error);
   }
@@ -163,7 +167,7 @@ export default function ScanAssetsForBookings() {
     <>
       <Header hidePageDescription />
 
-      <ScannedAssetsDrawer isLoading={isLoading} />
+      <AddAssetsToBookingDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

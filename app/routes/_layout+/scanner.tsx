@@ -6,16 +6,21 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
+import { useSetAtom } from "jotai";
+import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
+import { useActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -56,18 +61,38 @@ const QRScanner = () => {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false); // Add a ref to track navigation status
+  const addItem = useSetAtom(addScannedItemAtom);
+  const actionSwitcher = useActionSwitcher();
+  console.log("action", actionSwitcher.action);
 
-  function handleQrDetectionSuccess(qrId: string) {
-    // If navigation is already in progress, return early to prevent multiple navigations
-    if (isNavigating.current) return;
+  function handleQrDetectionSuccess({
+    qrId,
+    error,
+  }: OnQrDetectionSuccessProps) {
+    const action = actionSwitcher.action;
+    console.log("action on handle", action);
+    switch (action) {
+      // case "View asset":
+      //   // If navigation is already in progress, return early to prevent multiple navigations
+      //   if (isNavigating.current) return;
 
-    // Set the navigation flag to true to indicate navigation has started
-    isNavigating.current = true;
+      //   // Set the navigation flag to true to indicate navigation has started
+      //   isNavigating.current = true;
 
-    setPaused(true);
+      //   setPaused(true);
 
-    setScanMessage("Redirecting to mapped asset...");
-    navigate(`/qr/${qrId}`);
+      //   setScanMessage("Redirecting to mapped asset...");
+      //   navigate(`/qr/${qrId}`);
+      //   break;
+      case "Assign custody":
+      case "Release custody":
+      case "Add to location":
+        /** WE send the error to the item. addItem will automatically handle the data based on its value */
+        addItem(qrId, error);
+        break;
+      default:
+        break;
+    }
   }
 
   return (
@@ -82,6 +107,10 @@ const QRScanner = () => {
           paused={paused}
           setPaused={setPaused}
           scanMessage={scanMessage}
+          actionSwitcher={actionSwitcher}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
         />
       </div>
     </>

@@ -1,4 +1,5 @@
 // components/scanner/drawer.tsx
+import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
@@ -28,7 +29,7 @@ export const addScannedAssetsToBookingSchema = z.object({
 /**
  * Drawer component for managing scanned assets to be added to bookings
  */
-export default function ScannedAssetsDrawer({
+export default function AssignCustodyDrawer({
   className,
   style,
   isLoading,
@@ -39,7 +40,7 @@ export default function ScannedAssetsDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking } = useLoaderData<typeof loader>();
+  // const { booking } = useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
@@ -52,13 +53,15 @@ export default function ScannedAssetsDrawer({
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetWithBooking);
+  // @TODO fix this type !!!!!!!!!!!!!!!!!
 
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitForBooking);
+  // @TODO fix this type !!!!!!!!!!!!!!!!!
 
   // List of asset IDs for the form
-  const assetIdsForBooking = Array.from(
+  const assetIds = Array.from(
     new Set([
       ...assets.map((a) => a.id),
       ...kits.flatMap((k) => k.assets.map((a) => a.id)),
@@ -69,58 +72,65 @@ export default function ScannedAssetsDrawer({
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
   // Asset blockers
-  const assetsAlreadyAddedIds = assets
-    .filter((asset) => !!asset)
-    .filter((asset) => booking.assets.some((a) => a?.id === asset.id))
-    .map((a) => !!a && a.id);
+  const assetsAlreadyInCustody = assets
+    .filter((asset) => !!asset && asset.status === AssetStatus.IN_CUSTODY)
+    .map((asset) => asset.id);
 
-  const assetsPartOfKitIds = assets
+  // Asset is checked out
+  const assetsAreCheckedOut = assets
+    .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
+    .map((asset) => asset.id);
+
+  // Asset is part of a kit
+  const assetsArePartOfKit = assets
     .filter((asset) => !!asset && asset.kitId && asset.id)
     .map((asset) => asset.id);
 
-  const unavailableAssetsIds = assets
-    .filter((asset) => !asset.availableToBook)
-    .map((a) => !!a && a.id);
-
   // Kit blockers
-  const kitsWithUnavailableAssets = kits
-    .filter((kit) => kit.assets.some((a) => !a.availableToBook))
+  // Kit is in custody
+  const kitsIsAlreadyInCustody = kits
+    .filter((kit) => kit.status === AssetStatus.IN_CUSTODY)
     .map((kit) => kit.id);
 
-  const qrIdsOfUnavailableKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitsWithUnavailableAssets.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
+  // Kit has assets inside that that are in custody
+  const kitsWithAssetsInCustody = kits
+    .filter((kit) =>
+      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+    )
+    .map((kit) => kit.id);
+  // Kit is checked out
+  const kitsAreCheckedOut = kits
+    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
+    .map((kit) => kit.id);
 
   // Create blockers configuration
   const blockerConfigs = [
     {
-      condition: unavailableAssetsIds.length > 0,
-      count: unavailableAssetsIds.length,
+      condition: assetsAlreadyInCustody.length > 0,
+      count: assetsAlreadyInCustody.length,
       message: (count: number) => (
         <>
           <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          marked as <strong>unavailable</strong>.
+          already <strong>in custody</strong>.
         </>
       ),
-      onResolve: () => removeAssetsFromList(unavailableAssetsIds),
+      onResolve: () => removeAssetsFromList(assetsAlreadyInCustody),
     },
     {
-      condition: assetsAlreadyAddedIds.length > 0,
-      count: assetsAlreadyAddedIds.length,
+      condition: assetsAreCheckedOut.length > 0,
+      count: assetsAreCheckedOut.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> already
-          added to the booking.
+          <strong>{`${count} asset${count > 1 ? "s are" : "is"}`}</strong>{" "}
+          checked out.
         </>
       ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
+      description: "Note: Checked out assets cannot be assigned custody.",
+      onResolve: () => removeAssetsFromList(assetsAreCheckedOut),
     },
     {
-      condition: assetsPartOfKitIds.length > 0,
-      count: assetsPartOfKitIds.length,
+      condition: assetsArePartOfKit.length > 0,
+      count: assetsArePartOfKit.length,
       message: (count: number) => (
         <>
           <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
@@ -128,18 +138,41 @@ export default function ScannedAssetsDrawer({
         </>
       ),
       description: "Note: Scan Kit QR to add the full kit",
-      onResolve: () => removeAssetsFromList(assetsPartOfKitIds),
+      onResolve: () => removeAssetsFromList(assetsArePartOfKit),
     },
     {
-      condition: kitsWithUnavailableAssets.length > 0,
-      count: kitsWithUnavailableAssets.length,
+      condition: kitsIsAlreadyInCustody.length > 0,
+      count: kitsIsAlreadyInCustody.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} kit${count > 1 ? "s have" : " has"} `}</strong>{" "}
-          unavailable assets inside {count > 1 ? "them" : "it"}.
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
+          already <strong>in custody</strong>.
         </>
       ),
-      onResolve: () => removeItemsFromList(qrIdsOfUnavailableKits),
+      onResolve: () => removeItemsFromList(kitsIsAlreadyInCustody),
+    },
+    {
+      condition: kitsWithAssetsInCustody.length > 0,
+      count: kitsWithAssetsInCustody.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
+          already have assets <strong>in custody</strong>.
+        </>
+      ),
+      onResolve: () => removeItemsFromList(kitsWithAssetsInCustody),
+    },
+    {
+      condition: kitsAreCheckedOut.length > 0,
+      count: kitsAreCheckedOut.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
+          checked out.
+        </>
+      ),
+      onResolve: () => removeItemsFromList(kitsAreCheckedOut),
+      description: "Note: Checked out kits cannot be assigned custody.",
     },
     {
       condition: errors.length > 0,
@@ -158,13 +191,15 @@ export default function ScannedAssetsDrawer({
     blockerConfigs,
     onResolveAll: () => {
       removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsPartOfKitIds,
-        ...unavailableAssetsIds,
+        ...assetsAlreadyInCustody,
+        ...assetsAreCheckedOut,
+        ...assetsArePartOfKit,
       ]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfUnavailableKits,
+        ...kitsIsAlreadyInCustody,
+        ...kitsWithAssetsInCustody,
+        ...kitsAreCheckedOut,
       ]);
     },
   });
@@ -216,7 +251,7 @@ export default function ScannedAssetsDrawer({
   return (
     <ConfigurableDrawer
       schema={addScannedAssetsToBookingSchema}
-      formData={{ assetIds: assetIdsForBooking }}
+      formData={{ assetIds }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -235,7 +270,6 @@ export default function ScannedAssetsDrawer({
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetWithBooking }) {
-  const { booking } = useLoaderData<typeof loader>();
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -252,11 +286,11 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
         >
           asset
         </span>
-        <LocalAvailabilityLabel
+        {/* <LocalAvailabilityLabel
           isPartOfKit={!!asset.kitId}
           isAlreadyAdded={booking.assets.some((a) => a?.id === asset.id)}
           isMarkedAsUnavailable={!asset.availableToBook}
-        />
+        /> */}
       </div>
     </div>
   );

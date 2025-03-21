@@ -14,9 +14,20 @@ import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/he
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
+import type { ActionType, useActionSwitcher } from "./drawer/action-switcher";
+
+export type OnQrDetectionSuccessProps = {
+  qrId: string;
+  error?: string;
+};
+
+export type OnQRDetectionSuccess = ({
+  qrId,
+  error,
+}: OnQrDetectionSuccessProps) => void | Promise<void>;
 
 type CodeScannerProps = {
-  onQrDetectionSuccess: (qrId: string, error?: string) => void | Promise<void>;
+  onQrDetectionSuccess: OnQRDetectionSuccess;
   isLoading?: boolean;
   backButtonText?: string;
   allowNonShelfCodes?: boolean;
@@ -35,6 +46,8 @@ type CodeScannerProps = {
 
   /** Custom callback for the scanner mode */
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
+
+  actionSwitcher?: ReturnType<typeof useActionSwitcher>;
 };
 
 type Mode = "camera" | "scanner";
@@ -52,6 +65,8 @@ export const CodeScanner = ({
 
   scannerModeClassName,
   scannerModeCallback,
+
+  actionSwitcher,
 }: CodeScannerProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const { isMd } = useViewportHeight();
@@ -79,15 +94,33 @@ export const CodeScanner = ({
     >
       <div className="relative size-full overflow-hidden">
         <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
-          <div>
+          <div
+            className={tw(
+              // Different UI for mobile when actionSwitcher is present
+              actionSwitcher &&
+                !isMd &&
+                "flex w-full items-center justify-between gap-4"
+            )}
+          >
             {!hideBackButtonText && (
               <Link
                 to=".."
-                className="inline-flex items-center justify-start text-[11px] leading-[11px] "
+                className={tw(
+                  "inline-flex items-center justify-start text-[11px] leading-[11px]",
+                  actionSwitcher && isMd
+                    ? "absolute bottom-[-20px] left-[2px] text-white"
+                    : ""
+                )}
               >
                 <TriangleLeftIcon className="size-[14px]" />
                 <span>{backButtonText}</span>
               </Link>
+            )}
+
+            {actionSwitcher && (
+              <div>
+                <actionSwitcher.Component />
+              </div>
             )}
           </div>
 
@@ -128,6 +161,7 @@ export const CodeScanner = ({
                 : scannerModeClassName
             }
             callback={scannerModeCallback}
+            action={actionSwitcher?.action}
           />
         ) : (
           <CameraMode
@@ -136,6 +170,7 @@ export const CodeScanner = ({
             setPaused={setPaused}
             onQrDetectionSuccess={onQrDetectionSuccess}
             allowNonShelfCodes={allowNonShelfCodes}
+            action={actionSwitcher?.action}
           />
         )}
         {paused && (
@@ -166,7 +201,7 @@ function ScannerMode({
   className,
   callback,
 }: {
-  onQrDetectionSuccess: (qrId: string) => void;
+  onQrDetectionSuccess: OnQRDetectionSuccess;
   allowNonShelfCodes: boolean;
   paused: boolean;
   className?: string;
@@ -177,6 +212,7 @@ function ScannerMode({
    * By default if not passed, input element will always be cleared after handleDetection
    * */
   callback?: (input: HTMLInputElement, paused: boolean) => void;
+  action?: ActionType;
 }) {
   const [inputIsFocused, setInputIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -255,8 +291,9 @@ function CameraMode({
   setIsLoading: (loading: boolean) => void;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  onQrDetectionSuccess: (qrId: string) => void;
+  onQrDetectionSuccess: OnQRDetectionSuccess;
   allowNonShelfCodes: boolean;
+  action?: ActionType;
 }) {
   const videoRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
