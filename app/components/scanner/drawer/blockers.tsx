@@ -12,8 +12,8 @@ import type {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
-import { Button } from "../shared/button";
-import When from "../when/when";
+import { Button } from "../../shared/button";
+import When from "../../when/when";
 
 interface Props {
   assets: AssetWithBooking[];

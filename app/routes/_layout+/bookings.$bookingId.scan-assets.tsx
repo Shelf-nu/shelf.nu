@@ -12,10 +12,10 @@ import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { CodeScanner } from "~/components/scanner/code-scanner";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
-} from "~/components/scanner/drawer";
-import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
+} from "~/components/scanner/drawer/drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,

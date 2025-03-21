@@ -10,9 +10,9 @@ import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import { CodeScanner } from "../scanner/code-scanner";
 import { Button } from "../shared/button";
 import When from "../when/when";
-import { CodeScanner } from "../zxing-scanner/code-scanner";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;

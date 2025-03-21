@@ -9,7 +9,7 @@ import { Link, useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
+import { CodeScanner } from "~/components/scanner/code-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
