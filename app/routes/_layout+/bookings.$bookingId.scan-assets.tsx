@@ -15,7 +15,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
-} from "~/components/scanner/drawer/drawer";
+} from "~/components/scanner/drawer/uses/scanned-assets-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,

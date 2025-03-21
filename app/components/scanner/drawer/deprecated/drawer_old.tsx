@@ -21,14 +21,14 @@ import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-ki
 import { type loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
 import { tw } from "~/utils/tw";
 import { useBlockers } from "./blockers";
-import { AvailabilityBadge } from "../../booking/availability-label";
-import { AssetLabel } from "../../icons/library";
-import { ListHeader } from "../../list/list-header";
-import { Button } from "../../shared/button";
+import { AvailabilityBadge } from "../../../booking/availability-label";
+import { AssetLabel } from "../../../icons/library";
+import { ListHeader } from "../../../list/list-header";
+import { Button } from "../../../shared/button";
 
-import { Table, Td, Th } from "../../table";
-import When from "../../when/when";
-import { useGlobalModeViaObserver } from "../code-scanner";
+import { Table, Td, Th } from "../../../table";
+import When from "../../../when/when";
+import { useGlobalModeViaObserver } from "../../code-scanner";
 
 type ScannedAssetsDrawerProps = {
   className?: string;
