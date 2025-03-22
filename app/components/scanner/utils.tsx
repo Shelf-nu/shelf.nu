@@ -156,6 +156,7 @@ export const processFrame = async ({
   allowNonShelfCodes: boolean;
   setError: (error: string) => void;
 }) => {
+  // If already paused, don't process more frames
   if (paused) {
     /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
     if (animationFrame.current) {
@@ -206,13 +207,16 @@ export const processFrame = async ({
     if (results.length > 0) {
       const result = results[0];
       drawDetectionBox(ctx, result.position);
+
+      // Don't set paused yet - let handleDetection decide
       await handleDetection({
         result: result.text,
         onQrDetectionSuccess,
         allowNonShelfCodes,
-        paused,
+        paused, // Use the current paused state
       });
-      setPaused(true);
+
+      // The onQrDetectionSuccess callback will handle pausing based on the action
     }
   } catch (error) {
     // eslint-disable-next-line no-console

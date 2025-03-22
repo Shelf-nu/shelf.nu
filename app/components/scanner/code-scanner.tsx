@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
+import { useAtom } from "jotai";
 import lodash from "lodash";
 import { Camera, CameraIcon, QrCode, ScanQrCode } from "lucide-react";
 import Webcam from "react-webcam";
@@ -14,7 +15,8 @@ import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/he
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
-import type { ActionType, useActionSwitcher } from "./drawer/action-switcher";
+import { scannerActionAtom } from "./drawer/action-atom";
+import type { ActionType } from "./drawer/action-switcher";
 
 export type OnQrDetectionSuccessProps = {
   qrId: string;
@@ -47,7 +49,7 @@ type CodeScannerProps = {
   /** Custom callback for the scanner mode */
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
 
-  actionSwitcher?: ReturnType<typeof useActionSwitcher>;
+  actionSwitcher?: React.ReactNode;
 };
 
 type Mode = "camera" | "scanner";
@@ -71,6 +73,7 @@ export const CodeScanner = ({
   const [isLoading, setIsLoading] = useState(false);
   const { isMd } = useViewportHeight();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [action] = useAtom(scannerActionAtom);
 
   const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
 
@@ -117,11 +120,7 @@ export const CodeScanner = ({
               </Link>
             )}
 
-            {actionSwitcher && (
-              <div>
-                <actionSwitcher.Component />
-              </div>
-            )}
+            {actionSwitcher && <div>{actionSwitcher}</div>}
           </div>
 
           {/* We only show option to switch to scanner on big screens. Its not possible on mobile */}
@@ -161,7 +160,7 @@ export const CodeScanner = ({
                 : scannerModeClassName
             }
             callback={scannerModeCallback}
-            action={actionSwitcher?.action}
+            action={action}
           />
         ) : (
           <CameraMode
@@ -170,7 +169,7 @@ export const CodeScanner = ({
             setPaused={setPaused}
             onQrDetectionSuccess={onQrDetectionSuccess}
             allowNonShelfCodes={allowNonShelfCodes}
-            action={actionSwitcher?.action}
+            action={action}
           />
         )}
         {paused && (

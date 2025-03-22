@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -6,14 +6,15 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
-import { useActionSwitcher } from "~/components/scanner/drawer/action-switcher";
+import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
+import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -62,34 +63,44 @@ const QRScanner = () => {
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false); // Add a ref to track navigation status
   const addItem = useSetAtom(addScannedItemAtom);
-  const actionSwitcher = useActionSwitcher();
-  console.log("action", actionSwitcher.action);
+  const action = useAtomValue(scannerActionAtom);
+
+  // Custom setPaused function that only pauses for "View asset"
+  const handleSetPaused = useCallback(
+    (value: boolean) => {
+      if (action === "View asset") {
+        setPaused(value);
+      }
+      // For other actions, do nothing when trying to pause
+    },
+    [action]
+  );
 
   function handleQrDetectionSuccess({
     qrId,
     error,
   }: OnQrDetectionSuccessProps) {
-    const action = actionSwitcher.action;
-    console.log("action on handle", action);
     switch (action) {
-      // case "View asset":
-      //   // If navigation is already in progress, return early to prevent multiple navigations
-      //   if (isNavigating.current) return;
+      case "View asset":
+        // If navigation is already in progress, return early
+        if (isNavigating.current) {
+          return;
+        }
 
-      //   // Set the navigation flag to true to indicate navigation has started
-      //   isNavigating.current = true;
+        // Set the navigation flag to true and navigate
+        isNavigating.current = true;
+        handleSetPaused(true); // Pause the scanner
+        setScanMessage("Redirecting to mapped asset...");
+        navigate(`/qr/${qrId}`);
+        break;
 
-      //   setPaused(true);
-
-      //   setScanMessage("Redirecting to mapped asset...");
-      //   navigate(`/qr/${qrId}`);
-      //   break;
       case "Assign custody":
       case "Release custody":
       case "Add to location":
-        /** WE send the error to the item. addItem will automatically handle the data based on its value */
+        // For bulk actions, just add the item without pausing
         addItem(qrId, error);
         break;
+
       default:
         break;
     }
@@ -105,9 +116,9 @@ const QRScanner = () => {
         <CodeScanner
           onQrDetectionSuccess={handleQrDetectionSuccess}
           paused={paused}
-          setPaused={setPaused}
+          setPaused={handleSetPaused}
           scanMessage={scanMessage}
-          actionSwitcher={actionSwitcher}
+          actionSwitcher={<ActionSwitcher />}
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }

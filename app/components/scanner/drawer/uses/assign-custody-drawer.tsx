@@ -1,6 +1,5 @@
 // components/scanner/drawer.tsx
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -15,7 +14,6 @@ import { AssetLabel } from "~/components/icons/library";
 import When from "~/components/when/when";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
 import { tw } from "~/utils/tw";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
