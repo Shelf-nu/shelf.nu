@@ -173,7 +173,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string | JSX.Element;
+  tooltipContent: string | React.ReactNode;
   className?: string;
 }) {
   return (

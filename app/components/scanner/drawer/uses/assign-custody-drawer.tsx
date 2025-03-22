@@ -9,12 +9,15 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { AssetLabel } from "~/components/icons/library";
-import When from "~/components/when/when";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import { tw } from "~/utils/tw";
+import {
+  assetLabelPresets,
+  createAvailabilityLabels,
+  kitLabelPresets,
+} from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
@@ -38,8 +41,6 @@ export default function AssignCustodyDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  // const { booking } = useLoaderData<typeof loader>();
-
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -51,12 +52,10 @@ export default function AssignCustodyDrawer({
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetWithBooking);
-  // @TODO fix this type !!!!!!!!!!!!!!!!!
 
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitForBooking);
-  // @TODO fix this type !!!!!!!!!!!!!!!!!
 
   // List of asset IDs for the form
   const assetIds = Array.from(
@@ -268,6 +267,21 @@ export default function AssignCustodyDrawer({
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetWithBooking }) {
+  // Use predefined presets to create label configurations
+  const availabilityConfigs = [
+    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
+    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.partOfKit(!!asset.kitId),
+  ];
+
+  // Create the availability labels component with max 2 labels
+  const [, AssetAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+      sortByPriority: true,
+    }
+  );
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -284,20 +298,26 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
         >
           asset
         </span>
-        {/* <LocalAvailabilityLabel
-          isPartOfKit={!!asset.kitId}
-          isAlreadyAdded={booking.assets.some((a) => a?.id === asset.id)}
-          isMarkedAsUnavailable={!asset.availableToBook}
-        /> */}
+        <AssetAvailabilityLabels />
       </div>
     </div>
   );
 }
 
 export function KitRow({ kit }: { kit: KitForBooking }) {
-  const someAssetMarkedUnavailable = kit.assets.some(
-    (asset) => !asset.availableToBook
-  );
+  // Use predefined presets to create label configurations
+  const availabilityConfigs = [
+    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
+    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
+    kitLabelPresets.hasAssetsInCustody(
+      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+    ),
+  ];
+
+  // Create the availability labels component with default options
+  const [, KitAvailabilityLabels] =
+    createAvailabilityLabels(availabilityConfigs);
+
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -317,53 +337,8 @@ export function KitRow({ kit }: { kit: KitForBooking }) {
         >
           kit
         </span>
-        {someAssetMarkedUnavailable && (
-          <AvailabilityBadge
-            badgeText="Contains non-bookable assets"
-            tooltipTitle="Kit is unavailable for check-out"
-            tooltipContent="Some assets in this kit are marked as non-bookable. You can still add the kit to your booking, but you must remove the non-bookable assets to proceed with check-out."
-          />
-        )}
+        <KitAvailabilityLabels />
       </div>
     </div>
   );
 }
-
-// Also include the local availability label
-const LocalAvailabilityLabel = ({
-  isPartOfKit,
-  isAlreadyAdded,
-  isMarkedAsUnavailable,
-}: {
-  isPartOfKit: boolean;
-  isAlreadyAdded: boolean;
-  isMarkedAsUnavailable: boolean;
-}) => (
-  <div className="flex gap-1">
-    <When truthy={isMarkedAsUnavailable}>
-      <AvailabilityBadge
-        badgeText={"Unavailable"}
-        tooltipTitle={"Asset is unavailable for bookings"}
-        tooltipContent={
-          "This asset is marked as unavailable for bookings by an administrator."
-        }
-      />
-    </When>
-
-    <When truthy={isAlreadyAdded}>
-      <AvailabilityBadge
-        badgeText="Already added to this booking"
-        tooltipTitle="Asset is part of booking"
-        tooltipContent="This asset is already added to the current booking."
-      />
-    </When>
-
-    <When truthy={isPartOfKit}>
-      <AvailabilityBadge
-        badgeText="Part of kit"
-        tooltipTitle="Asset is part of a kit"
-        tooltipContent="Remove the asset from the kit to add it individually."
-      />
-    </When>
-  </div>
-);
