@@ -111,7 +111,6 @@ export function CustodyCard({
         user: {
           firstName: booking.custodianUser?.firstName || "",
           lastName: booking.custodianUser?.lastName || "",
-          profilePicture: booking.custodianUser?.profilePicture || null,
         },
       });
     } else if (booking.custodianTeamMember) {

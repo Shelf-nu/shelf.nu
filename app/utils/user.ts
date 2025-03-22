@@ -11,9 +11,7 @@ export const randomUsernameFromEmail = (email: string): string =>
 export const resolveTeamMemberName = (
   teamMember: {
     name: string;
-    user?: Partial<
-      Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-    > | null;
+    user?: Partial<Pick<User, "firstName" | "lastName" | "email">> | null;
   },
   includeEmail?: boolean
 ): string => {
