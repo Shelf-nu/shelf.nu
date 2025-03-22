@@ -118,7 +118,7 @@ export default function AssignCustodyDrawer({
       count: assetsAreCheckedOut.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${count > 1 ? "s are" : "is"}`}</strong>{" "}
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
           checked out.
         </>
       ),

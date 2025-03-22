@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -6,7 +6,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -58,53 +58,65 @@ const QRScanner = () => {
   const [scanMessage, setScanMessage] = useState<string>(
     "Processing QR code..."
   );
-
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
-  const isNavigating = useRef(false); // Add a ref to track navigation status
+  const isNavigating = useRef(false);
   const addItem = useSetAtom(addScannedItemAtom);
-  const action = useAtomValue(scannerActionAtom);
+
+  // Get action directly from the atom
+  const [action] = useAtom(scannerActionAtom);
+
+  // Store the current action in a ref that's always up-to-date
+  // This is required in order to handle the action correctly, even tho we use global state
+  const actionRef = useRef(action);
+
+  // Update the ref whenever the action changes
+  useEffect(() => {
+    actionRef.current = action;
+
+    // Reset the navigating state when action changes
+    if (action !== "View asset") {
+      isNavigating.current = false;
+    }
+  }, [action]);
 
   // Custom setPaused function that only pauses for "View asset"
   const handleSetPaused = useCallback(
     (value: boolean) => {
-      if (action === "View asset") {
+      // Always use the ref value for the most current action
+      if (actionRef.current === "View asset") {
         setPaused(value);
       }
-      // For other actions, do nothing when trying to pause
     },
-    [action]
+    [] // No dependencies needed since we use the ref
   );
 
-  function handleQrDetectionSuccess({
-    qrId,
-    error,
-  }: OnQrDetectionSuccessProps) {
-    switch (action) {
-      case "View asset":
-        // If navigation is already in progress, return early
+  // Define the handler using useCallback to prevent recreating it on every render
+  const handleQrDetectionSuccess = useCallback(
+    ({ qrId, error }: OnQrDetectionSuccessProps) => {
+      // IMPORTANT: Always use the current value from the ref
+      const currentAction = actionRef.current;
+
+      if (currentAction === "View asset") {
         if (isNavigating.current) {
           return;
         }
 
-        // Set the navigation flag to true and navigate
         isNavigating.current = true;
-        handleSetPaused(true); // Pause the scanner
+        handleSetPaused(true);
         setScanMessage("Redirecting to mapped asset...");
         navigate(`/qr/${qrId}`);
-        break;
-
-      case "Assign custody":
-      case "Release custody":
-      case "Add to location":
-        // For bulk actions, just add the item without pausing
+      } else if (
+        ["Assign custody", "Release custody", "Add to location"].includes(
+          currentAction
+        )
+      ) {
+        // @TODO we only need to do this if its not already added cuz we dont want to add it cause multiple fetches
         addItem(qrId, error);
-        break;
-
-      default:
-        break;
-    }
-  }
+      }
+    },
+    [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
+  );
 
   return (
     <>
