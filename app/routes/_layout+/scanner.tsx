@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -6,16 +6,22 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
+import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { CodeScanner } from "~/components/scanner/code-scanner";
+import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
+import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -56,18 +62,48 @@ const QRScanner = () => {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false); // Add a ref to track navigation status
+  const addItem = useSetAtom(addScannedItemAtom);
+  const action = useAtomValue(scannerActionAtom);
 
-  function handleQrDetectionSuccess(qrId: string) {
-    // If navigation is already in progress, return early to prevent multiple navigations
-    if (isNavigating.current) return;
+  // Custom setPaused function that only pauses for "View asset"
+  const handleSetPaused = useCallback(
+    (value: boolean) => {
+      if (action === "View asset") {
+        setPaused(value);
+      }
+      // For other actions, do nothing when trying to pause
+    },
+    [action]
+  );
 
-    // Set the navigation flag to true to indicate navigation has started
-    isNavigating.current = true;
+  function handleQrDetectionSuccess({
+    qrId,
+    error,
+  }: OnQrDetectionSuccessProps) {
+    switch (action) {
+      case "View asset":
+        // If navigation is already in progress, return early
+        if (isNavigating.current) {
+          return;
+        }
 
-    setPaused(true);
+        // Set the navigation flag to true and navigate
+        isNavigating.current = true;
+        handleSetPaused(true); // Pause the scanner
+        setScanMessage("Redirecting to mapped asset...");
+        navigate(`/qr/${qrId}`);
+        break;
 
-    setScanMessage("Redirecting to mapped asset...");
-    navigate(`/qr/${qrId}`);
+      case "Assign custody":
+      case "Release custody":
+      case "Add to location":
+        // For bulk actions, just add the item without pausing
+        addItem(qrId, error);
+        break;
+
+      default:
+        break;
+    }
   }
 
   return (
@@ -80,8 +116,12 @@ const QRScanner = () => {
         <CodeScanner
           onQrDetectionSuccess={handleQrDetectionSuccess}
           paused={paused}
-          setPaused={setPaused}
+          setPaused={handleSetPaused}
           scanMessage={scanMessage}
+          actionSwitcher={<ActionSwitcher />}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
         />
       </div>
     </>
