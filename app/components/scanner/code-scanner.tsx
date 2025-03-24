@@ -486,9 +486,15 @@ export function useGlobalModeViaObserver(): Mode {
   const observerRef = useRef<MutationObserver | null>(null);
 
   useEffect(() => {
+    // First, check the current state when the component mounts
     const targetNode = document.querySelector("div[data-mode]");
-
     if (targetNode) {
+      const currentMode = targetNode.getAttribute("data-mode") as Mode | null;
+      if (currentMode) {
+        setMode(currentMode);
+      }
+
+      // Then set up the observer for future changes
       const config: MutationObserverInit = {
         attributes: true,
         attributeFilter: ["data-mode"],
@@ -517,7 +523,7 @@ export function useGlobalModeViaObserver(): Mode {
         }
       };
     }
-  }, []);
+  }, []); // Empty dependency array to run only on mount
 
   return mode;
 }
