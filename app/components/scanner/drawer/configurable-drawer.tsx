@@ -49,6 +49,9 @@ type ConfigurableDrawerProps<T> = {
   style?: React.CSSProperties;
   // Form name (for the zorm)
   formName?: string;
+
+  // Optional form component to completely replace the default form
+  form?: React.ReactNode;
 };
 
 /**
@@ -73,6 +76,7 @@ export default function ConfigurableDrawer<T>({
   className,
   style,
   formName = "ConfigurableDrawerForm",
+  form,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
@@ -133,42 +137,46 @@ export default function ConfigurableDrawer<T>({
         {Blockers && <Blockers />}
 
         {/* Action form */}
-        <When truthy={hasItems}>
-          <Form
-            ref={zo.ref}
-            className="mb-4 flex max-h-full w-full"
-            method={method}
-            action={actionUrl}
-            onSubmit={onSubmit}
-          >
-            <div className="flex w-full gap-2 p-3">
-              {/* Render form fields from formData */}
-              {Object.entries(formData).map(([key, value]) => {
-                if (Array.isArray(value)) {
-                  return value.map((val, index) => (
-                    <input
-                      key={`${key}-${index}`}
-                      type="hidden"
-                      name={`${key}[${index}]`}
-                      value={val}
-                    />
-                  ));
-                }
-                return (
-                  <input key={key} type="hidden" name={key} value={value} />
-                );
-              })}
+        {form ? (
+          form
+        ) : (
+          <When truthy={hasItems}>
+            <Form
+              ref={zo.ref}
+              className="mb-4 flex max-h-full w-full"
+              method={method}
+              action={actionUrl}
+              onSubmit={onSubmit}
+            >
+              <div className="flex w-full gap-2 p-3">
+                {/* Render form fields from formData */}
+                {Object.entries(formData).map(([key, value]) => {
+                  if (Array.isArray(value)) {
+                    return value.map((val, index) => (
+                      <input
+                        key={`${key}-${index}`}
+                        type="hidden"
+                        name={`${key}[${index}]`}
+                        value={val}
+                      />
+                    ));
+                  }
+                  return (
+                    <input key={key} type="hidden" name={key} value={value} />
+                  );
+                })}
 
-              <Button
-                width="full"
-                type="submit"
-                disabled={isLoading || disableSubmit}
-              >
-                {submitButtonText}
-              </Button>
-            </div>
-          </Form>
-        </When>
+                <Button
+                  width="full"
+                  type="submit"
+                  disabled={isLoading || disableSubmit}
+                >
+                  {submitButtonText}
+                </Button>
+              </div>
+            </Form>
+          </When>
+        )}
       </>
     </BaseDrawer>
   );

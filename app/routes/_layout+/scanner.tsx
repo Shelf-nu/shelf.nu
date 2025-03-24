@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -15,20 +16,39 @@ import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanne
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export type ScannerLoader = typeof loader;
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
   try {
+    const { organizationId, role } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
     const header: HeaderData = {
       title: "Locations",
     };
@@ -36,8 +56,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /** We get the userPrefs cookie so we can see if there is already a default camera */
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
 
-    return json({ header, scannerCameraId: cookie.scannerCameraId });
+    const { teamMemberIds } = paramsValues;
+    const teamMemberData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: teamMemberIds,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
+      isSelfService: role === OrganizationRoles.SELF_SERVICE, // we can assume this is false because this view is not allowed for
+      userId,
+    });
+
+    return json({
+      header,
+      scannerCameraId: cookie.scannerCameraId,
+      ...teamMemberData,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

@@ -33,6 +33,7 @@ export function ActionSwitcher() {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isLoading = useDisabled();
+  // @TODO - we need to handle BASE vs Self service vs admin user
 
   // const isBulkAction = useMemo(
   //   () => getActionScope(action) === "bulk",

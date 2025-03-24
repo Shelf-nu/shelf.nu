@@ -1,6 +1,8 @@
-// components/scanner/drawer.tsx
+import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
@@ -9,10 +11,19 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { Form } from "~/components/custom-form";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { AssetLabel } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { createCustodianSchema } from "~/modules/custody/schema";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
+import type { ScannerLoader } from "~/routes/_layout+/scanner";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import {
   assetLabelPresets,
   createAvailabilityLabels,
@@ -23,8 +34,14 @@ import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
 // Export the schema so it can be reused
-export const addScannedAssetsToBookingSchema = z.object({
+export const AssignCustodyToSignedItemsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
+});
+
+const BulkAssignCustodySchema = z.object({
+  assetIds: z.array(z.string()).min(1),
+  kitsIds: z.array(z.string()).min(1),
+  custodian: createCustodianSchema(),
 });
 
 /**
@@ -262,7 +279,7 @@ export default function AssignCustodyDrawer({
 
   return (
     <ConfigurableDrawer
-      schema={addScannedAssetsToBookingSchema}
+      schema={AssignCustodyToSignedItemsSchema}
       formData={{ assetIds }}
       items={items}
       onClearItems={clearList}
@@ -271,12 +288,93 @@ export default function AssignCustodyDrawer({
       isLoading={isLoading}
       renderItem={renderItemRow}
       Blockers={Blockers}
-      disableSubmit={hasBlockers}
       defaultExpanded={defaultExpanded}
       className={className}
       style={style}
-      formName="AddScannedAssetsToBooking"
+      form={<CustodyForm disableSubmit={hasBlockers} />}
     />
+  );
+}
+
+function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
+  const fetcher = useFetcherWithReset<any>();
+  // @ts-ignore -- @TODO: Fix this
+  const disabled = isFormProcessing(fetcher);
+  const { isSelfService } = useUserRoleHelper();
+  const { teamMembers } = useLoaderData<ScannerLoader>();
+  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
+
+  const fetcherError = useMemo(() => fetcher?.data?.error?.message, [fetcher]);
+
+  return (
+    <Form>
+      <div className="modal-content-wrapper">
+        <div className="relative z-50 my-8">
+          <h5 className="mb-1">Select team member</h5>
+          <DynamicSelect
+            defaultValue={
+              isSelfService && teamMembers?.length > 0
+                ? JSON.stringify({
+                    id: teamMembers[0].id,
+                    name: resolveTeamMemberName(teamMembers[0]),
+                  })
+                : undefined
+            }
+            disabled={disabled || isSelfService}
+            model={{
+              name: "teamMember",
+              queryKey: "name",
+              deletedAt: null,
+            }}
+            fieldName="custodian"
+            contentLabel="Team members"
+            initialDataKey="teamMembers"
+            countKey="totalTeamMembers"
+            placeholder="Select a team member"
+            allowClear
+            closeOnSelect
+            transformItem={(item) => ({
+              ...item,
+              id: JSON.stringify({
+                id: item.id,
+                /**
+                 * This is parsed on the server, because we need the name to create the note.
+                 * @TODO This should be refactored to send the name as some metadata, instaed of like this
+                 */
+                name: resolveTeamMemberName(item),
+              }),
+            })}
+            renderItem={(item) => resolveTeamMemberName(item, true)}
+          />
+          {zo.errors.custodian()?.message ? (
+            <p className="text-sm text-error-500">
+              {zo.errors.custodian()?.message}
+            </p>
+          ) : null}
+          {fetcherError ? (
+            <p className="text-sm text-error-500">{fetcherError}</p>
+          ) : null}
+        </div>
+
+        <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
+          <Button
+            variant="secondary"
+            width="full"
+            disabled={disabled}
+            // onClick={handleCloseDialog}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            width="full"
+            disabled={disabled || disableSubmit}
+          >
+            Assign custody
+          </Button>
+        </div>
+      </div>
+    </Form>
   );
 }
 
