@@ -9,6 +9,7 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import { DateTime } from "luxon";
+import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
@@ -35,7 +36,7 @@ import {
   deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { isBookingEarlyCheckout } from "./helpers";
+import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
@@ -173,6 +174,7 @@ export async function upsertBooking(
       assetIds: Asset["id"][];
       isExpired: boolean;
       checkoutIntent?: CheckoutIntentEnum;
+      checkinIntent?: CheckinIntentEnum;
     }
   >,
   hints: ClientHint,
@@ -189,6 +191,7 @@ export async function upsertBooking(
       description,
       isExpired,
       checkoutIntent,
+      checkinIntent,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -308,13 +311,29 @@ export async function upsertBooking(
       if (
         booking.status === BookingStatus.ONGOING &&
         isBookingEarlyCheckout(oldBooking!.from!) &&
-        checkoutIntent === CheckoutIntentEnum["checkout-with-adjusted-date"]
+        checkoutIntent === CheckoutIntentEnum["with-adjusted-date"]
       ) {
         // Update originFrom to old booking's from date
         data.originalFrom = oldBooking?.from;
 
         // Update from date to current date
         data.from = new Date();
+      }
+
+      /**
+       * If user is doing an early checkin of booking then update
+       * the booking's to date accordingly
+       */
+      if (
+        booking.status === BookingStatus.COMPLETE &&
+        isBookingEarlyCheckin(oldBooking!.to!) &&
+        checkinIntent === CheckinIntentEnum["with-adjusted-date"]
+      ) {
+        // Update originTo to old booking's to date
+        data.originalTo = oldBooking?.to;
+
+        // Update the to date to current date
+        data.to = new Date();
       }
 
       //update

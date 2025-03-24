@@ -10,6 +10,7 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
@@ -244,7 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent, nameChangeOnly, checkoutIntent } = parseData(
+    const { intent, nameChangeOnly, checkoutIntent, checkinIntent } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -264,6 +265,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
         checkoutIntent: z.nativeEnum(CheckoutIntentEnum).optional(),
+        checkinIntent: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
       {
         additionalData: { userId },
@@ -323,6 +325,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         if (intent === "checkOut" && checkoutIntent) {
           Object.assign(upsertBookingData, { checkoutIntent });
+        }
+
+        if (intent === "checkIn" && checkinIntent) {
+          Object.assign(upsertBookingData, { checkinIntent });
         }
 
         // We are only changing the name so we do things simpler

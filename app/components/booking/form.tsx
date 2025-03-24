@@ -25,6 +25,7 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { ActionsDropdown } from "./actions-dropdown";
 import { Form } from "../custom-form";
+import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
@@ -280,16 +281,11 @@ export function BookingForm({
                 canCheckInBooking
               }
             >
-              <Button
+              <CheckinDialog
+                portalContainer={zo.form}
+                booking={{ id, name: name!, to: endDate! }}
                 disabled={disabled}
-                type="submit"
-                name="intent"
-                value="checkIn"
-                className="grow"
-                size="sm"
-              >
-                Check-in
-              </Button>
+              />
             </When>
           </AbsolutePositionedHeaderActions>
         ) : null}
