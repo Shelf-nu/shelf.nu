@@ -8,7 +8,6 @@ import { Button } from "~/components/shared/button";
 import { Table, Th } from "~/components/table";
 import When from "~/components/when/when";
 import BaseDrawer from "./base-drawer";
-import { ItemFetcher, useItemFetcher } from "./fetching-service";
 
 // Props for the configurable drawer
 type ConfigurableDrawerProps<T> = {
@@ -79,9 +78,6 @@ export default function ConfigurableDrawer<T>({
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
 
-  // Use the item fetcher
-  const { fetchItem } = useItemFetcher();
-
   // Create the title with item count
   const drawerTitle = `${title} (${itemsLength})`;
 
@@ -106,79 +102,74 @@ export default function ConfigurableDrawer<T>({
     </>
   );
   return (
-    <>
-      {/* ItemFetcher automatically fetches any items that don't have data yet */}
-      <ItemFetcher items={items} fetchItem={fetchItem} />
+    <BaseDrawer
+      className={className}
+      style={style}
+      defaultExpanded={defaultExpanded}
+      title={drawerTitle}
+      onClear={onClearItems}
+      hasItems={hasItems}
+      emptyStateContent={emptyStateContent || defaultEmptyState}
+    >
+      {/* No need to pass expanded state to this content since we don't use it */}
+      <>
+        {/* Item List */}
+        <Table className="overflow-y-auto">
+          <ListHeader hideFirstColumn className="border-none">
+            <Th className="p-0"> </Th>
+            <Th className="p-0"> </Th>
+          </ListHeader>
 
-      <BaseDrawer
-        className={className}
-        style={style}
-        defaultExpanded={defaultExpanded}
-        title={drawerTitle}
-        onClear={onClearItems}
-        hasItems={hasItems}
-        emptyStateContent={emptyStateContent || defaultEmptyState}
-      >
-        {/* No need to pass expanded state to this content since we don't use it */}
-        <>
-          {/* Item List */}
-          <Table className="overflow-y-auto">
-            <ListHeader hideFirstColumn className="border-none">
-              <Th className="p-0"> </Th>
-              <Th className="p-0"> </Th>
-            </ListHeader>
+          <tbody>
+            <AnimatePresence>
+              {Object.entries(items).map(([qrId, item]) =>
+                renderItem(qrId, item)
+              )}
+            </AnimatePresence>
+          </tbody>
+        </Table>
 
-            <tbody>
-              <AnimatePresence>
-                {Object.entries(items).map(([qrId, item]) =>
-                  renderItem(qrId, item)
-                )}
-              </AnimatePresence>
-            </tbody>
-          </Table>
+        {/* Blockers */}
+        {Blockers && <Blockers />}
 
-          {/* Blockers */}
-          {Blockers && <Blockers />}
+        {/* Action form */}
+        <When truthy={hasItems}>
+          <Form
+            ref={zo.ref}
+            className="mb-4 flex max-h-full w-full"
+            method={method}
+            action={actionUrl}
+            onSubmit={onSubmit}
+          >
+            <div className="flex w-full gap-2 p-3">
+              {/* Render form fields from formData */}
+              {Object.entries(formData).map(([key, value]) => {
+                if (Array.isArray(value)) {
+                  return value.map((val, index) => (
+                    <input
+                      key={`${key}-${index}`}
+                      type="hidden"
+                      name={`${key}[${index}]`}
+                      value={val}
+                    />
+                  ));
+                }
+                return (
+                  <input key={key} type="hidden" name={key} value={value} />
+                );
+              })}
 
-          {/* Action form */}
-          <When truthy={hasItems}>
-            <Form
-              ref={zo.ref}
-              className="mb-4 flex max-h-full w-full"
-              method={method}
-              action={actionUrl}
-              onSubmit={onSubmit}
-            >
-              <div className="flex w-full gap-2 p-3">
-                {/* Render form fields from formData */}
-                {Object.entries(formData).map(([key, value]) => {
-                  if (Array.isArray(value)) {
-                    return value.map((val, index) => (
-                      <input
-                        key={`${key}-${index}`}
-                        type="hidden"
-                        name={`${key}[${index}]`}
-                        value={val}
-                      />
-                    ));
-                  }
-                  return (
-                    <input key={key} type="hidden" name={key} value={value} />
-                  );
-                })}
-
-                <Button
-                  width="full"
-                  type="submit"
-                  disabled={isLoading || disableSubmit}
-                >
-                  {submitButtonText}
-                </Button>
-              </div>
-            </Form>
-          </When>
-        </>
-      </BaseDrawer>
-    </>
+              <Button
+                width="full"
+                type="submit"
+                disabled={isLoading || disableSubmit}
+              >
+                {submitButtonText}
+              </Button>
+            </div>
+          </Form>
+        </When>
+      </>
+    </BaseDrawer>
   );
 }

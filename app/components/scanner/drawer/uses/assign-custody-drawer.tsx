@@ -227,9 +227,7 @@ export default function AssignCustodyDrawer({
     <GenericItemRow
       key={qrId}
       qrId={qrId}
-      item={item?.data}
-      hasError={!!item?.error}
-      error={item?.error}
+      item={item}
       onRemove={removeItem}
       renderLoading={(qrId, error) => (
         <DefaultLoadingState qrId={qrId} error={error} />
