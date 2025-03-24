@@ -100,6 +100,23 @@ export default function AssignCustodyDrawer({
     .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
     .map((kit) => kit.id);
 
+  // Find the QR IDs that correspond to kit IDs with blockers
+  // This is necessary because we need to remove the QR IDs from the items object, not the kit IDs
+  const getQrIdsForKitIds = (kitIds: string[]) =>
+    Object.entries(items)
+      .filter(([, item]) => {
+        if (!item || item.type !== "kit") return false;
+        return kitIds.includes((item.data as KitForBooking)?.id);
+      })
+      .map(([qrId]) => qrId);
+
+  // Get the QR IDs for each type of kit blocker
+  const qrIdsOfKitsInCustody = getQrIdsForKitIds(kitsIsAlreadyInCustody);
+  const qrIdsOfKitsWithAssetsInCustody = getQrIdsForKitIds(
+    kitsWithAssetsInCustody
+  );
+  const qrIdsOfKitsCheckedOut = getQrIdsForKitIds(kitsAreCheckedOut);
+
   // Create blockers configuration
   const blockerConfigs = [
     {
@@ -138,37 +155,37 @@ export default function AssignCustodyDrawer({
       onResolve: () => removeAssetsFromList(assetsArePartOfKit),
     },
     {
-      condition: kitsIsAlreadyInCustody.length > 0,
-      count: kitsIsAlreadyInCustody.length,
+      condition: qrIdsOfKitsInCustody.length > 0,
+      count: qrIdsOfKitsInCustody.length,
       message: (count: number) => (
         <>
           <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
           already <strong>in custody</strong>.
         </>
       ),
-      onResolve: () => removeItemsFromList(kitsIsAlreadyInCustody),
+      onResolve: () => removeItemsFromList(qrIdsOfKitsInCustody),
     },
     {
-      condition: kitsWithAssetsInCustody.length > 0,
-      count: kitsWithAssetsInCustody.length,
+      condition: qrIdsOfKitsWithAssetsInCustody.length > 0,
+      count: qrIdsOfKitsWithAssetsInCustody.length,
       message: (count: number) => (
         <>
           <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
           already have assets <strong>in custody</strong>.
         </>
       ),
-      onResolve: () => removeItemsFromList(kitsWithAssetsInCustody),
+      onResolve: () => removeItemsFromList(qrIdsOfKitsWithAssetsInCustody),
     },
     {
-      condition: kitsAreCheckedOut.length > 0,
-      count: kitsAreCheckedOut.length,
+      condition: qrIdsOfKitsCheckedOut.length > 0,
+      count: qrIdsOfKitsCheckedOut.length,
       message: (count: number) => (
         <>
           <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
           checked out.
         </>
       ),
-      onResolve: () => removeItemsFromList(kitsAreCheckedOut),
+      onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
       description: "Note: Checked out kits cannot be assigned custody.",
     },
     {
@@ -194,9 +211,9 @@ export default function AssignCustodyDrawer({
       ]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
-        ...kitsIsAlreadyInCustody,
-        ...kitsWithAssetsInCustody,
-        ...kitsAreCheckedOut,
+        ...qrIdsOfKitsInCustody,
+        ...qrIdsOfKitsWithAssetsInCustody,
+        ...qrIdsOfKitsCheckedOut,
       ]);
     },
   });
@@ -277,7 +294,6 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
     availabilityConfigs,
     {
       maxLabels: 3,
-      sortByPriority: true,
     }
   );
   return (
@@ -313,8 +329,12 @@ export function KitRow({ kit }: { kit: KitForBooking }) {
   ];
 
   // Create the availability labels component with default options
-  const [, KitAvailabilityLabels] =
-    createAvailabilityLabels(availabilityConfigs);
+  const [, KitAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+    }
+  );
 
   return (
     <div className="flex flex-col gap-1">
