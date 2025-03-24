@@ -647,9 +647,16 @@ export const buildCsvExportDataFromBookings = (
           value = booking.displayTo;
           break;
         case "custodian":
-          value = booking.custodianTeamMember
-            ? resolveTeamMemberName(booking.custodianTeamMember)
-            : "";
+          const teamMember = {
+            name: booking.custodianTeamMember?.name ?? "",
+            user: {
+              firstName: booking.custodianUser?.firstName ?? "",
+              lastName: booking.custodianUser?.lastName ?? "",
+              email: booking.custodianUser?.email ?? "",
+            },
+          };
+
+          value = resolveTeamMemberName(teamMember, true);
           break;
         case "description":
           value = booking.description ?? "";
