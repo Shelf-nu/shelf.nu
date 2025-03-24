@@ -533,6 +533,13 @@ export async function upsertBooking(
       };
     }
 
+    /**
+     * Updated original dates to user entered `from` and `user`
+     * so that we can track of it later
+     */
+    data.originalFrom = data.from;
+    data.originalTo = data.to;
+
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
