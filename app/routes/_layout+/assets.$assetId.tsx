@@ -246,17 +246,25 @@ export const links: LinksFunction = () => [
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
 
+  /**
+   * Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
+   * Source: https://github.com/prisma/prisma/discussions/14371
+   */
+  const { roles } = useUserRoleHelper();
+
   let items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },
-    { to: "reminders", content: "Reminders" },
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.assetReminders,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "reminders", content: "Reminders" }]
+      : []),
   ];
 
-  /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
-   * Source: https://github.com/prisma/prisma/discussions/14371
-   */
-  const { roles } = useUserRoleHelper();
   return (
     <>
       <Header
