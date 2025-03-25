@@ -26,6 +26,7 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { ActionsDropdown } from "./actions-dropdown";
 import { Form } from "../custom-form";
+import BookingProcessSidebar from "./booking-process-sidebar";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -205,6 +206,10 @@ export function BookingForm({
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
+            <When truthy={isBaseOrSelfService}>
+              <BookingProcessSidebar />
+            </When>
+
             {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
             <ActionsDropdown />
 
