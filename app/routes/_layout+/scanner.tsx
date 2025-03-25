@@ -148,7 +148,6 @@ const QRScanner = () => {
           currentAction
         )
       ) {
-        // @TODO we only need to do this if its not already added cuz we dont want to add it cause multiple fetches
         addItem(qrId, error);
       }
     },

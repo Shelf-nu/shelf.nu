@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -15,6 +15,15 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { AssetLabel } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/shared/modal";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
@@ -38,11 +47,16 @@ export const AssignCustodyToSignedItemsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
-const BulkAssignCustodySchema = z.object({
-  assetIds: z.array(z.string()).min(1),
-  kitsIds: z.array(z.string()).min(1),
-  custodian: createCustodianSchema(),
-});
+const BulkAssignCustodySchema = z
+  .object({
+    assetIds: z.array(z.string()).optional().default([]),
+    kitsIds: z.array(z.string()).optional().default([]),
+    custodian: createCustodianSchema(),
+  })
+  .refine((data) => data.assetIds.length > 0 || data.kitsIds.length > 0, {
+    message: "At least one asset or kit must be selected",
+    path: ["assetIds"], // This will attach the error to the assetIds field
+  });
 
 /**
  * Drawer component for managing scanned assets to be added to bookings
@@ -298,83 +312,245 @@ export default function AssignCustodyDrawer({
 
 function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const fetcher = useFetcherWithReset<any>();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [custodyState, setCustodyState] = useState<{
+    assetMessage: string;
+    kitMessage: string;
+    custodianName: string;
+  }>({
+    assetMessage: "Assigning custody to assets...",
+    kitMessage: "Assigning custody to kits...",
+    custodianName: "",
+  });
+
   // @ts-ignore -- @TODO: Fix this
   const disabled = isFormProcessing(fetcher);
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<ScannerLoader>();
-  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
+  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
+    onValidSubmit: (e) => {
+      e.preventDefault();
+      setDialogOpen(true);
+
+      const { custodian, assetIds, kitsIds } = e.data;
+      setCustodyState((state) => ({
+        ...state,
+        custodianName: custodian.name,
+      }));
+
+      const assetFormData = {
+        custodian,
+        assetIds,
+      };
+      const kitFormData = {
+        custodian,
+        kitsIds,
+        intent: "bulk-assign-custody",
+      };
+
+      const assetPromise = fetch("/api/assets/bulk-assign-custody", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(assetFormData),
+      });
+
+      const kitPromise = fetch("/api/kits/bulk-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(kitFormData),
+      });
+
+      // show UI updates
+      setCustodyState((state) => ({
+        ...state,
+        assetMessage: "Assigning custody to assets...",
+        kitMessage: "Assigning custody to kits...",
+      }));
+
+      assetPromise
+        .then((response) => response.json())
+        .then((data) => {
+          setCustodyState((state) => ({
+            ...state,
+            assetMessage: "Custody assigned to assets successfully!",
+          }));
+        })
+        .catch((error) => {
+          setCustodyState((state) => ({
+            ...state,
+            assetMessage: "Error assigning custody to assets",
+          }));
+        });
+
+      kitPromise
+        .then((response) => response.json())
+        .then((data) => {
+          setCustodyState((state) => ({
+            ...state,
+            kitMessage: "Custody assigned to kits successfully!",
+          }));
+        })
+        .catch((error) => {
+          setCustodyState((state) => ({
+            ...state,
+            kitMessage: "Error assigning custody to kits",
+          }));
+        });
+    },
+  });
 
   const fetcherError = useMemo(() => fetcher?.data?.error?.message, [fetcher]);
+  const items = useAtomValue(scannedItemsAtom);
+
+  const assetIds = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => item?.data?.id);
+
+  const kitsIds = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "kit")
+    .map((item) => item?.data?.id);
 
   return (
-    <Form>
-      <div className="modal-content-wrapper">
-        <div className="relative z-50 my-8">
-          <h5 className="mb-1">Select team member</h5>
-          <DynamicSelect
-            defaultValue={
-              isSelfService && teamMembers?.length > 0
-                ? JSON.stringify({
-                    id: teamMembers[0].id,
-                    name: resolveTeamMemberName(teamMembers[0]),
-                  })
-                : undefined
-            }
-            disabled={disabled || isSelfService}
-            model={{
-              name: "teamMember",
-              queryKey: "name",
-              deletedAt: null,
-            }}
-            fieldName="custodian"
-            contentLabel="Team members"
-            initialDataKey="teamMembers"
-            countKey="totalTeamMembers"
-            placeholder="Select a team member"
-            allowClear
-            closeOnSelect
-            transformItem={(item) => ({
-              ...item,
-              id: JSON.stringify({
-                id: item.id,
-                /**
-                 * This is parsed on the server, because we need the name to create the note.
-                 * @TODO This should be refactored to send the name as some metadata, instaed of like this
-                 */
-                name: resolveTeamMemberName(item),
-              }),
-            })}
-            renderItem={(item) => resolveTeamMemberName(item, true)}
+    <>
+      <SubmittingDialog
+        open={dialogOpen}
+        setOpen={setDialogOpen}
+        custodyState={custodyState}
+      />
+      <fetcher.Form ref={zo.ref}>
+        {assetIds.map((id, index) => (
+          <input
+            key={`asset-${id}`}
+            type="hidden"
+            name={`assetIds[${index}]`}
+            value={id}
           />
-          {zo.errors.custodian()?.message ? (
-            <p className="text-sm text-error-500">
-              {zo.errors.custodian()?.message}
-            </p>
-          ) : null}
-          {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
-          ) : null}
-        </div>
+        ))}
 
-        <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
-          <Button
-            variant="secondary"
-            width="full"
-            disabled={disabled}
-            // onClick={handleCloseDialog}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            width="full"
-            disabled={disabled || disableSubmit}
-          >
-            Assign custody
-          </Button>
+        {kitsIds.map((id, index) => (
+          <input
+            key={`kit-${id}`}
+            type="hidden"
+            name={`kitsIds[${index}]`}
+            value={id}
+          />
+        ))}
+
+        <div className="pr-4">
+          <div className="relative z-50 my-8 ">
+            <h5 className="mb-1">Assign custody to:</h5>
+            <DynamicSelect
+              defaultValue={
+                isSelfService && teamMembers?.length > 0
+                  ? JSON.stringify({
+                      id: teamMembers[0].id,
+                      name: resolveTeamMemberName(teamMembers[0]),
+                    })
+                  : undefined
+              }
+              disabled={disabled || isSelfService}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+              }}
+              fieldName="custodian"
+              contentLabel="Team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+              placeholder="Select a team member"
+              allowClear
+              closeOnSelect
+              transformItem={(item) => ({
+                ...item,
+                id: JSON.stringify({
+                  id: item.id,
+                  /**
+                   * This is parsed on the server, because we need the name to create the note.
+                   * @TODO This should be refactored to send the name as some metadata, instaed of like this
+                   */
+                  name: resolveTeamMemberName(item),
+                }),
+              })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+            />
+            {zo.errors.custodian()?.message ? (
+              <p className="text-sm text-error-500">
+                {zo.errors.custodian()?.message}
+              </p>
+            ) : null}
+            {fetcherError ? (
+              <p className="text-sm text-error-500">{fetcherError}</p>
+            ) : null}
+          </div>
+
+          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-8")}>
+            <Button
+              variant="secondary"
+              width="full"
+              disabled={disabled}
+              // onClick={handleCloseDialog}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              width="full"
+              disabled={
+                disabled || disableSubmit || Object.values(items).length === 0
+              }
+            >
+              Assign custody
+            </Button>
+          </div>
         </div>
-      </div>
-    </Form>
+      </fetcher.Form>
+    </>
+  );
+}
+
+function SubmittingDialog({
+  open,
+  setOpen,
+  custodyState,
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  custodyState: { assetMessage: string; kitMessage: string };
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          {/* <div className="mx-auto md:m-0">
+            <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+              <Icon icon="trash" />
+            </span>
+          </div> */}
+          <AlertDialogTitle>Assigning custody</AlertDialogTitle>
+          <AlertDialogDescription>
+            <p>{custodyState.assetMessage}</p>
+            <p>{custodyState.kitMessage}</p>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <AlertDialogFooter>
+          <div className="flex justify-center gap-2">
+            <AlertDialogCancel asChild>
+              <Button variant="secondary">Cancel</Button>
+            </AlertDialogCancel>
+
+            <Button to="/assets" variant={"primary"}>
+              View assets
+            </Button>
+          </div>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

@@ -86,6 +86,10 @@ export const CodeScanner = ({
     }
   };
 
+  // Determine if we should allow non-shelf codes based on the current action
+  const shouldAllowNonShelfCodes =
+    allowNonShelfCodes || action !== "View asset";
+
   return (
     <div
       ref={containerRef}
@@ -152,7 +156,7 @@ export const CodeScanner = ({
         {mode === "scanner" ? (
           <ScannerMode
             onQrDetectionSuccess={onQrDetectionSuccess}
-            allowNonShelfCodes={allowNonShelfCodes}
+            allowNonShelfCodes={shouldAllowNonShelfCodes}
             paused={paused}
             className={
               typeof scannerModeClassName === "function"
@@ -168,7 +172,7 @@ export const CodeScanner = ({
             paused={paused}
             setPaused={setPaused}
             onQrDetectionSuccess={onQrDetectionSuccess}
-            allowNonShelfCodes={allowNonShelfCodes}
+            allowNonShelfCodes={shouldAllowNonShelfCodes}
             action={action}
           />
         )}

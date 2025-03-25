@@ -127,7 +127,7 @@ export default function BaseDrawer({
             ) : (
               <div
                 ref={itemsListRef}
-                className="-ml-4 flex max-h-full w-screen flex-col overflow-scroll md:ml-0 md:w-full"
+                className="-ml-4 flex max-h-full w-screen flex-col overflow-y-scroll md:ml-0 md:w-full"
               >
                 {typeof children === "function" ? children(expanded) : children}
               </div>
