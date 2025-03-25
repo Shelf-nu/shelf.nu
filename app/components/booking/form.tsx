@@ -259,7 +259,7 @@ export function BookingForm({
                 className="grow"
                 size="sm"
               >
-                Reserve
+                {isBaseOrSelfService ? "Submit for Approval" : "Reserve"}
               </Button>
             ) : null}
 
