@@ -82,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.assetReminders,
       action: PermissionAction.update,
     });
 
