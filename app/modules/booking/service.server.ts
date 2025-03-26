@@ -175,8 +175,8 @@ export async function upsertBooking(
     > & {
       assetIds: Asset["id"][];
       isExpired: boolean;
-      checkoutIntent?: CheckoutIntentEnum;
-      checkinIntent?: CheckinIntentEnum;
+      checkoutIntentChoice?: CheckoutIntentEnum;
+      checkinIntentChoice?: CheckinIntentEnum;
     }
   >,
   hints: ClientHint,
@@ -192,8 +192,8 @@ export async function upsertBooking(
       id,
       description,
       isExpired,
-      checkoutIntent,
-      checkinIntent,
+      checkoutIntentChoice,
+      checkinIntentChoice,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -313,7 +313,7 @@ export async function upsertBooking(
       if (
         booking.status === BookingStatus.ONGOING &&
         isBookingEarlyCheckout(oldBooking!.from!) &&
-        checkoutIntent === CheckoutIntentEnum["with-adjusted-date"]
+        checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
       ) {
         // Update originFrom to old booking's from date
         data.originalFrom = oldBooking?.from;
@@ -335,7 +335,7 @@ export async function upsertBooking(
       if (
         booking.status === BookingStatus.COMPLETE &&
         isBookingEarlyCheckin(oldBooking!.to!) &&
-        checkinIntent === CheckinIntentEnum["with-adjusted-date"]
+        checkinIntentChoice === CheckinIntentEnum["with-adjusted-date"]
       ) {
         // Update originTo to old booking's to date
         data.originalTo = oldBooking?.to;

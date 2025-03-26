@@ -78,24 +78,24 @@ export default function CheckinDialog({
           </AlertDialogCancel>
 
           <input type="hidden" name="intent" value="checkIn" />
-          <Button
-            className="flex-1"
-            type="submit"
-            variant="secondary"
-            name="checkinIntent"
-            value={CheckinIntentEnum["with-adjusted-date"]}
-          >
-            Adjust Date
-          </Button>
 
           <Button
             className="flex-1"
             type="submit"
             variant="secondary"
-            name="checkinIntent"
+            name="checkinIntentChoice"
             value={CheckinIntentEnum["without-adjusted-date"]}
           >
             Don't Adjust Date
+          </Button>
+
+          <Button
+            className="flex-1"
+            type="submit"
+            name="checkinIntentChoice"
+            value={CheckinIntentEnum["with-adjusted-date"]}
+          >
+            Adjust Date
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

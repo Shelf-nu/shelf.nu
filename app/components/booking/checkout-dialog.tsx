@@ -86,20 +86,19 @@ export default function CheckoutDialog({
             className="flex-1"
             type="submit"
             variant="secondary"
-            name="checkoutIntent"
-            value={CheckoutIntentEnum["with-adjusted-date"]}
+            name="checkoutIntentChoice"
+            value={CheckoutIntentEnum["without-adjusted-date"]}
           >
-            Adjust Date
+            Don't Adjust Date
           </Button>
 
           <Button
             className="flex-1"
             type="submit"
-            variant="secondary"
-            name="checkoutIntent"
-            value={CheckoutIntentEnum["without-adjusted-date"]}
+            name="checkoutIntentChoice"
+            value={CheckoutIntentEnum["with-adjusted-date"]}
           >
-            Don't Adjust Date
+            Adjust Date
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

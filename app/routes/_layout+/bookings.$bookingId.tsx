@@ -246,7 +246,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent, nameChangeOnly, checkoutIntent, checkinIntent } = parseData(
+    const {
+      intent,
+      nameChangeOnly,
+      checkoutIntentChoice,
+      checkinIntentChoice,
+    } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -265,8 +270,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .string()
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
-        checkoutIntent: z.nativeEnum(CheckoutIntentEnum).optional(),
-        checkinIntent: z.nativeEnum(CheckinIntentEnum).optional(),
+        checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+        checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
       {
         additionalData: { userId },
@@ -324,12 +329,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         let upsertBookingData = { organizationId, id };
 
-        if (intent === "checkOut" && checkoutIntent) {
-          Object.assign(upsertBookingData, { checkoutIntent });
+        if (intent === "checkOut" && checkoutIntentChoice) {
+          Object.assign(upsertBookingData, { checkoutIntentChoice });
         }
 
-        if (intent === "checkIn" && checkinIntent) {
-          Object.assign(upsertBookingData, { checkinIntent });
+        if (intent === "checkIn" && checkinIntentChoice) {
+          Object.assign(upsertBookingData, { checkinIntentChoice });
         }
 
         // We are only changing the name so we do things simpler
