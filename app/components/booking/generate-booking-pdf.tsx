@@ -9,6 +9,7 @@ import { SERVER_URL } from "~/utils/env";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { Spinner } from "../shared/spinner";
+import When from "../when/when";
 
 export const GenerateBookingPdf = ({
   booking,
@@ -136,6 +137,17 @@ const BookingPDFPreview = ({
     ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName} <${booking.custodianUser.email}>`
     : booking.custodianTeamMember?.name;
 
+  /** Check if the `originalFrom` date is different from `from` date */
+  const isFromDifferentFromOriginal =
+    !!pdfMeta.originalFrom && pdfMeta.originalFrom !== pdfMeta.from;
+
+  /** Check if the `originalTo` date is different from `to` date */
+  const isToDifferentFromOriginal =
+    !!pdfMeta.originalTo && pdfMeta.originalTo !== pdfMeta.to;
+
+  const isPeriodDifferentFromOriginal =
+    isFromDifferentFromOriginal || isToDifferentFromOriginal;
+
   return (
     <div className="border bg-gray-200 py-4">
       <style>
@@ -186,6 +198,23 @@ const BookingPDFPreview = ({
                 : ""}
             </span>
           </div>
+
+          {/* If from and to  */}
+          <When truthy={isPeriodDifferentFromOriginal}>
+            <div className="flex border-b border-gray-300 p-2">
+              <span className="min-w-[150px] text-sm font-medium">
+                Original period
+              </span>
+              <span className="grow text-gray-600">{`${
+                isFromDifferentFromOriginal
+                  ? pdfMeta.originalFrom
+                  : pdfMeta.from
+              } - ${
+                isToDifferentFromOriginal ? pdfMeta.originalTo : pdfMeta.to
+              }`}</span>
+            </div>
+          </When>
+
           <div className="flex p-2">
             <span className="min-w-[150px] text-sm font-medium">
               Description
