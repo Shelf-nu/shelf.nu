@@ -1786,24 +1786,30 @@ export async function getExistingBookingDetails(bookingId: string) {
 }
 
 export function formatBookingsDates(bookings: Booking[], request: Request) {
+  const dateFormat = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
   return bookings.map((b) => {
     if (b.from && b.to) {
-      const from = new Date(b.from);
-      const displayFrom = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(from);
+      const displayFrom = dateFormat.format(b.from).split(",");
+      const displayTo = dateFormat.format(b.to).split(",");
 
-      const to = new Date(b.to);
-      const displayTo = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(to);
+      const displayOriginalFrom = b.originalFrom
+        ? dateFormat.format(b.originalFrom).split(",")
+        : null;
+
+      const displayOriginalTo = b.originalTo
+        ? dateFormat.format(b.originalTo).split(",")
+        : null;
 
       return {
         ...b,
-        displayFrom: displayFrom.split(","),
-        displayTo: displayTo.split(","),
+        displayFrom,
+        displayTo,
+        displayOriginalFrom,
+        displayOriginalTo,
       };
     }
     return b;
