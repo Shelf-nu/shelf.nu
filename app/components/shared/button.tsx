@@ -124,6 +124,7 @@ const variants: Record<ButtonVariant, string> = {
     "disabled:border-error-300 disabled:bg-error-300",
     "enabled:hover:bg-error-800"
   ),
+  info: "bg-blue-500 text-white hover:bg-blue-400 focus:ring-2 disabled:bg-blue-300",
 };
 
 /**

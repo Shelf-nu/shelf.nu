@@ -53,7 +53,8 @@ export type ButtonVariant =
   | "link-gray"
   | "block-link"
   | "block-link-gray"
-  | "danger";
+  | "danger"
+  | "info";
 
 /** Width of the button. Default is auto */
 export type ButtonWidth = "auto" | "full";
