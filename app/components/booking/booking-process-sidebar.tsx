@@ -1,12 +1,6 @@
 import { Close } from "@radix-ui/react-dialog";
 import type { LucideIcon } from "lucide-react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckIcon,
-  ClockIcon,
-  InfoIcon,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, ClockIcon, InfoIcon } from "lucide-react";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -27,21 +21,15 @@ const ITEMS: Array<ProcessItem> = [
   {
     icon: ClockIcon,
     title: "Submit Request",
-    description: `Fill in all required information and select the assets you need. Click "Request Booking" to submit your request.`,
+    description: `Fill in all required information and select the assets you need. Click "Request reservation" to submit your request.`,
     iconClassName: "bg-blue-100 text-blue-500",
   },
   {
     icon: InfoIcon,
     title: "Admin Review",
     description:
-      "An administrator will review your request and decide whether to approve it. Multiple booking requests for the same assets may be considered.",
+      "Your booking will be shown as reserved, however the admin can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
     iconClassName: "bg-warning-100 text-warning-500",
-  },
-  {
-    icon: CheckIcon,
-    title: "Confirmation",
-    description: `You'll receive an email notification when your booking is approved. The booking will also be marked as "Reserved" in the system.`,
-    iconClassName: "bg-success-100 text-success-500",
   },
   {
     icon: ArrowRight,
@@ -54,7 +42,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowLeft,
     title: "Check-In",
     description:
-      "At the end of you booking period, return the equipment to the administrator who will check in back into the system.",
+      "At the end of you booking period, return the equipment to the administrator who will perform the check in action.",
     iconClassName: "bg-indigo-100 text-indigo-500",
   },
 ];
@@ -65,7 +53,7 @@ export default function BookingProcessSidebar({
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="info">
+        <Button variant="block-link-gray" className={"mt-0"}>
           <div className="flex items-center gap-2">
             <InfoIcon className="size-4" />
             How bookings work
@@ -91,7 +79,8 @@ export default function BookingProcessSidebar({
 
         <div className="p-4">
           <p className="mb-8 border-l-4 border-blue-500 bg-blue-50 p-2 text-blue-500">
-            Base users submit booking requests that require admin approval.
+            Base users reserve bookings that require admin approval and can be
+            cancelled at any time if there are conflicts with other bookings.
             Admins handle equipment check-out and check-in.
           </p>
 
@@ -127,7 +116,7 @@ export default function BookingProcessSidebar({
                 out.
               </li>
               <li>
-                If you need to extend your booking, contact and administrator
+                If you need to extend your booking, contact an administrator
                 before your booking end date.
               </li>
               <li>

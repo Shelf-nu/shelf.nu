@@ -171,7 +171,7 @@ export function BookingForm({
     NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
   );
 
-  const { roles, isBaseOrSelfService } = useUserRoleHelper();
+  const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();
 
   const canCheckInBooking = userHasPermission({
     roles,
@@ -206,7 +206,7 @@ export function BookingForm({
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
-            <When truthy={isBaseOrSelfService}>
+            <When truthy={isBase}>
               <BookingProcessSidebar />
             </When>
 
@@ -264,7 +264,7 @@ export function BookingForm({
                 className="grow"
                 size="sm"
               >
-                {isBaseOrSelfService ? "Submit for Approval" : "Reserve"}
+                {isBase ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 

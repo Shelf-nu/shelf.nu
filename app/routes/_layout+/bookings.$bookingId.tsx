@@ -10,12 +10,12 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
@@ -33,7 +33,6 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { bookingStatusColorMap } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import {
@@ -589,7 +588,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
-export default function BookingEditPage() {
+export default function BookingPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
@@ -608,11 +607,7 @@ export default function BookingEditPage() {
         title={hasName ? name : booking.name}
         subHeading={
           <div key={booking.status} className="flex items-center gap-2">
-            <Badge color={bookingStatusColorMap[booking.status]}>
-              <span className="block lowercase first-letter:uppercase">
-                {booking.status}
-              </span>
-            </Badge>
+            <BookingStatusBadge status={booking.status} />
           </div>
         }
       />

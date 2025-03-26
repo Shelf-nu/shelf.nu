@@ -6,6 +6,7 @@ import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
+import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
@@ -21,7 +22,6 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
@@ -36,7 +36,6 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { bookingStatusColorMap } from "~/utils/bookings";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -376,11 +375,7 @@ const ListAssetContent = ({
                 {item.name}
               </span>
               <div className="">
-                <Badge color={bookingStatusColorMap[item.status]}>
-                  <span className="block lowercase first-letter:uppercase">
-                    {item.status}
-                  </span>
-                </Badge>
+                <BookingStatusBadge status={item.status} />
               </div>
             </div>
           </div>
