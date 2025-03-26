@@ -12,19 +12,41 @@ import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { scannerActionAtom } from "./action-atom";
 import AssignCustodyDrawer from "./uses/assign-custody-drawer";
 
-const ACTIONS = [
-  "View asset",
-  "Assign custody",
-  "Release custody",
-  "Add to location",
+const ACTION_CONFIGS = [
+  {
+    id: "View asset",
+    permissionEntity: PermissionEntity.asset,
+    permissionAction: PermissionAction.read,
+  },
+  {
+    id: "Assign custody",
+    permissionEntity: PermissionEntity.asset,
+    permissionAction: PermissionAction.custody,
+  },
+  {
+    id: "Release custody",
+    permissionEntity: PermissionEntity.asset,
+    permissionAction: PermissionAction.custody,
+  },
+  {
+    id: "Add to location",
+    permissionEntity: PermissionEntity.asset,
+    permissionAction: PermissionAction.update,
+  },
 ] as const;
 
 // Create a type from the array values
-export type ActionType = (typeof ACTIONS)[number];
+export type ActionType = (typeof ACTION_CONFIGS)[number]["id"];
 
 export function ActionSwitcher() {
   const [open, setOpen] = useState(false);
@@ -33,20 +55,28 @@ export function ActionSwitcher() {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isLoading = useDisabled();
-  // @TODO - we need to handle BASE vs Self service vs admin user
+  const { roles } = useUserRoleHelper();
 
-  // const isBulkAction = useMemo(
-  //   () => getActionScope(action) === "bulk",
-  //   [action]
-  // );
+  // Filter actions based on user permissions
+  const availableActions = useMemo(
+    () =>
+      ACTION_CONFIGS.filter(({ permissionEntity, permissionAction }) =>
+        userHasPermission({
+          roles,
+          entity: permissionEntity,
+          action: permissionAction,
+        })
+      ).map((config) => config.id),
+    [roles]
+  );
 
   const filteredActions = useMemo(() => {
-    if (!searchQuery) return ACTIONS;
+    if (!searchQuery) return availableActions;
 
-    return ACTIONS.filter((action) =>
+    return availableActions.filter((action) =>
       action.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [searchQuery]);
+  }, [searchQuery, availableActions]);
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
@@ -92,7 +122,7 @@ export function ActionSwitcher() {
 
   function changeAction(newAction: ActionType) {
     setAction(newAction);
-    setSelectedIndex(ACTIONS.indexOf(newAction));
+    setSelectedIndex(availableActions.indexOf(newAction));
     setOpen(false);
   }
 

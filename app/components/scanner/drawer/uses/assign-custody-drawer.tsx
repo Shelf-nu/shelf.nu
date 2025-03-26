@@ -488,7 +488,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           />
         ))}
 
-        <div className="pr-4">
+        <div className="px-4 md:pl-0">
           <div className="relative z-50 my-8 ">
             <h5 className="mb-1">Assign custody to:</h5>
             <DynamicSelect
@@ -630,7 +630,7 @@ function SubmissionState({
     );
   } else if (status === "success") {
     return (
-      <div className="flex flex-row items-center gap-2">
+      <div className="flex flex-row items-center gap-2 text-left">
         <span className="text-green-700">
           <CheckmarkIcon />
         </span>
@@ -643,7 +643,7 @@ function SubmissionState({
   } else if (status === "error") {
     return (
       <div>
-        <div className="flex flex-row items-center gap-2">
+        <div className="flex flex-row items-center gap-2 text-left">
           <CircleX className="size-[18px] text-error-500" />
           <div className="font-mono">Failed to assign custody to {type}s.</div>
         </div>
