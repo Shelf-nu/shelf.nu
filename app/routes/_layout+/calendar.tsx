@@ -14,13 +14,13 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
+import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import TitleContainer from "~/components/calendar/title-container";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
 import { ArrowRightIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { DateS } from "~/components/shared/date";
@@ -37,7 +37,6 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { bookingStatusColorMap } from "~/utils/bookings";
 import {
   getStatusClasses,
   isOneDayEvent,
@@ -459,11 +458,7 @@ const renderEventCard = (args: EventContentArg) => {
           <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
 
           <div className="mb-3 flex items-center gap-2">
-            <Badge color={bookingStatusColorMap[booking.status]}>
-              <span className="block lowercase first-letter:uppercase">
-                {booking.status}
-              </span>
-            </Badge>
+            <BookingStatusBadge status={booking.status} />
 
             <UserBadge
               imgClassName="rounded-full"

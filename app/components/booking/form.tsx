@@ -27,6 +27,7 @@ import { ActionsDropdown } from "./actions-dropdown";
 import { Form } from "../custom-form";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
+import BookingProcessSidebar from "./booking-process-sidebar";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -171,7 +172,7 @@ export function BookingForm({
     NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
   );
 
-  const { roles, isBaseOrSelfService } = useUserRoleHelper();
+  const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();
 
   const canCheckInBooking = userHasPermission({
     roles,
@@ -195,6 +196,10 @@ export function BookingForm({
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
+            <When truthy={isBase}>
+              <BookingProcessSidebar />
+            </When>
+
             {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
             <ActionsDropdown />
 
@@ -249,7 +254,7 @@ export function BookingForm({
                 className="grow"
                 size="sm"
               >
-                Reserve
+                {isBase ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 
