@@ -17,6 +17,7 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -318,7 +319,13 @@ export async function upsertBooking(
         data.originalFrom = oldBooking?.from;
 
         // Update from date to current date
-        data.from = new Date();
+        const fromDateStr = DateTime.fromJSDate(new Date(), {
+          zone: hints.timeZone,
+        }).toFormat(DATE_TIME_FORMAT);
+
+        data.from = DateTime.fromFormat(fromDateStr, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
       }
 
       /**
@@ -334,7 +341,22 @@ export async function upsertBooking(
         data.originalTo = oldBooking?.to;
 
         // Update the to date to current date
-        data.to = new Date();
+        const toDateStr = DateTime.fromJSDate(new Date(), {
+          zone: hints.timeZone,
+        }).toFormat(DATE_TIME_FORMAT);
+
+        data.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
+      }
+
+      /**
+       * If the booking was in DRAFT state, then we update
+       * the original date's to latest `from` and `to` dates.
+       */
+      if (oldBooking?.status === BookingStatus.DRAFT) {
+        data.originalFrom = data.from;
+        data.originalTo = data.to;
       }
 
       //update

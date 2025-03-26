@@ -39,6 +39,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { bookingStatusColorMap } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -358,11 +359,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const { name, custodian, description } = payload;
 
           const hints = getHints(request);
-          const fmt = "yyyy-MM-dd'T'HH:mm";
 
           const from = DateTime.fromFormat(
             formData.get("startDate")!.toString()!,
-            fmt,
+            DATE_TIME_FORMAT,
             {
               zone: hints.timeZone,
             }
@@ -370,7 +370,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
           const to = DateTime.fromFormat(
             formData.get("endDate")!.toString()!,
-            fmt,
+            DATE_TIME_FORMAT,
             {
               zone: hints.timeZone,
             }
