@@ -74,12 +74,15 @@ export default function CheckinDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button variant="secondary">Cancel</Button>
+            <Button disabled={disabled} variant="secondary">
+              Cancel
+            </Button>
           </AlertDialogCancel>
 
           <input type="hidden" name="intent" value="checkIn" />
 
           <Button
+            disabled={disabled}
             className="flex-1"
             type="submit"
             variant="secondary"
@@ -90,6 +93,7 @@ export default function CheckinDialog({
           </Button>
 
           <Button
+            disabled={disabled}
             className="flex-1"
             type="submit"
             name="checkinIntentChoice"
