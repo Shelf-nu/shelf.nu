@@ -155,6 +155,7 @@ export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
 } as Prisma.BookingInclude;
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -534,7 +535,7 @@ export async function upsertBooking(
     }
 
     /**
-     * Updated original dates to user entered `from` and `user`
+     * Updated original dates to user entered `from` and `to`
      * so that we can track of it later
      */
     data.originalFrom = data.from;

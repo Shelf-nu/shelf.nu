@@ -2,6 +2,7 @@ import type { Booking } from "@prisma/client";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -64,7 +65,12 @@ export default function CheckoutDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             You are checking out the booking before the start date. If you
-            proceed, the start date will be adjusted to now.
+            proceed, the start date will be adjusted to now:{" "}
+            <span className="font-bold text-gray-700">
+              <DateS date={new Date()} includeTime />
+            </span>
+            .
+            <br />
             <br />
             Do you want to adjust the start date or keep the original date?
           </AlertDialogDescription>

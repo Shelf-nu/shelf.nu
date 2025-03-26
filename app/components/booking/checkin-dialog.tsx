@@ -1,6 +1,7 @@
 import type { Booking } from "@prisma/client";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import { Button, type ButtonProps } from "../shared/button";
+import { DateS } from "../shared/date";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -61,7 +62,12 @@ export default function CheckinDialog({
         </AlertDialogHeader>
         <AlertDialogDescription>
           You are checking in the booking before the end date. If you proceed,
-          the end date will be adjusted to now.
+          the end date will be adjusted to now:{" "}
+          <span className="font-bold text-gray-700">
+            <DateS date={new Date()} includeTime />
+          </span>
+          .
+          <br />
           <br />
           Do you want to adjust the end date or keep the original date?
         </AlertDialogDescription>
