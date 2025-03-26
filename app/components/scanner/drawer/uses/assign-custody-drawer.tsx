@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { CircleX } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
@@ -13,7 +14,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { AssetLabel } from "~/components/icons/library";
+import { AssetLabel, CheckmarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -24,13 +25,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/shared/modal";
+import { Spinner } from "~/components/shared/spinner";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
+import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { objectToFormData } from "~/utils/object-to-form-data";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -40,7 +44,11 @@ import {
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
-import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import {
+  GenericItemRow,
+  DefaultLoadingState,
+  TextLoader,
+} from "../generic-item-row";
 
 // Export the schema so it can be reused
 export const AssignCustodyToSignedItemsSchema = z.object({
@@ -50,10 +58,10 @@ export const AssignCustodyToSignedItemsSchema = z.object({
 const BulkAssignCustodySchema = z
   .object({
     assetIds: z.array(z.string()).optional().default([]),
-    kitsIds: z.array(z.string()).optional().default([]),
+    kitIds: z.array(z.string()).optional().default([]),
     custodian: createCustodianSchema(),
   })
-  .refine((data) => data.assetIds.length > 0 || data.kitsIds.length > 0, {
+  .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
     message: "At least one asset or kit must be selected",
     path: ["assetIds"], // This will attach the error to the assetIds field
   });
@@ -310,16 +318,20 @@ export default function AssignCustodyDrawer({
   );
 }
 
+type CustodyState = {
+  assetStatus: "processing" | "success" | "error" | "skipped";
+  assetErrorMessage?: string;
+  kitStatus: "processing" | "success" | "error" | "skipped";
+  kitErrorMessage?: string;
+  custodianName: string;
+};
+
 function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const fetcher = useFetcherWithReset<any>();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [custodyState, setCustodyState] = useState<{
-    assetMessage: string;
-    kitMessage: string;
-    custodianName: string;
-  }>({
-    assetMessage: "Assigning custody to assets...",
-    kitMessage: "Assigning custody to kits...",
+  const [custodyState, setCustodyState] = useState<CustodyState>({
+    assetStatus: "processing",
+    kitStatus: "processing",
     custodianName: "",
   });
 
@@ -331,75 +343,100 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     onValidSubmit: (e) => {
       e.preventDefault();
       setDialogOpen(true);
-
-      const { custodian, assetIds, kitsIds } = e.data;
+      const { custodian, assetIds, kitIds } = e.data;
       setCustodyState((state) => ({
         ...state,
         custodianName: custodian.name,
       }));
 
-      const assetFormData = {
-        custodian,
-        assetIds,
-      };
-      const kitFormData = {
-        custodian,
-        kitsIds,
-        intent: "bulk-assign-custody",
-      };
+      // Handle asset request
+      if (assetIds && assetIds.length > 0) {
+        // Create object data structure for assets
+        const assetData = {
+          custodian,
+          assetIds,
+        };
 
-      const assetPromise = fetch("/api/assets/bulk-assign-custody", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(assetFormData),
-      });
-
-      const kitPromise = fetch("/api/kits/bulk-actions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(kitFormData),
-      });
-
-      // show UI updates
-      setCustodyState((state) => ({
-        ...state,
-        assetMessage: "Assigning custody to assets...",
-        kitMessage: "Assigning custody to kits...",
-      }));
-
-      assetPromise
-        .then((response) => response.json())
-        .then((data) => {
-          setCustodyState((state) => ({
-            ...state,
-            assetMessage: "Custody assigned to assets successfully!",
-          }));
-        })
-        .catch((error) => {
-          setCustodyState((state) => ({
-            ...state,
-            assetMessage: "Error assigning custody to assets",
-          }));
+        // Convert to FormData
+        const assetFormData = objectToFormData(assetData, {
+          jsonStringifyFields: ["custodian"],
         });
 
-      kitPromise
-        .then((response) => response.json())
-        .then((data) => {
-          setCustodyState((state) => ({
-            ...state,
-            kitMessage: "Custody assigned to kits successfully!",
-          }));
+        // Send asset request
+        fetch("/api/assets/bulk-assign-custody", {
+          method: "POST",
+          body: assetFormData,
         })
-        .catch((error) => {
-          setCustodyState((state) => ({
-            ...state,
-            kitMessage: "Error assigning custody to kits",
-          }));
+          .then((response) => response.json())
+          .then((data) => {
+            setCustodyState((state) => ({
+              ...state,
+              assetStatus: data.error ? "error" : "success",
+              ...(data.error && { assetErrorMessage: data.error.message }),
+            }));
+          })
+          .catch((error) => {
+            setCustodyState((state) => ({
+              ...state,
+              assetStatus: "error",
+              assetErrorMessage:
+                error instanceof ShelfError
+                  ? error.message
+                  : "Something went wrong while assigning custody. Please try again.",
+            }));
+          });
+      } else {
+        // No assets to process, mark as skipped
+        setCustodyState((state) => ({
+          ...state,
+          assetStatus: "skipped",
+        }));
+      }
+
+      // Handle kit request
+      if (kitIds && kitIds.length > 0) {
+        // Create object data structure for kits
+        const kitData = {
+          custodian,
+          kitIds,
+          intent: "bulk-assign-custody",
+        };
+
+        // Convert to FormData
+        const kitFormData = objectToFormData(kitData, {
+          jsonStringifyFields: ["custodian"],
         });
+
+        // Send kit request
+        fetch("/api/kits/bulk-actions", {
+          method: "POST",
+          body: kitFormData,
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            setCustodyState((state) => ({
+              ...state,
+              kitStatus: data.error ? "error" : "success",
+              ...(data.error && { kitErrorMessage: data.error.message }),
+            }));
+          })
+          .catch((error) => {
+            setCustodyState((state) => ({
+              ...state,
+              kitStatus: "error",
+              kitErrorMessage:
+                error instanceof ShelfError
+                  ? error.message
+                  : "Something went wrong while assigning custody. Please try again.",
+            }));
+          });
+      } else {
+        // No kits to process, mark as skipped
+        setCustodyState((state) => ({
+          ...state,
+          kitStatus: "skipped",
+        }));
+      }
     },
   });
 
@@ -413,6 +450,16 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const kitsIds = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data?.id);
+  const clearItems = useSetAtom(clearScannedItemsAtom);
+
+  function cleanupState() {
+    setCustodyState({
+      assetStatus: "processing",
+      kitStatus: "processing",
+      custodianName: "",
+    });
+    clearItems();
+  }
 
   return (
     <>
@@ -420,8 +467,9 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         open={dialogOpen}
         setOpen={setDialogOpen}
         custodyState={custodyState}
+        cleanupState={cleanupState}
       />
-      <fetcher.Form ref={zo.ref}>
+      <Form ref={zo.ref}>
         {assetIds.map((id, index) => (
           <input
             key={`asset-${id}`}
@@ -435,7 +483,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           <input
             key={`kit-${id}`}
             type="hidden"
-            name={`kitsIds[${index}]`}
+            name={`kitIds[${index}]`}
             value={id}
           />
         ))}
@@ -488,15 +536,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-8")}>
-            <Button
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-              // onClick={handleCloseDialog}
-            >
-              Cancel
-            </Button>
+          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
             <Button
               variant="primary"
               width="full"
@@ -508,7 +548,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             </Button>
           </div>
         </div>
-      </fetcher.Form>
+      </Form>
     </>
   );
 }
@@ -517,41 +557,104 @@ function SubmittingDialog({
   open,
   setOpen,
   custodyState,
+  cleanupState,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
-  custodyState: { assetMessage: string; kitMessage: string };
+  custodyState: CustodyState;
+  cleanupState: () => void;
 }) {
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(newOpen) => {
+        if (!newOpen) cleanupState();
+        setOpen(newOpen);
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
-          {/* <div className="mx-auto md:m-0">
-            <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
-              <Icon icon="trash" />
-            </span>
-          </div> */}
           <AlertDialogTitle>Assigning custody</AlertDialogTitle>
           <AlertDialogDescription>
-            <p>{custodyState.assetMessage}</p>
-            <p>{custodyState.kitMessage}</p>
+            <div className="flex flex-col gap-4">
+              <SubmissionState
+                type={"asset"}
+                status={custodyState.assetStatus}
+                errorMessage={custodyState?.assetErrorMessage}
+                custodianName={custodyState.custodianName}
+              />
+              <SubmissionState
+                type={"kit"}
+                status={custodyState.kitStatus}
+                errorMessage={custodyState?.kitErrorMessage}
+                custodianName={custodyState.custodianName}
+              />
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button variant="secondary">Done</Button>
             </AlertDialogCancel>
-
-            <Button to="/assets" variant={"primary"}>
-              View assets
-            </Button>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+function SubmissionState({
+  type,
+  status,
+  errorMessage,
+  custodianName,
+}: {
+  type: "asset" | "kit";
+  status: "processing" | "success" | "error" | "skipped";
+  errorMessage?: string;
+  custodianName?: string;
+}) {
+  // Return null for skipped status to hide the component entirely
+  if (status === "skipped") {
+    return null;
+  }
+
+  if (status === "processing") {
+    return (
+      <div className="flex flex-row gap-2">
+        <Spinner />
+        <TextLoader text={`Assigning custody to ${type}s`} />
+      </div>
+    );
+  } else if (status === "success") {
+    return (
+      <div className="flex flex-row items-center gap-2">
+        <span className="text-green-700">
+          <CheckmarkIcon />
+        </span>
+        <div className="font-mono">
+          {type === "asset" ? "Assets" : "Kits"} are now in custody of{" "}
+          {custodianName}
+        </div>
+      </div>
+    );
+  } else if (status === "error") {
+    return (
+      <div>
+        <div className="flex flex-row items-center gap-2">
+          <CircleX className="size-[18px] text-error-500" />
+          <div className="font-mono">Failed to assign custody to {type}s.</div>
+        </div>
+        {errorMessage && (
+          <span className="text-[12px] text-error-500">
+            <strong>Error:</strong> {errorMessage}
+          </span>
+        )}
+      </div>
+    );
+  }
 }
 
 // Implement item renderers if they're not already defined elsewhere
