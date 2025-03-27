@@ -1,6 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType, type AssetStatus } from "@prisma/client";
+import { CustomFieldType, CustodySignatureStatus } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
@@ -8,6 +9,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "@remix-run/react";
+import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
@@ -174,7 +176,13 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn status={item.status} />;
+      return (
+        <StatusColumn
+          assetId={item.id}
+          status={item.status}
+          signatureStatus={item.custody?.signatureStatus}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -295,11 +303,25 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ status }: { status: AssetStatus }) {
+function StatusColumn({
+  assetId,
+  status,
+  signatureStatus,
+}: {
+  assetId: string;
+  status: AssetStatus;
+  signatureStatus?: CustodySignatureStatus;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
-      <AssetStatusBadge status={status} availableToBook={true} />
+      <div className="flex items-center gap-2">
+        {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
+        <AssetStatusBadge status={status} availableToBook={true} />
+
+        <When truthy={signatureStatus === CustodySignatureStatus.PENDING}>
+          <AwaitingSignatureTooltip assetId={assetId} />
+        </When>
+      </div>
     </Td>
   );
 }

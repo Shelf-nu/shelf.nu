@@ -1,3 +1,4 @@
+import { CustodySignatureStatus } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { PenLineIcon } from "lucide-react";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
@@ -26,7 +27,7 @@ export default function AgreementStatusCard({
 
       <div>
         <p className="font-semibold">
-          {asset.custody.agreement?.signatureRequired ? (
+          {asset.custody.signatureStatus === CustodySignatureStatus.PENDING ? (
             <>
               Awaiting signature from{" "}
               {resolveTeamMemberName(asset.custody.custodian)}

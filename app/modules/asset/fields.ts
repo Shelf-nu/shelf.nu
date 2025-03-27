@@ -30,6 +30,7 @@ export const ASSET_OVERVIEW_FIELDS = {
     select: {
       agreement: true,
       createdAt: true,
+      signatureStatus: true,
       agreementSigned: true,
       custodian: {
         include: {
