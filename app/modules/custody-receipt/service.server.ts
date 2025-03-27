@@ -14,7 +14,8 @@ export async function getPaginatedAndFilterableReceipts({
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const { page, perPageParam, search, signatureStatus, custodyStatus } =
+      getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
@@ -49,6 +50,14 @@ export async function getPaginatedAndFilterableReceipts({
           },
         },
       ];
+    }
+
+    if (signatureStatus) {
+      where.signatureStatus = signatureStatus;
+    }
+
+    if (custodyStatus) {
+      where.custodyStatus = custodyStatus;
     }
 
     const [receipts, totalReceipts] = await Promise.all([

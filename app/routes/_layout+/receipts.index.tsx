@@ -1,4 +1,4 @@
-import { CustodySignatureStatus } from "@prisma/client";
+import { CustodySignatureStatus, CustodyStatus } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import Select from "~/components/select/select";
 import { Badge } from "~/components/shared/badge";
 import { Td, Th } from "~/components/table";
 import { useSearchParams } from "~/hooks/search-params";
@@ -106,7 +107,45 @@ export default function Receipts() {
       <CustodyReceiptDialog />
 
       <ListContentWrapper>
-        <Filters />
+        <Filters
+          slots={{
+            "left-of-search": (
+              <div className="flex items-center gap-2">
+                <Select
+                  placeholder="Signature status"
+                  strategy="searchParams"
+                  paramKey="signatureStatus"
+                  labelKey="label"
+                  valueKey="value"
+                  items={[
+                    { label: "All", value: "ALL" },
+                    ...Object.keys(CustodySignatureStatus).map(
+                      (signStatus) => ({
+                        label: formatEnum(signStatus),
+                        value: signStatus,
+                      })
+                    ),
+                  ]}
+                />
+
+                <Select
+                  placeholder="Custody status"
+                  strategy="searchParams"
+                  paramKey="custodyStatus"
+                  labelKey="label"
+                  valueKey="value"
+                  items={[
+                    { label: "All", value: "ALL" },
+                    ...Object.keys(CustodyStatus).map((signStatus) => ({
+                      label: formatEnum(signStatus),
+                      value: signStatus,
+                    })),
+                  ]}
+                />
+              </div>
+            ),
+          }}
+        />
 
         <List
           hideFirstHeaderColumn
