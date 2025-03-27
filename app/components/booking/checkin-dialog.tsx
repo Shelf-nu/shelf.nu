@@ -9,6 +9,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
+  AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
 
@@ -58,7 +59,7 @@ export default function CheckinDialog({
 
       <AlertDialogContent portalProps={{ container: portalContainer }}>
         <AlertDialogHeader>
-          <h3>Early Check-in Warning</h3>
+          <AlertDialogTitle>Early Check-in Warning</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogDescription>
           You are checking in the booking before the end date. If you proceed,

@@ -60,9 +60,7 @@ export default function CheckoutDialog({
 
       <AlertDialogContent portalProps={{ container: portalContainer }}>
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            <h3>Early Check-Out Warning</h3>
-          </AlertDialogTitle>
+          <AlertDialogTitle>Early Check-Out Warning</AlertDialogTitle>
           <AlertDialogDescription>
             You are checking out the booking before the start date. If you
             proceed, the start date will be adjusted to now:{" "}

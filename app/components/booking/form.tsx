@@ -376,7 +376,6 @@ export function BookingForm({
                     disabled={inputFieldIsDisabled}
                     error={zo.errors.endDate()?.message}
                     className="w-full"
-                    defaultValue={endDate}
                     placeholder="Booking"
                     required
                     value={endDate}
