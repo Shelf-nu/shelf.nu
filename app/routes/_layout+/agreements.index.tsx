@@ -245,6 +245,7 @@ export default function Agreements() {
                     <ListHeader
                       children={
                         <>
+                          <Th></Th>
                           <Th>Default</Th>
                           <Th>Status</Th>
                           <Th>Actions</Th>
@@ -274,7 +275,7 @@ function AgreementRow({
 }: {
   item: Pick<
     CustodyAgreement,
-    "id" | "name" | "type" | "isDefault" | "isActive"
+    "id" | "name" | "type" | "isDefault" | "isActive" | "signatureRequired"
   >;
 }) {
   return (
@@ -288,6 +289,11 @@ function AgreementRow({
             {item.type}
           </span>
         </div>
+      </Td>
+      <Td>
+        <Badge withDot={false} color="#334054">
+          {item.signatureRequired ? "Ask for signature" : "View only"}
+        </Badge>
       </Td>
       <Td>
         {item.isDefault && (

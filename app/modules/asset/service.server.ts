@@ -2356,6 +2356,7 @@ export async function bulkCheckOutAssets({
     let custodies: Prisma.CustodyGetPayload<{
       select: {
         id: true;
+        agreementId: true;
         asset: { select: { id: true; title: true } };
       };
     }>[] = [];
@@ -2383,7 +2384,11 @@ export async function bulkCheckOutAssets({
               }
             : {}),
         })),
-        select: { id: true, asset: { select: { id: true, title: true } } },
+        select: {
+          id: true,
+          agreementId: true,
+          asset: { select: { id: true, title: true } },
+        },
       });
 
       /** Creating a custody receipt */
@@ -2437,7 +2442,7 @@ export async function bulkCheckOutAssets({
       });
     }
 
-    return true;
+    return custodies;
   } catch (cause) {
     const message =
       cause instanceof ShelfError

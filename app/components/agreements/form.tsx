@@ -134,11 +134,17 @@ export const AgreementForm = ({
           error={zo.errors.name()?.message}
           autoFocus
           onChange={updateTitle}
-          className="w-full"
+          className="mb-1 w-full"
           defaultValue={name || ""}
           placeholder="Custody Arrangement 2023"
-          required={true}
+          required
         />
+        <p className="text-sm text-gray-600">
+          Shown to end users as the agreement name.{" "}
+          <Button to="#" target="_blank" variant="link">
+            See a sample
+          </Button>
+        </p>
       </FormRow>
 
       <FormRow
@@ -166,11 +172,17 @@ export const AgreementForm = ({
           name={"description"}
           disabled={disabled}
           error={zo.errors.description()?.message}
-          className="w-full border-b-0 pb-0"
+          className="mb-1 w-full border-b-0 pb-0"
           defaultValue={description || ""}
           placeholder="Store the custody arrangement for 2023"
           required={false}
         />
+        <p className="text-sm text-gray-600">
+          Shown to end users for signing - use to give context.{" "}
+          <Button to="#" target="_blank" variant="link">
+            See a sample
+          </Button>
+        </p>
       </FormRow>
 
       <When

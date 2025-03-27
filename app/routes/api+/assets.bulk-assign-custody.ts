@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { json, redirect, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
 import { db } from "~/database/db.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
@@ -51,7 +51,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
-    await bulkCheckOutAssets({
+    const createdCustodies = await bulkCheckOutAssets({
       userId,
       assetIds,
       custodianId: custodian.id,
@@ -69,6 +69,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
+
+    /**
+     * If user assigned custody to single asset and the custody has an agreement associated
+     * then we navigate the user to the Share Agreement dialog
+     */
+    if (createdCustodies.length === 1 && createdCustodies[0]?.agreementId) {
+      return redirect(
+        `/assets/${createdCustodies[0].asset.id}/overview/share-agreement`
+      );
+    }
 
     return json(data({ success: true }));
   } catch (cause) {
