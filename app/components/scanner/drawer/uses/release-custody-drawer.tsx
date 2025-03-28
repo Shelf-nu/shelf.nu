@@ -297,7 +297,6 @@ export default function ReleaseCustodyDrawer({
 }
 
 function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
-  const fetcher = useFetcherWithReset<any>();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [custodyState, setCustodyState] = useState<CustodyState>({
     assetStatus: "processing",
@@ -305,7 +304,6 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   });
 
   // @ts-ignore -- @TODO: Fix this
-  const disabled = isFormProcessing(fetcher);
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -397,7 +395,6 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     },
   });
 
-  const fetcherError = useMemo(() => fetcher?.data?.error?.message, [fetcher]);
   const items = useAtomValue(scannedItemsAtom);
 
   const assetIds = Object.values(items)

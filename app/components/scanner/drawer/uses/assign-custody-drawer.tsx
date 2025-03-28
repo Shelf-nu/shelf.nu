@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -26,7 +26,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
@@ -37,7 +37,6 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { objectToFormData } from "~/utils/object-to-form-data";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -322,16 +321,13 @@ type CustodyState = {
 };
 
 function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
-  const fetcher = useFetcherWithReset<any>();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [custodyState, setCustodyState] = useState<CustodyState>({
     assetStatus: "processing",
     kitStatus: "processing",
     custodianName: "",
   });
-
-  // @ts-ignore -- @TODO: Fix this
-  const disabled = isFormProcessing(fetcher);
+  const disabled = useDisabled();
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<ScannerLoader>();
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
@@ -435,7 +431,6 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     },
   });
 
-  const fetcherError = useMemo(() => fetcher?.data?.error?.message, [fetcher]);
   const items = useAtomValue(scannedItemsAtom);
 
   const assetIds = Object.values(items)
@@ -525,9 +520,6 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               <p className="text-sm text-error-500">
                 {zo.errors.custodian()?.message}
               </p>
-            ) : null}
-            {fetcherError ? (
-              <p className="text-sm text-error-500">{fetcherError}</p>
             ) : null}
           </div>
 

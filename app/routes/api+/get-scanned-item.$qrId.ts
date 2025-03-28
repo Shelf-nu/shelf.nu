@@ -26,7 +26,6 @@ const KIT_INCLUDE = {
       bookings: { select: { id: true, status: true } },
     },
   },
-  custody: true,
 };
 
 const QR_INCLUDE = {
