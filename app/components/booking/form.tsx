@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -190,6 +190,15 @@ export function BookingForm({
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
+  useEffect(
+    function updateEndDate() {
+      if (incomingEndDate) {
+        setEndDate(incomingEndDate);
+      }
+    },
+    [incomingEndDate]
+  );
+
   return (
     <div>
       <Form ref={zo.ref} method="post" action={action}>
@@ -336,6 +345,7 @@ export function BookingForm({
                   required
                 >
                   <Input
+                    key={startDate}
                     label="Start Date"
                     type="datetime-local"
                     hideLabel
@@ -369,6 +379,7 @@ export function BookingForm({
                   required
                 >
                   <Input
+                    key={endDate}
                     label="End Date"
                     type="datetime-local"
                     hideLabel
