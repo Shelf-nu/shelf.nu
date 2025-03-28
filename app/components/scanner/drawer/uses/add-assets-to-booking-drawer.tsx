@@ -10,7 +10,6 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import { AssetLabel } from "~/components/icons/library";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
 import type {
   AssetFromQr,
@@ -175,27 +174,6 @@ export default function AddAssetsToBookingDrawer({
     },
   });
 
-  // Custom empty state content
-  const emptyStateContent = (expanded: boolean) => (
-    <>
-      {expanded && (
-        <div className="mb-4 rounded-full bg-primary-50 p-2">
-          <div className="rounded-full bg-primary-100 p-2 text-primary">
-            <AssetLabel className="size-6" />
-          </div>
-        </div>
-      )}
-      <div>
-        {expanded && (
-          <div className="text-base font-semibold text-gray-900">
-            List is empty
-          </div>
-        )}
-        <p className="text-sm text-gray-600">Fill list by scanning codes...</p>
-      </div>
-    </>
-  );
-
   // Render item row
   const renderItemRow = (qrId: string, item: any) => (
     <GenericItemRow
@@ -224,7 +202,6 @@ export default function AddAssetsToBookingDrawer({
       items={items}
       onClearItems={clearList}
       title="Items scanned"
-      emptyStateContent={emptyStateContent}
       isLoading={isLoading}
       renderItem={renderItemRow}
       Blockers={Blockers}

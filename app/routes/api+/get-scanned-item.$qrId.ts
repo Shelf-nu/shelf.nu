@@ -11,8 +11,28 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+const CUSTODY_INCLUDE = {
+  custody: {
+    select: {
+      custodian: {
+        select: {
+          name: true,
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 const ASSET_INCLUDE = {
   bookings: true,
+  ...CUSTODY_INCLUDE,
 };
 
 const KIT_INCLUDE = {
@@ -26,6 +46,7 @@ const KIT_INCLUDE = {
       bookings: { select: { id: true, status: true } },
     },
   },
+  ...CUSTODY_INCLUDE,
 };
 
 const QR_INCLUDE = {

@@ -11,10 +11,11 @@ import {
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
+  scannedItemIdsAtom,
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { AssetLabel, CheckmarkIcon } from "~/components/icons/library";
+import { CheckmarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -252,27 +253,6 @@ export default function AssignCustodyDrawer({
     },
   });
 
-  // Custom empty state content
-  const emptyStateContent = (expanded: boolean) => (
-    <>
-      {expanded && (
-        <div className="mb-4 rounded-full bg-primary-50 p-2">
-          <div className="rounded-full bg-primary-100 p-2 text-primary">
-            <AssetLabel className="size-6" />
-          </div>
-        </div>
-      )}
-      <div>
-        {expanded && (
-          <div className="text-base font-semibold text-gray-900">
-            List is empty
-          </div>
-        )}
-        <p className="text-sm text-gray-600">Fill list by scanning codes...</p>
-      </div>
-    </>
-  );
-
   // Render item row
   const renderItemRow = (qrId: string, item: any) => (
     <GenericItemRow
@@ -300,7 +280,6 @@ export default function AssignCustodyDrawer({
       items={items}
       onClearItems={clearList}
       title="Items scanned"
-      emptyStateContent={emptyStateContent}
       isLoading={isLoading}
       renderItem={renderItemRow}
       Blockers={Blockers}
@@ -431,15 +410,8 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     },
   });
 
-  const items = useAtomValue(scannedItemsAtom);
+  const { assetIds, kitIds, idsTotalCount } = useAtomValue(scannedItemIdsAtom);
 
-  const assetIds = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data?.id);
-
-  const kitsIds = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data?.id);
   const clearItems = useSetAtom(clearScannedItemsAtom);
 
   function cleanupState() {
@@ -469,7 +441,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           />
         ))}
 
-        {kitsIds.map((id, index) => (
+        {kitIds.map((id, index) => (
           <input
             key={`kit-${id}`}
             type="hidden"
@@ -527,9 +499,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             <Button
               variant="primary"
               width="full"
-              disabled={
-                disabled || disableSubmit || Object.values(items).length === 0
-              }
+              disabled={disabled || disableSubmit || idsTotalCount === 0}
             >
               Assign custody
             </Button>
@@ -537,6 +507,87 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         </div>
       </Form>
     </>
+  );
+}
+
+// Implement item renderers if they're not already defined elsewhere
+export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  // Use predefined presets to create label configurations
+  const availabilityConfigs = [
+    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
+    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.partOfKit(!!asset.kitId),
+  ];
+
+  // Create the availability labels component with max 2 labels
+  const [, AssetAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+    }
+  );
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {asset.title}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          asset
+        </span>
+        <AssetAvailabilityLabels />
+      </div>
+    </div>
+  );
+}
+
+export function KitRow({ kit }: { kit: KitFromQr }) {
+  // Use predefined presets to create label configurations
+  const availabilityConfigs = [
+    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
+    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
+    kitLabelPresets.hasAssetsInCustody(
+      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+    ),
+  ];
+
+  // Create the availability labels component with default options
+  const [, KitAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+    }
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {kit.name}{" "}
+        <span className="text-[12px] font-normal text-gray-700">
+          ({kit._count.assets} assets)
+        </span>
+      </p>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          kit
+        </span>
+        <KitAvailabilityLabels />
+      </div>
+    </div>
   );
 }
 
@@ -642,85 +693,4 @@ function SubmissionState({
       </div>
     );
   }
-}
-
-// Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetFromQr }) {
-  // Use predefined presets to create label configurations
-  const availabilityConfigs = [
-    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(!!asset.kitId),
-  ];
-
-  // Create the availability labels component with max 2 labels
-  const [, AssetAvailabilityLabels] = createAvailabilityLabels(
-    availabilityConfigs,
-    {
-      maxLabels: 3,
-    }
-  );
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
-      </div>
-    </div>
-  );
-}
-
-export function KitRow({ kit }: { kit: KitFromQr }) {
-  // Use predefined presets to create label configurations
-  const availabilityConfigs = [
-    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
-    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
-    kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
-    ),
-  ];
-
-  // Create the availability labels component with default options
-  const [, KitAvailabilityLabels] = createAvailabilityLabels(
-    availabilityConfigs,
-    {
-      maxLabels: 3,
-    }
-  );
-
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {kit.name}{" "}
-        <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
-        </span>
-      </p>
-
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          kit
-        </span>
-        <KitAvailabilityLabels />
-      </div>
-    </div>
-  );
 }

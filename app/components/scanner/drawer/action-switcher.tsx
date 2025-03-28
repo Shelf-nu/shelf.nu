@@ -21,6 +21,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { scannerActionAtom } from "./action-atom";
 import AssignCustodyDrawer from "./uses/assign-custody-drawer";
+import ReleaseCustodyDrawer from "./uses/release-custody-drawer";
 
 const ACTION_CONFIGS = [
   {
@@ -130,6 +131,9 @@ export function ActionSwitcher() {
     <div>
       <When truthy={action === "Assign custody"}>
         <AssignCustodyDrawer isLoading={isLoading} />
+      </When>
+      <When truthy={action === "Release custody"}>
+        <ReleaseCustodyDrawer isLoading={isLoading} />
       </When>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

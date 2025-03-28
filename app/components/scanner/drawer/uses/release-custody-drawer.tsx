@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
@@ -10,9 +10,10 @@ import {
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
+  scannedItemIdsAtom,
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
-import { AssetLabel, CheckmarkIcon } from "~/components/icons/library";
+import { CheckmarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -24,16 +25,15 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
+import { useDisabled } from "~/hooks/use-disabled";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { objectToFormData } from "~/utils/object-to-form-data";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 import {
   assetLabelPresets,
   createAvailabilityLabels,
@@ -99,20 +99,12 @@ export default function ReleaseCustodyDrawer({
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitFromQr);
 
-  // List of kit IDs for the form
-  const kitIds = Array.from(new Set(kits.map((k) => k.id)));
-
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Asset blockers - here we look for assets NOT in custody (which is the opposite of assign custody drawer)
+  // Asset blockers - here we look for assets NOT in custody (AVAILABLE OF CHECKED_OUT)
   const assetsNotInCustody = assets
     .filter((asset) => !!asset && asset.status !== AssetStatus.IN_CUSTODY)
-    .map((asset) => asset.id);
-
-  // Asset is checked out - can't release custody on these
-  const assetsAreCheckedOut = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
     .map((asset) => asset.id);
 
   // Asset is part of a kit
@@ -121,14 +113,9 @@ export default function ReleaseCustodyDrawer({
     .map((asset) => asset.id);
 
   // Kit blockers
-  // Kit is not in custody
+  // Kit is not in custody (AVAILABLE OF CHECKED_OUT)
   const kitsNotInCustody = kits
     .filter((kit) => kit.status !== AssetStatus.IN_CUSTODY)
-    .map((kit) => kit.id);
-
-  // Kit is checked out
-  const kitsAreCheckedOut = kits
-    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
     .map((kit) => kit.id);
 
   // Find the QR IDs that correspond to kit IDs with blockers
@@ -143,7 +130,6 @@ export default function ReleaseCustodyDrawer({
 
   // Get the QR IDs for each type of kit blocker
   const qrIdsOfKitsNotInCustody = getQrIdsForKitIds(kitsNotInCustody);
-  const qrIdsOfKitsCheckedOut = getQrIdsForKitIds(kitsAreCheckedOut);
 
   // Create blockers configuration
   const blockerConfigs = [
@@ -158,18 +144,6 @@ export default function ReleaseCustodyDrawer({
       ),
       description: "Only assets in custody can be released.",
       onResolve: () => removeAssetsFromList(assetsNotInCustody),
-    },
-    {
-      condition: assetsAreCheckedOut.length > 0,
-      count: assetsAreCheckedOut.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          checked out.
-        </>
-      ),
-      description: "Checked out assets can't be released from custody.",
-      onResolve: () => removeAssetsFromList(assetsAreCheckedOut),
     },
     {
       condition: assetsArePartOfKit.length > 0,
@@ -196,18 +170,6 @@ export default function ReleaseCustodyDrawer({
       onResolve: () => removeItemsFromList(qrIdsOfKitsNotInCustody),
     },
     {
-      condition: qrIdsOfKitsCheckedOut.length > 0,
-      count: qrIdsOfKitsCheckedOut.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          checked out.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
-      description: "Checked out kits can't be released from custody.",
-    },
-    {
       condition: errors.length > 0,
       count: errors.length,
       message: (count: number) => (
@@ -223,39 +185,13 @@ export default function ReleaseCustodyDrawer({
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
     onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsNotInCustody,
-        ...assetsAreCheckedOut,
-        ...assetsArePartOfKit,
-      ]);
+      removeAssetsFromList([...assetsNotInCustody, ...assetsArePartOfKit]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
         ...qrIdsOfKitsNotInCustody,
-        ...qrIdsOfKitsCheckedOut,
       ]);
     },
   });
-
-  // Custom empty state content
-  const emptyStateContent = (expanded: boolean) => (
-    <>
-      {expanded && (
-        <div className="mb-4 rounded-full bg-primary-50 p-2">
-          <div className="rounded-full bg-primary-100 p-2 text-primary">
-            <AssetLabel className="size-6" />
-          </div>
-        </div>
-      )}
-      <div>
-        {expanded && (
-          <div className="text-base font-semibold text-gray-900">
-            List is empty
-          </div>
-        )}
-        <p className="text-sm text-gray-600">Fill list by scanning codes...</p>
-      </div>
-    </>
-  );
 
   // Render item row
   const renderItemRow = (qrId: string, item: any) => (
@@ -284,7 +220,6 @@ export default function ReleaseCustodyDrawer({
       items={items}
       onClearItems={clearList}
       title="Items scanned"
-      emptyStateContent={emptyStateContent}
       isLoading={isLoading}
       renderItem={renderItemRow}
       Blockers={Blockers}
@@ -297,13 +232,15 @@ export default function ReleaseCustodyDrawer({
 }
 
 function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
+  const { assetIds, kitIds, idsTotalCount } = useAtomValue(scannedItemIdsAtom);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [custodyState, setCustodyState] = useState<CustodyState>({
     assetStatus: "processing",
     kitStatus: "processing",
   });
 
-  // @ts-ignore -- @TODO: Fix this
+  const disabled = useDisabled();
+
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -395,15 +332,6 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     },
   });
 
-  const items = useAtomValue(scannedItemsAtom);
-
-  const assetIds = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data?.id);
-
-  const kitsIds = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data?.id);
   const clearItems = useSetAtom(clearScannedItemsAtom);
 
   function cleanupState() {
@@ -432,7 +360,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           />
         ))}
 
-        {kitsIds.map((id, index) => (
+        {kitIds.map((id, index) => (
           <input
             key={`kit-${id}`}
             type="hidden"
@@ -446,9 +374,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             <Button
               variant="primary"
               width="full"
-              disabled={
-                disabled || disableSubmit || Object.values(items).length === 0
-              }
+              disabled={disabled || disableSubmit || idsTotalCount === 0}
             >
               Release custody
             </Button>
@@ -456,6 +382,111 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         </div>
       </Form>
     </>
+  );
+}
+
+// Implement item renderers if they're not already defined elsewhere
+export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  // Use predefined presets to create label configurations with appropriate conditions for release custody
+  const availabilityConfigs = [
+    // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
+    {
+      condition: asset.status !== AssetStatus.IN_CUSTODY,
+      badgeText: "Not in custody",
+      tooltipTitle: "Asset is not in custody",
+      tooltipContent: "This asset is not in custody and cannot be released.",
+      priority: 100,
+    },
+    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.partOfKit(!!asset.kitId),
+  ];
+
+  // Create the availability labels component with max 3 labels
+  const [, AssetAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+    }
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {asset.title}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          asset
+        </span>
+        <AssetAvailabilityLabels />
+        {asset.status === AssetStatus.IN_CUSTODY && asset.custody && (
+          <span className="flex items-center gap-1">
+            In custody of{" "}
+            <TeamMemberBadge teamMember={asset?.custody?.custodian} />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function KitRow({ kit }: { kit: KitFromQr }) {
+  // Use predefined presets to create label configurations appropriate for release custody
+  const availabilityConfigs = [
+    // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
+    {
+      condition: kit.status !== AssetStatus.IN_CUSTODY,
+      badgeText: "Not in custody",
+      tooltipTitle: "Kit is not in custody",
+      tooltipContent: "This kit is not in custody and cannot be released.",
+      priority: 100,
+    },
+    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
+  ];
+
+  // Create the availability labels component with default options
+  const [, KitAvailabilityLabels] = createAvailabilityLabels(
+    availabilityConfigs,
+    {
+      maxLabels: 3,
+    }
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="word-break whitespace-break-spaces font-medium">
+        {kit.name}{" "}
+        <span className="text-[12px] font-normal text-gray-700">
+          ({kit._count.assets} assets)
+        </span>
+      </p>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={tw(
+            "inline-block bg-gray-50 px-[6px] py-[2px]",
+            "rounded-md border border-gray-200",
+            "text-xs text-gray-700"
+          )}
+        >
+          kit
+        </span>
+        <KitAvailabilityLabels />
+        {kit.status === AssetStatus.IN_CUSTODY && kit.custody && (
+          <span className="flex items-center gap-1">
+            In custody of{" "}
+            <TeamMemberBadge teamMember={kit?.custody?.custodian} />
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -558,119 +589,4 @@ function SubmissionState({
       </div>
     );
   }
-}
-
-// Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetFromQr }) {
-  // Use predefined presets to create label configurations with appropriate conditions for release custody
-  const availabilityConfigs = [
-    // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
-    {
-      condition: asset.status !== AssetStatus.IN_CUSTODY,
-      badgeText: "Not in custody",
-      tooltipTitle: "Asset is not in custody",
-      tooltipContent: "This asset is not in custody and cannot be released.",
-      priority: 100,
-    },
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(!!asset.kitId),
-  ];
-
-  // Create the availability labels component with max 3 labels
-  const [, AssetAvailabilityLabels] = createAvailabilityLabels(
-    availabilityConfigs,
-    {
-      maxLabels: 3,
-    }
-  );
-
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
-        {asset.status === AssetStatus.IN_CUSTODY && asset.custody && (
-          <span
-            className={tw(
-              "inline-block bg-blue-50 px-[6px] py-[2px]",
-              "rounded-md border border-blue-200",
-              "text-xs text-blue-700"
-            )}
-          >
-            In custody of: {resolveTeamMemberName(asset.custody.custodian)}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function KitRow({ kit }: { kit: KitFromQr }) {
-  // Use predefined presets to create label configurations appropriate for release custody
-  const availabilityConfigs = [
-    // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
-    {
-      condition: kit.status !== AssetStatus.IN_CUSTODY,
-      badgeText: "Not in custody",
-      tooltipTitle: "Kit is not in custody",
-      tooltipContent: "This kit is not in custody and cannot be released.",
-      priority: 100,
-    },
-    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
-  ];
-
-  // Create the availability labels component with default options
-  const [, KitAvailabilityLabels] = createAvailabilityLabels(
-    availabilityConfigs,
-    {
-      maxLabels: 3,
-    }
-  );
-
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {kit.name}{" "}
-        <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
-        </span>
-      </p>
-
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          kit
-        </span>
-        <KitAvailabilityLabels />
-        {kit.status === AssetStatus.IN_CUSTODY && kit.custody && (
-          <span
-            className={tw(
-              "inline-block bg-blue-50 px-[6px] py-[2px]",
-              "rounded-md border border-blue-200",
-              "text-xs text-blue-700"
-            )}
-          >
-            In custody of: {resolveTeamMemberName(kit.custody.custodian)}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }

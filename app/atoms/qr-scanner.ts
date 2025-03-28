@@ -25,10 +25,27 @@ export type ScanListItem =
 
 export const scannedItemsAtom = atom<ScanListItems>({});
 
-/** Get an array of the scanned items ids */
-export const scannedItemsIdsAtom = atom((get) =>
-  Object.values(get(scannedItemsAtom)).map((item) => item?.data?.id)
-);
+/**
+ * A derived atom that extracts asset and kit IDs from the scanned items
+ * This avoids repeatedly filtering the items in different components
+ *
+ * @returns An object containing arrays of assetIds and kitIds
+ */
+export const scannedItemIdsAtom = atom((get) => {
+  const items = get(scannedItemsAtom);
+
+  // Extract asset IDs from items of type "asset"
+  const assetIds = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => item?.data?.id);
+
+  // Extract kit IDs from items of type "kit"
+  const kitIds = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "kit")
+    .map((item) => item?.data?.id);
+
+  return { assetIds, kitIds, idsTotalCount: assetIds.length + kitIds.length };
+});
 
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(
