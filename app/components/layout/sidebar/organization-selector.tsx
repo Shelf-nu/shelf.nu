@@ -106,7 +106,7 @@ export default function OrganizationSelector() {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="!mt-0 w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
+            className="!mt-0  w-[--radix-dropdown-menu-trigger-width] min-w-56 overflow-auto rounded p-1"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}

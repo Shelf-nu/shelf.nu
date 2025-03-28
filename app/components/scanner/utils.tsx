@@ -1,5 +1,6 @@
 import { readBarcodes, type ReadResult } from "zxing-wasm";
 import { isQrId } from "~/utils/id";
+import type { OnQRDetectionSuccess } from "./code-scanner";
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -151,13 +152,11 @@ export const processFrame = async ({
   animationFrame: React.MutableRefObject<number>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  onQrDetectionSuccess: (
-    qrId: string,
-    message?: string
-  ) => void | Promise<void>;
+  onQrDetectionSuccess: OnQRDetectionSuccess;
   allowNonShelfCodes: boolean;
   setError: (error: string) => void;
 }) => {
+  // If already paused, don't process more frames
   if (paused) {
     /** When the state is paused and animation frame exists, we need to cancel it to stop the processing of frames */
     if (animationFrame.current) {
@@ -208,13 +207,16 @@ export const processFrame = async ({
     if (results.length > 0) {
       const result = results[0];
       drawDetectionBox(ctx, result.position);
+
+      // Don't set paused yet - let handleDetection decide
       await handleDetection({
         result: result.text,
         onQrDetectionSuccess,
         allowNonShelfCodes,
-        paused,
+        paused, // Use the current paused state
       });
-      setPaused(true);
+
+      // The onQrDetectionSuccess callback will handle pausing based on the action
     }
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -250,10 +252,7 @@ export const handleDetection = async ({
 }: {
   result: string;
   allowNonShelfCodes: boolean;
-  onQrDetectionSuccess?: (
-    qrId: string,
-    message?: string
-  ) => void | Promise<void>;
+  onQrDetectionSuccess?: OnQRDetectionSuccess;
   paused: boolean;
 }) => {
   if (!result || paused) return;
@@ -262,20 +261,20 @@ export const handleDetection = async ({
   const match = result.match(regex);
 
   if (!match && !allowNonShelfCodes) {
-    await onQrDetectionSuccess?.(
-      result,
-      "Scanned code is not a valid Shelf QR code."
-    );
+    await onQrDetectionSuccess?.({
+      qrId: result,
+      error: "Scanned code is not a valid Shelf QR code.",
+    });
     return;
   }
 
   const qrId = match ? match[2] : result;
   if (match && !isQrId(qrId)) {
-    await onQrDetectionSuccess?.(qrId, "Invalid QR code format");
+    await onQrDetectionSuccess?.({ qrId, error: "Invalid QR code format" });
     return;
   }
 
-  await onQrDetectionSuccess?.(qrId);
+  await onQrDetectionSuccess?.({ qrId });
 };
 
 /** Updates the canvas size to match the video size */

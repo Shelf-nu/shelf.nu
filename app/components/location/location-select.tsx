@@ -12,9 +12,11 @@ import { Image } from "../shared/image";
 export const LocationSelect = ({
   isBulk = false,
   hideClearButton = false,
+  placeholder,
 }: {
   isBulk?: boolean;
   hideClearButton?: boolean;
+  placeholder?: string;
 }) => {
   const navigation = useNavigation();
 
@@ -38,7 +40,7 @@ export const LocationSelect = ({
           defaultValue={locationId}
           model={{ name: "location", queryKey: "name" }}
           contentLabel="Locations"
-          placeholder="Without location"
+          placeholder={placeholder || "Without location"}
           initialDataKey="locations"
           countKey="totalLocations"
           closeOnSelect
