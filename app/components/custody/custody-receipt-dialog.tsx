@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { changeDpiDataUrl } from "changedpi";
-import { toJpeg } from "html-to-image";
+import { useReactToPrint } from "react-to-print";
 import { useSearchParams } from "~/hooks/search-params";
 import { type loader } from "~/routes/_layout+/receipts.index";
 import { useHints } from "~/utils/client-hints";
@@ -19,36 +18,19 @@ export default function CustodyReceiptDialog() {
   const hints = useHints();
 
   const receiptId = searchParams.get("receiptId");
-  if (!receiptId) {
+  const receipt = items.find((item) => item.id === receiptId);
+  const custodyAgreement = receipt?.agreement;
+  const custodian = receipt?.custodian;
+  const asset = receipt?.asset;
+  const agreementFile = custodyAgreement?.custodyAgreementFiles[0];
+
+  const handlePrint = useReactToPrint({
+    content: () => receiptRef.current,
+    documentTitle: asset?.title ?? "",
+  });
+
+  if (!receipt || !custodyAgreement || !custodian || !asset || !agreementFile) {
     return null;
-  }
-
-  function downloadReceipt() {
-    const receipt = receiptRef.current;
-    if (!receipt) {
-      return;
-    }
-
-    toJpeg(receipt, {
-      height: receipt.offsetHeight * 2,
-      width: receipt.offsetWidth * 2,
-      style: {
-        transform: `scale(${2})`,
-        transformOrigin: "top left",
-        width: `${receipt.offsetWidth}px`,
-        height: `${receipt.offsetHeight}px`,
-      },
-    })
-      .then((dataUrl) => {
-        const filename = `${asset?.title}`;
-        const downloadLink = document.createElement("a");
-        downloadLink.href = changeDpiDataUrl(dataUrl, 300);
-        downloadLink.download = filename;
-        downloadLink.click();
-        URL.revokeObjectURL(downloadLink.href);
-      })
-      // eslint-disable-next-line no-console
-      .catch(console.error);
   }
 
   function handleClose() {
@@ -56,16 +38,6 @@ export default function CustodyReceiptDialog() {
       prev.delete("receiptId");
       return prev;
     });
-  }
-
-  const receipt = items.find((item) => item.id === receiptId);
-  const custodyAgreement = receipt?.agreement;
-  const custodian = receipt?.custodian;
-  const asset = receipt?.asset;
-  const agreementFile = custodyAgreement?.custodyAgreementFiles[0];
-
-  if (!receipt || !custodyAgreement || !custodian || !asset || !agreementFile) {
-    return null;
   }
 
   return (
@@ -153,11 +125,13 @@ export default function CustodyReceiptDialog() {
               <p className="p-2 font-medium">Asset</p>
               <p className="col-span-2 py-2 text-gray-600">
                 <Button
+                  className="mb-1 items-start text-start"
                   to={`/assets/${asset.id}/overview`}
                   target="_blank"
                   variant="link-gray"
                 >
-                  {asset.title}
+                  <p>{asset.title}</p>
+                  <p>{asset.id}</p>
                 </Button>
               </p>
               <Separator className="col-span-3" />
@@ -194,7 +168,7 @@ export default function CustodyReceiptDialog() {
           <Button
             variant="secondary"
             className="w-full max-w-full"
-            onClick={downloadReceipt}
+            onClick={handlePrint}
           >
             Download
           </Button>
