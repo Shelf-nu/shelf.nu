@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   AssetStatus,
   CustodySignatureStatus,
@@ -252,6 +253,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function Sign() {
+  const [isClosed, setIsClosed] = useState(false);
+
   useCrisp();
   const {
     custodyAgreement,
@@ -261,7 +264,7 @@ export default function Sign() {
     asset,
   } = useLoaderData<typeof loader>();
 
-  if (isAgreementSigned) {
+  if (isAgreementSigned || isClosed) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="flex w-[450px] flex-col items-center justify-center gap-4 p-6 text-center">
@@ -272,10 +275,12 @@ export default function Sign() {
           </div>
 
           <div>
-            <h4 className="mb-1">Successfully signed document.</h4>
+            <h4 className="mb-1">
+              {isClosed ? "Thank you" : "Successfully signed document."}
+            </h4>
             <p>
-              Thank you for signing the document. You can close this page or
-              visit your dashboard.
+              Thank you for {isClosed ? "reading" : "signing"} the document. You
+              can close this page or visit your dashboard.
             </p>
           </div>
 
@@ -335,7 +340,21 @@ export default function Sign() {
               </p>
             </div>
 
-            <When truthy={custodyAgreement.signatureRequired}>
+            <When
+              truthy={custodyAgreement.signatureRequired}
+              fallback={
+                <div className="flex items-center justify-end border-b p-2">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setIsClosed(true);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              }
+            >
               <Agreement className="hidden md:block" />
             </When>
           </div>
