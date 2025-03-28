@@ -1,4 +1,4 @@
-import { type Tag } from "@prisma/client";
+import { CustodySignatureStatus, type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -21,6 +21,7 @@ import AssetQuickActions from "~/components/assets/assets-index/asset-quick-acti
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
+import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
@@ -418,11 +419,19 @@ const ListAssetContent = ({
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div>
+              <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
+                <When
+                  truthy={
+                    item.custody?.signatureStatus ===
+                    CustodySignatureStatus.PENDING
+                  }
+                >
+                  <AwaitingSignatureTooltip assetId={item.id} />
+                </When>
               </div>
             </div>
           </div>

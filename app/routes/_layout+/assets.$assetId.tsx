@@ -1,3 +1,4 @@
+import { CustodySignatureStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -15,6 +16,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
+import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -78,7 +80,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: {
-        custody: { include: { custodian: true } },
+        custody: {
+          include: {
+            custodian: true,
+            agreement: { select: { signatureRequired: true } },
+          },
+        },
         kit: true,
         qrCodes: true,
       },
@@ -285,10 +292,20 @@ export default function AssetDetailsPage() {
         }}
         subHeading={
           <div className="flex gap-2">
-            <AssetStatusBadge
-              status={asset.status}
-              availableToBook={asset.availableToBook}
-            />
+            <div className="flex items-center gap-x-1">
+              <AssetStatusBadge
+                status={asset.status}
+                availableToBook={asset.availableToBook}
+              />
+              <When
+                truthy={
+                  asset.custody?.signatureStatus ===
+                  CustodySignatureStatus.PENDING
+                }
+              >
+                <AwaitingSignatureTooltip assetId={asset.id} />
+              </When>
+            </div>
           </div>
         }
       >

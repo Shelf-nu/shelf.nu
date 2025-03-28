@@ -1,9 +1,14 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
+
 import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
+fileErrorAtom.onMount = (setAtom) => {
+  setAtom("");
+};
+export const MAX_SIZE = 4_000_000; // 4MB
 
 /** Validates the file atom */
 export const validateFileAtom = atom(
@@ -17,7 +22,9 @@ export const validateFileAtom = atom(
 
         if (!allowedType) {
           event.target.value = "";
-          return `Allowed file types are: PNG, JPG or JPEG`;
+          return `Allowed file types are: ${
+            event.target.accept === "pdf" ? "PDF" : "PNG, JPG or JPEG"
+          }`;
         }
 
         if (!allowedSize) {
