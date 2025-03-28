@@ -613,7 +613,7 @@ function SubmittingDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Assigning custody</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogDescription asChild>
             <div className="flex flex-col gap-4">
               <SubmissionState
                 type={"asset"}
