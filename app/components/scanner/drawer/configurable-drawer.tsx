@@ -14,7 +14,7 @@ type ConfigurableDrawerProps<T> = {
   // Form schema for validation
   schema: z.ZodType<any>;
   // Data to be passed to the form on submission
-  formData: Record<string, any>;
+  formData?: Record<string, any>;
   // Action URL for the form
   actionUrl?: string; // Optional if using the current route's action
   // Method for the form (default: POST)
@@ -139,7 +139,7 @@ export default function ConfigurableDrawer<T>({
         {/* Action form */}
         {form ? (
           form
-        ) : (
+        ) : formData ? (
           <When truthy={hasItems}>
             <Form
               ref={zo.ref}
@@ -176,7 +176,7 @@ export default function ConfigurableDrawer<T>({
               </div>
             </Form>
           </When>
-        )}
+        ) : null}
       </>
     </BaseDrawer>
   );

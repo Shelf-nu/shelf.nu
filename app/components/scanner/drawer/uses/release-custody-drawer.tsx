@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useZorm } from "react-zorm";
@@ -13,7 +12,6 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
-import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { AssetLabel, CheckmarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
@@ -27,11 +25,8 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { createCustodianSchema } from "~/modules/custody/schema";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
-import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { objectToFormData } from "~/utils/object-to-form-data";
@@ -51,25 +46,31 @@ import {
 } from "../generic-item-row";
 
 // Export the schema so it can be reused
-export const AssignCustodyToSignedItemsSchema = z.object({
+export const ReleaseCustodyFromScannedItemsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
-const BulkAssignCustodySchema = z
+const BulkReleaseCustodySchema = z
   .object({
     assetIds: z.array(z.string()).optional().default([]),
     kitIds: z.array(z.string()).optional().default([]),
-    custodian: createCustodianSchema(),
   })
   .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
     message: "At least one asset or kit must be selected",
     path: ["assetIds"], // This will attach the error to the assetIds field
   });
 
+type CustodyState = {
+  assetStatus: "processing" | "success" | "error" | "skipped";
+  assetErrorMessage?: string;
+  kitStatus: "processing" | "success" | "error" | "skipped";
+  kitErrorMessage?: string;
+};
+
 /**
- * Drawer component for managing scanned assets to be added to bookings
+ * Drawer component for managing scanned items to release from custody
  */
-export default function AssignCustodyDrawer({
+export default function ReleaseCustodyDrawer({
   className,
   style,
   isLoading,
@@ -96,15 +97,18 @@ export default function AssignCustodyDrawer({
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitForBooking);
 
+  // List of kit IDs for the form
+  const kitIds = Array.from(new Set(kits.map((k) => k.id)));
+
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Asset blockers
-  const assetsAlreadyInCustody = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.IN_CUSTODY)
+  // Asset blockers - here we look for assets NOT in custody (which is the opposite of assign custody drawer)
+  const assetsNotInCustody = assets
+    .filter((asset) => !!asset && asset.status !== AssetStatus.IN_CUSTODY)
     .map((asset) => asset.id);
 
-  // Asset is checked out
+  // Asset is checked out - can't release custody on these
   const assetsAreCheckedOut = assets
     .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
     .map((asset) => asset.id);
@@ -115,17 +119,11 @@ export default function AssignCustodyDrawer({
     .map((asset) => asset.id);
 
   // Kit blockers
-  // Kit is in custody
-  const kitsIsAlreadyInCustody = kits
-    .filter((kit) => kit.status === AssetStatus.IN_CUSTODY)
+  // Kit is not in custody
+  const kitsNotInCustody = kits
+    .filter((kit) => kit.status !== AssetStatus.IN_CUSTODY)
     .map((kit) => kit.id);
 
-  // Kit has assets inside that that are in custody
-  const kitsWithAssetsInCustody = kits
-    .filter((kit) =>
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
-    )
-    .map((kit) => kit.id);
   // Kit is checked out
   const kitsAreCheckedOut = kits
     .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
@@ -142,24 +140,22 @@ export default function AssignCustodyDrawer({
       .map(([qrId]) => qrId);
 
   // Get the QR IDs for each type of kit blocker
-  const qrIdsOfKitsInCustody = getQrIdsForKitIds(kitsIsAlreadyInCustody);
-  const qrIdsOfKitsWithAssetsInCustody = getQrIdsForKitIds(
-    kitsWithAssetsInCustody
-  );
+  const qrIdsOfKitsNotInCustody = getQrIdsForKitIds(kitsNotInCustody);
   const qrIdsOfKitsCheckedOut = getQrIdsForKitIds(kitsAreCheckedOut);
 
   // Create blockers configuration
   const blockerConfigs = [
     {
-      condition: assetsAlreadyInCustody.length > 0,
-      count: assetsAlreadyInCustody.length,
+      condition: assetsNotInCustody.length > 0,
+      count: assetsNotInCustody.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already <strong>in custody</strong>.
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> not
+          in custody.
         </>
       ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyInCustody),
+      description: "Only assets in custody can be released.",
+      onResolve: () => removeAssetsFromList(assetsNotInCustody),
     },
     {
       condition: assetsAreCheckedOut.length > 0,
@@ -170,7 +166,7 @@ export default function AssignCustodyDrawer({
           checked out.
         </>
       ),
-      description: "Note: Checked out assets cannot be assigned custody.",
+      description: "Checked out assets can't be released from custody.",
       onResolve: () => removeAssetsFromList(assetsAreCheckedOut),
     },
     {
@@ -182,30 +178,20 @@ export default function AssignCustodyDrawer({
           of a kit.
         </>
       ),
-      description: "Note: Scan Kit QR to add the full kit",
+      description: "Note: Scan Kit QR to release the full kit from custody",
       onResolve: () => removeAssetsFromList(assetsArePartOfKit),
     },
     {
-      condition: qrIdsOfKitsInCustody.length > 0,
-      count: qrIdsOfKitsInCustody.length,
+      condition: qrIdsOfKitsNotInCustody.length > 0,
+      count: qrIdsOfKitsNotInCustody.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          already <strong>in custody</strong>.
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong> not
+          in custody.
         </>
       ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsInCustody),
-    },
-    {
-      condition: qrIdsOfKitsWithAssetsInCustody.length > 0,
-      count: qrIdsOfKitsWithAssetsInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          already have assets <strong>in custody</strong>.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsWithAssetsInCustody),
+      description: "Only kits in custody can be released.",
+      onResolve: () => removeItemsFromList(qrIdsOfKitsNotInCustody),
     },
     {
       condition: qrIdsOfKitsCheckedOut.length > 0,
@@ -217,7 +203,7 @@ export default function AssignCustodyDrawer({
         </>
       ),
       onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
-      description: "Note: Checked out kits cannot be assigned custody.",
+      description: "Checked out kits can't be released from custody.",
     },
     {
       condition: errors.length > 0,
@@ -236,14 +222,13 @@ export default function AssignCustodyDrawer({
     blockerConfigs,
     onResolveAll: () => {
       removeAssetsFromList([
-        ...assetsAlreadyInCustody,
+        ...assetsNotInCustody,
         ...assetsAreCheckedOut,
         ...assetsArePartOfKit,
       ]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsInCustody,
-        ...qrIdsOfKitsWithAssetsInCustody,
+        ...qrIdsOfKitsNotInCustody,
         ...qrIdsOfKitsCheckedOut,
       ]);
     },
@@ -293,7 +278,7 @@ export default function AssignCustodyDrawer({
 
   return (
     <ConfigurableDrawer
-      schema={AssignCustodyToSignedItemsSchema}
+      schema={ReleaseCustodyFromScannedItemsSchema}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -304,57 +289,39 @@ export default function AssignCustodyDrawer({
       defaultExpanded={defaultExpanded}
       className={className}
       style={style}
-      form={<CustodyForm disableSubmit={hasBlockers} />}
+      form={<ReleaseCustodyForm disableSubmit={hasBlockers} />}
     />
   );
 }
 
-type CustodyState = {
-  assetStatus: "processing" | "success" | "error" | "skipped";
-  assetErrorMessage?: string;
-  kitStatus: "processing" | "success" | "error" | "skipped";
-  kitErrorMessage?: string;
-  custodianName: string;
-};
-
-function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
+function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const fetcher = useFetcherWithReset<any>();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [custodyState, setCustodyState] = useState<CustodyState>({
     assetStatus: "processing",
     kitStatus: "processing",
-    custodianName: "",
   });
 
   // @ts-ignore -- @TODO: Fix this
   const disabled = isFormProcessing(fetcher);
-  const { isSelfService } = useUserRoleHelper();
-  const { teamMembers } = useLoaderData<ScannerLoader>();
-  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
+  const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
       setDialogOpen(true);
-      const { custodian, assetIds, kitIds } = e.data;
-      setCustodyState((state) => ({
-        ...state,
-        custodianName: custodian.name,
-      }));
+      const { assetIds, kitIds } = e.data;
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
         // Create object data structure for assets
         const assetData = {
-          custodian,
           assetIds,
         };
 
         // Convert to FormData
-        const assetFormData = objectToFormData(assetData, {
-          jsonStringifyFields: ["custodian"],
-        });
+        const assetFormData = objectToFormData(assetData);
 
         // Send asset request
-        fetch("/api/assets/bulk-assign-custody", {
+        fetch("/api/assets/bulk-release-custody", {
           method: "POST",
           body: assetFormData,
         })
@@ -373,7 +340,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               assetErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : "Something went wrong while releasing custody. Please try again.",
             }));
           });
       } else {
@@ -388,15 +355,12 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
       if (kitIds && kitIds.length > 0) {
         // Create object data structure for kits
         const kitData = {
-          custodian,
           kitIds,
-          intent: "bulk-assign-custody",
+          intent: "bulk-release-custody",
         };
 
         // Convert to FormData
-        const kitFormData = objectToFormData(kitData, {
-          jsonStringifyFields: ["custodian"],
-        });
+        const kitFormData = objectToFormData(kitData);
 
         // Send kit request
         fetch("/api/kits/bulk-actions", {
@@ -418,7 +382,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
               kitErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while assigning custody. Please try again.",
+                  : "Something went wrong while releasing custody. Please try again.",
             }));
           });
       } else {
@@ -447,7 +411,6 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
-      custodianName: "",
     });
     clearItems();
   }
@@ -480,54 +443,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className="relative z-50 my-8 ">
-            <h5 className="mb-1">Assign custody to:</h5>
-            <DynamicSelect
-              defaultValue={
-                isSelfService && teamMembers?.length > 0
-                  ? JSON.stringify({
-                      id: teamMembers[0].id,
-                      name: resolveTeamMemberName(teamMembers[0]),
-                    })
-                  : undefined
-              }
-              disabled={disabled || isSelfService}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Select a team member"
-              allowClear
-              closeOnSelect
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  /**
-                   * This is parsed on the server, because we need the name to create the note.
-                   * @TODO This should be refactored to send the name as some metadata, instaed of like this
-                   */
-                  name: resolveTeamMemberName(item),
-                }),
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-            />
-            {zo.errors.custodian()?.message ? (
-              <p className="text-sm text-error-500">
-                {zo.errors.custodian()?.message}
-              </p>
-            ) : null}
-            {fetcherError ? (
-              <p className="text-sm text-error-500">{fetcherError}</p>
-            ) : null}
-          </div>
-
-          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
+          <div className={tw("mb-4 flex gap-3")}>
             <Button
               variant="primary"
               width="full"
@@ -535,7 +451,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
                 disabled || disableSubmit || Object.values(items).length === 0
               }
             >
-              Assign custody
+              Release custody
             </Button>
           </div>
         </div>
@@ -565,20 +481,18 @@ function SubmittingDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Assigning custody</AlertDialogTitle>
+          <AlertDialogTitle>Releasing custody</AlertDialogTitle>
           <AlertDialogDescription>
             <div className="flex flex-col gap-4">
               <SubmissionState
                 type={"asset"}
                 status={custodyState.assetStatus}
                 errorMessage={custodyState?.assetErrorMessage}
-                custodianName={custodyState.custodianName}
               />
               <SubmissionState
                 type={"kit"}
                 status={custodyState.kitStatus}
                 errorMessage={custodyState?.kitErrorMessage}
-                custodianName={custodyState.custodianName}
               />
             </div>
           </AlertDialogDescription>
@@ -600,12 +514,10 @@ function SubmissionState({
   type,
   status,
   errorMessage,
-  custodianName,
 }: {
   type: "asset" | "kit";
   status: "processing" | "success" | "error" | "skipped";
   errorMessage?: string;
-  custodianName?: string;
 }) {
   // Return null for skipped status to hide the component entirely
   if (status === "skipped") {
@@ -616,7 +528,7 @@ function SubmissionState({
     return (
       <div className="flex flex-row gap-2">
         <Spinner />
-        <TextLoader text={`Assigning custody to ${type}s`} />
+        <TextLoader text={`Releasing custody from ${type}s`} />
       </div>
     );
   } else if (status === "success") {
@@ -626,8 +538,7 @@ function SubmissionState({
           <CheckmarkIcon />
         </span>
         <div className="font-mono">
-          {type === "asset" ? "Assets" : "Kits"} are now in custody of{" "}
-          {custodianName}
+          {type === "asset" ? "Assets" : "Kits"} have been released from custody
         </div>
       </div>
     );
@@ -636,7 +547,9 @@ function SubmissionState({
       <div>
         <div className="flex flex-row items-center gap-2 text-left">
           <CircleX className="size-[18px] text-error-500" />
-          <div className="font-mono">Failed to assign custody to {type}s.</div>
+          <div className="font-mono">
+            Failed to release custody from {type}s.
+          </div>
         </div>
         {errorMessage && (
           <span className="text-[12px] text-error-500">
@@ -650,20 +563,28 @@ function SubmissionState({
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetWithBooking }) {
-  // Use predefined presets to create label configurations
+  // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
-    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
+    // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
+    {
+      condition: asset.status !== AssetStatus.IN_CUSTODY,
+      badgeText: "Not in custody",
+      tooltipTitle: "Asset is not in custody",
+      tooltipContent: "This asset is not in custody and cannot be released.",
+      priority: 100,
+    },
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
     assetLabelPresets.partOfKit(!!asset.kitId),
   ];
 
-  // Create the availability labels component with max 2 labels
+  // Create the availability labels component with max 3 labels
   const [, AssetAvailabilityLabels] = createAvailabilityLabels(
     availabilityConfigs,
     {
       maxLabels: 3,
     }
   );
+
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -681,19 +602,34 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
           asset
         </span>
         <AssetAvailabilityLabels />
+        {asset.status === AssetStatus.IN_CUSTODY && asset.custody && (
+          <span
+            className={tw(
+              "inline-block bg-blue-50 px-[6px] py-[2px]",
+              "rounded-md border border-blue-200",
+              "text-xs text-blue-700"
+            )}
+          >
+            In custody of: {resolveTeamMemberName(asset.custody.custodian)}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
 export function KitRow({ kit }: { kit: KitForBooking }) {
-  // Use predefined presets to create label configurations
+  // Use predefined presets to create label configurations appropriate for release custody
   const availabilityConfigs = [
-    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
+    // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
+    {
+      condition: kit.status !== AssetStatus.IN_CUSTODY,
+      badgeText: "Not in custody",
+      tooltipTitle: "Kit is not in custody",
+      tooltipContent: "This kit is not in custody and cannot be released.",
+      priority: 100,
+    },
     kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
-    kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
-    ),
   ];
 
   // Create the availability labels component with default options
@@ -724,6 +660,17 @@ export function KitRow({ kit }: { kit: KitForBooking }) {
           kit
         </span>
         <KitAvailabilityLabels />
+        {kit.status === AssetStatus.IN_CUSTODY && kit.custody && (
+          <span
+            className={tw(
+              "inline-block bg-blue-50 px-[6px] py-[2px]",
+              "rounded-md border border-blue-200",
+              "text-xs text-blue-700"
+            )}
+          >
+            In custody of: {resolveTeamMemberName(kit.custody.custodian)}
+          </span>
+        )}
       </div>
     </div>
   );
