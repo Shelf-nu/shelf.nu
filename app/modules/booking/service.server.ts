@@ -8,12 +8,16 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
+import { DateTime } from "luxon";
+import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -33,6 +37,7 @@ import {
   deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
+import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
@@ -151,6 +156,7 @@ export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
 } as Prisma.BookingInclude;
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -169,6 +175,8 @@ export async function upsertBooking(
     > & {
       assetIds: Asset["id"][];
       isExpired: boolean;
+      checkoutIntentChoice?: CheckoutIntentEnum;
+      checkinIntentChoice?: CheckinIntentEnum;
     }
   >,
   hints: ClientHint,
@@ -184,6 +192,8 @@ export async function upsertBooking(
       id,
       description,
       isExpired,
+      checkoutIntentChoice,
+      checkinIntentChoice,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -275,10 +285,7 @@ export async function upsertBooking(
         BookingStatus.COMPLETE,
       ].includes(booking.status as any);
 
-      //no need to fetch old booking always, we need only for this case(for now)
-      const oldBooking = isTerminalState
-        ? await db.booking.findFirst({ where: { id } })
-        : null;
+      const oldBooking = await db.booking.findFirst({ where: { id } });
 
       if (isTerminalState) {
         if (
@@ -297,6 +304,59 @@ export async function upsertBooking(
         }
         //cancel any active schedulers
         await cancelScheduler(oldBooking);
+      }
+
+      /**
+       * If user is doing an early checkout of booking then update the
+       * booking's from date accordingly
+       * */
+      if (
+        booking.status === BookingStatus.ONGOING &&
+        isBookingEarlyCheckout(oldBooking!.from!) &&
+        checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
+      ) {
+        // Update originFrom to old booking's from date
+        data.originalFrom = oldBooking?.from;
+
+        // Update from date to current date
+        const fromDateStr = DateTime.fromJSDate(new Date(), {
+          zone: hints.timeZone,
+        }).toFormat(DATE_TIME_FORMAT);
+
+        data.from = DateTime.fromFormat(fromDateStr, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
+      }
+
+      /**
+       * If user is doing an early checkin of booking then update
+       * the booking's to date accordingly
+       */
+      if (
+        booking.status === BookingStatus.COMPLETE &&
+        isBookingEarlyCheckin(oldBooking!.to!) &&
+        checkinIntentChoice === CheckinIntentEnum["with-adjusted-date"]
+      ) {
+        // Update originTo to old booking's to date
+        data.originalTo = oldBooking?.to;
+
+        // Update the to date to current date
+        const toDateStr = DateTime.fromJSDate(new Date(), {
+          zone: hints.timeZone,
+        }).toFormat(DATE_TIME_FORMAT);
+
+        data.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
+      }
+
+      /**
+       * If the booking was in DRAFT state, then we update
+       * the original date's to latest `from` and `to` dates.
+       */
+      if (oldBooking?.status === BookingStatus.DRAFT) {
+        data.originalFrom = data.from;
+        data.originalTo = data.to;
       }
 
       //update
@@ -495,6 +555,13 @@ export async function upsertBooking(
         connect: { id: organizationId },
       };
     }
+
+    /**
+     * Updated original dates to user entered `from` and `to`
+     * so that we can track of it later
+     */
+    data.originalFrom = data.from;
+    data.originalTo = data.to;
 
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
@@ -1741,24 +1808,30 @@ export async function getExistingBookingDetails(bookingId: string) {
 }
 
 export function formatBookingsDates(bookings: Booking[], request: Request) {
+  const dateFormat = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
   return bookings.map((b) => {
     if (b.from && b.to) {
-      const from = new Date(b.from);
-      const displayFrom = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(from);
+      const displayFrom = dateFormat.format(b.from).split(",");
+      const displayTo = dateFormat.format(b.to).split(",");
 
-      const to = new Date(b.to);
-      const displayTo = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(to);
+      const displayOriginalFrom = b.originalFrom
+        ? dateFormat.format(b.originalFrom).split(",")
+        : null;
+
+      const displayOriginalTo = b.originalTo
+        ? dateFormat.format(b.originalTo).split(",")
+        : null;
 
       return {
         ...b,
-        displayFrom: displayFrom.split(","),
-        displayTo: displayTo.split(","),
+        displayFrom,
+        displayTo,
+        displayOriginalFrom,
+        displayOriginalTo,
       };
     }
     return b;
@@ -1825,6 +1898,31 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
       cause: cause,
       message,
       label: "Booking",
+    });
+  }
+}
+
+/** This function checks if the booking is expired or not */
+export async function isBookingExpired({ id }: { id: Booking["id"] }) {
+  try {
+    const booking = await db.booking.findUnique({
+      where: { id },
+      select: { to: true },
+    });
+
+    if (!booking?.to) {
+      return false;
+    }
+
+    const end = DateTime.fromJSDate(booking.to);
+    const now = DateTime.now();
+
+    return end < now;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking if the booking is expired.",
+      label,
     });
   }
 }

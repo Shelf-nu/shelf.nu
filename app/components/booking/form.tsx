@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
-import { DateTime } from "luxon";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -27,6 +26,8 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { ActionsDropdown } from "./actions-dropdown";
 import { Form } from "../custom-form";
 import BookingProcessSidebar from "./booking-process-sidebar";
+import CheckinDialog from "./checkin-dialog";
+import CheckoutDialog from "./checkout-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -184,25 +185,23 @@ export function BookingForm({
     action: PermissionAction.checkout,
   });
 
-  /** Checks if this booking is already exipred */
-  const isExpired = useMemo(() => {
-    if (!endDate) return false;
-    const end = DateTime.fromISO(endDate);
-    const now = DateTime.now();
-    return end < now;
-  }, [endDate]);
-
   /** This is used when we have selfSErvice or Base as we are setting the default */
   const defaultTeamMember = teamMembers?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
+  useEffect(
+    function updateEndDate() {
+      if (incomingEndDate) {
+        setEndDate(incomingEndDate);
+      }
+    },
+    [incomingEndDate]
+  );
+
   return (
     <div>
       <Form ref={zo.ref} method="post" action={action}>
-        {/* Hidden input for expired state. Helps is know what status we should set on the server, when the booking is getting checked out */}
-        {isExpired && <input type="hidden" name="isExpired" value="true" />}
-
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
@@ -270,7 +269,9 @@ export function BookingForm({
 
             {/* When booking is reserved, we show the check-out button */}
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-              <Button
+              <CheckoutDialog
+                portalContainer={zo.form}
+                booking={{ id, name: name!, from: startDate! }}
                 disabled={
                   disabled ||
                   bookingFlags?.hasUnavailableAssets ||
@@ -285,14 +286,7 @@ export function BookingForm({
                       }
                     : false
                 }
-                type="submit"
-                name="intent"
-                value="checkOut"
-                className="grow"
-                size="sm"
-              >
-                Check Out
-              </Button>
+              />
             </When>
 
             <When
@@ -301,16 +295,11 @@ export function BookingForm({
                 canCheckInBooking
               }
             >
-              <Button
+              <CheckinDialog
+                portalContainer={zo.form}
+                booking={{ id, name: name!, to: endDate! }}
                 disabled={disabled}
-                type="submit"
-                name="intent"
-                value="checkIn"
-                className="grow"
-                size="sm"
-              >
-                Check-in
-              </Button>
+              />
             </When>
           </AbsolutePositionedHeaderActions>
         ) : null}
@@ -356,6 +345,7 @@ export function BookingForm({
                   required
                 >
                   <Input
+                    key={startDate}
                     label="Start Date"
                     type="datetime-local"
                     hideLabel
@@ -389,6 +379,7 @@ export function BookingForm({
                   required
                 >
                   <Input
+                    key={endDate}
                     label="End Date"
                     type="datetime-local"
                     hideLabel
@@ -396,7 +387,6 @@ export function BookingForm({
                     disabled={inputFieldIsDisabled}
                     error={zo.errors.endDate()?.message}
                     className="w-full"
-                    defaultValue={endDate}
                     placeholder="Booking"
                     required
                     value={endDate}

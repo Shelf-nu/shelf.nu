@@ -14,6 +14,7 @@ import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -114,19 +115,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { name, custodian, assetIds, description } = payload;
     const hints = getHints(request);
 
-    const fmt = "yyyy-MM-dd'T'HH:mm";
-
     const from = DateTime.fromFormat(
       formData.get("startDate")!.toString()!,
-      fmt,
+      DATE_TIME_FORMAT,
       {
         zone: hints.timeZone,
       }
     ).toJSDate();
 
-    const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
-      zone: hints.timeZone,
-    }).toJSDate();
+    const to = DateTime.fromFormat(
+      formData.get("endDate")!.toString()!,
+      DATE_TIME_FORMAT,
+      {
+        zone: hints.timeZone,
+      }
+    ).toJSDate();
+
     const booking = await upsertBooking(
       {
         custodianUserId: custodian?.userId,
