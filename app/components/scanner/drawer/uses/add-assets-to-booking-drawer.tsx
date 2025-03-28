@@ -11,9 +11,11 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { AssetLabel } from "~/components/icons/library";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 import {
   assetLabelPresets,
@@ -55,11 +57,11 @@ export default function AddAssetsToBookingDrawer({
   // Filter and prepare data
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetWithBooking);
+    .map((item) => item?.data as AssetFromQr);
 
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitForBooking);
+    .map((item) => item?.data as KitFromQr);
 
   // List of asset IDs for the form
   const assetIdsForBooking = Array.from(
@@ -206,9 +208,9 @@ export default function AddAssetsToBookingDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetWithBooking} />;
+          return <AssetRow asset={data as AssetFromQr} />;
         } else if (item?.type === "kit") {
-          return <KitRow kit={data as KitForBooking} />;
+          return <KitRow kit={data as KitFromQr} />;
         }
         return null;
       }}
@@ -236,7 +238,7 @@ export default function AddAssetsToBookingDrawer({
 }
 
 // Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetWithBooking }) {
+export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const { booking } = useLoaderData<typeof loader>();
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
@@ -278,7 +280,7 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
   );
 }
 
-export function KitRow({ kit }: { kit: KitForBooking }) {
+export function KitRow({ kit }: { kit: KitFromQr }) {
   // Use preset configurations to define the availability labels
   const availabilityConfigs = [
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),

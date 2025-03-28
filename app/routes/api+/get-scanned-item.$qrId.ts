@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
@@ -9,6 +10,45 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+const ASSET_INCLUDE = {
+  bookings: true,
+};
+
+const KIT_INCLUDE = {
+  _count: { select: { assets: true } },
+  assets: {
+    select: {
+      id: true,
+      status: true,
+      availableToBook: true,
+      custody: true,
+      bookings: { select: { id: true, status: true } },
+    },
+  },
+  custody: true,
+};
+
+const QR_INCLUDE = {
+  asset: {
+    include: ASSET_INCLUDE,
+  },
+  kit: {
+    include: KIT_INCLUDE,
+  },
+};
+
+export type QrForScannerType = Prisma.QrGetPayload<{
+  include: typeof QR_INCLUDE;
+}>;
+
+export type KitFromQr = Prisma.KitGetPayload<{
+  include: typeof KIT_INCLUDE;
+}>;
+
+export type AssetFromQr = Prisma.AssetGetPayload<{
+  include: typeof ASSET_INCLUDE;
+}>;
 
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -30,28 +70,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
     const qr = await getQr({
       id: qrId,
-      include: {
-        asset: {
-          include: {
-            bookings: true,
-          },
-        },
-        kit: {
-          // Fits KitForBooking type
-          include: {
-            _count: { select: { assets: true } },
-            assets: {
-              select: {
-                id: true,
-                status: true,
-                availableToBook: true,
-                custody: true,
-                bookings: { select: { id: true, status: true } },
-              },
-            },
-          },
-        },
-      },
+      include: QR_INCLUDE,
     });
 
     if (qr.organizationId !== organizationId) {

@@ -25,8 +25,10 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { objectToFormData } from "~/utils/object-to-form-data";
@@ -91,11 +93,11 @@ export default function ReleaseCustodyDrawer({
   // Filter and prepare data
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetWithBooking);
+    .map((item) => item?.data as AssetFromQr);
 
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitForBooking);
+    .map((item) => item?.data as KitFromQr);
 
   // List of kit IDs for the form
   const kitIds = Array.from(new Set(kits.map((k) => k.id)));
@@ -135,7 +137,7 @@ export default function ReleaseCustodyDrawer({
     Object.entries(items)
       .filter(([, item]) => {
         if (!item || item.type !== "kit") return false;
-        return kitIds.includes((item.data as KitForBooking)?.id);
+        return kitIds.includes((item.data as KitFromQr)?.id);
       })
       .map(([qrId]) => qrId);
 
@@ -267,9 +269,9 @@ export default function ReleaseCustodyDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetWithBooking} />;
+          return <AssetRow asset={data as AssetFromQr} />;
         } else if (item?.type === "kit") {
-          return <KitRow kit={data as KitForBooking} />;
+          return <KitRow kit={data as KitFromQr} />;
         }
         return null;
       }}
@@ -562,7 +564,7 @@ function SubmissionState({
 }
 
 // Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetWithBooking }) {
+export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
@@ -618,7 +620,7 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
   );
 }
 
-export function KitRow({ kit }: { kit: KitForBooking }) {
+export function KitRow({ kit }: { kit: KitFromQr }) {
   // Use predefined presets to create label configurations appropriate for release custody
   const availabilityConfigs = [
     // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)

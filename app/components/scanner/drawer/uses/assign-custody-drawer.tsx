@@ -32,6 +32,10 @@ import { createCustodianSchema } from "~/modules/custody/schema";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { objectToFormData } from "~/utils/object-to-form-data";
@@ -281,10 +285,10 @@ export default function AssignCustodyDrawer({
         <DefaultLoadingState qrId={qrId} error={error} />
       )}
       renderItem={(data) => {
-        if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetWithBooking} />;
-        } else if (item?.type === "kit") {
-          return <KitRow kit={data as KitForBooking} />;
+        if (item?.type === "asset" && data) {
+          return <AssetRow asset={data as AssetFromQr} />;
+        } else if (item?.type === "kit" && data) {
+          return <KitRow kit={data as KitFromQr} />;
         }
         return null;
       }}
@@ -649,7 +653,7 @@ function SubmissionState({
 }
 
 // Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetWithBooking }) {
+export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
@@ -686,7 +690,7 @@ export function AssetRow({ asset }: { asset: AssetWithBooking }) {
   );
 }
 
-export function KitRow({ kit }: { kit: KitForBooking }) {
+export function KitRow({ kit }: { kit: KitFromQr }) {
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
