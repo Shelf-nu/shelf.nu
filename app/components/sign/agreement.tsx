@@ -56,7 +56,7 @@ export default function Agreement({ className }: AgreementProps) {
 
       <div
         onClick={() => setCanvasClicked(true)}
-        className="flex size-full min-h-80 grow items-center justify-center border-b"
+        className="relative flex size-full min-h-80 grow items-center justify-center border-b"
       >
         {!canvasClicked && (
           <div className="flex gap-1 text-gray-300">
@@ -80,7 +80,7 @@ export default function Agreement({ className }: AgreementProps) {
 
       <div className="flex items-center justify-between gap-x-2 p-4">
         <input
-          className="flex-1 border-none bg-transparent px-0 py-1 outline-none ring-0 focus-within:ring-0"
+          className="flex-1 border-none bg-transparent px-0 py-1 font-caveat text-lg outline-none ring-0 focus-within:ring-0"
           placeholder="or type your name here..."
           onChange={(event) => {
             setSignatureText(event.target.value);
@@ -95,6 +95,17 @@ export default function Agreement({ className }: AgreementProps) {
           variant="primary"
         >
           Sign
+        </Button>
+        <Button
+          disabled={!signatureImage || disabled}
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            setSignatureImage("");
+            signatureRef.current?.clear();
+          }}
+        >
+          Clear
         </Button>
       </div>
     </Form>

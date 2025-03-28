@@ -88,6 +88,7 @@ export default {
       },
       fontFamily: {
         inter: ["Inter", "sans-serif"],
+        caveat: ["Caveat", "sans-serif"],
       },
       colors: {
         white: "#ffffff",

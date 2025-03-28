@@ -149,7 +149,7 @@ export default function CustodyReceiptDialog() {
               <Separator className="col-span-3" />
 
               <p className="p-2 font-medium">Signature</p>
-              <div className="col-span-2 py-2 text-gray-600">
+              <div className="col-span-2 py-2 font-caveat text-2xl text-gray-600">
                 {receipt.signatureText ? (
                   receipt.signatureText
                 ) : (
