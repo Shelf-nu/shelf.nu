@@ -14,3 +14,6 @@ export const ACCEPT_SUPPORTED_IMAGES =
 
 /** For image uploads */
 export const MAX_IMAGE_UPLOAD_SIZE = 8 * 1024 * 1024; // 8MB in bytes
+
+/** Default date format */
+export const DATE_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm";

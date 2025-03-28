@@ -34,12 +34,18 @@ const AlertDialogOverlay = React.forwardRef<
   );
 });
 
+type ALertDialogContentProps = React.ComponentPropsWithoutRef<
+  typeof AlertDialogPrimitive.Content
+> & {
+  portalProps?: AlertDialogPrimitive.AlertDialogPortalProps;
+};
+
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(function AlertDialogContent({ className, ...props }, ref) {
+  ALertDialogContentProps
+>(function AlertDialogContent({ className, portalProps, ...props }, ref) {
   return (
-    <AlertDialogPortal>
+    <AlertDialogPortal {...portalProps}>
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Content
         ref={ref}

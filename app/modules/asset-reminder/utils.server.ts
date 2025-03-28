@@ -5,6 +5,7 @@ import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { data, parseData, safeRedirect } from "~/utils/http.server";
 import { deleteAssetReminder, editAssetReminder } from "./service.server";
@@ -37,11 +38,10 @@ export async function resolveRemindersActions({
       );
 
       const hints = getHints(request);
-      const fmt = "yyyy-MM-dd'T'HH:mm";
 
       const alertDateTime = DateTime.fromFormat(
         formData.get("alertDateTime")!.toString()!,
-        fmt,
+        DATE_TIME_FORMAT,
         { zone: hints.timeZone }
       ).toJSDate();
 
