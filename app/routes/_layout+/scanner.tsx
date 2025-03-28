@@ -16,6 +16,7 @@ import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanne
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -31,6 +32,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import type { AllowedModelNames } from "../api+/model-filters";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -43,12 +45,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
     const header: HeaderData = {
       title: "Locations",
     };
@@ -59,6 +62,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
 
+    // @TODO - to improve this we should place the action in the params and only fetch certain data depending on the action
+
+    /** Get team members for form teamMember select */
     const { teamMemberIds } = paramsValues;
     const teamMemberData = await getTeamMemberForCustodianFilter({
       organizationId,
@@ -69,11 +75,39 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       isSelfService: role === OrganizationRoles.SELF_SERVICE, // we can assume this is false because this view is not allowed for
       userId,
     });
+    /** End team members */
+
+    /** Get locations  */
+    let locationsData;
+    if (!isSelfServiceOrBase) {
+      const locationSelected = searchParams.get("location") ?? "";
+      const getAllEntries = searchParams.getAll(
+        "getAll"
+      ) as AllowedModelNames[];
+      const [locationExcludedSelected, selectedLocation, totalLocations] =
+        await Promise.all([
+          db.location.findMany({
+            where: { organizationId, id: { not: locationSelected } },
+            take: getAllEntries.includes("location") ? undefined : 12,
+          }),
+          db.location.findMany({
+            where: { organizationId, id: locationSelected },
+          }),
+          db.location.count({ where: { organizationId } }),
+        ]);
+
+      locationsData = {
+        locations: [...selectedLocation, ...locationExcludedSelected],
+        totalLocations,
+      };
+    }
+    /** End locations */
 
     return json({
       header,
       scannerCameraId: cookie.scannerCameraId,
       ...teamMemberData,
+      ...locationsData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

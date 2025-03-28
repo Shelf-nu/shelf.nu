@@ -30,7 +30,6 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import type {
@@ -94,11 +93,11 @@ export default function AssignCustodyDrawer({
   // Filter and prepare data
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetWithBooking);
+    .map((item) => item?.data as AssetFromQr);
 
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitForBooking);
+    .map((item) => item?.data as KitFromQr);
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);

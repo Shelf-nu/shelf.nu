@@ -22,6 +22,7 @@ import { tw } from "~/utils/tw";
 import { scannerActionAtom } from "./action-atom";
 import AssignCustodyDrawer from "./uses/assign-custody-drawer";
 import ReleaseCustodyDrawer from "./uses/release-custody-drawer";
+import UpdateLocationDrawer from "./uses/update-location-drawer";
 
 const ACTION_CONFIGS = [
   {
@@ -40,7 +41,7 @@ const ACTION_CONFIGS = [
     permissionAction: PermissionAction.custody,
   },
   {
-    id: "Add to location",
+    id: "Update location",
     permissionEntity: PermissionEntity.asset,
     permissionAction: PermissionAction.update,
   },
@@ -129,12 +130,18 @@ export function ActionSwitcher() {
 
   return (
     <div>
+      {/* Drawers */}
       <When truthy={action === "Assign custody"}>
         <AssignCustodyDrawer isLoading={isLoading} />
       </When>
       <When truthy={action === "Release custody"}>
         <ReleaseCustodyDrawer isLoading={isLoading} />
       </When>
+      <When truthy={action === "Update location"}>
+        <UpdateLocationDrawer isLoading={isLoading} />
+      </When>
+
+      {/* Action Switcher */}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -213,7 +220,7 @@ function getActionScope(action: ActionType) {
       return "single";
     case "Assign custody":
     case "Release custody":
-    case "Add to location":
+    case "Update location":
       return "bulk";
   }
 }

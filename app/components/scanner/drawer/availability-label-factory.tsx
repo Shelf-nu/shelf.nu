@@ -16,6 +16,8 @@ export type AvailabilityLabelConfig = {
   tooltipContent: ReactNode;
   /** Optional priority for sorting (higher numbers appear first) */
   priority?: number;
+  /** Class name to be pased to the availability label */
+  className?: string;
 };
 
 /**
@@ -64,6 +66,7 @@ export function createAvailabilityLabels(
             badgeText={label.badgeText}
             tooltipTitle={label.tooltipTitle}
             tooltipContent={label.tooltipContent}
+            className={label.className}
           />
         ))}
       </div>

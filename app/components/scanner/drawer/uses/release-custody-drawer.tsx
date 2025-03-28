@@ -25,7 +25,6 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
-import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { useDisabled } from "~/hooks/use-disabled";
 import type {
   AssetFromQr,
@@ -389,6 +388,14 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
+    {
+      condition: asset.status === AssetStatus.IN_CUSTODY,
+      badgeText: `In custody of: ${asset.custody?.custodian?.name}`,
+      tooltipTitle: "Asset is in custody",
+      tooltipContent: `This asset is in custody of ${asset.custody?.custodian?.name}.`,
+      priority: 110,
+      className: "bg-gray-50 border-gray-200 text-gray-700",
+    },
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
       condition: asset.status !== AssetStatus.IN_CUSTODY,
@@ -426,12 +433,6 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
           asset
         </span>
         <AssetAvailabilityLabels />
-        {asset.status === AssetStatus.IN_CUSTODY && asset.custody && (
-          <span className="flex items-center gap-1">
-            In custody of{" "}
-            <TeamMemberBadge teamMember={asset?.custody?.custodian} />
-          </span>
-        )}
       </div>
     </div>
   );
@@ -440,6 +441,14 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 export function KitRow({ kit }: { kit: KitFromQr }) {
   // Use predefined presets to create label configurations appropriate for release custody
   const availabilityConfigs = [
+    {
+      condition: kit.status === AssetStatus.IN_CUSTODY,
+      badgeText: `In custody of: ${kit.custody?.custodian?.name}`,
+      tooltipTitle: "Kit is in custody",
+      tooltipContent: `This kit is in custody of ${kit.custody?.custodian?.name}.`,
+      priority: 110,
+      className: "bg-gray-50 border-gray-200 text-gray-700",
+    },
     // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
     {
       condition: kit.status !== AssetStatus.IN_CUSTODY,
@@ -479,12 +488,6 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
           kit
         </span>
         <KitAvailabilityLabels />
-        {kit.status === AssetStatus.IN_CUSTODY && kit.custody && (
-          <span className="flex items-center gap-1">
-            In custody of{" "}
-            <TeamMemberBadge teamMember={kit?.custody?.custodian} />
-          </span>
-        )}
       </div>
     </div>
   );

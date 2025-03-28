@@ -32,6 +32,12 @@ const CUSTODY_INCLUDE = {
 
 const ASSET_INCLUDE = {
   bookings: true,
+  location: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
   ...CUSTODY_INCLUDE,
 };
 

@@ -1,6 +1,8 @@
 import { atom } from "jotai";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 
 export type ScanListItems = {
   [key: string]: ScanListItem;
@@ -8,7 +10,7 @@ export type ScanListItems = {
 
 export type ScanListItem =
   | {
-      data?: AssetWithBooking | KitForBooking;
+      data?: KitFromQr | AssetFromQr;
       error?: string;
       type?: "asset" | "kit";
     }
