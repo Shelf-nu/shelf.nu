@@ -17,7 +17,7 @@ import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdow
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
-import ContextualModal from "~/components/layout/contextual-modal";
+import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -390,7 +390,7 @@ export default function KitDetails() {
         <BookingActionsDropdown />
       </Header>
 
-      <ContextualModal />
+      <ContextualSidebar />
 
       <div className="mt-8 lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">

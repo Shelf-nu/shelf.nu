@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -12,10 +12,11 @@ import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import {
   Tooltip,
@@ -23,10 +24,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -47,6 +49,9 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { ListItemTagsColumn } from "./assets._index";
+
+type LoaderData = typeof loader;
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -118,7 +123,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your asset database",
           text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         kit,
         items: assets.map((asset) => ({
@@ -418,7 +423,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function ManageAssetsInKit() {
-  const { kit, header, items, totalItems } = useLoaderData<typeof loader>();
+  const { kit, items, totalItems } = useLoaderData<LoaderData>();
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -451,18 +456,12 @@ export default function ManageAssetsInKit() {
   }, [kit.id]);
 
   return (
-    <div className="flex h-full max-h-full flex-col">
-      <Header
-        {...header}
-        hideBreadcrumbs
-        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
-      />
-
-      <div className="-mx-6 border-b px-6 md:pb-3">
+    <div className="flex size-full flex-col overflow-y-hidden">
+      <div className=" border-b px-6 md:pb-3">
         <Filters className="md:border-0 md:p-0"></Filters>
       </div>
 
-      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+      <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -511,15 +510,11 @@ export default function ManageAssetsInKit() {
         />
       </div>
 
-      {/* Body of the modal*/}
-      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
+      {/* Body of the modal - this is the scrollable area */}
+      <div className="flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
-          /** Clicking on the row will add the current asset to the atom of selected assets */
           navigate={(assetId, item) => {
-            /**
-             * We will select asset only if it is not in custody
-             */
             if (
               !item.isInOtherCustody &&
               item.status !== AssetStatus.CHECKED_OUT
@@ -547,11 +542,20 @@ export default function ManageAssetsInKit() {
               {hasSelectedAll ? "Clear all" : "Select all"}
             </Button>
           }
+          headerChildren={
+            <>
+              <Th className="whitespace-nowrap">Availability</Th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
+              <Th>Location</Th>
+              <Th> </Th>
+            </>
+          }
         />
       </div>
 
-      {/* Footer of the modal */}
-      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+      {/* Footer of the modal - fixed at the bottom */}
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
         </p>
@@ -587,15 +591,11 @@ export default function ManageAssetsInKit() {
 const RowComponent = ({
   item,
 }: {
-  item: Prisma.AssetGetPayload<{
-    include: {
-      kit: { select: { id: true; name: true } };
-      custody: { select: { id: true } };
-    };
-  }> & {
+  item: AssetsFromViewItem & {
     isInOtherCustody: boolean;
   };
 }) => {
+  const { category, tags, location } = item;
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
@@ -603,11 +603,11 @@ const RowComponent = ({
     <>
       <Td
         className={tw(
-          "w-full p-0 md:p-0",
+          "w-full min-w-[330px] p-0 md:p-0",
           (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
         )}
       >
-        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
+        <div className="flex items-center  gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
@@ -639,57 +639,79 @@ const RowComponent = ({
               </div>
             </div>
           </div>
-
-          {/* Asset is in custody */}
-          <When truthy={item.isInOtherCustody}>
-            <TooltipProvider delayDuration={100}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
-                    In custody
-                  </div>
-                </TooltipTrigger>
-
-                <TooltipContent side="top" align="end" className="md:w-80">
-                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
-                    Asset is in custody
-                  </h2>
-                  <div className="text-wrap text-xs font-medium text-gray-500">
-                    Asset is currently in custody of a team member. <br /> Make
-                    sure the asset has an Available status in order to add it to
-                    this kit.
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </When>
-
-          {/* Asset is in checked out */}
-          <When truthy={isCheckedOut}>
-            <TooltipProvider delayDuration={100}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
-                    Checked out
-                  </div>
-                </TooltipTrigger>
-
-                <TooltipContent side="top" align="end" className="md:w-80">
-                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
-                    Asset is checked out
-                  </h2>
-                  <div className="text-wrap text-xs font-medium text-gray-500">
-                    Asset is currently in checked out via a booking. <br /> Make
-                    sure the asset has an Available status in order to add it to
-                    this kit.
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </When>
         </div>
       </Td>
 
+      <Td>
+        {/* Asset is in custody */}
+        <When truthy={item.isInOtherCustody}>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                  In custody
+                </div>
+              </TooltipTrigger>
+
+              <TooltipContent side="top" align="end" className="md:w-80">
+                <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                  Asset is in custody
+                </h2>
+                <div className="text-wrap text-xs font-medium text-gray-500">
+                  Asset is currently in custody of a team member. <br /> Make
+                  sure the asset has an Available status in order to add it to
+                  this kit.
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </When>
+
+        {/* Asset is in checked out */}
+        <When truthy={isCheckedOut}>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                  Checked out
+                </div>
+              </TooltipTrigger>
+
+              <TooltipContent side="top" align="end" className="md:w-80">
+                <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                  Asset is checked out
+                </h2>
+                <div className="text-wrap text-xs font-medium text-gray-500">
+                  Asset is currently in checked out via a booking. <br /> Make
+                  sure the asset has an Available status in order to add it to
+                  this kit.
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </When>
+      </Td>
+
+      {/* Category */}
+      <Td>
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : (
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
+          </Badge>
+        )}
+      </Td>
+
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
+      </Td>
+
+      {/* Location */}
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
       <Td
         className={
           item.isInOtherCustody || isCheckedOut
