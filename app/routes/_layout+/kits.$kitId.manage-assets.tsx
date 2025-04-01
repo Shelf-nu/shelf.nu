@@ -8,12 +8,16 @@ import { z } from "zod";
 import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -458,7 +462,18 @@ export default function ManageAssetsInKit() {
   return (
     <div className="flex size-full flex-col overflow-y-hidden">
       <div className=" border-b px-6 md:pb-3">
-        <Filters className="md:border-0 md:p-0"></Filters>
+        <Filters
+          className="md:border-0 md:p-0"
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+            "right-of-search": (
+              <SortBy
+                sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+              />
+            ),
+          }}
+        ></Filters>
       </div>
 
       <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
@@ -539,16 +554,20 @@ export default function ManageAssetsInKit() {
               className="px-2 py-1 text-sm font-normal"
               onClick={handleSelectAll}
             >
-              {hasSelectedAll ? "Clear all" : "Select all"}
+              {hasSelectedAll ? "Clear all" : "Select all available"}
             </Button>
           }
+          hideFirstHeaderColumn
           headerChildren={
             <>
+              <Th
+                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
+              ></Th>
+              <Th>Name</Th>
               <Th className="whitespace-nowrap">Availability</Th>
               <Th>Category</Th>
               <Th>Tags</Th>
               <Th>Location</Th>
-              <Th> </Th>
             </>
           }
         />
@@ -601,13 +620,34 @@ const RowComponent = ({
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
   return (
     <>
+      {/* Checkbox */}
+      <Td
+        className={tw(
+          freezeColumnClassNames.checkbox,
+          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
+          item.isInOtherCustody || isCheckedOut
+            ? "cursor-not-allowed"
+            : undefined
+        )}
+      >
+        <FakeCheckbox
+          checked={checked}
+          className={tw(
+            "text-white",
+            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
+            checked ? "text-primary" : ""
+          )}
+        />
+      </Td>
+
+      {/* Name */}
       <Td
         className={tw(
           "w-full min-w-[330px] p-0 md:p-0",
           (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
         )}
       >
-        <div className="flex items-center  gap-3 p-4 md:px-6">
+        <div className="flex items-center  gap-3 p-4 md:pr-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
@@ -712,22 +752,6 @@ const RowComponent = ({
 
       {/* Location */}
       <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
-      <Td
-        className={
-          item.isInOtherCustody || isCheckedOut
-            ? "cursor-not-allowed opacity-50"
-            : undefined
-        }
-      >
-        <FakeCheckbox
-          checked={checked}
-          className={tw(
-            "text-white",
-            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
-            checked ? "text-primary" : ""
-          )}
-        />
-      </Td>
     </>
   );
 };
