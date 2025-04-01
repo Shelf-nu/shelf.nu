@@ -2442,7 +2442,7 @@ export async function bulkCheckOutAssets({
       });
     }
 
-    return custodies;
+    return { custodies, agreementFound };
   } catch (cause) {
     const message =
       cause instanceof ShelfError

@@ -13,6 +13,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+export type BulkAssignCustodySuccessMessageType =
+  | "self-or-base-with-sign"
+  | "self-or-base-without-sign"
+  | "nrm-with-sign"
+  | "nrm-without-sign";
+
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const userId = authSession.userId;
@@ -34,12 +40,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      const teamMember = await db.teamMember.findUnique({
-        where: { id: custodian.id },
-        select: { id: true, userId: true },
-      });
+    const teamMember = await db.teamMember.findUnique({
+      where: { id: custodian.id },
+      select: {
+        id: true,
+        userId: true,
+        user: {
+          select: { userOrganizations: true },
+        },
+      },
+    });
 
+    if (role === OrganizationRoles.SELF_SERVICE) {
       if (teamMember?.userId !== userId) {
         throw new ShelfError({
           cause: null,
@@ -51,7 +63,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
-    const createdCustodies = await bulkCheckOutAssets({
+    const isCustodianNRM = !teamMember?.userId;
+    const custodianRoles = teamMember?.user?.userOrganizations.find(
+      (o) => o.organizationId === organizationId
+    )?.roles;
+    const custodianRole = custodianRoles ? custodianRoles[0] : undefined;
+
+    const isCustodianSelfOrBase =
+      custodianRole === OrganizationRoles.SELF_SERVICE ||
+      custodianRole === OrganizationRoles.BASE;
+
+    const { custodies, agreementFound } = await bulkCheckOutAssets({
       userId,
       assetIds,
       custodianId: custodian.id,
@@ -74,13 +96,32 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * If user assigned custody to single asset and the custody has an agreement associated
      * then we navigate the user to the Share Agreement dialog
      */
-    if (createdCustodies.length === 1 && createdCustodies[0]?.agreementId) {
+    if (custodies.length === 1 && agreementFound?.id) {
       return redirect(
-        `/assets/${createdCustodies[0].asset.id}/overview/share-agreement`
+        `/assets/${custodies[0].asset.id}/overview/share-agreement`
       );
     }
 
-    return json(data({ success: true }));
+    const agreementWithSign =
+      agreementFound && agreementFound.signatureRequired;
+    const agreementWithoutSign =
+      agreementFound && !agreementFound.signatureRequired;
+
+    /** We use `successMessageType` in our dialog to show the success message accordingly. */
+    let successMessageType: BulkAssignCustodySuccessMessageType | undefined =
+      undefined;
+
+    if (isCustodianSelfOrBase && agreementWithSign) {
+      successMessageType = "self-or-base-with-sign";
+    } else if (isCustodianSelfOrBase && agreementWithoutSign) {
+      successMessageType = "self-or-base-without-sign";
+    } else if (isCustodianNRM && agreementWithSign) {
+      successMessageType = "nrm-with-sign";
+    } else if (isCustodianNRM && agreementWithoutSign) {
+      successMessageType = "nrm-without-sign";
+    }
+
+    return json(data({ success: true, successMessageType }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
