@@ -34,6 +34,7 @@ import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -198,11 +199,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
         const hints = getHints(request);
 
-        const fmt = "yyyy-MM-dd'T'HH:mm";
-
         const alertDateTime = DateTime.fromFormat(
           formData.get("alertDateTime")!.toString()!,
-          fmt,
+          DATE_TIME_FORMAT,
           {
             zone: hints.timeZone,
           }

@@ -564,7 +564,7 @@ export async function exportBookingsFromIndexToCsv({
       bookings as FlexibleBooking[]
     );
 
-    // // Join rows with CRLF as per CSV spec
+    // Join rows with CRLF as per CSV spec
     return csvData.join("\r\n");
   } catch (cause) {
     const message =
@@ -590,6 +590,8 @@ type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   assets: FlexibleAsset[];
   displayFrom?: string;
   displayTo?: string;
+  displayOriginalFrom?: string;
+  displayOriginalTo?: string;
 };
 
 /**
@@ -612,6 +614,8 @@ export const buildCsvExportDataFromBookings = (
     custodian: "Custodian",
     description: "Description", // string
     asset: "Assets", // New column for assets
+    originalFrom: "Original start date",
+    originalTo: "Original end date",
   };
 
   // Create data rows with assets
@@ -666,6 +670,17 @@ export const buildCsvExportDataFromBookings = (
         case "asset":
           // Include the first asset title in the main booking row
           value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
+          break;
+        case "originalFrom":
+          value = booking.displayOriginalFrom
+            ? booking.displayOriginalFrom
+            : booking.displayFrom;
+          break;
+
+        case "originalTo":
+          value = booking.displayOriginalTo
+            ? booking.displayOriginalTo
+            : booking.displayTo;
           break;
         default:
           value = "";

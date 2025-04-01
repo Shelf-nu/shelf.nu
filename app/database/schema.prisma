@@ -789,6 +789,11 @@ model Booking {
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
   from      DateTime? @db.Timestamptz(3)
   to        DateTime? @db.Timestamptz(3)
+
+  // When a booking is early check-in or early check-out, we store the original from and to
+  // dates here and updated the from and to dates to current date (if users agrees to change) 
+  originalFrom DateTime? @db.Timestamptz(3)
+  originalTo   DateTime? @db.Timestamptz(3)
 }
 
 model Kit {

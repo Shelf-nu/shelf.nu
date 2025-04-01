@@ -11,6 +11,8 @@ import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
+import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -23,6 +25,7 @@ import {
   deleteBooking,
   getBooking,
   getBookingFlags,
+  isBookingExpired,
   removeAssets,
   sendBookingUpdateNotification,
   upsertBooking,
@@ -35,6 +38,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -241,7 +245,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent, nameChangeOnly } = parseData(
+    const {
+      intent,
+      nameChangeOnly,
+      checkoutIntentChoice,
+      checkinIntentChoice,
+    } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -260,6 +269,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .string()
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
+        checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+        checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
       {
         additionalData: { userId },
@@ -306,26 +317,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           checkOut: BookingStatus.ONGOING,
           checkIn: BookingStatus.COMPLETE,
         };
-        // Parse the isExpired field
-        const { isExpired } = parseData(
-          formData,
-          z.object({
-            isExpired: z
-              .string()
-              .optional()
-              .transform((val) => val === "true"),
-          })
-        );
+
+        const isExpired = await isBookingExpired({ id });
+
         // Modify status if expired during checkout
         const status =
           intent === "checkOut" && isExpired
             ? BookingStatus.OVERDUE
             : intentToStatusMap[intent];
 
-        let upsertBookingData = {
-          organizationId,
-          id,
-        };
+        let upsertBookingData = { organizationId, id };
+
+        if (intent === "checkOut" && checkoutIntentChoice) {
+          Object.assign(upsertBookingData, { checkoutIntentChoice });
+        }
+
+        if (intent === "checkIn" && checkinIntentChoice) {
+          Object.assign(upsertBookingData, { checkinIntentChoice });
+        }
 
         // We are only changing the name so we do things simpler
         if (nameChangeOnly) {
@@ -354,11 +363,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const { name, custodian, description } = payload;
 
           const hints = getHints(request);
-          const fmt = "yyyy-MM-dd'T'HH:mm";
 
           const from = DateTime.fromFormat(
             formData.get("startDate")!.toString()!,
-            fmt,
+            DATE_TIME_FORMAT,
             {
               zone: hints.timeZone,
             }
@@ -366,7 +374,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
           const to = DateTime.fromFormat(
             formData.get("endDate")!.toString()!,
-            fmt,
+            DATE_TIME_FORMAT,
             {
               zone: hints.timeZone,
             }
@@ -390,6 +398,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // Make sure to pass isExpired when checking out
           ...(intent === "checkOut" && { isExpired }),
         });
+
         // Update and save the booking
         const booking = await upsertBooking(
           upsertBookingData,
