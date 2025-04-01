@@ -64,7 +64,7 @@
     "@react-email/components": "0.0.14",
     "@remix-run/node": "2.16.0",
     "@remix-run/react": "2.16.0",
-    "@remix-run/serve": "2.16.0",
+    "@remix-run/serve": "2.16.4",
     "@sentry/remix": "^8.53.0",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
