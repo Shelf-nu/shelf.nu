@@ -554,7 +554,7 @@ export default function ManageAssetsInKit() {
               className="px-2 py-1 text-sm font-normal"
               onClick={handleSelectAll}
             >
-              {hasSelectedAll ? "Clear all" : "Select all available"}
+              {hasSelectedAll ? "Clear all" : "Select all"}
             </Button>
           }
           hideFirstHeaderColumn
@@ -564,7 +564,7 @@ export default function ManageAssetsInKit() {
                 className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
               ></Th>
               <Th>Name</Th>
-              <Th className="whitespace-nowrap">Availability</Th>
+              <Th>Kit</Th>
               <Th>Category</Th>
               <Th>Tags</Th>
               <Th>Location</Th>
@@ -666,70 +666,90 @@ const RowComponent = ({
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <AssetStatusBadge
-                  status={item.status}
-                  availableToBook={item.availableToBook}
-                />
+                {/*
+                   When asset is available, show normal status badge 
+                   When asset is in custody, and not in other custody, show normal status badge
+                */}
+                <When
+                  truthy={
+                    item.status === AssetStatus.AVAILABLE ||
+                    (item.status === AssetStatus.IN_CUSTODY &&
+                      !item.isInOtherCustody)
+                  }
+                >
+                  <AssetStatusBadge
+                    status={item.status}
+                    availableToBook={item.availableToBook}
+                  />
+                </When>
 
-                {item.kit?.name ? (
-                  <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
-                    {item.kit.name}
-                  </div>
-                ) : null}
+                {/* When asset is in other custody, show special badge */}
+                <When truthy={item.isInOtherCustody}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                          In custody
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset is in custody
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Asset is currently in custody of a team member. <br />{" "}
+                          Make sure the asset has an Available status in order
+                          to add it to this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
+
+                {/* Asset is in checked out */}
+                <When truthy={isCheckedOut}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                          Checked out
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset is checked out
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Asset is currently in checked out via a booking.{" "}
+                          <br /> Make sure the asset has an Available status in
+                          order to add it to this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
               </div>
             </div>
           </div>
         </div>
       </Td>
-
+      {/* Kit */}
       <Td>
-        {/* Asset is in custody */}
-        <When truthy={item.isInOtherCustody}>
-          <TooltipProvider delayDuration={100}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
-                  In custody
-                </div>
-              </TooltipTrigger>
-
-              <TooltipContent side="top" align="end" className="md:w-80">
-                <h2 className="mb-1 text-xs font-semibold text-gray-700">
-                  Asset is in custody
-                </h2>
-                <div className="text-wrap text-xs font-medium text-gray-500">
-                  Asset is currently in custody of a team member. <br /> Make
-                  sure the asset has an Available status in order to add it to
-                  this kit.
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </When>
-
-        {/* Asset is in checked out */}
-        <When truthy={isCheckedOut}>
-          <TooltipProvider delayDuration={100}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
-                  Checked out
-                </div>
-              </TooltipTrigger>
-
-              <TooltipContent side="top" align="end" className="md:w-80">
-                <h2 className="mb-1 text-xs font-semibold text-gray-700">
-                  Asset is checked out
-                </h2>
-                <div className="text-wrap text-xs font-medium text-gray-500">
-                  Asset is currently in checked out via a booking. <br /> Make
-                  sure the asset has an Available status in order to add it to
-                  this kit.
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </When>
+        {item.kit?.name ? (
+          <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+            {item.kit.name}
+          </div>
+        ) : null}
       </Td>
 
       {/* Category */}

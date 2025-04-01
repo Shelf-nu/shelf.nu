@@ -12,6 +12,7 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
@@ -23,6 +24,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { ScanDetails } from "~/components/location/scan-details";
 import { QrPreview } from "~/components/qr/qr-preview";
 import { Badge } from "~/components/shared/badge";
@@ -63,6 +65,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -409,6 +412,7 @@ export default function KitDetails() {
       <ContextualModal />
 
       <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+        {/* Left column - assets list */}
         <div className="flex-1 overflow-hidden">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
@@ -435,7 +439,17 @@ export default function KitDetails() {
           </div>
 
           <div className="flex flex-col md:gap-2">
-            <Filters className="responsive-filters mb-2 lg:mb-0">
+            <Filters
+              className="responsive-filters mb-2 lg:mb-0"
+              slots={{
+                "right-of-search": (
+                  <SortBy
+                    sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                    defaultSortingBy="createdAt"
+                  />
+                ),
+              }}
+            >
               {userRoleCanManageAssets ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
@@ -485,12 +499,14 @@ export default function KitDetails() {
                 <>
                   <Th>Category</Th>
                   <Th>Location</Th>
+                  <Th>Tags</Th>
                 </>
               }
             />
           </div>
         </div>
 
+        {/* Right column */}
         <div className="w-full md:w-[360px] lg:ml-4">
           {kit.description ? (
             <Card className="mb-3 mt-0">
@@ -546,10 +562,11 @@ function ListContent({
         include: { image: { select: { id: true; updatedAt: true } } };
       };
       category: true;
+      tags: true;
     };
   }>;
 }) {
-  const { location, category } = item;
+  const { location, category, tags } = item;
 
   const { roles } = useUserRoleHelper();
   return (
@@ -610,6 +627,11 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
+      </Td>
+
       <When
         truthy={userHasPermission({
           roles,

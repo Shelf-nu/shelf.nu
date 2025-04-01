@@ -34,11 +34,10 @@ export default function ContextualSidebar() {
     },
     [navigate, prevRoute.pathname]
   );
+
   useEffect(() => {
-    if (showSidebar) {
-      handleOpenChange(true);
-    }
-  }, [handleOpenChange, showSidebar]);
+    setOpen(showSidebar);
+  }, [showSidebar]);
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>

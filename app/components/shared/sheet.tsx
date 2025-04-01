@@ -1,30 +1,17 @@
 import { forwardRef } from "react";
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
+import { X } from "lucide-react";
 import { tw } from "~/utils/tw";
-import { XIcon } from "../icons/library";
 import When from "../when/when";
 
 const Sheet = SheetPrimitive.Root;
 
 const SheetTrigger = SheetPrimitive.Trigger;
 
-const SheetClose = forwardRef<
-  React.ElementRef<typeof SheetPrimitive.Close>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Close>
->(({ className, ...props }, ref) => (
-  <SheetPrimitive.Close
-    ref={ref}
-    className={tw(
-      "ring-offset-background data-[state=open]:bg-secondary absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none",
-      className
-    )}
-    {...props}
-  />
-));
-SheetClose.displayName = SheetPrimitive.Close.displayName;
-
 const SheetPortal = SheetPrimitive.Portal;
+
+const SheetClose = SheetPrimitive.Close;
 
 const SheetOverlay = forwardRef<
   React.ElementRef<typeof SheetPrimitive.Overlay>,
@@ -81,7 +68,7 @@ const SheetContent = forwardRef<
       >
         <When truthy={!hideCloseButton}>
           <SheetPrimitive.Close className="ring-offset-background data-[state=open]:bg-secondary absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-            <XIcon className="size-4" />
+            <X className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
         </When>
