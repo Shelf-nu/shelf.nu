@@ -1,4 +1,7 @@
+import { cloneElement } from "react";
 import type { Kit } from "@prisma/client";
+import { useNavigation } from "@remix-run/react";
+import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -14,24 +17,29 @@ import {
 } from "../shared/modal";
 
 type DeleteKitProps = {
-  kit: {
-    name: Kit["name"];
-    image: Kit["image"];
-  };
+  kit: Pick<Kit, "id" | "name" | "image">;
+  trigger?: React.ReactElement;
 };
 
-export default function DeleteKit({ kit }: DeleteKitProps) {
+export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          variant="link"
-          icon="trash"
-          className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none  hover:bg-slate-100 hover:text-gray-700"
-          width="full"
-        >
-          Delete
-        </Button>
+        {trigger ? (
+          cloneElement(trigger)
+        ) : (
+          <Button
+            variant="link"
+            icon="trash"
+            className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none  hover:bg-slate-100 hover:text-gray-700"
+            width="full"
+          >
+            Delete
+          </Button>
+        )}
       </AlertDialogTrigger>
 
       <AlertDialogContent>
@@ -51,15 +59,20 @@ export default function DeleteKit({ kit }: DeleteKitProps) {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button variant="secondary" disabled={disabled}>
+                Cancel
+              </Button>
             </AlertDialogCancel>
 
-            <Form method="delete">
+            <Form method="delete" action={`/kits/${kit.id}`}>
               {kit.image && (
                 <input type="hidden" value={kit.image} name="image" />
               )}
               <input type="hidden" value="delete" name="intent" />
-              <Button className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800">
+              <Button
+                className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
+                disabled={disabled}
+              >
                 Delete
               </Button>
             </Form>

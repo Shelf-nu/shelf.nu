@@ -1,5 +1,5 @@
 import type { Kit } from "@prisma/client";
-import { PencilIcon, QrCodeIcon } from "lucide-react";
+import { PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,
@@ -7,6 +7,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import DeleteKit from "./delete-kit";
 import QrPreviewDialog from "./qr-preview-dialog";
 import { Button } from "../shared/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../shared/tooltip";
@@ -30,7 +31,7 @@ export default function KitQuickActions({
       <When
         truthy={userHasPermission({
           roles,
-          entity: PermissionEntity.asset,
+          entity: PermissionEntity.kit,
           action: PermissionAction.update,
         })}
       >
@@ -73,6 +74,31 @@ export default function KitQuickActions({
 
           <TooltipContent align="center" side="top">
             Show kit qr
+          </TooltipContent>
+        </Tooltip>
+      </When>
+
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.delete,
+        })}
+      >
+        <Tooltip>
+          <DeleteKit
+            kit={kit}
+            trigger={
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="secondary" className={"p-2"}>
+                  <Trash2Icon className="size-4" />
+                </Button>
+              </TooltipTrigger>
+            }
+          />
+
+          <TooltipContent align="center" side="top">
+            Delete kit
           </TooltipContent>
         </Tooltip>
       </When>
