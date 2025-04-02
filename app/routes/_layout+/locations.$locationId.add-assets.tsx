@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { Asset } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -7,17 +7,22 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
@@ -41,6 +46,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -115,7 +121,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           subHeading:
             "Search your database for assets that you would like to move to this location.",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         items: assets,
         categories,
@@ -331,8 +337,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location, header, items, totalItems } =
-    useLoaderData<typeof loader>();
+  const { location, items, totalItems } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -375,16 +380,23 @@ export default function AddAssetsToLocation() {
 
   return (
     <div className="flex h-full max-h-full flex-col">
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
-      />
-
-      <div className="-mx-6 border-b px-6 md:pb-3">
-        <Filters className="md:border-0 md:p-0"></Filters>
+      {/* Search */}
+      <div className=" border-b px-6 md:pb-3">
+        <Filters
+          className="md:border-0 md:p-0"
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+            "right-of-search": (
+              <SortBy
+                sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+              />
+            ),
+          }}
+        ></Filters>
       </div>
-      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+      {/* Filters */}
+      <div className=" flex  justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -433,7 +445,9 @@ export default function AddAssetsToLocation() {
           )}
         />
       </div>
-      <div className="-mx-6  flex-1 overflow-y-auto px-5 md:px-0">
+
+      {/* List */}
+      <div className="  flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -460,10 +474,22 @@ export default function AddAssetsToLocation() {
               {hasSelectedAll ? "Clear all" : "Select all"}
             </Button>
           }
+          hideFirstHeaderColumn
+          headerChildren={
+            <>
+              <Th
+                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
+              ></Th>
+              <Th>Name</Th>
+              <Th>Location</Th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
+            </>
+          }
         />
       </div>
       {/* Footer of the modal */}
-      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
         </p>
@@ -507,19 +533,38 @@ export default function AddAssetsToLocation() {
   );
 }
 
-type AssetWithLocation = Asset & {
-  location: {
-    name: string;
-  };
-};
-
-const RowComponent = ({ item }: { item: AssetWithLocation }) => {
+const RowComponent = ({
+  item,
+}: {
+  item: Prisma.AssetGetPayload<{
+    include: {
+      location: true;
+      category: true;
+      tags: true;
+    };
+  }>;
+}) => {
   const selectedAssets = useAtomValue(locationsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
+  const { tags, category } = item;
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      {/* Checkbox */}
+      <Td
+        className={tw(
+          freezeColumnClassNames.checkbox,
+          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']"
+        )}
+      >
+        <FakeCheckbox
+          className={tw("text-white", checked ? "text-primary" : "")}
+          checked={checked}
+        />
+      </Td>
+
+      {/* Name */}
+      <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -533,29 +578,48 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
               </p>
-              {item.location ? (
-                <div
-                  className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-                  title={`Current location: ${item.location.name}`}
-                >
-                  <div className="size-2 rounded-full bg-gray-500"></div>
-                  <span>{item.location.name}</span>
-                </div>
-              ) : null}
+              <AssetStatusBadge
+                status={item.status}
+                availableToBook={item.availableToBook}
+              />
             </div>
           </div>
         </div>
       </Td>
 
+      {/* Location */}
       <Td>
-        <FakeCheckbox
-          className={tw("text-white", checked ? "text-primary" : "")}
-          checked={checked}
-        />
+        {item.location ? (
+          <div
+            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
+            title={`Current location: ${item.location.name}`}
+          >
+            <div className="size-2 rounded-full bg-gray-500"></div>
+            <span>{item.location.name}</span>
+          </div>
+        ) : null}
+      </Td>
+
+      {/* Category */}
+      <Td>
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : (
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
+          </Badge>
+        )}
+      </Td>
+
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
       </Td>
     </>
   );

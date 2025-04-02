@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import Header from "./header";
-import { Sheet, SheetContent, SheetTitle } from "../shared/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "../shared/sheet";
 
 export default function ContextualSidebar() {
   const matches = useMatches();
@@ -16,7 +21,7 @@ export default function ContextualSidebar() {
     showSidebar?: boolean;
     header: {
       title: string;
-      description?: string;
+      subHeading?: string;
     };
   };
   const showSidebar = data?.showSidebar || false;
@@ -47,13 +52,19 @@ export default function ContextualSidebar() {
         )}
       >
         <div className="flex h-screen w-full flex-col">
-          <SheetTitle>
-            <Header
-              {...data.header}
-              hideBreadcrumbs
-              classNames="text-left mb-3 [&>div]:px-6 mx-0"
-            />
-          </SheetTitle>
+          <Header
+            title={
+              // We render as child with span to avoid nesting of H2
+              <SheetTitle asChild>
+                <span>{data.header.title}</span>
+              </SheetTitle>
+            }
+            subHeading={
+              <SheetDescription>{data.header.subHeading}</SheetDescription>
+            }
+            hideBreadcrumbs
+            classNames="text-left mb-3 [&>div]:px-6 mx-0"
+          />
           <div className="h-full flex-1 overflow-hidden">
             <Outlet />
           </div>

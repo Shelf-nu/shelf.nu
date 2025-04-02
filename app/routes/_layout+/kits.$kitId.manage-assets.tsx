@@ -120,7 +120,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         header: {
           title: `Manage assets for ${kit.name}`,
-          SubHeading: "Fill up the kit with the assets of your choice.",
+          subHeading: "Fill up the kit with the assets of your choice.",
         },
         searchFieldLabel: "Search assets",
         searchFieldTooltip: {
@@ -130,10 +130,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         showSidebar: true,
         noScroll: true,
         kit,
-        items: assets.map((asset) => ({
-          ...asset,
-          isInOtherCustody: Boolean(asset?.custody && asset.kitId !== kit.id),
-        })),
+        items: assets,
         totalItems: totalAssets,
         categories,
         tags,
@@ -531,8 +528,9 @@ export default function ManageAssetsInKit() {
           ItemComponent={RowComponent}
           navigate={(assetId, item) => {
             if (
-              !item.isInOtherCustody &&
-              item.status !== AssetStatus.CHECKED_OUT
+              item.status !== AssetStatus.IN_CUSTODY ||
+              item.status !== AssetStatus.CHECKED_OUT ||
+              item.kit?.id !== kit.id
             ) {
               setSelectedAssets((selectedAssets) =>
                 selectedAssets.includes(assetId)
@@ -607,17 +605,12 @@ export default function ManageAssetsInKit() {
   );
 }
 
-const RowComponent = ({
-  item,
-}: {
-  item: AssetsFromViewItem & {
-    isInOtherCustody: boolean;
-  };
-}) => {
+const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
   const { category, tags, location } = item;
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
+  const isInCustody = item.status === AssetStatus.IN_CUSTODY;
   return (
     <>
       {/* Checkbox */}
@@ -625,16 +618,14 @@ const RowComponent = ({
         className={tw(
           freezeColumnClassNames.checkbox,
           "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
-          item.isInOtherCustody || isCheckedOut
-            ? "cursor-not-allowed"
-            : undefined
+          isInCustody || isCheckedOut ? "cursor-not-allowed" : undefined
         )}
       >
         <FakeCheckbox
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
+            isInCustody || isCheckedOut ? "text-gray-200" : "",
             checked ? "text-primary" : ""
           )}
         />
@@ -644,7 +635,7 @@ const RowComponent = ({
       <Td
         className={tw(
           "w-full min-w-[330px] p-0 md:p-0",
-          (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
+          (isInCustody || isCheckedOut) && "cursor-not-allowed"
         )}
       >
         <div className="flex items-center  gap-3 p-4 md:pr-6">
@@ -670,13 +661,7 @@ const RowComponent = ({
                    When asset is available, show normal status badge 
                    When asset is in custody, and not in other custody, show normal status badge
                 */}
-                <When
-                  truthy={
-                    item.status === AssetStatus.AVAILABLE ||
-                    (item.status === AssetStatus.IN_CUSTODY &&
-                      !item.isInOtherCustody)
-                  }
-                >
+                <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
@@ -684,7 +669,7 @@ const RowComponent = ({
                 </When>
 
                 {/* When asset is in other custody, show special badge */}
-                <When truthy={item.isInOtherCustody}>
+                <When truthy={isInCustody}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -743,6 +728,7 @@ const RowComponent = ({
           </div>
         </div>
       </Td>
+
       {/* Kit */}
       <Td>
         {item.kit?.name ? (
