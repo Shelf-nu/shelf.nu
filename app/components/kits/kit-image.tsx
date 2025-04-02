@@ -7,6 +7,7 @@ import { tw } from "~/utils/tw";
 import { DIALOG_CLOSE_SHORTCUT } from "../assets/asset-image";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 type KitImageProps = ImgHTMLAttributes<HTMLImageElement> & {
   className?: string;
@@ -23,14 +24,17 @@ export default function KitImage({
   className,
   kit,
   withPreview = false,
-  ...imageProps
+  ...rest
 }: KitImageProps) {
   const fetcher = useFetcher<typeof action>();
 
   const { kitId, image, imageExpiration, alt } = kit;
 
   const updatedKitImage = fetcher.data?.error ? null : fetcher.data?.kit.image;
-
+  const [isLoading, setIsLoading] = useState(true);
+  const handleImageLoad = () => {
+    setIsLoading(false);
+  };
   const url =
     image ?? updatedKitImage ?? "/static/images/asset-placeholder.jpg";
 
@@ -80,13 +84,32 @@ export default function KitImage({
 
   return (
     <>
-      <img
-        onClick={withPreview ? handleOpenDialog : undefined}
-        {...imageProps}
-        src={url}
-        className={tw(withPreview && "cursor-pointer", className)}
-        alt={alt}
-      />
+      <div className={tw("relative overflow-hidden", className)}>
+        {isLoading && (
+          <div
+            className={tw(
+              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "transition-opacity" // Fallback animation
+            )}
+          >
+            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+          </div>
+        )}
+
+        <img
+          onClick={withPreview ? handleOpenDialog : undefined}
+          src={url}
+          className={tw(
+            "size-full object-cover",
+            withPreview && "cursor-pointer"
+          )}
+          alt={alt}
+          onLoad={handleImageLoad}
+          loading="lazy"
+          decoding="async"
+          {...rest}
+        />
+      </div>
       {withPreview && (
         <DialogPortal>
           <Dialog

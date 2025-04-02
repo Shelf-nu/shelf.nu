@@ -26,7 +26,6 @@ import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import KitImage from "~/components/kits/kit-image";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
@@ -37,7 +36,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
   getBooking,
@@ -152,7 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your kit database",
           text: "Search kits based on name or description",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         booking,
         modelName,
@@ -266,7 +265,7 @@ export default function AddKitsToBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
+  const { booking, bookingKitIds } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -307,7 +306,7 @@ export default function AddKitsToBooking() {
 
   return (
     <Tabs
-      className="-mx-6 flex h-full max-h-full flex-col"
+      className="flex h-full max-h-full flex-col"
       value="kits"
       onValueChange={() => {
         if (hasUnsavedChanges) {
@@ -318,12 +317,6 @@ export default function AddKitsToBooking() {
         navigate(manageAssetsUrl);
       }}
     >
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left [&>div]:px-6 -mt-6 mx-0"
-      />
-
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
@@ -377,6 +370,15 @@ export default function AddKitsToBooking() {
             newButtonRoute: "/kits/new",
             newButtonContent: "New kit",
           }}
+          hideFirstHeaderColumn
+          headerChildren={
+            <>
+              <Th
+                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
+              ></Th>
+              <Th>Name</Th>
+            </>
+          }
         />
       </TabsContent>
 
@@ -482,7 +484,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
         <FakeCheckbox
           className={tw(
             "text-white",
-            isKitUnavailable ? "text-gray-100" : "",
+            isKitUnavailable ? "cursor-not-allowed text-gray-100" : "",
             checked ? "text-primary" : ""
           )}
           checked={checked}

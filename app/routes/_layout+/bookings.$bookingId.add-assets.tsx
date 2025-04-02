@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -16,17 +17,19 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
@@ -37,10 +40,12 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getBooking,
@@ -67,6 +72,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
+
+export type AssetWithBooking = Asset & {
+  bookings: Booking[];
+  custody: Custody | null;
+  category: Category;
+  kitId?: string | null;
+  qrScanned: string;
+};
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -131,7 +145,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your asset database",
           text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         booking,
         items: assets,
@@ -274,7 +288,7 @@ export default function AddAssetsToNewBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds, items, totalItems } =
+  const { booking, bookingKitIds, items, totalItems } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -336,7 +350,7 @@ export default function AddAssetsToNewBooking() {
 
   return (
     <Tabs
-      className="-mx-6 flex h-full max-h-full flex-col"
+      className="flex h-full max-h-full flex-col"
       value="assets"
       onValueChange={() => {
         if (hasUnsavedChanges) {
@@ -347,12 +361,6 @@ export default function AddAssetsToNewBooking() {
         navigate(manageKitsUrl);
       }}
     >
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left [&>div]:px-6 -mt-6 mx-0"
-      />
-
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
@@ -375,7 +383,10 @@ export default function AddAssetsToNewBooking() {
       </div>
 
       <Filters
-        slots={{ "right-of-search": <AvailabilitySelect /> }}
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": <AvailabilitySelect />,
+        }}
         className="justify-between !border-t-0 border-b px-6 md:flex"
       />
 
@@ -462,6 +473,19 @@ export default function AddAssetsToNewBooking() {
               {hasSelectedAll ? "Clear all" : "Select all"}
             </Button>
           }
+          hideFirstHeaderColumn
+          headerChildren={
+            <>
+              <Th
+                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
+              ></Th>
+              <Th>Name</Th>
+              <Th>Id</Th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
+              <Th>Location</Th>
+            </>
+          }
         />
       </TabsContent>
 
@@ -525,24 +549,33 @@ export default function AddAssetsToNewBooking() {
   );
 }
 
-export type AssetWithBooking = Asset & {
-  bookings: Booking[];
-  custody: Custody | null;
-  category: Category;
-  kitId?: string | null;
-  qrScanned: string;
-};
-
-const RowComponent = ({ item }: { item: AssetWithBooking }) => {
+const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
   const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
-
+  const { category, tags, location } = item;
   const isPartOfKit = !!item.kitId;
   const isAddedThroughKit = isPartOfKit && checked;
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      <Td>
+        <FakeCheckbox
+          className={tw(
+            "sticky left-0 z-10 bg-white",
+            "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
+            "text-white",
+            isPartOfKit ? "cursor-not-allowed text-gray-100" : "",
+            checked ? "text-primary" : "",
+            isAddedThroughKit ? "text-gray-300" : ""
+          )}
+          fillColor={isPartOfKit ? "#F2F4F7" : undefined}
+          checked={checked}
+          aria-disabled={isPartOfKit}
+        />
+      </Td>
+
+      {/* Name */}
+      <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -556,37 +589,53 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
-                {item.title}
+                {item.title}{" "}
               </p>
+              <div className="flex flex-row gap-x-2">
+                <When truthy={item.status === AssetStatus.AVAILABLE}>
+                  <AssetStatusBadge
+                    status={item.status}
+                    availableToBook={item.availableToBook}
+                  />
+                </When>
+
+                <AvailabilityLabel
+                  isAddedThroughKit={isAddedThroughKit}
+                  showKitStatus
+                  asset={item as unknown as AssetWithBooking}
+                  isCheckedOut={item.status === "CHECKED_OUT"}
+                />
+              </div>
             </div>
           </div>
         </div>
       </Td>
 
-      <Td className="text-right">
-        <AvailabilityLabel
-          isAddedThroughKit={isAddedThroughKit}
-          showKitStatus
-          asset={item}
-          isCheckedOut={item.status === "CHECKED_OUT"}
-        />
+      {/* ID */}
+      <Td>{item.id}</Td>
+
+      {/* Category */}
+      <Td>
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : (
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
+          </Badge>
+        )}
       </Td>
 
-      <Td>
-        <FakeCheckbox
-          className={tw(
-            "text-white",
-            isPartOfKit ? "text-gray-100" : "",
-            checked ? "text-primary" : "",
-            isAddedThroughKit ? "text-gray-300" : ""
-          )}
-          fillColor={isPartOfKit ? "#F2F4F7" : undefined}
-          checked={checked}
-          aria-disabled={isPartOfKit}
-        />
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
       </Td>
+
+      {/* Location */}
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };
