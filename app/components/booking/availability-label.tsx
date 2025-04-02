@@ -182,7 +182,7 @@ export function AvailabilityBadge({
         <TooltipTrigger asChild>
           <span
             className={tw(
-              "inline-block bg-warning-50 px-[6px] py-[2px]",
+              "inline-block  bg-warning-50 px-[6px] py-[2px]",
               "rounded-md border border-warning-200",
               "text-xs text-warning-700",
               className

@@ -490,7 +490,7 @@ export default function AddAssetsToNewBooking() {
       </TabsContent>
 
       {/* Footer of the modal */}
-      <footer className="item-center flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
         </p>

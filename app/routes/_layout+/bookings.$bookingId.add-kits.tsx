@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Booking, Prisma } from "@prisma/client";
+import { AssetStatus, type Booking, type Prisma } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -17,6 +17,7 @@ import {
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedKitsAtom } from "~/atoms/selected-assets-atoms";
+import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
@@ -26,6 +27,8 @@ import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import KitImage from "~/components/kits/kit-image";
+import { KitStatusBadge } from "~/components/kits/kit-status-badge";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
@@ -37,6 +40,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   getBooking,
@@ -328,7 +332,7 @@ export default function AddKitsToBooking() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
-            Kits (beta)
+            Kits
             {selectedKits.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
                 {selectedKits.length}
@@ -377,13 +381,15 @@ export default function AddKitsToBooking() {
                 className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
               ></Th>
               <Th>Name</Th>
+              <Th>Description</Th>
+              <Th>Assets</Th>
             </>
           }
         />
       </TabsContent>
 
       {/* Footer of the modal */}
-      <footer className="item-center flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <div className="flex flex-col justify-center gap-1">
           {selectedKits.length} kits selected
         </div>
@@ -450,46 +456,64 @@ function Row({ item: kit }: { item: KitForBooking }) {
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
-              <KitImage
-                kit={{
-                  kitId: kit.id,
-                  image: kit.image,
-                  imageExpiration: kit.imageExpiration,
-                  alt: kit.name,
-                }}
-                className="size-full rounded-[4px] border object-cover"
-              />
-            </div>
-            <div className="flex flex-col">
-              <p className="word-break whitespace-break-spaces font-medium">
-                {kit.name}
-              </p>
-              <p className="text-xs text-gray-600">
-                {kit._count.assets} assets
-              </p>
-            </div>
-          </div>
-        </div>
-      </Td>
-
-      <Td className="whitespace-break-spaces text-right md:whitespace-nowrap">
-        <KitAvailabilityLabel kit={kit} />
-      </Td>
-
       <Td>
         <FakeCheckbox
           className={tw(
             "text-white",
+            freezeColumnClassNames.checkbox,
+            "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
             isKitUnavailable ? "cursor-not-allowed text-gray-100" : "",
             checked ? "text-primary" : ""
           )}
           checked={checked}
         />
       </Td>
+      {/* Name */}
+      <Td className="w-full min-w-[330px] whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center">
+              <KitImage
+                className="size-full rounded-[4px] border object-cover"
+                kit={{
+                  image: kit.image,
+                  imageExpiration: kit.imageExpiration,
+                  alt: kit.name,
+                  kitId: kit.id,
+                }}
+              />
+            </div>
+            <div className="min-w-[130px]">
+              <span className="word-break mb-1 block font-medium">
+                {kit.name}
+              </span>
+              <div className="flex flex-col items-start gap-2 lg:flex-row lg:items-center">
+                <When truthy={kit.status === AssetStatus.AVAILABLE}>
+                  <KitStatusBadge
+                    status={kit.status}
+                    availableToBook={
+                      !kit.assets.some((a) => !a.availableToBook)
+                    }
+                  />
+                </When>
+                <KitAvailabilityLabel kit={kit} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Td>
+
+      <Td className="max-w-62 md:max-w-96">
+        {kit.description ? (
+          <LineBreakText
+            className="md:max-w-96"
+            text={kit.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
+        ) : null}
+      </Td>
+      <Td>{kit._count.assets}</Td>
     </>
   );
 }
