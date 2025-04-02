@@ -86,7 +86,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    let [kit, assets] = await Promise.all([
+    let [kit, assets, qrObj] = await Promise.all([
       getKit({
         id: kitId,
         organizationId,
@@ -143,6 +143,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         kitId,
       }),
+      generateQrObj({
+        kitId,
+        userId,
+        organizationId,
+      }),
     ]);
 
     let custody = null;
@@ -157,12 +162,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         dateDisplay,
       };
     }
-
-    const qrObj = await generateQrObj({
-      kitId,
-      userId,
-      organizationId,
-    });
 
     /**
      * We get the first QR code(for now we can only have 1)
@@ -204,7 +203,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       })
     );
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(cause, { kitId, userId });
     throw json(error(reason));
   }
 }
