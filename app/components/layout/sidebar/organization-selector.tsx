@@ -106,10 +106,16 @@ export default function OrganizationSelector() {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="!mt-0 w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded p-1"
+            className="!mt-0 max-h-96 w-[--radix-dropdown-menu-trigger-width] min-w-56 overflow-auto rounded p-1 scrollbar-none"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
+            onWheel={(event) => {
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.stopPropagation();
+            }}
           >
             {organizations.map((organization) => (
               <DropdownMenuItem
