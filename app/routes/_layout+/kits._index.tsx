@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { KitStatus, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -58,6 +58,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         extraInclude: {
+          qrCodes: { select: { id: true } },
           assets: {
             select: { id: true, availableToBook: true, status: true },
           },
@@ -132,7 +133,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function KitsIndexPage() {
-  const navigate = useNavigate();
   const { roles, isBase } = useUserRoleHelper();
   const canCreateKit = userHasPermission({
     roles,
@@ -195,7 +195,6 @@ export default function KitsIndexPage() {
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
           bulkActions={isBase ? undefined : <BulkActionsDropdown />}
-          navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -216,6 +215,7 @@ function ListContent({
   item: Prisma.KitGetPayload<{
     include: {
       _count: { select: { assets: true } };
+      qrCodes: { select: { id: true } };
       custody: {
         select: {
           custodian: {
@@ -252,7 +252,10 @@ function ListContent({
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <Link
+          to={`/kits/${item.id}`}
+          className="flex justify-between gap-3 p-4 md:justify-normal md:px-6"
+        >
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <KitImage
@@ -277,7 +280,7 @@ function ListContent({
               </div>
             </div>
           </div>
-        </div>
+        </Link>
       </Td>
       <Td className="max-w-62 md:max-w-96">
         {item.description ? (
@@ -326,7 +329,12 @@ function ListContent({
       )}
 
       <Td>
-        <KitQuickActions kit={item} />
+        <KitQuickActions
+          kit={{
+            ...item,
+            qrId: item.qrCodes[0].id,
+          }}
+        />
       </Td>
     </>
   );
