@@ -8,6 +8,7 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
 import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
+import KitQuickActions from "~/components/kits/kit-quick-actions";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
 import LineBreakText from "~/components/layout/line-break-text";
@@ -200,6 +201,7 @@ export default function KitsIndexPage() {
               <Th>Description</Th>
               <Th>Assets</Th>
               {canReadCustody && <Th>Custodian</Th>}
+              <Th>Actions</Th>
             </>
           }
         />
@@ -246,6 +248,7 @@ function ListContent({
     entity: PermissionEntity.custody,
     action: PermissionAction.read,
   });
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -321,6 +324,10 @@ function ListContent({
           ) : null}
         </Td>
       )}
+
+      <Td>
+        <KitQuickActions kit={item} />
+      </Td>
     </>
   );
 }
