@@ -125,7 +125,19 @@ export const AgreementForm = ({
       className={tw("flex w-full flex-col gap-2", className)}
       encType="multipart/form-data"
     >
-      <FormRow rowLabel="Name" className="border-b-0 pb-0" required={true}>
+      <FormRow
+        rowLabel="Name"
+        className="border-b-0 pb-0"
+        required={true}
+        subHeading={
+          <>
+            Shown to end users as the agreement name.{" "}
+            <Button to="#" target="_blank" variant="link" className={"text-xs"}>
+              See a sample
+            </Button>
+          </>
+        }
+      >
         <Input
           label="Name"
           hideLabel
@@ -139,12 +151,6 @@ export const AgreementForm = ({
           placeholder="Custody Arrangement 2023"
           required
         />
-        <p className="text-sm text-gray-600">
-          Shown to end users as the agreement name.{" "}
-          <Button to="#" target="_blank" variant="link">
-            See a sample
-          </Button>
-        </p>
       </FormRow>
 
       <FormRow
@@ -164,6 +170,14 @@ export const AgreementForm = ({
         className="border-0 pb-0"
         rowLabel="Description"
         required={false}
+        subHeading={
+          <>
+            Shown to end users for signing - use to give context.{" "}
+            <Button to="#" target="_blank" variant="link" className={"text-xs"}>
+              See a sample
+            </Button>
+          </>
+        }
       >
         <Input
           label="Description"
@@ -177,12 +191,6 @@ export const AgreementForm = ({
           placeholder="Store the custody arrangement for 2023"
           required={false}
         />
-        <p className="text-sm text-gray-600">
-          Shown to end users for signing - use to give context.{" "}
-          <Button to="#" target="_blank" variant="link">
-            See a sample
-          </Button>
-        </p>
       </FormRow>
 
       <When

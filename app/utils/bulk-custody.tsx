@@ -17,7 +17,7 @@ export const BULK_CUSTODY_SUCCESS_CONTENT: Record<
         to appear as "available" until the agreements are signed. Look for the
         pending icon{" "}
         <div className="inline-flex items-center justify-center rounded-full bg-gray-200 p-2">
-          <Icon icon="sign" />
+          <Icon icon="sign" size="xs" />
         </div>{" "}
         next to each asset.
       </p>
@@ -73,7 +73,7 @@ export const BULK_CUSTODY_SUCCESS_CONTENT: Record<
         to appear as "available" until the agreements are signed. Look for the
         pending icon{" "}
         <div className="inline-flex items-center justify-center rounded-full bg-gray-200 p-2">
-          <Icon icon="sign" />
+          <Icon icon="sign" size="xs" />
         </div>{" "}
         next to each asset.
       </p>
