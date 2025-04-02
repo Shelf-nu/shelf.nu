@@ -35,7 +35,8 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { isLikeShelfError, makeShelfError } from "~/utils/error";
+import { isRouteError } from "~/utils/http";
 import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
@@ -144,11 +145,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
-export const meta: MetaFunction<typeof loader> = ({ error }) => [
-  /** This will make sure that if we have an error its visible in the title of the browser tab */
-  // @ts-expect-error
-  { title: error ? appendToMetaTitle(error.data.error.title) : "" },
-];
+export const meta: MetaFunction<typeof loader> = ({ error }) => {
+  if (!error) {
+    return [{ title: "" }];
+  }
+
+  let title = "Something went wrong";
+
+  if (isRouteError(error)) {
+    title = error.data.error?.title ?? "";
+  } else if (isLikeShelfError(error)) {
+    title = error?.title ?? "";
+  } else if (error instanceof Error) {
+    title = error.name;
+  }
+
+  return [
+    /** This will make sure that if we have an error its visible in the title of the browser tab */
+    { title: appendToMetaTitle(title) },
+  ];
+};
 
 export default function App() {
   useCrisp();
