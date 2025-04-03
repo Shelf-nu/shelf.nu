@@ -38,6 +38,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
@@ -71,7 +72,6 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export type AssetIndexLoaderData = typeof loader;
 
@@ -456,34 +456,7 @@ const ListAssetContent = ({
         })}
       >
         <Td>
-          {custody ? (
-            <GrayBadge>
-              <>
-                {custody.custodian?.user ? (
-                  <img
-                    src={
-                      custody.custodian?.user?.profilePicture ||
-                      "/static/images/default_pfp.jpg"
-                    }
-                    className="mr-1 size-4 rounded-full"
-                    alt=""
-                  />
-                ) : null}
-                <span className="mt-px">
-                  {resolveTeamMemberName({
-                    name: custody.custodian.name,
-                    user: custody.custodian?.user
-                      ? {
-                          firstName: custody.custodian?.user?.firstName || null,
-                          lastName: custody.custodian?.user?.lastName || null,
-                          email: custody.custodian?.user?.email || "",
-                        }
-                      : undefined,
-                  })}
-                </span>
-              </>
-            </GrayBadge>
-          ) : null}
+          <TeamMemberBadge teamMember={custody?.custodian} />
         </Td>
       </When>
 
