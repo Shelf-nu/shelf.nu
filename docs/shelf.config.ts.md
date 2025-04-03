@@ -26,7 +26,7 @@ sendOnboardingEmail: true;
 
 ## enablePremiumFeatures
 
-Choose whether you want premium features to be enabled. Setting this to false will allow your users to use all features of shelf, without limitations.
+Choose whether you want premium features to be enabled. Setting this to `true` will allow your users to use all features of shelf, without limitations.
 
 ```ts
 //remix.config.ts
