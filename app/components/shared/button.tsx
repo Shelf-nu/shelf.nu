@@ -32,6 +32,12 @@ export interface CommonButtonProps {
   icon?: IconType;
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
+  /**
+   * If true, and target="_blank", the icon will only be shown on hover
+   * This is useful for links that open in a new tab, to avoid showing the icon
+   * when the link is not hovered.
+   */
+  onlyNewTabIconOnHover?: boolean;
   error?: string;
   hideErrorText?: boolean;
   children?: React.ReactNode;
@@ -160,6 +166,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       disabled,
       children,
       onlyIconOnMobile,
+      onlyNewTabIconOnHover = false,
       error,
       hideErrorText = false,
       ...props
@@ -189,12 +196,24 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           <span
             className={tw(
               newTab ? "inline-flex items-center gap-[2px]" : "",
-              onlyIconOnMobile ? "hidden lg:inline-block" : ""
+              onlyIconOnMobile ? "hidden lg:inline-block" : "",
+              newTab && onlyNewTabIconOnHover ? "hover-parent " : ""
             )}
           >
+            <style>{`
+              .hover-parent:hover .external-link-icon {
+                display: inline-flex !important;
+              }
+            `}</style>
+
             <span>{children}</span>
             {newTab && (
-              <ExternalLinkIcon className="external-link-icon mt-px" />
+              <ExternalLinkIcon
+                className={tw(
+                  "external-link-icon mt-px",
+                  onlyNewTabIconOnHover ? "hidden" : "inline-flex"
+                )}
+              />
             )}
           </span>
         )}

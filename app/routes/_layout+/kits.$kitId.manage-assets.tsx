@@ -1,23 +1,28 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setDisabledBulkItemsAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
-import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -45,7 +50,7 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -425,36 +430,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems } = useLoaderData<LoaderData>();
-
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
-  const kitAssetIds = useMemo(() => kit.assets.map((k) => k.id), [kit.assets]);
-
-  const [selectedAssets, setSelectedAssets] = useAtom(kitsSelectedAssetsAtom);
-
-  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
-
-  function handleSelectAll() {
-    if (hasSelectedAll) {
-      setSelectedAssets([]);
-    } else {
-      setSelectedAssets([
-        ...kitAssetIds,
-        ...items.map((item) => item.id),
-        ALL_SELECTED_KEY,
-      ]);
-    }
-  }
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per kit
    * So we do a manual effect to set the selected assets to the kit assets ids
    */
   useEffect(() => {
-    setSelectedAssets(kitAssetIds);
+    setSelectedBulkItems(kit.assets);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kit.id]);
+  }, [kit.assets]);
+
+  useEffect(() => {
+    const disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
+      const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
+      const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
+
+      if (isCheckedOut || isInCustody) {
+        acc.push(asset);
+      }
+
+      return acc;
+    }, []);
+
+    setDisabledBulkItems(disabledBulkItems);
+  }, [items, setDisabledBulkItems]);
 
   return (
     <div className="flex size-full flex-col overflow-y-hidden">
@@ -526,18 +534,14 @@ export default function ManageAssetsInKit() {
       <div className="flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
-          navigate={(assetId, item) => {
-            if (
-              item.status !== AssetStatus.IN_CUSTODY ||
-              item.status !== AssetStatus.CHECKED_OUT ||
-              item.kit?.id !== kit.id
-            ) {
-              setSelectedAssets((selectedAssets) =>
-                selectedAssets.includes(assetId)
-                  ? selectedAssets.filter((id) => id !== assetId)
-                  : [...selectedAssets, assetId]
-              );
+          navigate={(_assetId, item) => {
+            if (item.status === AssetStatus.CHECKED_OUT) {
+              return;
             }
+            if (item.status === AssetStatus.IN_CUSTODY) {
+              return;
+            }
+            setSelectedBulkItem(item);
           }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
@@ -546,35 +550,23 @@ export default function ManageAssetsInKit() {
             newButtonContent: "New asset",
           }}
           className="-mx-5 flex h-full flex-col justify-start border-0"
-          headerExtraContent={
-            <Button
-              variant="secondary"
-              className="px-2 py-1 text-sm font-normal"
-              onClick={handleSelectAll}
-            >
-              {hasSelectedAll ? "Clear all" : "Select all"}
-            </Button>
-          }
-          hideFirstHeaderColumn
+          bulkActions={<> </>}
           headerChildren={
             <>
-              <Th
-                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
-              ></Th>
-              <Th>Name</Th>
               <Th>Kit</Th>
               <Th>Category</Th>
               <Th>Tags</Th>
               <Th>Location</Th>
             </>
           }
+          disableSelectAllItems={true}
         />
       </div>
 
       {/* Footer of the modal - fixed at the bottom */}
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
-          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
         </p>
 
         <div className="flex gap-3">
@@ -582,12 +574,12 @@ export default function ManageAssetsInKit() {
             Close
           </Button>
           <Form method="post">
-            {selectedAssets.map((assetId, i) => (
+            {selectedBulkItems.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`assetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             <Button
@@ -607,37 +599,13 @@ export default function ManageAssetsInKit() {
 
 const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
   const { category, tags, location } = item;
-  const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
-  const checked = selectedAssets.some((id) => id === item.id);
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
   const isInCustody = item.status === AssetStatus.IN_CUSTODY;
+  const allowCursor = isInCustody || isCheckedOut ? "cursor-not-allowed" : "";
   return (
     <>
-      {/* Checkbox */}
-      <Td
-        className={tw(
-          freezeColumnClassNames.checkbox,
-          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
-          isInCustody || isCheckedOut ? "cursor-not-allowed" : undefined
-        )}
-      >
-        <FakeCheckbox
-          checked={checked}
-          className={tw(
-            "text-white",
-            isInCustody || isCheckedOut ? "text-gray-200" : "",
-            checked ? "text-primary" : ""
-          )}
-        />
-      </Td>
-
       {/* Name */}
-      <Td
-        className={tw(
-          "w-full min-w-[330px] p-0 md:p-0",
-          (isInCustody || isCheckedOut) && "cursor-not-allowed"
-        )}
-      >
+      <Td className={tw("w-full min-w-[330px] p-0 md:p-0", allowCursor)}>
         <div className="flex items-center  gap-3 p-4 md:pr-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -730,7 +698,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       </Td>
 
       {/* Kit */}
-      <Td>
+      <Td className={allowCursor}>
         {item.kit?.name ? (
           <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
             {item.kit.name}
@@ -739,7 +707,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       </Td>
 
       {/* Category */}
-      <Td>
+      <Td className={allowCursor}>
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
@@ -752,12 +720,14 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       </Td>
 
       {/* Tags */}
-      <Td className="text-left">
+      <Td className={tw("text-left", allowCursor)}>
         <ListItemTagsColumn tags={tags} />
       </Td>
 
       {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+      <Td className={allowCursor}>
+        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
+      </Td>
     </>
   );
 };

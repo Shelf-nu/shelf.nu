@@ -590,6 +590,8 @@ function ListContent({
                   to={`/assets/${item.id}`}
                   variant="link"
                   className="text-left text-gray-900 hover:text-gray-700"
+                  target={"_blank"}
+                  onlyNewTabIconOnHover
                 >
                   {item.title}
                 </Button>

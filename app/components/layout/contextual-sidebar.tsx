@@ -33,7 +33,6 @@ export default function ContextualSidebar() {
       if (open) {
         setOpen(true);
       } else {
-        setOpen(false);
         navigate(prevRoute.pathname);
       }
     },
@@ -65,7 +64,7 @@ export default function ContextualSidebar() {
             hideBreadcrumbs
             classNames="text-left mb-3 [&>div]:px-6 mx-0"
           />
-          <div className="h-full flex-1 overflow-hidden">
+          <div className="h-full flex-1 overflow-hidden scrollbar-thin">
             <Outlet />
           </div>
         </div>

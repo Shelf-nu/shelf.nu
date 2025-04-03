@@ -82,6 +82,11 @@ export type ListProps = {
   headerExtraContent?: React.ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
+
+  /** We have some views where the select all pages is not realistic to work, because we have some disabled items
+   * This should be used in those cases
+   */
+  disableSelectAllItems?: boolean;
 };
 
 /**
@@ -101,6 +106,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     customPagination,
     headerExtraContent,
     extraItemComponentProps,
+    disableSelectAllItems,
   }: ListProps,
   ref
 ) {
@@ -183,7 +189,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                         ? totalItems
                         : selectedBulkItemsCount}{" "}
                       selected
-                      {!hasSelectedAllItems &&
+                      {!disableSelectAllItems &&
+                        !hasSelectedAllItems &&
                         selectedBulkItemsCount < totalItems && (
                           <Button
                             onClick={handleSelectAllItems}
@@ -228,7 +235,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
-            <tbody>
+            <tbody key={`item-list-${items.length}`}>
               {items.map((item, i) => (
                 <ListItem
                   item={item}
