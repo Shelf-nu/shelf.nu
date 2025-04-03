@@ -160,7 +160,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               <div>
                 <h5 className="text-left capitalize">{title || plural}</h5>
                 <div className="h-7">
-                  {hasSelectedItems ? (
+                  {!!bulkActions && hasSelectedItems ? (
                     <div className="flex items-start gap-2">
                       <Button
                         onClick={() => setSelectedBulkItems([])}
