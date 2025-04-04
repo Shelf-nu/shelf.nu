@@ -86,13 +86,22 @@ export default function Select<T extends Record<string, unknown>>({
       defaultValue={defaultValue}
       onValueChange={handleValueChange}
     >
-      <SelectTrigger className={tw("w-max gap-2", className)}>
+      <SelectTrigger
+        className={tw(
+          "w-max gap-2 px-3.5 py-2 text-left text-base text-gray-500",
+          className
+        )}
+      >
         <SelectValue className="w-max" placeholder={placeholder} />
       </SelectTrigger>
 
-      <SelectContent>
+      <SelectContent className="min-w-72 p-0">
         {itemsToRender.map((item) => (
-          <SelectItem key={item.value} value={item.value} className="px-4 py-2">
+          <SelectItem
+            key={item.value}
+            value={item.value}
+            className="block rounded-none border-b border-gray-200 px-6 py-4 pr-[5px] text-sm text-gray-700"
+          >
             {item.label}
           </SelectItem>
         ))}
