@@ -43,10 +43,6 @@ export function AssetStatusBadge({
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
   return (
     <div className="flex items-center gap-[6px]">
-      <Badge color={assetStatusColorMap(status)}>
-        {userFriendlyAssetStatus(status)}
-      </Badge>
-
       <When
         truthy={status === AssetStatus.SIGNATURE_PENDING && !!assetId}
         fallback={

@@ -123,7 +123,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         kit,
         items: assets.map((asset) => ({
           ...asset,
-          isInOtherCustody: Boolean(asset?.custody && asset.kitId !== kit.id),
+          isInOtherCustody: Boolean(
+            asset.status === AssetStatus.IN_CUSTODY && asset.kitId !== kit.id
+          ),
         })),
         totalItems: totalAssets,
         categories,
@@ -522,7 +524,8 @@ export default function ManageAssetsInKit() {
              */
             if (
               !item.isInOtherCustody &&
-              item.status !== AssetStatus.CHECKED_OUT
+              item.status !== AssetStatus.CHECKED_OUT &&
+              item.status !== AssetStatus.SIGNATURE_PENDING
             ) {
               setSelectedAssets((selectedAssets) =>
                 selectedAssets.includes(assetId)
@@ -599,13 +602,13 @@ const RowComponent = ({
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
+  const isSignaturePending = item.status === AssetStatus.SIGNATURE_PENDING;
+  const notAllowed =
+    item.isInOtherCustody || isCheckedOut || isSignaturePending;
   return (
     <>
       <Td
-        className={tw(
-          "w-full p-0 md:p-0",
-          (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
-        )}
+        className={tw("w-full p-0 md:p-0", notAllowed && "cursor-not-allowed")}
       >
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
@@ -665,6 +668,30 @@ const RowComponent = ({
             </TooltipProvider>
           </When>
 
+          {/* Asset is signature pending */}
+          <When truthy={isSignaturePending}>
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                    Signature pending
+                  </div>
+                </TooltipTrigger>
+
+                <TooltipContent side="top" align="end" className="md:w-80">
+                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                    Asset has a pending signature
+                  </h2>
+                  <div className="text-wrap text-xs font-medium text-gray-500">
+                    Assets with a pending signature are in the process of being
+                    assigned to a team member. <br /> Make sure the asset has an
+                    Available status in order to add it to this kit.
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </When>
+
           {/* Asset is in checked out */}
           <When truthy={isCheckedOut}>
             <TooltipProvider delayDuration={100}>
@@ -691,18 +718,12 @@ const RowComponent = ({
         </div>
       </Td>
 
-      <Td
-        className={
-          item.isInOtherCustody || isCheckedOut
-            ? "cursor-not-allowed opacity-50"
-            : undefined
-        }
-      >
+      <Td className={notAllowed ? "cursor-not-allowed opacity-50" : undefined}>
         <FakeCheckbox
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
+            notAllowed ? "text-gray-200" : "",
             checked ? "text-primary" : ""
           )}
         />

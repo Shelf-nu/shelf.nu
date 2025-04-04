@@ -2409,7 +2409,7 @@ export async function bulkCheckOutAssets({
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: {
           status: agreementFound?.signatureRequired
-            ? AssetStatus.AVAILABLE
+            ? AssetStatus.SIGNATURE_PENDING
             : AssetStatus.IN_CUSTODY,
         },
       });

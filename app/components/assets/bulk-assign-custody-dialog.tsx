@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
@@ -30,8 +28,6 @@ export default function BulkAssignCustodyDialog() {
 
   const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-
-  const totalAssets = useAtomValue(selectedBulkItemsCountAtom);
 
   return (
     <BulkUpdateDialogContent
@@ -130,7 +126,7 @@ export default function BulkAssignCustodyDialog() {
                 <div className="mb-4">
                   {BULK_CUSTODY_SUCCESS_CONTENT[
                     fetcherData.successMessageType as BulkAssignCustodySuccessMessageType
-                  ](totalAssets)}
+                  ](fetcherData.assetsCount)}
                 </div>
               ) : (
                 <p className="mb-4 text-success-500">

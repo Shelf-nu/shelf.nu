@@ -5,7 +5,7 @@ export const BULK_CUSTODY_SUCCESS_CONTENT: Record<
   BulkAssignCustodySuccessMessageType,
   (totalAssets: number) => React.ReactNode
 > = {
-  "self-or-base-with-sign": (totalAssets) => (
+  "user-with-sign": (totalAssets) => (
     <>
       <h3 className="mb-2">Bulk Custody Assignment - Action Required</h3>
       <p className="mb-4">
@@ -34,7 +34,7 @@ export const BULK_CUSTODY_SUCCESS_CONTENT: Record<
       </ol>
     </>
   ),
-  "self-or-base-without-sign": (totalAssets) => (
+  "user-without-sign": (totalAssets) => (
     <>
       <h3 className="mb-2">Bulk Custody Assignment - Action Required</h3>
 

@@ -244,11 +244,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: { id: assetId, organizationId },
         data: {
           /**
-           * If agreement requires a signature then asset will still be AVAILABLE until user signs the custody
+           * If agreement requires a signature then asset will be with status SIGNATURE_PENDING until user signs the custody
            * otherwise it will be IN_CUSTODY directly
            */
           status: agreementFound?.signatureRequired
-            ? AssetStatus.AVAILABLE
+            ? AssetStatus.SIGNATURE_PENDING
             : AssetStatus.IN_CUSTODY,
           custody: {
             create: {

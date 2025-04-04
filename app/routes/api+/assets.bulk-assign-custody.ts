@@ -14,8 +14,8 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type BulkAssignCustodySuccessMessageType =
-  | "self-or-base-with-sign"
-  | "self-or-base-without-sign"
+  | "user-with-sign"
+  | "user-without-sign"
   | "nrm-with-sign"
   | "nrm-without-sign";
 
@@ -64,14 +64,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     const isCustodianNRM = !teamMember?.userId;
-    const custodianRoles = teamMember?.user?.userOrganizations.find(
-      (o) => o.organizationId === organizationId
-    )?.roles;
-    const custodianRole = custodianRoles ? custodianRoles[0] : undefined;
-
-    const isCustodianSelfOrBase =
-      custodianRole === OrganizationRoles.SELF_SERVICE ||
-      custodianRole === OrganizationRoles.BASE;
+    const isCustodianUser = teamMember?.userId;
 
     const { custodies, agreementFound } = await bulkCheckOutAssets({
       userId,
@@ -101,7 +94,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         `/assets/${custodies[0].asset.id}/overview/share-agreement`
       );
     }
-
     const agreementWithSign =
       agreementFound && agreementFound.signatureRequired;
     const agreementWithoutSign =
@@ -111,17 +103,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
     let successMessageType: BulkAssignCustodySuccessMessageType | undefined =
       undefined;
 
-    if (isCustodianSelfOrBase && agreementWithSign) {
-      successMessageType = "self-or-base-with-sign";
-    } else if (isCustodianSelfOrBase && agreementWithoutSign) {
-      successMessageType = "self-or-base-without-sign";
+    let assetsCount = custodies.length;
+
+    if (isCustodianUser && agreementWithSign) {
+      successMessageType = "user-with-sign";
+    } else if (isCustodianUser && agreementWithoutSign) {
+      successMessageType = "user-without-sign";
     } else if (isCustodianNRM && agreementWithSign) {
       successMessageType = "nrm-with-sign";
     } else if (isCustodianNRM && agreementWithoutSign) {
       successMessageType = "nrm-without-sign";
     }
 
-    return json(data({ success: true, successMessageType }));
+    return json(data({ success: true, successMessageType, assetsCount }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

@@ -30,8 +30,8 @@ export default function AwaitingSignatureTooltip({
             Awaiting signature to complete custody assignment
           </h6>
           <div className="whitespace-normal text-xs font-medium text-gray-500">
-            Asset status will change after signing. To cancel custody
-            assignment, go to{" "}
+            Asset status will change to "In custody" after signing. To cancel
+            custody assignment, go to{" "}
             <span className="font-semibold text-gray-600">
               {"Actions > Release Custody"}
             </span>

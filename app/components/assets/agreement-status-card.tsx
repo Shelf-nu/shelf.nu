@@ -47,7 +47,7 @@ export default function AgreementStatusCard({
         <Button
           to={
             isSignaturePending
-              ? "share-document"
+              ? "share-agreement"
               : `/receipts?receiptId=${receiptId}`
           }
           variant="link-gray"
