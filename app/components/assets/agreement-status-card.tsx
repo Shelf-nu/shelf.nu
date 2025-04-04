@@ -17,6 +17,13 @@ export default function AgreementStatusCard({
     return null;
   }
 
+  const receiptId = asset.custodyReceipts.length
+    ? asset.custodyReceipts[0].id
+    : null;
+
+  const isSignaturePending =
+    asset.custody.signatureStatus === CustodySignatureStatus.PENDING;
+
   return (
     <Card className="my-3 flex items-center gap-2">
       <div className="flex size-12 items-center justify-center rounded-full bg-gray-50">
@@ -27,7 +34,7 @@ export default function AgreementStatusCard({
 
       <div>
         <p className="font-semibold">
-          {asset.custody.signatureStatus === CustodySignatureStatus.PENDING ? (
+          {isSignaturePending ? (
             <>
               Awaiting signature from{" "}
               {resolveTeamMemberName(asset.custody.custodian)}
@@ -37,8 +44,15 @@ export default function AgreementStatusCard({
           )}
         </p>
 
-        <Button to="share-agreement" variant="link-gray">
-          Share document
+        <Button
+          to={
+            isSignaturePending
+              ? "share-document"
+              : `/receipts?receiptId=${receiptId}`
+          }
+          variant="link-gray"
+        >
+          {isSignaturePending ? "Share document" : "View receipt"}
         </Button>
       </div>
     </Card>

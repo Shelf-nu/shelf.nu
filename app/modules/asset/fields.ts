@@ -1,4 +1,8 @@
-import type { BookingStatus, Prisma } from "@prisma/client";
+import {
+  CustodySignatureStatus,
+  type BookingStatus,
+  type Prisma,
+} from "@prisma/client";
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
@@ -75,6 +79,10 @@ export const ASSET_OVERVIEW_FIELDS = {
       custodianTeamMember: true,
       custodianUser: true,
     },
+  },
+  custodyReceipts: {
+    select: { id: true },
+    where: { signatureStatus: CustodySignatureStatus.SIGNED },
   },
 } satisfies Prisma.AssetInclude;
 
