@@ -566,6 +566,7 @@ function ListContent({
                 </Button>
               </span>
               <AssetStatusBadge
+                assetId={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

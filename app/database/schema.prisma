@@ -134,6 +134,7 @@ model Asset {
 
 enum AssetStatus {
   AVAILABLE
+  SIGNATURE_PENDING
   IN_CUSTODY
   CHECKED_OUT
 }

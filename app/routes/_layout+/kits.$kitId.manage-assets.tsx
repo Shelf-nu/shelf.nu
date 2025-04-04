@@ -627,6 +627,7 @@ const RowComponent = ({
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <AssetStatusBadge
+                  assetId={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />

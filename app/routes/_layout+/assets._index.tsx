@@ -1,4 +1,4 @@
-import { CustodySignatureStatus, type Tag } from "@prisma/client";
+import type { Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -423,10 +423,6 @@ const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                   assetId={item.id}
-                  isSignaturePending={
-                    item.custody?.signatureStatus ===
-                    CustodySignatureStatus.PENDING
-                  }
                 />
               </div>
             </div>

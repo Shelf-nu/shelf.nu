@@ -1,4 +1,3 @@
-import { CustodySignatureStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -296,10 +295,6 @@ export default function AssetDetailsPage() {
                 status={asset.status}
                 availableToBook={asset.availableToBook}
                 assetId={asset.id}
-                isSignaturePending={
-                  asset.custody?.signatureStatus ===
-                  CustodySignatureStatus.PENDING
-                }
               />
             </div>
           </div>
