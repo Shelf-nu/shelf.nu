@@ -157,6 +157,114 @@ export const BOOKING_COMMON_INCLUDE = {
   custodianUser: true,
 } as Prisma.BookingInclude;
 
+export async function createBooking({
+  booking,
+  assetIds,
+  hints,
+}: {
+  booking: Pick<
+    Booking,
+    | "name"
+    | "description"
+    | "creatorId"
+    | "custodianUserId"
+    | "custodianTeamMemberId"
+    | "organizationId"
+    | "from"
+    | "to"
+  >;
+  assetIds: Asset["id"][];
+  hints: ClientHint;
+}) {
+  try {
+    const dataToCreate: Prisma.BookingCreateInput = {
+      name: booking.name,
+      from: booking.from,
+      to: booking.to,
+      description: booking.description,
+      status: BookingStatus.DRAFT,
+      creator: { connect: { id: booking.creatorId } },
+      organization: { connect: { id: booking.organizationId } },
+      /**
+       * Updated original dates to user entered `from` and `to`
+       * so that we can track of it later
+       */
+      originalFrom: booking.from,
+      originalTo: booking.to,
+    };
+
+    if (assetIds.length > 0) {
+      dataToCreate.assets = {
+        connect: assetIds.map((id) => ({ id })),
+      };
+    }
+
+    if (booking.custodianUserId) {
+      dataToCreate.custodianUser = {
+        connect: { id: booking.custodianUserId },
+      };
+    } else if (booking.custodianTeamMemberId) {
+      const custodianUser = await db.teamMember
+        .findUniqueOrThrow({
+          where: { id: booking.custodianTeamMemberId },
+          select: { id: true, user: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Cannot find team member",
+            additionalData: {
+              custodianTeamMemberId: booking.custodianTeamMemberId,
+            },
+            label,
+          });
+        });
+
+      dataToCreate.custodianTeamMember = {
+        connect: { id: booking.custodianTeamMemberId },
+      };
+
+      /**
+       * If there is a user associated with team member,
+       * we connect it to the booking user as well.
+       */
+      if (custodianUser.user?.id) {
+        dataToCreate.custodianUser = {
+          connect: { id: custodianUser.user.id },
+        };
+      }
+    }
+
+    const createdBooking = await db.booking.create({
+      data: dataToCreate,
+      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+    });
+
+    if (createdBooking.from) {
+      const when = new Date(createdBooking.from);
+      when.setHours(when.getHours() - 1); // 1 hour before send checkout reminder
+      await scheduleNextBookingJob({
+        data: {
+          id: createdBooking.id,
+          hints,
+          eventType: bookingSchedulerEventsEnum.checkoutReminder,
+        },
+        when,
+      });
+    }
+
+    return createdBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while trying to create or update the booking. Please try again or contact support.",
+      additionalData: { booking, hints },
+      label,
+    });
+  }
+}
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<

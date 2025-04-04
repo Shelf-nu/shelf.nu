@@ -10,7 +10,7 @@ import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 
-import { upsertBooking } from "~/modules/booking/service.server";
+import { createBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -131,23 +131,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     ).toJSDate();
 
-    const booking = await upsertBooking(
-      {
-        custodianUserId: custodian?.userId,
-        custodianTeamMemberId: custodian?.id,
-        name,
-        description,
-        organizationId,
+    const booking = await createBooking({
+      booking: {
         from,
         to,
-        assetIds,
+        custodianTeamMemberId: custodian?.id,
+        custodianUserId: custodian?.userId ?? null,
+        name: name!,
+        description: description ?? null,
+        organizationId,
         creatorId: authSession.userId,
-        ...(isSelfServiceOrBase && {
-          custodianUserId: authSession.userId,
-        }),
+        ...(isSelfServiceOrBase && { custodianUserId: authSession.userId }),
       },
-      getClientHint(request)
-    );
+      assetIds: assetIds?.length ? assetIds : [],
+      hints: getClientHint(request),
+    });
 
     sendNotification({
       title: "Booking saved",
