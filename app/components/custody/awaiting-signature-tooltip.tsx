@@ -1,15 +1,26 @@
+import { cloneElement } from "react";
 import { useNavigate } from "@remix-run/react";
 import Icon from "../icons/icon";
 import { CustomTooltip } from "../shared/custom-tooltip";
 
 type AwaitingSignatureTooltipProps = {
   assetId: string;
+  trigger?: React.ReactElement<{
+    onClick: (event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => void;
+  }>;
 };
 
 export default function AwaitingSignatureTooltip({
   assetId,
+  trigger,
 }: AwaitingSignatureTooltipProps) {
   const navigate = useNavigate();
+
+  function handleClick(event: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
+    event.preventDefault();
+    event.stopPropagation();
+    navigate(`/assets/${assetId}/overview/share-agreement`);
+  }
 
   return (
     <CustomTooltip
@@ -28,16 +39,13 @@ export default function AwaitingSignatureTooltip({
         </div>
       }
     >
-      <button
-        className="rounded-full bg-gray-200 p-1"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          navigate(`/assets/${assetId}/overview/share-agreement`);
-        }}
-      >
-        <Icon icon="sign" />
-      </button>
+      {trigger ? (
+        cloneElement(trigger, { onClick: handleClick })
+      ) : (
+        <button className="rounded-full bg-gray-200 p-1" onClick={handleClick}>
+          <Icon icon="sign" />
+        </button>
+      )}
     </CustomTooltip>
   );
 }

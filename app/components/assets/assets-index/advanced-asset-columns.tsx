@@ -9,7 +9,6 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "@remix-run/react";
-import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
@@ -316,11 +315,15 @@ function StatusColumn({
     <Td className="w-full max-w-none whitespace-nowrap">
       <div className="flex items-center gap-2">
         {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
-        <AssetStatusBadge status={status} availableToBook={true} />
 
-        <When truthy={signatureStatus === CustodySignatureStatus.PENDING}>
-          <AwaitingSignatureTooltip assetId={assetId} />
-        </When>
+        <AssetStatusBadge
+          status={status}
+          availableToBook
+          assetId={assetId}
+          isSignaturePending={
+            signatureStatus === CustodySignatureStatus.PENDING
+          }
+        />
       </div>
     </Td>
   );

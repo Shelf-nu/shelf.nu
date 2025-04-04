@@ -16,7 +16,6 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
-import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -296,15 +295,12 @@ export default function AssetDetailsPage() {
               <AssetStatusBadge
                 status={asset.status}
                 availableToBook={asset.availableToBook}
-              />
-              <When
-                truthy={
+                assetId={asset.id}
+                isSignaturePending={
                   asset.custody?.signatureStatus ===
                   CustodySignatureStatus.PENDING
                 }
-              >
-                <AwaitingSignatureTooltip assetId={asset.id} />
-              </When>
+              />
             </div>
           </div>
         }

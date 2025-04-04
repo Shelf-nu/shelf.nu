@@ -21,7 +21,6 @@ import AssetQuickActions from "~/components/assets/assets-index/asset-quick-acti
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
-import AwaitingSignatureTooltip from "~/components/custody/awaiting-signature-tooltip";
 import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { ListProps } from "~/components/list";
@@ -423,15 +422,12 @@ const ListAssetContent = ({
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
-                />
-                <When
-                  truthy={
+                  assetId={item.id}
+                  isSignaturePending={
                     item.custody?.signatureStatus ===
                     CustodySignatureStatus.PENDING
                   }
-                >
-                  <AwaitingSignatureTooltip assetId={item.id} />
-                </When>
+                />
               </div>
             </div>
           </div>
