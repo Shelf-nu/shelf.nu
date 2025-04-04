@@ -322,9 +322,11 @@ export default function AddKitsToBooking() {
    */
   useEffect(() => {
     const _disabledBulkItems = items.reduce<ListItemData[]>((acc, kit) => {
-      const { isKitUnavailable, someAssetMarkedUnavailable } =
-        getKitAvailabilityStatus(kit as unknown as KitForBooking, booking.id);
-      if (isKitUnavailable || someAssetMarkedUnavailable) {
+      const { isKitUnavailable } = getKitAvailabilityStatus(
+        kit as unknown as KitForBooking,
+        booking.id
+      );
+      if (isKitUnavailable) {
         acc.push(kit);
       }
 
