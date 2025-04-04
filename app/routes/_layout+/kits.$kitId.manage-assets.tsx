@@ -434,21 +434,22 @@ export default function ManageAssetsInKit() {
   const isSearching = isFormProcessing(navigation.state);
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
-  const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per kit
-   * So we do a manual effect to set the selected assets to the kit assets ids
+   * Set selected items for kit based on the route data
    */
   useEffect(() => {
     setSelectedBulkItems(kit.assets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kit.assets]);
+  }, [kit.assets, setSelectedBulkItems]);
 
+  /**
+   * Set disabled items for kit
+   */
   useEffect(() => {
     const disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
       const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
@@ -541,7 +542,7 @@ export default function ManageAssetsInKit() {
             if (item.status === AssetStatus.IN_CUSTODY) {
               return;
             }
-            setSelectedBulkItem(item);
+            updateItem(item);
           }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",

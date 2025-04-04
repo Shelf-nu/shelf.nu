@@ -24,13 +24,16 @@ export const selectedBulkItemsCountAtom = atom(
  * Set an item in selectedBulkItems
  */
 export const setSelectedBulkItemAtom = atom<null, ListItemData[], unknown>(
-  null, // it's a convention to pass `null` for the first argument
+  null,
   (_, set, update) => {
     set(selectedBulkItemsAtom, (prev) => {
-      if (prev.includes(update)) {
-        return prev.filter((item) => item !== update);
-      }
+      // Check if the item exists by ID instead of reference
+      const exists = prev.some((item) => item.id === update.id);
 
+      if (exists) {
+        // Remove by ID instead of reference
+        return prev.filter((item) => item.id !== update.id);
+      }
       return [...prev, update];
     });
   }

@@ -3,17 +3,20 @@ import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
-import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
@@ -39,7 +42,7 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -337,46 +340,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location, items, totalItems } = useLoaderData<typeof loader>();
+  const { location, totalItems } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
-  const locationAssetsIds = useMemo(
-    () => location.assets.map((a) => a.id),
-    [location.assets]
-  );
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
-  const [selectedAssets, setSelectedAssets] = useAtom(
-    locationsSelectedAssetsAtom
-  );
-  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
-
-  const removedAssetIds = useMemo(
+  const removedAssets = useMemo(
     () =>
-      locationAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
-    [locationAssetsIds, selectedAssets]
+      location.assets.filter(
+        (asset) =>
+          !selectedBulkItems.some(
+            (selectedItem) => selectedItem.id === asset.id
+          )
+      ),
+    [location.assets, selectedBulkItems]
   );
-
-  function handleSelectAll() {
-    if (hasSelectedAll) {
-      setSelectedAssets([]);
-    } else {
-      setSelectedAssets([
-        ...locationAssetsIds,
-        ...items.map((item) => item.id),
-        ALL_SELECTED_KEY,
-      ]);
-    }
-  }
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per location
-   * So we do a manual effect to set the selected assets to the location assets ids
+   * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedAssets(locationAssetsIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.id]);
+    setSelectedBulkItems(location.assets);
+  }, [location.assets, setSelectedBulkItems]);
 
   return (
     <div className="flex h-full max-h-full flex-col">
@@ -451,12 +441,8 @@ export default function AddAssetsToLocation() {
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
+          navigate={(_assetId, item) => {
+            updateItem(item);
           }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
@@ -465,22 +451,9 @@ export default function AddAssetsToLocation() {
             newButtonContent: "New asset",
           }}
           className="-mx-5 flex h-full flex-col justify-start border-0"
-          headerExtraContent={
-            <Button
-              variant="secondary"
-              className="min-w-24 px-2 py-1 text-sm font-normal"
-              onClick={handleSelectAll}
-            >
-              {hasSelectedAll ? "Clear all" : "Select all"}
-            </Button>
-          }
-          hideFirstHeaderColumn
+          bulkActions={<> </>}
           headerChildren={
             <>
-              <Th
-                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
-              ></Th>
-              <Th>Name</Th>
               <Th>Location</Th>
               <Th>Category</Th>
               <Th>Tags</Th>
@@ -491,7 +464,7 @@ export default function AddAssetsToLocation() {
       {/* Footer of the modal */}
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
-          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
         </p>
 
         <div className="flex gap-3">
@@ -501,21 +474,21 @@ export default function AddAssetsToLocation() {
           <Form method="post">
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {/* These are the asset ids, coming from the server */}
-            {removedAssetIds.map((assetId, i) => (
+            {removedAssets.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`removedAssetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedAssets.map((assetId, i) => (
+            {selectedBulkItems.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`assetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             <Button
@@ -544,25 +517,10 @@ const RowComponent = ({
     };
   }>;
 }) => {
-  const selectedAssets = useAtomValue(locationsSelectedAssetsAtom);
-  const checked = selectedAssets.some((id) => id === item.id);
   const { tags, category } = item;
 
   return (
     <>
-      {/* Checkbox */}
-      <Td
-        className={tw(
-          freezeColumnClassNames.checkbox,
-          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']"
-        )}
-      >
-        <FakeCheckbox
-          className={tw("text-white", checked ? "text-primary" : "")}
-          checked={checked}
-        />
-      </Td>
-
       {/* Name */}
       <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">

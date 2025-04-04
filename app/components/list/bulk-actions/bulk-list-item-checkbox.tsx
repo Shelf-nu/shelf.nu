@@ -37,7 +37,6 @@ export default function BulkListItemCheckbox({
 
     setSelectedBulkItem(item);
   }
-  // console.log(item.title, item.id);
 
   return (
     <Td
