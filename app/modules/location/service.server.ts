@@ -28,6 +28,8 @@ export async function getLocation(
     /** Assets to be loaded per page with the location */
     perPage?: number;
     search?: string | null;
+    orderBy: string;
+    orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
   }
@@ -40,6 +42,8 @@ export async function getLocation(
     search,
     userOrganizations,
     request,
+    orderBy,
+    orderDirection,
   } = params;
 
   try {
@@ -85,6 +89,7 @@ export async function getLocation(
             skip,
             take,
             where: assetsWhere,
+            orderBy: { [orderBy]: orderDirection },
           },
         },
       }),

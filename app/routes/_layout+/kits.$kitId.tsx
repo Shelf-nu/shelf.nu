@@ -12,16 +12,19 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
+import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { ScanDetails } from "~/components/location/scan-details";
 import { QrPreview } from "~/components/qr/qr-preview";
 import { Badge } from "~/components/shared/badge";
@@ -62,6 +65,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -322,7 +326,7 @@ export default function KitDetails() {
   usePosition();
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   /**
    * User can manage assets if
    * 1. Kit has AVAILABLE status
@@ -376,6 +380,20 @@ export default function KitDetails() {
             availableToBook={!kitHasUnavailableAssets}
           />
         }
+        slots={{
+          "left-of-title": (
+            <KitImage
+              kit={{
+                kitId: kit.id,
+                image: kit.image,
+                imageExpiration: kit.imageExpiration,
+                alt: kit.name,
+              }}
+              className={tw("mr-4 size-[56px] rounded border object-cover")}
+              withPreview
+            />
+          ),
+        }}
       >
         <When
           truthy={userHasPermission({
@@ -389,24 +407,108 @@ export default function KitDetails() {
         <BookingActionsDropdown />
       </Header>
 
+      <ContextualSidebar />
       <ContextualModal />
 
-      <div className="mt-8 lg:flex">
-        <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
-          <KitImage
-            kit={{
-              kitId: kit.id,
-              image: kit.image,
-              imageExpiration: kit.imageExpiration,
-              alt: kit.name,
-            }}
-            className={tw(
-              "h-auto w-full rounded border object-cover",
-              kit.description ? "rounded-b-none border-b-0" : ""
-            )}
-          />
+      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+        {/* Left column - assets list */}
+        <div className="flex-1 overflow-hidden">
+          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+          <div className="mb-3 flex gap-4 lg:hidden">
+            {userRoleCanManageAssets ? (
+              <Button
+                to="manage-assets?status=AVAILABLE"
+                variant="primary"
+                width="full"
+                disabled={
+                  !canManageAssets
+                    ? {
+                        reason:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                      }
+                    : false
+                }
+              >
+                Manage assets
+              </Button>
+            ) : null}
+            <div className="w-full">
+              <ActionsDropdown fullWidth />
+            </div>
+          </div>
+
+          <div className="flex flex-col md:gap-2">
+            <Filters
+              className="responsive-filters mb-2 lg:mb-0"
+              slots={{
+                "right-of-search": (
+                  <SortBy
+                    sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                    defaultSortingBy="createdAt"
+                  />
+                ),
+              }}
+            >
+              {userRoleCanManageAssets ? (
+                <div className="flex items-center justify-normal gap-6 xl:justify-end">
+                  <div className="hidden lg:block">
+                    <Button
+                      to="manage-assets?status=AVAILABLE"
+                      variant="primary"
+                      width="full"
+                      className="whitespace-nowrap"
+                      disabled={
+                        !canManageAssets
+                          ? {
+                              reason:
+                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                            }
+                          : false
+                      }
+                    >
+                      Manage assets
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </Filters>
+            <List
+              ItemComponent={ListContent}
+              customEmptyStateContent={{
+                title: "Not assets in kit",
+                text: userRoleCanManageAssets
+                  ? "Start by adding your first asset."
+                  : "",
+                newButtonContent: userRoleCanManageAssets
+                  ? "Manage assets"
+                  : undefined,
+                newButtonRoute: userRoleCanManageAssets
+                  ? "manage-assets?status=AVAILABLE"
+                  : undefined,
+                buttonProps: {
+                  disabled: !canManageAssets
+                    ? {
+                        reason:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                      }
+                    : false,
+                },
+              }}
+              headerChildren={
+                <>
+                  <Th>Category</Th>
+                  <Th>Location</Th>
+                  <Th>Tags</Th>
+                </>
+              }
+            />
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div className="w-full md:w-[360px] lg:ml-4">
           {kit.description ? (
-            <Card className="mb-3 mt-0 rounded-t-none border-t-0">
+            <Card className="mb-3 mt-0">
               <p className="whitespace-pre-wrap text-gray-600">
                 {kit.description}
               </p>
@@ -445,80 +547,6 @@ export default function KitDetails() {
             <ScanDetails lastScan={lastScan} />
           ) : null}
         </div>
-
-        <div className="w-full lg:ml-6">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            {userRoleCanManageAssets ? (
-              <Button
-                to="manage-assets"
-                variant="primary"
-                width="full"
-                disabled={
-                  !canManageAssets
-                    ? {
-                        reason:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }
-                    : false
-                }
-              >
-                Manage assets
-              </Button>
-            ) : null}
-            <div className="w-full">
-              <ActionsDropdown fullWidth />
-            </div>
-          </div>
-
-          <div className="flex flex-col md:gap-2">
-            <Filters className="responsive-filters mb-2 lg:mb-0">
-              {userRoleCanManageAssets ? (
-                <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                  <div className="hidden lg:block">
-                    <Button
-                      to="manage-assets"
-                      variant="primary"
-                      width="full"
-                      className="whitespace-nowrap"
-                      disabled={
-                        !canManageAssets
-                          ? {
-                              reason:
-                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                            }
-                          : false
-                      }
-                    >
-                      Manage assets
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </Filters>
-            <List
-              ItemComponent={ListContent}
-              customEmptyStateContent={{
-                title: "Not assets in kit",
-                text: !isBaseOrSelfService
-                  ? "Start by adding your first asset."
-                  : "",
-                newButtonContent: !isBaseOrSelfService
-                  ? "Manage assets"
-                  : undefined,
-                newButtonRoute: !isBaseOrSelfService
-                  ? "manage-assets"
-                  : undefined,
-              }}
-              headerChildren={
-                <>
-                  <Th>Category</Th>
-                  <Th>Location</Th>
-                </>
-              }
-            />
-          </div>
-        </div>
       </div>
     </>
   );
@@ -533,10 +561,11 @@ function ListContent({
         include: { image: { select: { id: true; updatedAt: true } } };
       };
       category: true;
+      tags: true;
     };
   }>;
 }) {
-  const { location, category } = item;
+  const { location, category, tags } = item;
 
   const { roles } = useUserRoleHelper();
   return (
@@ -561,6 +590,8 @@ function ListContent({
                   to={`/assets/${item.id}`}
                   variant="link"
                   className="text-left text-gray-900 hover:text-gray-700"
+                  target={"_blank"}
+                  onlyNewTabIconOnHover
                 >
                   {item.title}
                 </Button>
@@ -597,6 +628,11 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
+      </Td>
+
       <When
         truthy={userHasPermission({
           roles,

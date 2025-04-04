@@ -55,6 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       userOrganizations,
       request,
+      orderBy: "createdAt",
     });
 
     const header: HeaderData = {

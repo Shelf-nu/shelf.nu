@@ -221,6 +221,13 @@ async function getAssets(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
+  /**
+   * Hide all assets that cannot currently be added to kit.
+   * This includes:
+   * - assets in custody
+   * - assets that are checkedout
+   * */
+  hideUnavailableToAddToKit?: boolean;
 }) {
   let {
     organizationId,

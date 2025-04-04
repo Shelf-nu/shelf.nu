@@ -9,6 +9,7 @@ import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
+import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
@@ -180,6 +181,7 @@ export default function App() {
 
   return (
     <SidebarProvider defaultOpen={!minimizedSidebar}>
+      <AtomsResetHandler />
       <AppSidebar />
       <SidebarInset>
         {disabledTeamOrg ? (

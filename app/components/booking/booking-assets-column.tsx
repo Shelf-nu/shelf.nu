@@ -303,6 +303,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                   to={`/assets/${item.id}`}
                   variant="link"
                   className="text-left text-gray-900 hover:text-gray-700"
+                  target={"_blank"}
+                  onlyNewTabIconOnHover={true}
                 >
                   {item.title}
                 </Button>

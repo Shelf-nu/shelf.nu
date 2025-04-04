@@ -1,23 +1,31 @@
 import { useEffect, useMemo } from "react";
-import type { Asset } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
@@ -34,13 +42,14 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -115,7 +124,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           subHeading:
             "Search your database for assets that you would like to move to this location.",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         items: assets,
         categories,
@@ -331,60 +340,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location, header, items, totalItems } =
-    useLoaderData<typeof loader>();
+  const { location, totalItems } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
-  const locationAssetsIds = useMemo(
-    () => location.assets.map((a) => a.id),
-    [location.assets]
-  );
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
-  const [selectedAssets, setSelectedAssets] = useAtom(
-    locationsSelectedAssetsAtom
-  );
-  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
-
-  const removedAssetIds = useMemo(
+  const removedAssets = useMemo(
     () =>
-      locationAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
-    [locationAssetsIds, selectedAssets]
+      location.assets.filter(
+        (asset) =>
+          !selectedBulkItems.some(
+            (selectedItem) => selectedItem.id === asset.id
+          )
+      ),
+    [location.assets, selectedBulkItems]
   );
-
-  function handleSelectAll() {
-    if (hasSelectedAll) {
-      setSelectedAssets([]);
-    } else {
-      setSelectedAssets([
-        ...locationAssetsIds,
-        ...items.map((item) => item.id),
-        ALL_SELECTED_KEY,
-      ]);
-    }
-  }
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per location
-   * So we do a manual effect to set the selected assets to the location assets ids
+   * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedAssets(locationAssetsIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.id]);
+    setSelectedBulkItems(location.assets);
+  }, [location.assets, setSelectedBulkItems]);
 
   return (
     <div className="flex h-full max-h-full flex-col">
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
-      />
-
-      <div className="-mx-6 border-b px-6 md:pb-3">
-        <Filters className="md:border-0 md:p-0"></Filters>
+      {/* Search */}
+      <div className=" border-b px-6 md:pb-3">
+        <Filters
+          className="md:border-0 md:p-0"
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+            "right-of-search": (
+              <SortBy
+                sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+              />
+            ),
+          }}
+        ></Filters>
       </div>
-      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+      {/* Filters */}
+      <div className=" flex  justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -433,16 +435,14 @@ export default function AddAssetsToLocation() {
           )}
         />
       </div>
-      <div className="-mx-6  flex-1 overflow-y-auto px-5 md:px-0">
+
+      {/* List */}
+      <div className="  flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
+          navigate={(_assetId, item) => {
+            updateItem(item);
           }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
@@ -451,21 +451,20 @@ export default function AddAssetsToLocation() {
             newButtonContent: "New asset",
           }}
           className="-mx-5 flex h-full flex-col justify-start border-0"
-          headerExtraContent={
-            <Button
-              variant="secondary"
-              className="min-w-24 px-2 py-1 text-sm font-normal"
-              onClick={handleSelectAll}
-            >
-              {hasSelectedAll ? "Clear all" : "Select all"}
-            </Button>
+          bulkActions={<> </>}
+          headerChildren={
+            <>
+              <Th>Location</Th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
+            </>
           }
         />
       </div>
       {/* Footer of the modal */}
-      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
-          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
         </p>
 
         <div className="flex gap-3">
@@ -474,22 +473,21 @@ export default function AddAssetsToLocation() {
           </Button>
           <Form method="post">
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
-            {/* These are the asset ids, coming from the server */}
-            {removedAssetIds.map((assetId, i) => (
+            {removedAssets.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`removedAssetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedAssets.map((assetId, i) => (
+            {selectedBulkItems.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`assetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             <Button
@@ -507,19 +505,23 @@ export default function AddAssetsToLocation() {
   );
 }
 
-type AssetWithLocation = Asset & {
-  location: {
-    name: string;
-  };
-};
-
-const RowComponent = ({ item }: { item: AssetWithLocation }) => {
-  const selectedAssets = useAtomValue(locationsSelectedAssetsAtom);
-  const checked = selectedAssets.some((id) => id === item.id);
+const RowComponent = ({
+  item,
+}: {
+  item: Prisma.AssetGetPayload<{
+    include: {
+      location: true;
+      category: true;
+      tags: true;
+    };
+  }>;
+}) => {
+  const { tags, category } = item;
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      {/* Name */}
+      <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -533,29 +535,48 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
               </p>
-              {item.location ? (
-                <div
-                  className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-                  title={`Current location: ${item.location.name}`}
-                >
-                  <div className="size-2 rounded-full bg-gray-500"></div>
-                  <span>{item.location.name}</span>
-                </div>
-              ) : null}
+              <AssetStatusBadge
+                status={item.status}
+                availableToBook={item.availableToBook}
+              />
             </div>
           </div>
         </div>
       </Td>
 
+      {/* Location */}
       <Td>
-        <FakeCheckbox
-          className={tw("text-white", checked ? "text-primary" : "")}
-          checked={checked}
-        />
+        {item.location ? (
+          <div
+            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
+            title={`Current location: ${item.location.name}`}
+          >
+            <div className="size-2 rounded-full bg-gray-500"></div>
+            <span>{item.location.name}</span>
+          </div>
+        ) : null}
+      </Td>
+
+      {/* Category */}
+      <Td>
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : (
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
+          </Badge>
+        )}
+      </Td>
+
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
       </Td>
     </>
   );

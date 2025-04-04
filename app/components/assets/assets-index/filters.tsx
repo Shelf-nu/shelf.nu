@@ -23,7 +23,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
-const ASSET_INDEX_SORTING_OPTIONS = {
+export const ASSET_INDEX_SORTING_OPTIONS = {
   title: "Name",
   createdAt: "Date created",
   updatedAt: "Date updated",
