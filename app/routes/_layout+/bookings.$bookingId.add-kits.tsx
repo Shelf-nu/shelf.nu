@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, type Booking, type Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -14,10 +14,15 @@ import {
   useNavigation,
   useSubmit,
 } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { bookingsSelectedKitsAtom } from "~/atoms/selected-assets-atoms";
-import { freezeColumnClassNames } from "~/components/assets/assets-index/freeze-column-classes";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setDisabledBulkItemsAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
@@ -25,12 +30,12 @@ import {
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import type { ListItemData } from "~/components/list/list-item";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -60,7 +65,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -269,16 +273,25 @@ export default function AddKitsToBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, bookingKitIds } = useLoaderData<typeof loader>();
+  const { booking, items, bookingKitIds } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const submit = useSubmit();
 
-  const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
-  const removedKitIds = bookingKitIds.filter(
-    (id) => !selectedKits.includes(id)
+  const removedKitIds = useMemo(
+    () =>
+      bookingKitIds.filter(
+        (kitId) =>
+          !selectedBulkItems.some((selectedItem) => selectedItem.id === kitId)
+      ),
+    [bookingKitIds, selectedBulkItems]
   );
 
   const manageAssetsUrl = useMemo(
@@ -295,18 +308,31 @@ export default function AddKitsToBooking() {
   );
 
   const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
-  const hasUnsavedChanges = selectedKits.length !== bookingKitIds.length;
+  const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
-   * So we do a manual effect to set the selected assets to the booking assets ids
-   * I would still rather use the useHydrateAtoms, but it's not working as expected.
-   *  https://github.com/pmndrs/jotai/discussions/669
+   * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedKits(bookingKitIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking.id]);
+    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+  }, [bookingKitIds, setSelectedBulkItems]);
+
+  /**
+   * Set disabled items for kit
+   */
+  useEffect(() => {
+    const _disabledBulkItems = items.reduce<ListItemData[]>((acc, kit) => {
+      const { isKitUnavailable, someAssetMarkedUnavailable } =
+        getKitAvailabilityStatus(kit as unknown as KitForBooking, booking.id);
+      if (isKitUnavailable || someAssetMarkedUnavailable) {
+        acc.push(kit);
+      }
+
+      return acc;
+    }, []);
+
+    setDisabledBulkItems(_disabledBulkItems);
+  }, [booking.id, items, setDisabledBulkItems]);
 
   return (
     <Tabs
@@ -333,9 +359,9 @@ export default function AddKitsToBooking() {
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
             Kits
-            {selectedKits.length > 0 ? (
+            {selectedBulkItemsCount > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {selectedKits.length}
+                {selectedBulkItemsCount}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -352,7 +378,7 @@ export default function AddKitsToBooking() {
         <List
           className="mx-0 mt-0 h-full border-0"
           ItemComponent={Row}
-          navigate={(kitId, kit) => {
+          navigate={(_kitId, kit) => {
             const { isKitUnavailable } = getKitAvailabilityStatus(
               kit as KitForBooking,
               booking.id
@@ -360,12 +386,7 @@ export default function AddKitsToBooking() {
             if (isKitUnavailable) {
               return;
             }
-
-            setSelectedKits((prevSelected) =>
-              prevSelected.includes(kitId)
-                ? prevSelected.filter((id) => id !== kitId)
-                : [...prevSelected, kitId]
-            );
+            updateItem(kit);
           }}
           emptyStateClassName="py-10"
           customEmptyStateContent={{
@@ -375,12 +396,10 @@ export default function AddKitsToBooking() {
             newButtonContent: "New kit",
           }}
           hideFirstHeaderColumn
+          bulkActions={<> </>}
+          disableSelectAllItems
           headerChildren={
             <>
-              <Th
-                className={tw("!px-0", "sticky left-0 z-10", "bg-white")}
-              ></Th>
-              <Th>Name</Th>
               <Th>Description</Th>
               <Th>Assets</Th>
             </>
@@ -391,7 +410,7 @@ export default function AddKitsToBooking() {
       {/* Footer of the modal */}
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <div className="flex flex-col justify-center gap-1">
-          {selectedKits.length} kits selected
+          {selectedBulkItems.length} kits selected
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
@@ -409,12 +428,12 @@ export default function AddKitsToBooking() {
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedKits.map((kitId, i) => (
+            {selectedBulkItems.map((kit, i) => (
               <input
-                key={kitId}
+                key={kit.id}
                 type="hidden"
                 name={`kitIds[${i}]`}
-                value={kitId}
+                value={kit.id}
               />
             ))}
             {hasUnsavedChanges && isAlertOpen ? (
@@ -448,26 +467,8 @@ export default function AddKitsToBooking() {
 }
 
 function Row({ item: kit }: { item: KitForBooking }) {
-  const { booking } = useLoaderData<{ booking: Booking }>();
-  const selectedKits = useAtomValue(bookingsSelectedKitsAtom);
-  const checked = selectedKits.includes(kit.id);
-
-  const { isKitUnavailable } = getKitAvailabilityStatus(kit, booking.id);
-
   return (
     <>
-      <Td>
-        <FakeCheckbox
-          className={tw(
-            "text-white",
-            freezeColumnClassNames.checkbox,
-            "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-['']",
-            isKitUnavailable ? "cursor-not-allowed text-gray-100" : "",
-            checked ? "text-primary" : ""
-          )}
-          checked={checked}
-        />
-      </Td>
       {/* Name */}
       <Td className="w-full min-w-[330px] whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">

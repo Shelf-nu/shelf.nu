@@ -473,7 +473,6 @@ export default function AddAssetsToLocation() {
           </Button>
           <Form method="post">
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
-            {/* These are the asset ids, coming from the server */}
             {removedAssets.map((asset, i) => (
               <input
                 key={asset.id}
