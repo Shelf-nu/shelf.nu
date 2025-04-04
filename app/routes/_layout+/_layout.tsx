@@ -46,7 +46,10 @@ import {
   getStripeCustomer,
   stripe,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription.server";
+import {
+  canUseBookings,
+  canUseSignedCustody,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -125,6 +128,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
+        canUseSignedCustody: canUseSignedCustody(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
           ? false

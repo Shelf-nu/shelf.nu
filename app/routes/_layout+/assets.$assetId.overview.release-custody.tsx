@@ -6,16 +6,21 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { releaseCustody } from "~/modules/custody/service.server";
+import { assetCustodyRevokedEmailText } from "~/modules/invite/helpers";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -23,6 +28,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
+/** @TODO this needs review */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -39,7 +45,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const custody = await db.custody
-      .findUnique({
+      .findUniqueOrThrow({
         where: { assetId },
         select: {
           custodian: {
@@ -147,33 +153,58 @@ export const action = async ({
 
     const asset = await releaseCustody({ assetId, organizationId });
 
-    if (!asset.custody) {
-      const formData = await request.formData();
-      const { custodianName } = parseData(
-        formData,
-        z.object({
-          custodianName: z.string(),
+    const formData = await request.formData();
+    const { custodianName, custodianEmail } = parseData(
+      formData,
+      z.object({
+        custodianName: z.string(),
+        custodianEmail: z
+          .string()
+          .transform((email) => email?.toLowerCase())
+          .refine(
+            (email) => {
+              if (!email) {
+                return true;
+              }
+
+              return validEmail(email);
+            },
+            () => ({
+              message: "Custodian email is invalid",
+            })
+          )
+          .optional(),
+      }),
+      {
+        additionalData: { userId, assetId },
+      }
+    );
+
+    await createNote({
+      content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
+        isSelfService ? "their" : `**${custodianName.trim()}'s**`
+      } custody over **${asset.title.trim()}**`,
+      type: "UPDATE",
+      userId: asset.userId,
+      assetId: asset.id,
+    });
+
+    sendNotification({
+      title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+      message: "This asset is available again.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    if (custodianEmail) {
+      sendEmail({
+        to: custodianEmail,
+        subject: `Your custody over ${asset.title} has been revoked`,
+        text: assetCustodyRevokedEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
         }),
-        {
-          additionalData: { userId, assetId },
-        }
-      );
-
-      /** Once the asset is updated, we create the note */
-      await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
-          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
-        } custody over **${asset.title?.trim()}**`,
-        type: "UPDATE",
-        userId: asset.userId,
-        assetId: asset.id,
-      });
-
-      sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
-        message: "This asset is available again.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
       });
     }
 
@@ -221,6 +252,11 @@ export default function Custody() {
               type="hidden"
               name="custodianName"
               value={resolveTeamMemberName(custody?.custodian)}
+            />
+            <input
+              type="hidden"
+              name="custodianEmail"
+              value={custody?.custodian.user?.email}
             />
             <Button
               to=".."

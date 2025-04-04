@@ -1,5 +1,5 @@
 import type { Booking } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
@@ -80,13 +80,28 @@ export function AvailabilityLabel({
   /**
    * Has custody
    */
-  if (asset.custody) {
+  if (asset.status === AssetStatus.IN_CUSTODY) {
     return (
       <AvailabilityBadge
         badgeText={"In custody"}
         tooltipTitle={"Asset is in custody"}
         tooltipContent={
           "This asset is in custody of a team member making it currently unavailable for bookings."
+        }
+      />
+    );
+  }
+
+  /**
+   * Has custody
+   */
+  if (asset.status === AssetStatus.SIGNATURE_PENDING) {
+    return (
+      <AvailabilityBadge
+        badgeText={"Signature pending"}
+        tooltipTitle={"Asset has a signature pending"}
+        tooltipContent={
+          "This asset has a signature pending, this means its currently in the process of being assigned custody to a team member making it currently unavailable for bookings."
         }
       />
     );
@@ -222,7 +237,14 @@ export function getKitAvailabilityStatus(
 
   const isCheckedOut = kit.assets.some(
     (a) =>
-      (a.status === "CHECKED_OUT" &&
+      (a.status === AssetStatus.CHECKED_OUT &&
+        !a.bookings.some((b) => b.id === currentBookingId)) ??
+      false
+  );
+
+  const isSignaturePending = kit.assets.some(
+    (a) =>
+      (a.status === AssetStatus.SIGNATURE_PENDING &&
         !a.bookings.some((b) => b.id === currentBookingId)) ??
       false
   );
@@ -250,6 +272,7 @@ export function getKitAvailabilityStatus(
 
   return {
     isCheckedOut,
+    isSignaturePending,
     isInCustody,
     isKitWithoutAssets,
     someAssetMarkedUnavailable,
@@ -265,6 +288,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     isCheckedOut,
     someAssetMarkedUnavailable,
     isInCustody,
+    isSignaturePending,
     isKitWithoutAssets,
     someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
@@ -288,7 +312,15 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
       />
     );
   }
-
+  if (isSignaturePending) {
+    return (
+      <AvailabilityBadge
+        badgeText="Assets pending signature"
+        tooltipTitle="Contains assets pending signature"
+        tooltipContent="This kit contains assets that are pending signature which means they are in the process of getting custody assigned."
+      />
+    );
+  }
   if (isKitWithoutAssets) {
     return (
       <AvailabilityBadge

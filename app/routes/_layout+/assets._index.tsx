@@ -1,4 +1,4 @@
-import { type Tag } from "@prisma/client";
+import type { Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -418,10 +418,11 @@ const ListAssetContent = ({
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div>
+              <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  assetId={item.id}
                 />
               </div>
             </div>

@@ -52,6 +52,7 @@ model User {
   // Relationships
 
   assets            Asset[]
+  custodyAgreements CustodyAgreement[]
   categories        Category[]
   notes             Note[]
   qrCodes           Qr[]
@@ -109,14 +110,15 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
-  notes        Note[]
-  qrCodes      Qr[]
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
-  bookings     Booking[]
-  reminders    AssetReminder[]
+  custody         Custody?
+  notes           Note[]
+  qrCodes         Qr[]
+  reports         ReportFound[]
+  tags            Tag[]
+  customFields    AssetCustomFieldValue[]
+  bookings        Booking[]
+  reminders       AssetReminder[]
+  custodyReceipts CustodyReceipt[]
 
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -132,6 +134,7 @@ model Asset {
 
 enum AssetStatus {
   AVAILABLE
+  SIGNATURE_PENDING
   IN_CUSTODY
   CHECKED_OUT
 }
@@ -390,14 +393,22 @@ model TeamMember {
   userId          String?
   kitCustodies    KitCustody[]
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
-  bookings       Booking[]
-  assetReminders AssetReminder[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  bookings        Booking[]
+  assetReminders  AssetReminder[]
+  custodyReceipts CustodyReceipt[]
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+enum CustodySignatureStatus {
+  NOT_REQUIRED // no signature required for custody
+  PENDING
+  SIGNED
+  CANCELLED
 }
 
 model Custody {
@@ -408,6 +419,15 @@ model Custody {
 
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
+
+  agreement       CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  agreementId     String?
+  agreementSigned Boolean?          @default(false)
+
+  signatureStatus   CustodySignatureStatus? @default(NOT_REQUIRED)
+  signatureText     String?
+  signatureImage    String?
+  agreementSignedOn DateTime?
 
   // DateTime
   createdAt DateTime @default(now())
@@ -450,10 +470,12 @@ model Organization {
   updatedAt          DateTime             @updatedAt
   customFields       CustomField[]
   images             Image[]              @relation("owner")
+  custodyAgreements  CustodyAgreement[]
   bookings           Booking[]
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  custodyReceipts    CustodyReceipt[]
 }
 
 model UserOrganization {
@@ -523,30 +545,76 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                         TierId   @id
+  tier                       Tier?
+  canImportAssets            Boolean  @default(false)
+  canExportAssets            Boolean  @default(false)
+  canImportNRM               Boolean  @default(false)
+  maxCustomFields            Int      @default(0)
+  maxOrganizations           Int      @default(1)
+  maxCustodyAgreements       Int      @default(10) // total number of agreements
+  maxActiveCustodyAgreements Int      @default(5)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @unique @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                         String   @id @unique @default(cuid())
+  user                       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId                     String?  @unique // This is the foreign key
+  canImportAssets            Boolean  @default(true)
+  canExportAssets            Boolean  @default(true)
+  canImportNRM               Boolean  @default(true)
+  maxCustomFields            Int      @default(1000)
+  maxOrganizations           Int      @default(1)
+  maxCustodyAgreements       Int      @default(20) // total number of agreements
+  maxActiveCustodyAgreements Int      @default(5)
+  isEnterprise               Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+enum CustodyAgreementType {
+  CUSTODY
+  BOOKINGS
+}
+
+model CustodyAgreement {
+  id                String               @id @default(cuid())
+  name              String
+  description       String?
+  type              CustodyAgreementType @default(CUSTODY)
+  signatureRequired Boolean              @default(false)
+  isDefault         Boolean              @default(false)
+  isActive          Boolean              @default(true)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdById String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  custodies             Custody[]
+  custodyAgreementFiles CustodyAgreementFile[]
+  custodyReceipts       CustodyReceipt[]
+}
+
+model CustodyAgreementFile {
+  id   String @id @default(cuid())
+  size Int // PDF size
+  name String // PDF file name
+  url  String // PDF file URL
+
+  // Relationships
+  custodyAgreement   CustodyAgreement @relation(fields: [custodyAgreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  custodyAgreementId String
+
+  @@unique([custodyAgreementId])
 }
 
 model CustomField {
@@ -795,4 +863,40 @@ model AssetReminder {
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+}
+
+enum CustodyStatus {
+  ACTIVE
+  CANCELLED
+  FINISHED
+}
+
+// A receipt is generated when a custody is assigned
+// Our main custody is deleted once it is release, but we can track it now with CustodyReceipt 
+model CustodyReceipt {
+  id String @id @default(cuid())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  custodian   TeamMember @relation(fields: [custodianId], references: [id])
+  custodianId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  agreement   CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  agreementId String?
+
+  custodyStatus   CustodyStatus          @default(ACTIVE)
+  signatureStatus CustodySignatureStatus
+
+  agreementSigned Boolean @default(false)
+
+  signatureText     String?
+  signatureImage    String?
+  agreementSignedOn DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
