@@ -1,4 +1,4 @@
-import type { AssetStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -73,22 +73,30 @@ function ConditionalDropdown() {
    */
 
   const allKitsInCustody =
-    allSelected || selectedKits.every((kit) => kit.status === "IN_CUSTODY");
+    allSelected ||
+    selectedKits.every((kit) => kit.status === KitStatus.IN_CUSTODY);
 
   const allKitsAvailable =
-    allSelected || selectedKits.every((kit) => kit.status === "AVAILABLE");
+    allSelected ||
+    selectedKits.every((kit) => kit.status === KitStatus.AVAILABLE);
 
   const someKitsCheckedOut = selectedKits.some(
-    (kit) => kit.status === "CHECKED_OUT"
+    (kit) => kit.status === KitStatus.CHECKED_OUT
   );
 
   const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
     (kit) =>
       kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "CHECKED_OUT"
+        (asset: { status: AssetStatus }) =>
+          asset.status === AssetStatus.CHECKED_OUT
       ) ||
       kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "IN_CUSTODY"
+        (asset: { status: AssetStatus }) =>
+          asset.status === AssetStatus.IN_CUSTODY
+      ) ||
+      kit.assets.some(
+        (asset: { status: AssetStatus }) =>
+          asset.status === AssetStatus.SIGNATURE_PENDING
       )
   );
 
@@ -220,7 +228,7 @@ function ConditionalDropdown() {
                     someAssetsInsideKitsCheckedOutOrInCustody
                       ? {
                           reason: someAssetsInsideKitsCheckedOutOrInCustody
-                            ? "Some of the asset(s) inside this kits are either checked out or in custody. You need to resolve that before you can assign custody."
+                            ? "Some of the asset(s) inside this kits are either checked out, in custody or have a signature pending. You need to resolve that before you can assign custody."
                             : "Some of the selected kits are not available",
                         }
                       : isLoading

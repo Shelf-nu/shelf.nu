@@ -145,6 +145,7 @@ export default function Receipts() {
               </div>
             ),
           }}
+          searchClassName="text-[14px]"
         />
 
         <List

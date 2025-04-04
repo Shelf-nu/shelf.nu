@@ -93,7 +93,7 @@ export async function updateCustodyAgreement({
      *
      * If it is false, this could mean a scenario that the custodian has the asset in custody
      * and wasn't required to sign the agreement. But since we are setting signatureRequired to true,
-     * we need to set the asset custody to "AVAILABLE" and furthermore, ask the custodian to sign
+     * we need to set the asset custody to "SIGNATURE_PENDING" and furthermore, ask the custodian to sign
      * the agreement via mailing them.
      */
     if (signatureRequired) {
@@ -116,10 +116,10 @@ export async function updateCustodyAgreement({
       });
 
       for (const custody of custodies) {
-        // Set the asset status to AVAILABLE
+        // Set the asset status to SIGNATURE_PENDING
         await db.asset.update({
           where: { id: custody.assetId },
-          data: { status: AssetStatus.AVAILABLE },
+          data: { status: AssetStatus.SIGNATURE_PENDING },
         });
 
         // Send notifications

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { KitStatus } from "@prisma/client";
 import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -92,7 +93,7 @@ function ConditionalDropdown() {
   const someAssetCheckedOut = selectedAssets.some((asset) => !!asset.custody);
 
   const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+    (asset) => asset?.kit && asset.kit.status !== KitStatus.AVAILABLE
   );
 
   const selfUserCustody = selectedAssets.some(

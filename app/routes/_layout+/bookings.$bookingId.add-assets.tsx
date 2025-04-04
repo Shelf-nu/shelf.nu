@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import {
+  AssetStatus,
+  type Asset,
+  type Booking,
+  type Category,
+  type Custody,
+} from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -570,7 +576,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
           isAddedThroughKit={isAddedThroughKit}
           showKitStatus
           asset={item}
-          isCheckedOut={item.status === "CHECKED_OUT"}
+          isCheckedOut={item.status === AssetStatus.CHECKED_OUT}
         />
       </Td>
 

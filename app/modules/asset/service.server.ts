@@ -2038,7 +2038,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
   try {
     /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
     const checkedOutAssetsIds = assets
-      .filter((a) => a.status === "CHECKED_OUT")
+      .filter((a) => a.status === AssetStatus.CHECKED_OUT)
       .map((a) => a.id);
 
     if (checkedOutAssetsIds.length > 0) {
@@ -2304,7 +2304,7 @@ export async function bulkCheckOutAssets({
     ]);
 
     const assetsNotAvailable = assets.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) => asset.status !== AssetStatus.AVAILABLE
     );
 
     if (assetsNotAvailable) {

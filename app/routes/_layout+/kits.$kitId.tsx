@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -345,7 +345,7 @@ export default function KitDetails() {
     ? kit.assets[0]?.bookings.every((b) =>
         allowedBookingStatus.includes(b.status)
       )
-    : kit.status === "AVAILABLE";
+    : kit.status === KitStatus.AVAILABLE;
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
 

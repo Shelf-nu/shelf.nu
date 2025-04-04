@@ -652,7 +652,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
   try {
     /** When kits are checked out, we have to display the custodian from that booking */
     const checkedOutKits = kits
-      .filter((kit) => kit.status === "CHECKED_OUT")
+      .filter((kit) => kit.status === KitStatus.CHECKED_OUT)
       .map((k) => k.id);
 
     if (checkedOutKits.length === 0) {
@@ -889,7 +889,9 @@ export async function bulkAssignKitCustody({
       getUserByID(userId),
     ]);
 
-    const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
+    const someKitsNotAvailable = kits.some(
+      (kit) => kit.status !== KitStatus.AVAILABLE
+    );
     if (someKitsNotAvailable) {
       throw new ShelfError({
         cause: null,
@@ -902,7 +904,7 @@ export async function bulkAssignKitCustody({
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
     const someAssetsUnavailable = allAssetsOfAllKits.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) => asset.status !== AssetStatus.AVAILABLE
     );
     if (someAssetsUnavailable) {
       throw new ShelfError({
@@ -1026,7 +1028,9 @@ export async function bulkReleaseKitCustody({
     const custodian = kits[0].custody?.custodian;
 
     /** Kits will be released only if all the selected kits are IN_CUSTODY */
-    const allKitsInCustody = kits.every((kit) => kit.status === "IN_CUSTODY");
+    const allKitsInCustody = kits.every(
+      (kit) => kit.status === KitStatus.IN_CUSTODY
+    );
     if (!allKitsInCustody) {
       throw new ShelfError({
         cause: null,

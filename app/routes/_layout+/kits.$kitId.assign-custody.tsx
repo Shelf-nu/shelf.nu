@@ -96,7 +96,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * then a kit cannot be assigned a custody
      */
     const someUnavailableAsset = kit.assets.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) => asset.status !== AssetStatus.AVAILABLE
     );
     if (someUnavailableAsset) {
       sendNotification({
