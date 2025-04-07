@@ -192,6 +192,9 @@ export function BookingAssetsColumn() {
                                 to={`/kits/${kit.id}`}
                                 variant="link"
                                 className="text-gray-900 hover:text-gray-700"
+                                target={"_blank"}
+                                onlyNewTabIconOnHover={true}
+                                aria-label="Go to kit"
                               >
                                 <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
                                   {kit.name}
