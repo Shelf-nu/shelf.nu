@@ -22,6 +22,7 @@ import { ExportAssetsButton } from "../assets/assets-index/export-assets-button"
 import { Button } from "../shared/button";
 import { Table } from "../table";
 import When from "../when/when";
+import { generateRandomCode } from "~/modules/invite/helpers";
 
 export interface IndexResponse {
   header: {
@@ -235,7 +236,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
-            <tbody key={`item-list-${items.length}`}>
+            <tbody key={`item-list-${items.length}-${generateRandomCode(5)}`}>
               {items.map((item, i) => (
                 <ListItem
                   item={item}
