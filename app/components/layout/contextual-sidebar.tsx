@@ -53,10 +53,12 @@ export default function ContextualSidebar() {
         <div className="flex h-screen w-full flex-col">
           <Header
             title={
-              // We render as child with span to avoid nesting of H2
-              <SheetTitle asChild>
-                <span>{data.header.title}</span>
-              </SheetTitle>
+              data?.header?.title && (
+                // We render as child with span to avoid nesting of H2
+                <SheetTitle asChild>
+                  <span>{data.header.title}</span>
+                </SheetTitle>
+              )
             }
             subHeading={
               <SheetDescription>{data.header.subHeading}</SheetDescription>
