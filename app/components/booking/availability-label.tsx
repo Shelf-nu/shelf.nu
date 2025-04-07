@@ -185,6 +185,7 @@ export function AvailabilityBadge({
               "inline-block  bg-warning-50 px-[6px] py-[2px]",
               "rounded-md border border-warning-200",
               "text-xs text-warning-700",
+              "availability-badge",
               className
             )}
           >
@@ -305,7 +306,6 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
         badgeText="Contains non-bookable assets"
         tooltipTitle="Kit is unavailable for check-out"
         tooltipContent="Some assets in this kit are marked as non-bookable. You can still add the kit to your booking, but you must remove the non-bookable assets to proceed with check-out."
-        className="border-gray-200 bg-gray-100 text-gray-500"
       />
     );
   }
