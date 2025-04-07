@@ -8,6 +8,7 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
+import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -242,8 +243,9 @@ export async function createBooking({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while trying to create or update the booking. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
     });
@@ -320,6 +322,15 @@ export async function updateBasicBooking({
       dataToUpdate.from = from;
       dataToUpdate.to = to;
 
+      // Also update the original dates to new ones
+      if (from) {
+        dataToUpdate.originalFrom = from;
+      }
+
+      if (to) {
+        dataToUpdate.originalTo = to;
+      }
+
       if (custodianUserId) {
         dataToUpdate.custodianUser = {
           connect: { id: custodianUserId },
@@ -377,6 +388,152 @@ export async function updateBasicBooking({
       label,
       title: "Error",
       message: "Could not update the details of booking",
+    });
+  }
+}
+
+export async function reserveBooking({
+  id,
+  organizationId,
+  hints,
+  isSelfServiceOrBase,
+}: Pick<Booking, "id" | "organizationId"> & {
+  hints: ClientHint;
+  isSelfServiceOrBase: boolean;
+}) {
+  try {
+    const bookingFound = await db.booking.findFirst({
+      where: { id, organizationId },
+      include: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        organization: {
+          include: { owner: { select: { email: true } } },
+        },
+        _count: { select: { assets: true } },
+      },
+    });
+
+    if (!bookingFound) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Booking not found. Are you sure it exists in current workspace?",
+      });
+    }
+
+    /** Validate the booking dates */
+    if (!bookingFound.from || !bookingFound.to) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Booking dates are missing.",
+      });
+    }
+
+    /** Make sure that the start date is in future */
+    if (isBefore(bookingFound.from, new Date())) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Booking start date should be in future.",
+      });
+    }
+
+    /** Make sure that the end date is after startDate */
+    if (isBefore(bookingFound.to, bookingFound.from)) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Booking end date should be after start date.",
+      });
+    }
+
+    const updatedBooking = await db.booking.update({
+      where: { id: bookingFound.id },
+      data: { status: BookingStatus.RESERVED },
+    });
+
+    /** Start the reminder scheduler */
+    const when = new Date(bookingFound.from);
+    when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking starts
+
+    await scheduleNextBookingJob({
+      data: {
+        id: bookingFound.id,
+        hints,
+        eventType: bookingSchedulerEventsEnum.checkoutReminder,
+      },
+      when,
+    });
+
+    if (bookingFound.custodianUser?.email) {
+      const custodian = bookingFound?.custodianUser
+        ? `${bookingFound.custodianUser.firstName} ${bookingFound.custodianUser.lastName}`
+        : bookingFound.custodianTeamMember?.name ?? "";
+
+      const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
+
+      const text = assetReservedEmailContent({
+        bookingName: bookingFound.name,
+        assetsCount: bookingFound._count.assets,
+        custodian: custodian,
+        from: bookingFound.from,
+        to: bookingFound.to,
+        hints,
+        bookingId: bookingFound.id,
+      });
+
+      const html = bookingUpdatesTemplateString({
+        booking: bookingFound,
+        heading: `Booking reservation for ${custodian}`,
+        assetCount: bookingFound._count.assets,
+        hints,
+      });
+
+      /**
+       * Here we need to check if the custodian is different than the admin
+       * and send email to the admin in case they are different
+       * */
+      if (isSelfServiceOrBase) {
+        const adminsEmails = await getOrganizationAdminsEmails({
+          organizationId,
+        });
+
+        const adminSubject = `Booking reservation request (${bookingFound.name}) by ${custodian} - shelf.nu`;
+
+        sendEmail({
+          to: adminsEmails.join(","),
+          subject: adminSubject,
+          text,
+          /** We need to invoke this function separately for the admin email as the footer of emails is different */
+          html: bookingUpdatesTemplateString({
+            booking: bookingFound,
+            heading: `Booking reservation request for ${custodian}`,
+            assetCount: bookingFound._count.assets,
+            hints,
+            isAdminEmail: true,
+          }),
+        });
+      }
+
+      sendEmail({
+        to: bookingFound.custodianUser.email,
+        subject,
+        text,
+        html,
+      });
+    }
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Could not reserve the booking.",
     });
   }
 }
@@ -1475,16 +1632,6 @@ export function sendBookingUpdateNotification(
   /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
   switch (intent) {
     case "save":
-      break;
-    case "reserve":
-      /** Send reserved notification */
-      sendNotification({
-        title: "Booking reserved",
-        message: "Your booking has been reserved successfully",
-        icon: { name: "success", variant: "success" },
-        senderId,
-      });
-
       break;
 
     case "checkOut":

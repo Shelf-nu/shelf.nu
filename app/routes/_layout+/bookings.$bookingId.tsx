@@ -27,6 +27,7 @@ import {
   getBookingFlags,
   isBookingExpired,
   removeAssets,
+  reserveBooking,
   sendBookingUpdateNotification,
   updateBasicBooking,
   upsertBooking,
@@ -332,13 +333,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }).toJSDate()
           : undefined;
 
-        sendNotification({
-          title: "Booking saved",
-          message: "Your booking has been saved successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -350,13 +344,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: payload.custodian?.id,
         });
 
-        sendBookingUpdateNotification(intent, userId);
+        sendNotification({
+          title: "Booking saved",
+          message: "Your booking has been saved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
         return json(data({ booking }), {
           headers,
         });
       }
-      case "reserve":
+      case "reserve": {
+        const booking = await reserveBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          isSelfServiceOrBase,
+        });
+
+        sendNotification({
+          title: "Booking reserved",
+          message: "Your booking has been reserved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
       case "checkOut":
       case "checkIn":
         // What status to set based on the intent
