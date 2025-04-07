@@ -78,7 +78,7 @@ export const QrPreview = ({
 
   return (
     <div
-      className={tw("mb-4 w-auto rounded border-2 bg-white", className)}
+      className={tw("mb-4 w-auto rounded border bg-white", className)}
       style={style}
     >
       <div className="flex w-full justify-center pt-6">
@@ -145,6 +145,7 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
           borderRadius: "4px",
           border: "5px solid #E3E4E8",
           padding: "24px 17px 24px 17px",
+          backgroundColor: "white",
         }}
         ref={ref}
       >

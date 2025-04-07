@@ -310,6 +310,14 @@ export const CustomFieldForm = ({
         />
 
         <div className="text-right">
+          <Button
+            to={".."}
+            variant="secondary"
+            disabled={disabled}
+            className={"mr-2"}
+          >
+            Cancel
+          </Button>
           <Button type="submit" disabled={disabled}>
             {disabled ? <Spinner /> : "Save"}
           </Button>

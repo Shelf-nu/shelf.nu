@@ -455,7 +455,14 @@ export async function getAssetsForKits({
       ? null
       : (searchParams.get("status") as AssetStatus | null);
 
-  const { page, perPageParam, search, hideUnavailable } = paramsValues;
+  const {
+    page,
+    perPageParam,
+    search,
+    hideUnavailable,
+    orderBy,
+    orderDirection,
+  } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -502,8 +509,9 @@ export async function getAssetsForKits({
           custody: { select: { id: true } },
           category: true,
           location: { include: { image: true } },
+          tags: true,
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { [orderBy]: orderDirection },
       }),
       db.asset.count({ where: finalQuery }),
     ]);

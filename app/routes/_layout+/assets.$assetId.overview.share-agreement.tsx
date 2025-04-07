@@ -46,8 +46,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const signUrl = `${SERVER_URL}/sign/${custody.id}`;
     const isCustodianNrm = !custodian.user;
 
+    const header = {
+      title: "Share custody agreement",
+    };
+
     return json(
       data({
+        header,
         showModal: true,
         custodyAgreement,
         custodian,

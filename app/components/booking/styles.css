@@ -6,6 +6,6 @@ dialog {
   /* @apply h-[42px] w-full md:w-[200px]; */
 }
 
-.search-form > div {
-  @apply justify-between;
+.search-form > div > button {
+  @apply ml-auto;
 }

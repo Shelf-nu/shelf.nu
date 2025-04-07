@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Booking, Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -14,9 +14,15 @@ import {
   useNavigation,
   useSubmit,
 } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { bookingsSelectedKitsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setDisabledBulkItemsAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
@@ -24,11 +30,12 @@ import {
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import KitImage from "~/components/kits/kit-image";
-import Header from "~/components/layout/header";
+import { KitStatusBadge } from "~/components/kits/kit-status-badge";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import type { ListItemData } from "~/components/list/list-item";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -37,7 +44,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   getBooking,
@@ -57,7 +65,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -152,7 +159,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your kit database",
           text: "Search kits based on name or description",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         booking,
         modelName,
@@ -266,16 +273,25 @@ export default function AddKitsToBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
+  const { booking, items, bookingKitIds } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const submit = useSubmit();
 
-  const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
-  const removedKitIds = bookingKitIds.filter(
-    (id) => !selectedKits.includes(id)
+  const removedKitIds = useMemo(
+    () =>
+      bookingKitIds.filter(
+        (kitId) =>
+          !selectedBulkItems.some((selectedItem) => selectedItem.id === kitId)
+      ),
+    [bookingKitIds, selectedBulkItems]
   );
 
   const manageAssetsUrl = useMemo(
@@ -292,22 +308,37 @@ export default function AddKitsToBooking() {
   );
 
   const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
-  const hasUnsavedChanges = selectedKits.length !== bookingKitIds.length;
+  const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
-   * So we do a manual effect to set the selected assets to the booking assets ids
-   * I would still rather use the useHydrateAtoms, but it's not working as expected.
-   *  https://github.com/pmndrs/jotai/discussions/669
+   * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedKits(bookingKitIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking.id]);
+    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+  }, [bookingKitIds, setSelectedBulkItems]);
+
+  /**
+   * Set disabled items for kit
+   */
+  useEffect(() => {
+    const _disabledBulkItems = items.reduce<ListItemData[]>((acc, kit) => {
+      const { isKitUnavailable } = getKitAvailabilityStatus(
+        kit as unknown as KitForBooking,
+        booking.id
+      );
+      if (isKitUnavailable) {
+        acc.push(kit);
+      }
+
+      return acc;
+    }, []);
+
+    setDisabledBulkItems(_disabledBulkItems);
+  }, [booking.id, items, setDisabledBulkItems]);
 
   return (
     <Tabs
-      className="-mx-6 flex h-full max-h-full flex-col"
+      className="flex h-full max-h-full flex-col"
       value="kits"
       onValueChange={() => {
         if (hasUnsavedChanges) {
@@ -318,12 +349,6 @@ export default function AddKitsToBooking() {
         navigate(manageAssetsUrl);
       }}
     >
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left [&>div]:px-6 -mt-6 mx-0"
-      />
-
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
@@ -335,10 +360,10 @@ export default function AddKitsToBooking() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
-            Kits (beta)
-            {selectedKits.length > 0 ? (
+            Kits
+            {selectedBulkItemsCount > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {selectedKits.length}
+                {selectedBulkItemsCount}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -355,7 +380,7 @@ export default function AddKitsToBooking() {
         <List
           className="mx-0 mt-0 h-full border-0"
           ItemComponent={Row}
-          navigate={(kitId, kit) => {
+          navigate={(_kitId, kit) => {
             const { isKitUnavailable } = getKitAvailabilityStatus(
               kit as KitForBooking,
               booking.id
@@ -363,12 +388,7 @@ export default function AddKitsToBooking() {
             if (isKitUnavailable) {
               return;
             }
-
-            setSelectedKits((prevSelected) =>
-              prevSelected.includes(kitId)
-                ? prevSelected.filter((id) => id !== kitId)
-                : [...prevSelected, kitId]
-            );
+            updateItem(kit);
           }}
           emptyStateClassName="py-10"
           customEmptyStateContent={{
@@ -377,13 +397,22 @@ export default function AddKitsToBooking() {
             newButtonRoute: "/kits/new",
             newButtonContent: "New kit",
           }}
+          hideFirstHeaderColumn
+          bulkActions={<> </>}
+          disableSelectAllItems
+          headerChildren={
+            <>
+              <Th>Description</Th>
+              <Th>Assets</Th>
+            </>
+          }
         />
       </TabsContent>
 
       {/* Footer of the modal */}
-      <footer className="item-center flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <div className="flex flex-col justify-center gap-1">
-          {selectedKits.length} kits selected
+          {selectedBulkItems.length} kits selected
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
@@ -401,12 +430,12 @@ export default function AddKitsToBooking() {
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedKits.map((kitId, i) => (
+            {selectedBulkItems.map((kit, i) => (
               <input
-                key={kitId}
+                key={kit.id}
                 type="hidden"
                 name={`kitIds[${i}]`}
-                value={kitId}
+                value={kit.id}
               />
             ))}
             {hasUnsavedChanges && isAlertOpen ? (
@@ -440,54 +469,54 @@ export default function AddKitsToBooking() {
 }
 
 function Row({ item: kit }: { item: KitForBooking }) {
-  const { booking } = useLoaderData<{ booking: Booking }>();
-  const selectedKits = useAtomValue(bookingsSelectedKitsAtom);
-  const checked = selectedKits.includes(kit.id);
-
-  const { isKitUnavailable } = getKitAvailabilityStatus(kit, booking.id);
-
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:px-6">
+      {/* Name */}
+      <Td className="w-full min-w-[330px] whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <KitImage
+                className="size-full rounded-[4px] border object-cover"
                 kit={{
-                  kitId: kit.id,
                   image: kit.image,
                   imageExpiration: kit.imageExpiration,
                   alt: kit.name,
+                  kitId: kit.id,
                 }}
-                className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
-              <p className="word-break whitespace-break-spaces font-medium">
+            <div className="min-w-[130px]">
+              <span className="word-break mb-1 block font-medium">
                 {kit.name}
-              </p>
-              <p className="text-xs text-gray-600">
-                {kit._count.assets} assets
-              </p>
+              </span>
+              <div className="flex flex-col items-start gap-2 lg:flex-row lg:items-center">
+                <When truthy={kit.status === AssetStatus.AVAILABLE}>
+                  <KitStatusBadge
+                    status={kit.status}
+                    availableToBook={
+                      !kit.assets.some((a) => !a.availableToBook)
+                    }
+                  />
+                </When>
+                <KitAvailabilityLabel kit={kit} />
+              </div>
             </div>
           </div>
         </div>
       </Td>
 
-      <Td className="whitespace-break-spaces text-right md:whitespace-nowrap">
-        <KitAvailabilityLabel kit={kit} />
+      <Td className="max-w-62 md:max-w-96">
+        {kit.description ? (
+          <LineBreakText
+            className="md:max-w-96"
+            text={kit.description}
+            numberOfLines={3}
+            charactersPerLine={60}
+          />
+        ) : null}
       </Td>
-
-      <Td>
-        <FakeCheckbox
-          className={tw(
-            "text-white",
-            isKitUnavailable ? "text-gray-100" : "",
-            checked ? "text-primary" : ""
-          )}
-          checked={checked}
-        />
-      </Td>
+      <Td>{kit._count.assets}</Td>
     </>
   );
 }
