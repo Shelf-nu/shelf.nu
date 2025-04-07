@@ -131,6 +131,9 @@ const variants: Record<ButtonVariant, string> = {
     "enabled:hover:bg-error-800"
   ),
   info: "bg-blue-500 text-white hover:bg-blue-400 focus:ring-2 disabled:bg-blue-300",
+  inherit: tw(
+    "font-inherit m-0 inline border-none bg-transparent p-0 text-inherit hover:underline"
+  ),
 };
 
 /**
@@ -175,7 +178,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
   ) {
     const Component = isLinkProps(props) ? Link : as;
     const baseButtonClasses =
-      "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
+      variant === "inherit"
+        ? "inline-flex items-center"
+        : "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
 
     const isDisabled =
       typeof disabled === "boolean" ? disabled : disabled !== undefined;
@@ -222,9 +227,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
 
     const finalStyles = tw(
       baseButtonClasses,
-      sizes[size as ButtonSize], // Type assertion to ensure correct indexing
+      variant !== "inherit" && sizes[size as ButtonSize],
       variants[variant as ButtonVariant],
-      widths[width as ButtonWidth],
+      variant !== "inherit" && widths[width as ButtonWidth],
       isDisabled && "cursor-not-allowed opacity-50",
       attachToInput && "rounded-l-none border-l-0",
       error && "border-error-300 focus:border-error-300 focus:ring-error-100",

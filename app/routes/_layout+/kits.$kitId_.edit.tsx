@@ -11,6 +11,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 import {
   getKit,
   updateKit,
@@ -143,7 +144,13 @@ export default function KitEdit() {
 
   return (
     <>
-      <Header title={title ?? kit.name} />
+      <Header
+        title={
+          <Button to={`/kits/${kit.id}`} variant={"inherit"}>
+            {title !== "" ? title : kit.name}
+          </Button>
+        }
+      />
 
       <div className="items-top flex justify-between">
         <KitsForm
