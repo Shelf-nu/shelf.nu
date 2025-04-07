@@ -96,6 +96,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header: HeaderData = {
       title: location.name,
+      subHeading: location.id,
     };
 
     const modelName = {

@@ -13,6 +13,7 @@ import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
@@ -221,7 +222,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AssetEditPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const hasTitle = title !== "";
   const { asset } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
@@ -230,7 +230,13 @@ export default function AssetEditPage() {
 
   return (
     <div className="relative">
-      <Header title={hasTitle ? title : asset.title} />
+      <Header
+        title={
+          <Button to={`/assets/${asset.id}`} variant={"inherit"}>
+            {title !== "" ? title : asset.title}
+          </Button>
+        }
+      />
       <div className=" items-top flex justify-between">
         <AssetForm
           id={asset.id}
