@@ -28,6 +28,7 @@ import {
   isBookingExpired,
   removeAssets,
   sendBookingUpdateNotification,
+  updateBasicBooking,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -234,8 +235,7 @@ export const handle = {
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId } = context.getSession();
   const { bookingId: id } = getParams(
     params,
     z.object({ bookingId: z.string() }),
@@ -292,13 +292,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { organizationId, role, isSelfServiceOrBase } =
       await requirePermission({
-        userId: authSession?.userId,
+        userId,
         request,
         entity: PermissionEntity.booking,
         action: intent2ActionMap[intent],
       });
 
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID(userId);
 
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
@@ -306,7 +306,56 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
 
     switch (intent) {
-      case "save":
+      case "save": {
+        const payload = parseData(
+          formData,
+          NewBookingFormSchema(false, false, getHints(request)),
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
+
+        const hints = getHints(request);
+
+        const from = formData.get("startDate");
+        const to = formData.get("endDate");
+
+        const formattedFrom = from
+          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const formattedTo = to
+          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        sendNotification({
+          title: "Booking saved",
+          message: "Your booking has been saved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        const booking = await updateBasicBooking({
+          id,
+          organizationId,
+          name: payload.name,
+          description: payload.description,
+          from: formattedFrom,
+          to: formattedTo,
+          custodianUserId: payload.custodian?.userId,
+          custodianTeamMemberId: payload.custodian?.id,
+        });
+
+        sendBookingUpdateNotification(intent, userId);
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
       case "reserve":
       case "checkOut":
       case "checkIn":
@@ -409,10 +458,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await createNotesForBookingUpdate(intent, booking, {
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
-          id: authSession.userId,
+          id: userId,
         });
 
-        sendBookingUpdateNotification(intent, authSession.userId);
+        sendBookingUpdateNotification(intent, userId);
 
         return json(data({ booking }), {
           headers,
@@ -426,10 +475,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
           const b = await getBooking({ id, organizationId });
-          if (
-            b?.creatorId !== authSession.userId &&
-            b?.custodianUserId !== authSession.userId
-          ) {
+          if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
             throw new ShelfError({
               cause: null,
               message: "You are not authorized to delete this booking",
@@ -449,7 +495,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             deletedBooking.name
           }**.`,
           type: "UPDATE",
-          userId: authSession.userId,
+          userId: userId,
           assetIds: deletedBooking.assets.map((a) => a.id),
         });
 
@@ -457,7 +503,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking deleted",
           message: "Your booking has been deleted successfully",
           icon: { name: "trash", variant: "error" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return redirect("/bookings", {
@@ -479,7 +525,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking: { id, assetIds: [assetId as string] },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
-          userId: authSession.userId,
+          userId,
           organizationId,
         });
 
@@ -487,7 +533,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Asset removed",
           message: "Your asset has been removed from the booking",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ booking: b }), {
@@ -504,7 +550,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking archived",
           message: "Your booking has been archived successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
         return json(
           { success: true },
@@ -524,7 +570,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             cancelledBooking.name
           }](/bookings/${cancelledBooking.id})**.`,
           type: "UPDATE",
-          userId: authSession.userId,
+          userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
         });
 
@@ -532,7 +578,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking canceled",
           message: "Your booking has been canceled successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(
@@ -556,7 +602,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking: { id, assetIds: kit.assets.map((a) => a.id) },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
-          userId: authSession.userId,
+          userId,
           organizationId,
         });
 
@@ -564,7 +610,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Kit removed",
           message: "Your kit has been removed from the booking",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ booking: b }), {
@@ -581,7 +627,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking reverted",
           message: "Your booking has been reverted back to draft successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ success: true }));

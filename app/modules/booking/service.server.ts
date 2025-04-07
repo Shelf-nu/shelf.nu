@@ -235,25 +235,10 @@ export async function createBooking({
       }
     }
 
-    const createdBooking = await db.booking.create({
+    return await db.booking.create({
       data: dataToCreate,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
     });
-
-    if (createdBooking.from) {
-      const when = new Date(createdBooking.from);
-      when.setHours(when.getHours() - 1); // 1 hour before send checkout reminder
-      await scheduleNextBookingJob({
-        data: {
-          id: createdBooking.id,
-          hints,
-          eventType: bookingSchedulerEventsEnum.checkoutReminder,
-        },
-        when,
-      });
-    }
-
-    return createdBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -261,6 +246,137 @@ export async function createBooking({
         "Something went wrong while trying to create or update the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
+    });
+  }
+}
+
+export async function updateBasicBooking({
+  id,
+  name,
+  from,
+  to,
+  custodianTeamMemberId,
+  custodianUserId,
+  description,
+  organizationId,
+}: Partial<
+  Pick<
+    Booking,
+    | "id"
+    | "name"
+    | "from"
+    | "to"
+    | "custodianTeamMemberId"
+    | "custodianUserId"
+    | "description"
+    | "organizationId"
+  >
+> &
+  Pick<Booking, "id" | "organizationId">) {
+  try {
+    const booking = await db.booking.findFirst({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        status: true,
+        custodianUserId: true,
+      },
+    });
+
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        status: 404,
+        message:
+          "Could not find booking or the booking exists in another workspace.",
+        label,
+      });
+    }
+
+    const dataToUpdate: Prisma.BookingUpdateInput = {
+      name,
+      description,
+    };
+
+    /** Booking update is not allowed for these type of status */
+    const notAllowedStatus: BookingStatus[] = [
+      "COMPLETE",
+      "ARCHIVED",
+      "CANCELLED",
+    ];
+
+    if (notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking update is not allowed at this state of booking",
+        label,
+      });
+    }
+
+    /**
+     * Changing of booking dates and custodian is only allowed for DRAFT status
+     */
+    if (booking.status === BookingStatus.DRAFT) {
+      dataToUpdate.from = from;
+      dataToUpdate.to = to;
+
+      if (custodianUserId) {
+        dataToUpdate.custodianUser = {
+          connect: { id: custodianUserId },
+        };
+
+        /**
+         * To change custodian we disconnect the old team member
+         * and connect new one
+         */
+        dataToUpdate.custodianTeamMember = {
+          disconnect: true,
+        };
+      } else if (custodianTeamMemberId) {
+        const teamMember = await db.teamMember
+          .findUniqueOrThrow({
+            where: { id: custodianTeamMemberId },
+            select: { id: true, user: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Cannot find team member",
+              additionalData: { custodianTeamMemberId },
+              label,
+            });
+          });
+
+        dataToUpdate.custodianTeamMember = {
+          connect: { id: custodianTeamMemberId },
+        };
+
+        /**
+         * If there is a user associated with team member
+         * we connect it to the booking user as well.
+         */
+        if (teamMember.user?.id) {
+          dataToUpdate.custodianUser = {
+            connect: { id: teamMember.user.id },
+          };
+        } else if (booking.custodianUserId) {
+          dataToUpdate.custodianUser = {
+            disconnect: true,
+          };
+        }
+      }
+    }
+
+    return await db.booking.update({
+      where: { id: booking.id },
+      data: dataToUpdate,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error",
+      message: "Could not update the details of booking",
     });
   }
 }
@@ -1359,12 +1475,6 @@ export function sendBookingUpdateNotification(
   /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
   switch (intent) {
     case "save":
-      sendNotification({
-        title: "Booking saved",
-        message: "Your booking has been saved successfully",
-        icon: { name: "success", variant: "success" },
-        senderId,
-      });
       break;
     case "reserve":
       /** Send reserved notification */
