@@ -21,7 +21,6 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -39,7 +38,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
-import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
+import type { ClientHint, SchedulerData } from "./types";
 // eslint-disable-next-line import/no-cycle
 import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../note/service.server";
@@ -453,6 +452,10 @@ export async function reserveBooking({
     const updatedBooking = await db.booking.update({
       where: { id: bookingFound.id },
       data: { status: BookingStatus.RESERVED },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        assets: true,
+      },
     });
 
     /** Start the reminder scheduler */
@@ -613,6 +616,7 @@ export async function checkoutBooking({
         data: dataToUpdate,
         include: {
           ...BOOKING_COMMON_INCLUDE,
+          assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       });
@@ -631,6 +635,129 @@ export async function checkoutBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while checking out booking.",
+    });
+  }
+}
+
+export async function checkinBooking({
+  id,
+  organizationId,
+  hints,
+  intentChoice,
+}: Pick<Booking, "id" | "organizationId"> & {
+  hints: ClientHint;
+  intentChoice?: CheckinIntentEnum;
+}) {
+  try {
+    const bookingFound = await db.booking.findFirst({
+      where: { id, organizationId },
+      include: { assets: { select: { id: true, kitId: true } } },
+    });
+
+    if (!bookingFound) {
+      throw new ShelfError({
+        cause: null,
+        status: 404,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace.",
+      });
+    }
+
+    const dataToUpdate: Prisma.BookingUpdateInput = {
+      status: BookingStatus.COMPLETE,
+    };
+
+    const kitIds = getKitIdsByAssets(bookingFound.assets);
+    const hasKits = kitIds.length > 0;
+
+    /**
+     * If user is doing an early checkin of booking then update
+     * the booking's `to` date accordingly
+     */
+    if (
+      isBookingEarlyCheckin(bookingFound.to!) &&
+      intentChoice === CheckinIntentEnum["with-adjusted-date"]
+    ) {
+      // Update originalTo to booking's to date
+      dataToUpdate.originalTo = bookingFound.to;
+
+      // Update the `to` date to current date
+      const toDateStr = DateTime.fromJSDate(new Date(), {
+        zone: hints.timeZone,
+      }).toFormat(DATE_TIME_FORMAT);
+
+      dataToUpdate.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+        zone: hints.timeZone,
+      }).toJSDate();
+    }
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      /* Updating the status of all assets inside booking */
+      await tx.asset.updateMany({
+        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /* If there are any kits associated with the booking, then update their status */
+      if (hasKits) {
+        await tx.kit.updateMany({
+          where: { id: { in: kitIds } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
+
+      /** Finally update the booking */
+      return tx.booking.update({
+        where: { id: bookingFound.id },
+        data: dataToUpdate,
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          assets: true,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
+      });
+    });
+
+    if (updatedBooking.custodianUser?.email) {
+      const custodian = updatedBooking?.custodianUser
+        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        : updatedBooking.custodianTeamMember?.name ?? "";
+
+      const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
+      const text = completedBookingEmailContent({
+        bookingName: updatedBooking.name,
+        assetsCount: updatedBooking._count.assets,
+        custodian: custodian,
+        from: updatedBooking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
+        to: updatedBooking.to as Date,
+        bookingId: updatedBooking.id,
+        hints: hints,
+      });
+
+      const html = bookingUpdatesTemplateString({
+        booking: updatedBooking,
+        heading: `Your booking has been completed: "${updatedBooking.name}".`,
+        assetCount: updatedBooking._count.assets,
+        hints,
+      });
+
+      sendEmail({
+        to: updatedBooking.custodianUser.email,
+        subject,
+        text,
+        html,
+      });
+    }
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while checking in booking.",
     });
   }
 }
@@ -901,51 +1028,6 @@ export async function upsertBooking(
               assetCount: res.assets.length,
               hints,
             });
-
-            /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
-            if (isBaseOrSelfService) {
-              const adminsEmails = await getOrganizationAdminsEmails({
-                organizationId: res.organizationId,
-              });
-
-              const adminSubject = `Booking reservation request (${res.name}) by ${custodian} - shelf.nu`;
-
-              /** Pushing admins emails to promises */
-              promises.push(
-                sendEmail({
-                  to: adminsEmails.join(","),
-                  subject: adminSubject,
-                  text,
-                  /** We need to invoke this function separately for the admin email as the footer of emails is different */
-                  html: bookingUpdatesTemplateString({
-                    booking: res,
-                    heading: `Booking reservation request for ${custodian}`,
-                    assetCount: res.assets.length,
-                    hints,
-                    isAdminEmail: true,
-                  }),
-                })
-              );
-            }
-
-            if (data.status === BookingStatus.COMPLETE) {
-              subject = `🎉 Booking completed (${res.name}) - shelf.nu`;
-              text = completedBookingEmailContent({
-                bookingName: res.name,
-                assetsCount: res._count.assets,
-                custodian: custodian,
-                from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
-                to: booking.to as Date,
-                bookingId: res.id,
-                hints: hints,
-              });
-              html = bookingUpdatesTemplateString({
-                booking: res,
-                heading: `Your booking has been completed: "${res.name}".`,
-                assetCount: res._count.assets,
-                hints,
-              });
-            }
 
             if (data.status === BookingStatus.CANCELLED) {
               subject = `Booking canceled (${res.name}) - shelf.nu`;
@@ -1656,57 +1738,6 @@ export async function getBookingsForCalendar(params: {
       additionalData: { ...params },
       label,
     });
-  }
-}
-export async function createNotesForBookingUpdate(
-  intent: BookingUpdateIntent,
-  booking: Booking & { assets: Pick<Asset, "id">[] },
-  user: { firstName: string; lastName: string; id: string }
-) {
-  switch (intent) {
-    case "checkOut":
-      await createNotes({
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
-          booking.name
-        }](/bookings/${booking.id})**.`,
-        type: "UPDATE",
-        userId: user.id,
-        assetIds: booking.assets.map((a) => a.id),
-      });
-      break;
-    case "checkIn":
-      /** Create check-in notes for all assets */
-      await createNotes({
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
-          booking.name
-        }](/bookings/${booking.id})**.`,
-        type: "UPDATE",
-        userId: user.id,
-        assetIds: booking.assets.map((a) => a.id),
-      });
-      break;
-    default:
-      break;
-  }
-}
-
-export function sendBookingUpdateNotification(
-  intent: BookingUpdateIntent,
-  senderId: string
-) {
-  /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
-  switch (intent) {
-    case "checkIn":
-      sendNotification({
-        title: "Booking checked-in",
-        message: "Your booking has been checked-in successfully",
-        icon: { name: "success", variant: "success" },
-        senderId,
-      });
-      break;
-
-    default:
-      break;
   }
 }
 

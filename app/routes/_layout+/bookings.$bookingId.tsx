@@ -21,14 +21,13 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
+  checkinBooking,
   checkoutBooking,
-  createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
   getBookingFlags,
   removeAssets,
   reserveBooking,
-  sendBookingUpdateNotification,
   updateBasicBooking,
   upsertBooking,
 } from "~/modules/booking/service.server";
@@ -246,12 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const {
-      intent,
-      nameChangeOnly,
-      checkoutIntentChoice,
-      checkinIntentChoice,
-    } = parseData(
+    const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -382,6 +376,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           intentChoice: checkoutIntentChoice,
         });
 
+        await createNotes({
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
+            booking.name
+          }](/bookings/${booking.id})**.`,
+          type: "UPDATE",
+          userId: user.id,
+          assetIds: booking.assets.map((a) => a.id),
+        });
+
         sendNotification({
           title: "Booking checked-out",
           message: "Your booking has been checked-out successfully",
@@ -394,98 +397,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn":
-        // What status to set based on the intent
-        const intentToStatusMap = {
-          save: undefined,
-          reserve: BookingStatus.RESERVED,
-          checkOut: BookingStatus.ONGOING,
-          checkIn: BookingStatus.COMPLETE,
-        };
-
-        // Modify status if expired during checkout
-        const status = intentToStatusMap[intent];
-
-        let upsertBookingData = { organizationId, id };
-
-        if (intent === "checkIn" && checkinIntentChoice) {
-          Object.assign(upsertBookingData, { checkinIntentChoice });
-        }
-
-        // We are only changing the name so we do things simpler
-        if (nameChangeOnly) {
-          const { name, description } = parseData(
-            formData,
-            z.object({
-              name: z.string(),
-              description: z.string().optional(),
-            }),
-            {
-              additionalData: { userId, id, organizationId, role },
-            }
-          );
-
-          Object.assign(upsertBookingData, { name, description });
-        } else {
-          /** WE are updating the whole booking */
-          const payload = parseData(
-            formData,
-            NewBookingFormSchema(false, false, getHints(request)), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
-            {
-              additionalData: { userId, id, organizationId, role },
-            }
-          );
-
-          const { name, custodian, description } = payload;
-
-          const hints = getHints(request);
-
-          const from = DateTime.fromFormat(
-            formData.get("startDate")!.toString()!,
-            DATE_TIME_FORMAT,
-            {
-              zone: hints.timeZone,
-            }
-          ).toJSDate();
-
-          const to = DateTime.fromFormat(
-            formData.get("endDate")!.toString()!,
-            DATE_TIME_FORMAT,
-            {
-              zone: hints.timeZone,
-            }
-          ).toJSDate();
-
-          Object.assign(upsertBookingData, {
-            custodianUserId: custodian?.userId,
-            custodianTeamMemberId: custodian?.id,
-            name,
-            from,
-            to,
-            description,
-          });
-        }
-
-        // Add the status if it exists
-        Object.assign(upsertBookingData, {
-          ...(status && {
-            status,
-          }),
+        const booking = await checkinBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          intentChoice: checkinIntentChoice,
         });
 
-        // Update and save the booking
-        const booking = await upsertBooking(
-          upsertBookingData,
-          getClientHint(request),
-          isSelfServiceOrBase
-        );
-
-        await createNotesForBookingUpdate(intent, booking, {
-          firstName: user?.firstName || "",
-          lastName: user?.lastName || "",
-          id: userId,
+        await createNotes({
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
+            booking.name
+          }](/bookings/${booking.id})**.`,
+          type: "UPDATE",
+          userId: user.id,
+          assetIds: booking.assets.map((a) => a.id),
         });
 
-        sendBookingUpdateNotification(intent, userId);
+        sendNotification({
+          title: "Booking checked-in",
+          message: "Your booking has been checked-in successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
         return json(data({ booking }), {
           headers,
