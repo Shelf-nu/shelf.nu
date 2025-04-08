@@ -8,7 +8,7 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
-const DIALOG_CLOSE_SHORTCUT = "Escape";
+export const DIALOG_CLOSE_SHORTCUT = "Escape";
 
 type AssetImageProps = {
   asset: {

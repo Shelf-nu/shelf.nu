@@ -14,7 +14,6 @@ import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
-import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
@@ -532,7 +531,6 @@ export default function AssetOverview() {
           </When>
         </div>
       </div>
-      <ContextualSidebar />
     </div>
   );
 }

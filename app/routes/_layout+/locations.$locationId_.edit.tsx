@@ -19,6 +19,7 @@ import {
   LocationForm,
   NewLocationFormSchema,
 } from "~/components/location/form";
+import { Button } from "~/components/shared/button";
 import { getLocation, updateLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -55,10 +56,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       userOrganizations,
       request,
+      orderBy: "createdAt",
     });
 
     const header: HeaderData = {
       title: `Edit | ${location.name}`,
+      subHeading: location.id,
     };
 
     return json(
@@ -141,12 +144,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
-  const hasName = name !== "";
   const { location } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
-      <Header title={hasName ? name : location.name} />
+      <Header
+        title={
+          <Button to={`/locations/${location.id}`} variant={"inherit"}>
+            {name !== "" ? name : location.name}
+          </Button>
+        }
+      />
       <div className="items-top flex justify-between">
         <LocationForm
           name={location.name}

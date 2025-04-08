@@ -54,7 +54,8 @@ export type ButtonVariant =
   | "block-link"
   | "block-link-gray"
   | "danger"
-  | "info";
+  | "info"
+  | "inherit";
 
 /** Width of the button. Default is auto */
 export type ButtonWidth = "auto" | "full";

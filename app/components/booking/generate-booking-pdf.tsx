@@ -6,6 +6,7 @@ import { Button } from "~/components/shared/button";
 
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { SERVER_URL } from "~/utils/env";
+import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { Spinner } from "../shared/spinner";
@@ -253,43 +254,64 @@ const BookingPDFPreview = ({
           </thead>
           <tbody>
             {assets.map((asset, index) => (
-              <tr key={asset.id} className="align-top">
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  {index + 1}
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  <img
-                    src={
-                      asset?.mainImage ||
-                      `${SERVER_URL}/static/images/asset-placeholder.jpg`
-                    }
-                    alt="Asset"
-                    className="!size-14 object-cover"
-                  />
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  {asset?.title}
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  {asset?.kit?.name}
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  {asset?.category?.name}
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  {asset?.location?.name}
-                </td>
-                <td className="border-b border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  <div className="flex items-center gap-3">
+              <>
+                <tr
+                  key={asset.id}
+                  className={tw(
+                    "align-top",
+                    !asset.description && "border-b border-gray-300"
+                  )}
+                >
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {index + 1}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     <img
-                      src={assetIdToQrCodeMap[asset.id] || ""}
-                      alt="QR Code"
-                      className="size-14 object-cover"
+                      src={
+                        asset?.mainImage ||
+                        `${SERVER_URL}/static/images/asset-placeholder.jpg`
+                      }
+                      alt="Asset"
+                      className="!size-14 object-cover"
                     />
-                    <input type="checkbox" className="block size-5 border" />
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {asset?.title}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {asset?.kit?.name}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {asset?.category?.name}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {asset?.location?.name}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={assetIdToQrCodeMap[asset.id] || ""}
+                        alt="QR Code"
+                        className="size-14 object-cover"
+                      />
+                      <input type="checkbox" className="block size-5 border" />
+                    </div>
+                  </td>
+                </tr>
+
+                <When truthy={!!asset.description}>
+                  <tr className="border-b border-gray-300 align-top">
+                    <td colSpan={7} className="m-2 p-2">
+                      <div className="flex items-start gap-4 bg-gray-100 p-4">
+                        <div className="w-20 text-xs">Asset Description</div>
+                        <div className="flex-1 text-sm">
+                          {asset.description}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </When>
+              </>
             ))}
           </tbody>
         </table>
