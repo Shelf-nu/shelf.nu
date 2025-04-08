@@ -49,7 +49,7 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Booking";
 
 /** Includes needed for booking to have all data required for emails */
-export const bookingIncludeForEmails = {
+export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
   custodianUser: true,
   organization: {
@@ -538,6 +538,103 @@ export async function reserveBooking({
   }
 }
 
+export async function checkoutBooking({
+  id,
+  organizationId,
+  intentChoice,
+  hints,
+}: Pick<Booking, "id" | "organizationId"> & {
+  hints: ClientHint;
+  intentChoice?: CheckoutIntentEnum;
+}) {
+  try {
+    const bookingFound = await db.booking.findFirst({
+      where: { id, organizationId },
+      include: { assets: true },
+    });
+
+    if (!bookingFound) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?z",
+      });
+    }
+
+    const isExpired = isBookingExpired({ to: bookingFound.to });
+
+    const dataToUpdate: Prisma.BookingUpdateInput = {
+      status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+    };
+
+    const kitIds = getKitIdsByAssets(bookingFound.assets);
+    const hasKits = kitIds.length > 0;
+
+    /**
+     * If user is doing an early checkout of booking then update the
+     * booking's `from` date accordingly
+     */
+    if (
+      isBookingEarlyCheckout(bookingFound.from!) &&
+      intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+    ) {
+      // Update originalFrom to old `from` date of booking
+      dataToUpdate.originalFrom = bookingFound.from;
+
+      // Update `from` date to current date
+      const fromDateStr = DateTime.fromJSDate(new Date(), {
+        zone: hints.timeZone,
+      }).toFormat(DATE_TIME_FORMAT);
+
+      dataToUpdate.from = DateTime.fromFormat(fromDateStr, DATE_TIME_FORMAT, {
+        zone: hints.timeZone,
+      }).toJSDate();
+    }
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      /* Updating the status of all assets inside booking */
+      await tx.asset.updateMany({
+        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+
+      /** If there are any kits associated with the booking, then update their status */
+      if (hasKits) {
+        await tx.kit.updateMany({
+          where: { id: { in: kitIds } },
+          data: { status: KitStatus.CHECKED_OUT },
+        });
+      }
+
+      /** Finally update the booking */
+      return tx.booking.update({
+        where: { id: bookingFound.id },
+        data: dataToUpdate,
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
+      });
+    });
+
+    const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
+    if (hours < 1) {
+      sendCheckinReminder(updatedBooking, updatedBooking.assets.length, hints);
+    }
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while checking out booking.",
+    });
+  }
+}
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -573,7 +670,6 @@ export async function upsertBooking(
       id,
       description,
       isExpired,
-      checkoutIntentChoice,
       checkinIntentChoice,
       ...rest
     } = booking;
@@ -688,28 +784,6 @@ export async function upsertBooking(
       }
 
       /**
-       * If user is doing an early checkout of booking then update the
-       * booking's from date accordingly
-       * */
-      if (
-        booking.status === BookingStatus.ONGOING &&
-        isBookingEarlyCheckout(oldBooking!.from!) &&
-        checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
-      ) {
-        // Update originFrom to old booking's from date
-        data.originalFrom = oldBooking?.from;
-
-        // Update from date to current date
-        const fromDateStr = DateTime.fromJSDate(new Date(), {
-          zone: hints.timeZone,
-        }).toFormat(DATE_TIME_FORMAT);
-
-        data.from = DateTime.fromFormat(fromDateStr, DATE_TIME_FORMAT, {
-          zone: hints.timeZone,
-        }).toJSDate();
-      }
-
-      /**
        * If user is doing an early checkin of booking then update
        * the booking's to date accordingly
        */
@@ -731,15 +805,6 @@ export async function upsertBooking(
         }).toJSDate();
       }
 
-      /**
-       * If the booking was in DRAFT state, then we update
-       * the original date's to latest `from` and `to` dates.
-       */
-      if (oldBooking?.status === BookingStatus.DRAFT) {
-        data.originalFrom = data.from;
-        data.originalTo = data.to;
-      }
-
       //update
       const res = await db.booking
         .update({
@@ -748,7 +813,7 @@ export async function upsertBooking(
           include: {
             ...BOOKING_COMMON_INCLUDE,
             assets: true,
-            ...bookingIncludeForEmails,
+            ...BOOKING_INCLUDE_FOR_EMAIL,
           },
         })
         .catch((cause) => {
@@ -1343,7 +1408,7 @@ export async function deleteBooking(
       where: { id, organizationId },
       include: {
         ...BOOKING_COMMON_INCLUDE,
-        ...bookingIncludeForEmails,
+        ...BOOKING_INCLUDE_FOR_EMAIL,
         assets: {
           select: {
             id: true,
@@ -1631,18 +1696,6 @@ export function sendBookingUpdateNotification(
 ) {
   /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
   switch (intent) {
-    case "save":
-      break;
-
-    case "checkOut":
-      sendNotification({
-        title: "Booking checked-out",
-        message: "Your booking has been checked-out successfully",
-        icon: { name: "success", variant: "success" },
-        senderId,
-      });
-
-      break;
     case "checkIn":
       sendNotification({
         title: "Booking checked-in",
@@ -2268,18 +2321,13 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
 }
 
 /** This function checks if the booking is expired or not */
-export async function isBookingExpired({ id }: { id: Booking["id"] }) {
+export function isBookingExpired({ to }: { to: Booking["to"] }) {
   try {
-    const booking = await db.booking.findUnique({
-      where: { id },
-      select: { to: true },
-    });
-
-    if (!booking?.to) {
+    if (!to) {
       return false;
     }
 
-    const end = DateTime.fromJSDate(booking.to);
+    const end = DateTime.fromJSDate(to);
     const now = DateTime.now();
 
     return end < now;

@@ -15,7 +15,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
-  bookingIncludeForEmails,
+  BOOKING_INCLUDE_FOR_EMAIL,
   scheduleNextBookingJob,
 } from "./service.server";
 import type { SchedulerData } from "./types";
@@ -24,7 +24,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
       where: { id: data.id },
-      include: bookingIncludeForEmails,
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -82,7 +82,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
       where: { id: data.id },
-      include: bookingIncludeForEmails,
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -150,7 +150,7 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
       where: { id: data.id },
-      include: bookingIncludeForEmails,
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({

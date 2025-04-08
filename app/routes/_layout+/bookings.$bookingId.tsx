@@ -21,11 +21,11 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
+  checkoutBooking,
   createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
   getBookingFlags,
-  isBookingExpired,
   removeAssets,
   reserveBooking,
   sendBookingUpdateNotification,
@@ -374,7 +374,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
-      case "checkOut":
+      case "checkOut": {
+        const booking = await checkoutBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          intentChoice: checkoutIntentChoice,
+        });
+
+        sendNotification({
+          title: "Booking checked-out",
+          message: "Your booking has been checked-out successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
       case "checkIn":
         // What status to set based on the intent
         const intentToStatusMap = {
@@ -384,19 +402,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           checkIn: BookingStatus.COMPLETE,
         };
 
-        const isExpired = await isBookingExpired({ id });
-
         // Modify status if expired during checkout
-        const status =
-          intent === "checkOut" && isExpired
-            ? BookingStatus.OVERDUE
-            : intentToStatusMap[intent];
+        const status = intentToStatusMap[intent];
 
         let upsertBookingData = { organizationId, id };
-
-        if (intent === "checkOut" && checkoutIntentChoice) {
-          Object.assign(upsertBookingData, { checkoutIntentChoice });
-        }
 
         if (intent === "checkIn" && checkinIntentChoice) {
           Object.assign(upsertBookingData, { checkinIntentChoice });
@@ -461,8 +470,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ...(status && {
             status,
           }),
-          // Make sure to pass isExpired when checking out
-          ...(intent === "checkOut" && { isExpired }),
         });
 
         // Update and save the booking
