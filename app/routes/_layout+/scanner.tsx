@@ -178,7 +178,7 @@ const QRScanner = () => {
         setScanMessage("Redirecting to mapped asset...");
         navigate(`/qr/${qrId}`);
       } else if (
-        ["Assign custody", "Release custody", "Add to location"].includes(
+        ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
         )
       ) {

@@ -232,7 +232,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
         <div className="px-4 md:pl-0">
           <div className="relative z-50 my-8">
-            <h5 className="mb-1">Add to location:</h5>
+            <h5 className="mb-1">Update location:</h5>
             <LocationSelect
               isBulk
               hideClearButton
@@ -251,7 +251,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
               width="full"
               disabled={disabled || disableSubmit || idsTotalCount === 0}
             >
-              Add to location
+              Update location
             </Button>
           </div>
         </div>
