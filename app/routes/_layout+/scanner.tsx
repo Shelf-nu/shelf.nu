@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -6,23 +7,51 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
+import { useAtom, useSetAtom } from "jotai";
+import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { CodeScanner } from "~/components/zxing-scanner/code-scanner";
+import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { CodeScanner } from "~/components/scanner/code-scanner";
+import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
+import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
+import { db } from "~/database/db.server";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
+import type { AllowedModelNames } from "../api+/model-filters";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export type ScannerLoader = typeof loader;
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
   try {
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
     const header: HeaderData = {
       title: "Locations",
     };
@@ -30,8 +59,56 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /** We get the userPrefs cookie so we can see if there is already a default camera */
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
 
-    return json({ header, scannerCameraId: cookie.scannerCameraId });
+    // @TODO - to improve this we should place the action in the params and only fetch certain data depending on the action
+
+    /** Get team members for form teamMember select */
+    const { teamMemberIds } = paramsValues;
+    const teamMemberData = await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: teamMemberIds,
+      getAll:
+        searchParams.has("getAll") &&
+        hasGetAllValue(searchParams, "teamMember"),
+      isSelfService: role === OrganizationRoles.SELF_SERVICE, // we can assume this is false because this view is not allowed for
+      userId,
+    });
+    /** End team members */
+
+    /** Get locations  */
+    let locationsData;
+    if (!isSelfServiceOrBase) {
+      const locationSelected = searchParams.get("location") ?? "";
+      const getAllEntries = searchParams.getAll(
+        "getAll"
+      ) as AllowedModelNames[];
+      const [locationExcludedSelected, selectedLocation, totalLocations] =
+        await Promise.all([
+          db.location.findMany({
+            where: { organizationId, id: { not: locationSelected } },
+            take: getAllEntries.includes("location") ? undefined : 12,
+          }),
+          db.location.findMany({
+            where: { organizationId, id: locationSelected },
+          }),
+          db.location.count({ where: { organizationId } }),
+        ]);
+
+      locationsData = {
+        locations: [...selectedLocation, ...locationExcludedSelected],
+        totalLocations,
+      };
+    }
+    /** End locations */
+
+    return json({
+      header,
+      scannerCameraId: cookie.scannerCameraId,
+      ...teamMemberData,
+      ...locationsData,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -52,23 +129,64 @@ const QRScanner = () => {
   const [scanMessage, setScanMessage] = useState<string>(
     "Processing QR code..."
   );
-
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
-  const isNavigating = useRef(false); // Add a ref to track navigation status
+  const isNavigating = useRef(false);
+  const addItem = useSetAtom(addScannedItemAtom);
 
-  function handleQrDetectionSuccess(qrId: string) {
-    // If navigation is already in progress, return early to prevent multiple navigations
-    if (isNavigating.current) return;
+  // Get action directly from the atom
+  const [action] = useAtom(scannerActionAtom);
 
-    // Set the navigation flag to true to indicate navigation has started
-    isNavigating.current = true;
+  // Store the current action in a ref that's always up-to-date
+  // This is required in order to handle the action correctly, even tho we use global state
+  const actionRef = useRef(action);
 
-    setPaused(true);
+  // Update the ref whenever the action changes
+  useEffect(() => {
+    actionRef.current = action;
 
-    setScanMessage("Redirecting to mapped asset...");
-    navigate(`/qr/${qrId}`);
-  }
+    // Reset the navigating state when action changes
+    if (action !== "View asset") {
+      isNavigating.current = false;
+    }
+  }, [action]);
+
+  // Custom setPaused function that only pauses for "View asset"
+  const handleSetPaused = useCallback(
+    (value: boolean) => {
+      // Always use the ref value for the most current action
+      if (actionRef.current === "View asset") {
+        setPaused(value);
+      }
+    },
+    [] // No dependencies needed since we use the ref
+  );
+
+  // Define the handler using useCallback to prevent recreating it on every render
+  const handleQrDetectionSuccess = useCallback(
+    ({ qrId, error }: OnQrDetectionSuccessProps) => {
+      // IMPORTANT: Always use the current value from the ref
+      const currentAction = actionRef.current;
+
+      if (currentAction === "View asset") {
+        if (isNavigating.current) {
+          return;
+        }
+
+        isNavigating.current = true;
+        handleSetPaused(true);
+        setScanMessage("Redirecting to mapped asset...");
+        navigate(`/qr/${qrId}`);
+      } else if (
+        ["Assign custody", "Release custody", "Update location"].includes(
+          currentAction
+        )
+      ) {
+        addItem(qrId, error);
+      }
+    },
+    [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
+  );
 
   return (
     <>
@@ -80,8 +198,12 @@ const QRScanner = () => {
         <CodeScanner
           onQrDetectionSuccess={handleQrDetectionSuccess}
           paused={paused}
-          setPaused={setPaused}
+          setPaused={handleSetPaused}
           scanMessage={scanMessage}
+          actionSwitcher={<ActionSwitcher />}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
         />
       </div>
     </>

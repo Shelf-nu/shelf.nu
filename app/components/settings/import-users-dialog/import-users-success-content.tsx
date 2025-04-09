@@ -1,8 +1,8 @@
 import { ClientOnly } from "remix-utils/client-only";
+import SuccessAnimation from "~/components/scanner/success-animation";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import When from "~/components/when/when";
-import SuccessAnimation from "~/components/zxing-scanner/success-animation";
 import { tw } from "~/utils/tw";
 import type { FetcherData } from "./import-users-dialog";
 import ImportUsersTable from "./import-users-table";

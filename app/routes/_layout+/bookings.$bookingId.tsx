@@ -15,6 +15,7 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
+import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
@@ -619,6 +620,7 @@ export default function BookingPage() {
       <div>
         <BookingPageContent />
         <ContextualModal />
+        <ContextualSidebar />
       </div>
     </div>
   );

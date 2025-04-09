@@ -16,8 +16,8 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -254,7 +254,7 @@ function ListContent({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
           to={`/kits/${item.id}`}
-          className="flex justify-between gap-3 p-4 md:justify-normal md:px-6"
+          className="flex justify-between gap-3 p-4 md:justify-normal md:pl-0 md:pr-6"
         >
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -295,36 +295,7 @@ function ListContent({
       <Td>{item._count.assets}</Td>
       {canReadCustody && (
         <Td>
-          {item.custody ? (
-            <GrayBadge>
-              <>
-                {item.custody.custodian?.user ? (
-                  <img
-                    src={
-                      item.custody.custodian?.user?.profilePicture ||
-                      "/static/images/default_pfp.jpg"
-                    }
-                    className="mr-1 size-4 rounded-full"
-                    alt=""
-                  />
-                ) : null}
-                <span className="mt-px">
-                  {resolveTeamMemberName({
-                    name: item?.custody?.custodian.name,
-                    user: item?.custody?.custodian?.user
-                      ? {
-                          firstName:
-                            item?.custody?.custodian?.user?.firstName || null,
-                          lastName:
-                            item?.custody?.custodian?.user?.lastName || null,
-                          email: item?.custody?.custodian?.user?.email || "",
-                        }
-                      : undefined,
-                  })}
-                </span>
-              </>
-            </GrayBadge>
-          ) : null}
+          <TeamMemberBadge teamMember={item?.custody?.custodian} />
         </Td>
       )}
 
