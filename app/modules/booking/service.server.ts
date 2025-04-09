@@ -794,30 +794,6 @@ export async function updateBookingAssets({
   }
 }
 
-export async function updateBookingStatus({
-  id,
-  organizationId,
-  status,
-}: Pick<Booking, "id" | "organizationId" | "status">) {
-  try {
-    return await db.booking.update({
-      where: { id, organizationId },
-      data: { status },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        assets: true,
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-      },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      label,
-      message: "",
-    });
-  }
-}
-
 export async function archiveBooking({
   id,
   organizationId,
