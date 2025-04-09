@@ -29,6 +29,7 @@ import {
   removeAssets,
   reserveBooking,
   updateBasicBooking,
+  updateBookingStatus,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -498,10 +499,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
-        await upsertBooking(
-          { id, status: BookingStatus.ARCHIVED },
-          getClientHint(request)
-        );
+        await updateBookingStatus({
+          id,
+          organizationId,
+          status: BookingStatus.ARCHIVED,
+        });
 
         sendNotification({
           title: "Booking archived",
@@ -509,12 +511,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
-        return json(
-          { success: true },
-          {
-            headers,
-          }
-        );
+
+        return json(data({ success: true }), { headers });
       }
       case "cancel": {
         const cancelledBooking = await upsertBooking(

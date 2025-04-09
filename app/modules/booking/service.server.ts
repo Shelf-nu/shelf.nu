@@ -794,6 +794,25 @@ export async function updateBookingAssets({
   }
 }
 
+export async function updateBookingStatus({
+  id,
+  organizationId,
+  status,
+}: Pick<Booking, "id" | "organizationId" | "status">) {
+  try {
+    return await db.booking.update({
+      where: { id, organizationId },
+      data: { status },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: "",
+    });
+  }
+}
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
