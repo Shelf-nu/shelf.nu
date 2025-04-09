@@ -22,6 +22,7 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   archiveBooking,
+  cancelBooking,
   checkinBooking,
   checkoutBooking,
   deleteBooking,
@@ -511,10 +512,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }), { headers });
       }
       case "cancel": {
-        const cancelledBooking = await upsertBooking(
-          { id, status: BookingStatus.CANCELLED },
-          getClientHint(request)
-        );
+        const cancelledBooking = await cancelBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+        });
 
         await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
