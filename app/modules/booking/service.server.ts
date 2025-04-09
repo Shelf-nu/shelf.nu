@@ -982,6 +982,54 @@ export async function cancelBooking({
   }
 }
 
+export async function revertBookingToDraft({
+  id,
+  organizationId,
+}: Pick<Booking, "id" | "organizationId">) {
+  try {
+    const booking = await db.booking.findFirst({
+      where: { id, organizationId },
+      select: { id: true, status: true },
+    });
+
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Booking not found, are you sure the booking exists in current workspace?",
+      });
+    }
+
+    /** User can only revert the booking to DRAFT from RESERVED */
+    if (booking.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Booking can be reverted to draft only for reserved state.",
+      });
+    }
+
+    return await db.booking.update({
+      where: { id: booking.id },
+      data: { status: BookingStatus.DRAFT },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        assets: true,
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while reverting the booking to draft.",
+    });
+  }
+}
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
@@ -1016,7 +1064,6 @@ export async function upsertBooking(
       custodianUserId,
       id,
       description,
-      isExpired,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -1126,30 +1173,11 @@ export async function upsertBooking(
       };
     }
 
-    /**
-     * Updated original dates to user entered `from` and `to`
-     * so that we can track of it later
-     */
-    data.originalFrom = data.from;
-    data.originalTo = data.to;
-
     const res = await db.booking.create({
       data: data as Prisma.BookingCreateInput,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
     });
-    if (res.from && booking.status === BookingStatus.RESERVED && !isExpired) {
-      await cancelScheduler(res);
-      const when = new Date(res.from);
-      when.setHours(when.getHours() - 1); //1hour before send checkout reminder
-      await scheduleNextBookingJob({
-        data: {
-          id: res.id,
-          hints,
-          eventType: bookingSchedulerEventsEnum.checkoutReminder,
-        },
-        when,
-      });
-    }
+
     return res;
   } catch (cause) {
     throw new ShelfError({

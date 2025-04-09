@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -30,8 +29,8 @@ import {
   getBookingFlags,
   removeAssets,
   reserveBooking,
+  revertBookingToDraft,
   updateBasicBooking,
-  upsertBooking,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -571,10 +570,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "revert-to-draft": {
-        await upsertBooking(
-          { id, status: BookingStatus.DRAFT },
-          getClientHint(request)
-        );
+        await revertBookingToDraft({ id, organizationId });
 
         sendNotification({
           title: "Booking reverted",
