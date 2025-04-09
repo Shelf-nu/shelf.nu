@@ -803,12 +803,66 @@ export async function updateBookingStatus({
     return await db.booking.update({
       where: { id, organizationId },
       data: { status },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        assets: true,
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       label,
       message: "",
+    });
+  }
+}
+
+export async function archiveBooking({
+  id,
+  organizationId,
+}: Pick<Booking, "id" | "organizationId">) {
+  try {
+    const booking = await db.booking.findFirst({
+      where: { id, organizationId },
+      select: { id: true, status: true },
+    });
+
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Not found",
+        message:
+          "Booking not found, are you sure it exists in current organization?",
+      });
+    }
+
+    /** Booking can be archived only if it is COMPLETE */
+    if (booking.status !== BookingStatus.COMPLETE) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Archive is not allowed at current state of booking.",
+      });
+    }
+
+    return await db.booking.update({
+      where: { id: booking.id },
+      data: { status: BookingStatus.ARCHIVED },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        assets: true,
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while archiving the booking. Please try again.",
     });
   }
 }

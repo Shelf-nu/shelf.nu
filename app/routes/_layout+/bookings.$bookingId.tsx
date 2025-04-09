@@ -21,6 +21,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
+  archiveBooking,
   checkinBooking,
   checkoutBooking,
   deleteBooking,
@@ -29,7 +30,6 @@ import {
   removeAssets,
   reserveBooking,
   updateBasicBooking,
-  updateBookingStatus,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -499,11 +499,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
-        await updateBookingStatus({
-          id,
-          organizationId,
-          status: BookingStatus.ARCHIVED,
-        });
+        await archiveBooking({ id, organizationId });
 
         sendNotification({
           title: "Booking archived",
