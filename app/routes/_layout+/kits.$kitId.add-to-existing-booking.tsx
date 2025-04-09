@@ -9,7 +9,7 @@ import { Button } from "~/components/shared/button";
 
 import {
   getExistingBookingDetails,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { loadBookingsData } from "~/modules/booking/utils.server";
 import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
@@ -17,10 +17,6 @@ import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
-import {
-  getClientHint,
-  getDateTimeFormatFromHints,
-} from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -133,7 +129,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -172,13 +168,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
     const user = await getUserByID(authSession.userId);
 
-    const booking = await upsertBooking(
-      {
-        id: bookingId,
-        assetIds: finalAssetIds,
-      },
-      getClientHint(request)
-    );
+    const booking = await updateBookingAssets({
+      id: bookingId,
+      organizationId,
+      assetIds: finalAssetIds,
+    });
+
     await createNotes({
       content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
         booking.name
@@ -207,22 +202,13 @@ export function links() {
 }
 
 export default function ExistingBooking() {
-  const { ids, hints } = useLoaderData<typeof loader>();
+  const { ids } = useLoaderData<typeof loader>();
+
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   function isValidBooking(booking: any) {
     return booking && ["RESERVED", "DRAFT"].includes(booking.status);
-  }
-
-  function formatDate(date: Date) {
-    if (!date) {
-      return null;
-    }
-    return getDateTimeFormatFromHints(hints, {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(date));
   }
 
   return (
@@ -256,12 +242,6 @@ export default function ExistingBooking() {
             allowClear
             closeOnSelect
             required={true}
-            transformItem={(item) => ({
-              ...item,
-              displayFrom: formatDate(item?.metadata?.from),
-              displayTo: formatDate(item?.metadata?.to),
-              status: item?.metadata?.status,
-            })}
             renderItem={(item: any) =>
               isValidBooking(item) ? (
                 <div
