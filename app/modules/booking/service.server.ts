@@ -766,18 +766,14 @@ export async function updateBookingAssets({
   id,
   organizationId,
   assetIds,
-  type,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
-  type: "replace" | "append";
 }) {
   try {
     return await db.booking.update({
       where: { id, organizationId },
       data: {
         assets: {
-          // type replace mean, remove old assets and set new `assetIds` in booking
-          ...(type === "replace" ? { set: [] } : {}),
           connect: assetIds.map((id) => ({ id })),
         },
       },

@@ -109,7 +109,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id: bookingId,
       organizationId,
       assetIds: finalAssetIds,
-      type: "append",
     });
 
     await createNotes({
