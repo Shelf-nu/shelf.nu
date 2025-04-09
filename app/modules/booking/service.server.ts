@@ -762,6 +762,42 @@ export async function checkinBooking({
   }
 }
 
+export async function updateBookingAssets({
+  id,
+  organizationId,
+  assetIds,
+  type,
+}: Pick<Booking, "id" | "organizationId"> & {
+  assetIds: Asset["id"][];
+  type: "replace" | "append";
+}) {
+  try {
+    return await db.booking.update({
+      where: { id, organizationId },
+      data: {
+        assets: {
+          // type replace mean, remove old assets and set new `assetIds` in booking
+          ...(type === "replace" ? { set: [] } : {}),
+          connect: assetIds.map((id) => ({ id })),
+        },
+      },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        assets: true,
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating booking assets.",
+    });
+  }
+}
+
 //client should pass new Date().toIsoString() to action handler for to and from
 export async function upsertBooking(
   booking: Partial<
