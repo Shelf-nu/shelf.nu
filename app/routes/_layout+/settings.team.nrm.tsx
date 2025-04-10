@@ -14,6 +14,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import BulkActionsDropdown from "~/components/nrm/bulk-actions-dropdown";
+import { ExportNrmButton } from "~/components/nrm/export-nrm-button";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
@@ -182,6 +183,7 @@ export default function NrmSettings() {
       <ListContentWrapper>
         <Filters>
           <div className="flex items-center justify-end gap-2">
+            <ExportNrmButton />
             <ImportNrmButton canImportNRM={canImportNRM} />
 
             <Button

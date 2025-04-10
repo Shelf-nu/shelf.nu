@@ -1,4 +1,10 @@
-import type { Asset, AssetIndexSettings } from "@prisma/client";
+import type {
+  Asset,
+  AssetIndexSettings,
+  Organization,
+  Prisma,
+  TeamMember,
+} from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
@@ -422,7 +428,7 @@ const cleanMarkdownFormatting = (text: string): string =>
 /**
  * Safely formats a value for CSV export by properly escaping and quoting values
  */
-const formatValueForCsv = (value: any, isMarkdown = false): string => {
+export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values
   if (value === null || value === undefined || value === "") {
     return '""';
@@ -712,3 +718,90 @@ export const buildCsvExportDataFromBookings = (
   // Return headers followed by data rows
   return [Object.values(headers), ...rows];
 };
+
+export async function exportNRMsToCsv({
+  nrmIds,
+  organizationId,
+}: {
+  nrmIds: TeamMember["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
+      ? { organizationId }
+      : { id: { in: nrmIds }, organizationId };
+
+    const teamMembers = await db.teamMember.findMany({
+      where,
+      include: { _count: { select: { custodies: true } } },
+    });
+
+    return buildCsvExportDataFromTeamMembers({ teamMembers });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label: "Team Member",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while exporting NRMs to csv.",
+      additionalData: { nrmIds, organizationId },
+    });
+  }
+}
+
+export function buildCsvExportDataFromTeamMembers({
+  teamMembers,
+}: {
+  teamMembers: Prisma.TeamMemberGetPayload<{
+    include: { _count: { select: { custodies: true } } };
+  }>[];
+}) {
+  try {
+    const headers = {
+      id: "Id",
+      name: "Name",
+      custodies: "Custodies",
+    };
+
+    const rows: string[][] = [];
+
+    teamMembers.forEach((teamMember) => {
+      let value = "";
+
+      const teamMemberRow = Object.keys(headers).map((header) => {
+        switch (header) {
+          case "id":
+            value = teamMember.id;
+            break;
+
+          case "name":
+            value = teamMember.name;
+            break;
+
+          case "custodies":
+            value = teamMember._count.custodies.toString();
+            break;
+
+          default:
+            value = "";
+        }
+
+        return formatValueForCsv(value, false);
+      });
+
+      rows.push(teamMemberRow);
+    });
+
+    const finalCsv = [Object.values(headers), ...rows];
+
+    // Join rows with CRLF as per CSV spec
+    return finalCsv.join("\r\n");
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label: "Team Member",
+      message:
+        "Something went wrong while building csv from team members data.",
+    });
+  }
+}
