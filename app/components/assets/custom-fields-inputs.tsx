@@ -97,7 +97,18 @@ export default function AssetCustomFields({
           name={`cf-${field.id}`}
           value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
           onChange={(e) => {
-            const selectedDate = new Date(e.target.value);
+            let selectedDate = new Date(e.target.value);
+
+            /**
+             * While typing, user can enter invalid date
+             * so we have to make sure that we are saving a valid date
+             * to avoid any errors
+             * */
+            const isDateInvalid = isNaN(selectedDate.valueOf());
+            if (isDateInvalid) {
+              selectedDate = new Date();
+            }
+
             setDateObj({ ...dateObj, [field.id]: selectedDate });
           }}
           error={zo.errors[`cf-${field.id}`]()?.message}
