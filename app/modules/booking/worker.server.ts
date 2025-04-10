@@ -199,8 +199,8 @@ const event2HandlerMap: Record<
   bookingSchedulerEventsEnum,
   (job: PgBoss.Job<SchedulerData>) => Promise<void>
 > = {
-  [bookingSchedulerEventsEnum.checkinReminder]: checkinReminder,
   [bookingSchedulerEventsEnum.checkoutReminder]: checkoutReminder,
+  [bookingSchedulerEventsEnum.checkinReminder]: checkinReminder,
   [bookingSchedulerEventsEnum.overdueHandler]: overdueHandler,
   [bookingSchedulerEventsEnum.overdueReminder]: overdueReminder,
 };

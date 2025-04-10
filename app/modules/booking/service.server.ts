@@ -162,6 +162,9 @@ export async function createBooking({
   assetIds,
   hints,
 }: {
+  /**
+   * Booking object that contains all the required fields to create a booking
+   */
   booking: Pick<
     Booking,
     | "name"
@@ -173,7 +176,15 @@ export async function createBooking({
     | "from"
     | "to"
   >;
+
+  /**
+   * Asset IDs that are connected to the booking
+   */
   assetIds: Asset["id"][];
+
+  /**
+   * Hints are used for setting the timezone of the booking
+   */
   hints: ClientHint;
 }) {
   try {
@@ -193,6 +204,12 @@ export async function createBooking({
       originalTo: booking.to,
     };
 
+    /**
+     * If assetsIds are passed, we directly connect them.
+     * This can happen when:
+     * - Booking is created from assets bulk actions
+     * - Booking is created from asset page
+     * */
     if (assetIds.length > 0) {
       dataToCreate.assets = {
         connect: assetIds.map((id) => ({ id })),
@@ -204,10 +221,20 @@ export async function createBooking({
         connect: { id: booking.custodianUserId },
       };
     } else if (booking.custodianTeamMemberId) {
-      const custodianUser = await db.teamMember
+      /**
+       * In this case we fetch the teamMember because we need to know if there is a user attached, and connect that as well
+       */
+      const custodianTeamMember = await db.teamMember
         .findUniqueOrThrow({
           where: { id: booking.custodianTeamMemberId },
-          select: { id: true, user: true },
+          select: {
+            id: true,
+            user: {
+              select: {
+                id: true,
+              },
+            },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -228,9 +255,9 @@ export async function createBooking({
        * If there is a user associated with team member,
        * we connect it to the booking user as well.
        */
-      if (custodianUser.user?.id) {
+      if (custodianTeamMember.user?.id) {
         dataToCreate.custodianUser = {
-          connect: { id: custodianUser.user.id },
+          connect: { id: custodianTeamMember.user.id },
         };
       }
     }
@@ -251,6 +278,11 @@ export async function createBooking({
   }
 }
 
+/**
+ * Used when the user clicks the save booking to simply update the booking information
+ * It only updates dates & custodian if the booking is in DRAFT state
+ * In other ongoing states, it just updates name and description
+ */
 export async function updateBasicBooking({
   id,
   name,
@@ -370,6 +402,7 @@ export async function updateBasicBooking({
             connect: { id: teamMember.user.id },
           };
         } else if (booking.custodianUserId) {
+          /** If there isn't we need to run a disconnect, so if the previous custodian had a user, we need to remove it. */
           dataToUpdate.custodianUser = {
             disconnect: true,
           };
@@ -391,6 +424,9 @@ export async function updateBasicBooking({
   }
 }
 
+/**
+ * Changes the status of a booking to RESERVED
+ */
 export async function reserveBooking({
   id,
   organizationId,
@@ -476,6 +512,7 @@ export async function reserveBooking({
         ? `${bookingFound.custodianUser.firstName} ${bookingFound.custodianUser.lastName}`
         : bookingFound.custodianTeamMember?.name ?? "";
 
+      /** Prepare email content */
       const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
 
       const text = assetReservedEmailContent({
@@ -494,9 +531,10 @@ export async function reserveBooking({
         assetCount: bookingFound._count.assets,
         hints,
       });
+      /** END Prepare email content */
 
       /**
-       * Here we need to check if the custodian is different than the admin
+       * Here we need to check if the custodian has an OrganizationRole different than ADMIN
        * and send email to the admin in case they are different
        * */
       if (isSelfServiceOrBase) {
@@ -521,6 +559,9 @@ export async function reserveBooking({
         });
       }
 
+      /**
+       * Notify the custodian that the booking is reserved
+       */
       sendEmail({
         to: bookingFound.custodianUser.email,
         subject,
@@ -565,12 +606,20 @@ export async function checkoutBooking({
       });
     }
 
+    /**
+     * This checks if the booking end date is in the past
+     * We need this because sometimes the user can checkout a booking
+     * that is already overdue for check in
+     */
     const isExpired = isBookingExpired({ to: bookingFound.to });
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
     };
 
+    /**
+     * Get the kitIds because we need them to update their status later on
+     */
     const kitIds = getKitIdsByAssets(bookingFound.assets);
     const hasKits = kitIds.length > 0;
 
@@ -1628,12 +1677,14 @@ export async function getBookingsForCalendar(params: {
 }
 
 export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
-  const assetsWithKit = assets.filter((a) => !!a.kitId) as Array<{
-    id: string;
-    kitId: string;
-  }>;
+  const assetsWithKit = assets.filter((a) => !!a.kitId) as Pick<
+    Asset,
+    "id" | "kitId"
+  >[];
+  const allKitIds = assetsWithKit
+    .map((a) => a.kitId)
+    .filter((id) => id !== null); // filter out null entreis
 
-  const allKitIds = assetsWithKit.map((a) => a.kitId);
   const uniqueKitIds = new Set(allKitIds);
 
   return [...uniqueKitIds];
