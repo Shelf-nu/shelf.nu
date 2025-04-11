@@ -14,7 +14,6 @@ import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import {
   Tooltip,
   TooltipContent,
@@ -22,6 +21,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td as BaseTd } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 
@@ -47,7 +47,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -390,34 +389,7 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {custody ? (
-          <GrayBadge>
-            <>
-              {custody.custodian?.user ? (
-                <img
-                  src={
-                    custody.custodian?.user?.profilePicture ||
-                    "/static/images/default_pfp.jpg"
-                  }
-                  className="mr-1 size-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-px">
-                {resolveTeamMemberName({
-                  name: custody.custodian.name,
-                  user: custody.custodian?.user
-                    ? {
-                        firstName: custody.custodian?.user?.firstName || null,
-                        lastName: custody.custodian?.user?.lastName || null,
-                        email: custody.custodian?.user?.email || "",
-                      }
-                    : undefined,
-                })}
-              </span>
-            </>
-          </GrayBadge>
-        ) : null}
+        <TeamMemberBadge teamMember={custody?.custodian} />
       </Td>
     </When>
   );

@@ -10,9 +10,10 @@ import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import type { OnQrDetectionSuccessProps } from "../scanner/code-scanner";
+import { CodeScanner } from "../scanner/code-scanner";
 import { Button } from "../shared/button";
 import When from "../when/when";
-import { CodeScanner } from "../zxing-scanner/code-scanner";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;
@@ -41,7 +42,10 @@ export default function RelinkQrCodeDialog({
   const qrCode = asset.qrCodes[0];
   const isNewCodeSameAsCurrent = qrCode?.id === newQrId;
 
-  function handleQrDetectionSuccess(qrId: string, error?: string) {
+  function handleQrDetectionSuccess({
+    qrId,
+    error,
+  }: OnQrDetectionSuccessProps) {
     /** Set the error returned from the scanner */
     if (error && error !== "") {
       setErrorMessage(error);
