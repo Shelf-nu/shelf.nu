@@ -270,4 +270,5 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   OPTION: "Option",
   BOOLEAN: "Boolean",
   DATE: "Date",
+  AMOUNT: "Amount",
 };

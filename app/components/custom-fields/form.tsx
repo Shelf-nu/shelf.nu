@@ -72,6 +72,8 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   DATE: "A date picker for selecting a date.",
   MULTILINE_TEXT:
     "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes.",
+  AMOUNT:
+    "Enter numerical values to be formatted in your workspace's currency. Supports decimals.",
 };
 
 export const CustomFieldForm = ({
