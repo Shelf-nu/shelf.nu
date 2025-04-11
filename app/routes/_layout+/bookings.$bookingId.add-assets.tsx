@@ -58,11 +58,10 @@ import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -246,13 +245,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** We only update the booking if there are assets to add */
     if (assetIds.length > 0) {
       /** We update the booking with the new assets */
-      const b = await upsertBooking(
-        {
-          id: bookingId,
-          assetIds,
-        },
-        getClientHint(request)
-      );
+      const b = await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds,
+      });
 
       /** We create notes for the assets that were added */
       await createNotes({

@@ -2,11 +2,10 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
   processBooking,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -24,7 +23,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -80,13 +79,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
 
     const user = await getUserByID(userId);
-    const booking = await upsertBooking(
-      {
-        id,
-        assetIds: finalAssetIds,
-      },
-      getClientHint(request)
-    );
+    const booking = await updateBookingAssets({
+      id,
+      organizationId,
+      assetIds: finalAssetIds,
+    });
 
     await createNotes({
       content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
