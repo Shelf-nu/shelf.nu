@@ -221,45 +221,9 @@ export async function createBooking({
         connect: { id: booking.custodianUserId },
       };
     } else if (booking.custodianTeamMemberId) {
-      /**
-       * In this case we fetch the teamMember because we need to know if there is a user attached, and connect that as well
-       */
-      const custodianTeamMember = await db.teamMember
-        .findUniqueOrThrow({
-          where: { id: booking.custodianTeamMemberId },
-          select: {
-            id: true,
-            user: {
-              select: {
-                id: true,
-              },
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Cannot find team member",
-            additionalData: {
-              custodianTeamMemberId: booking.custodianTeamMemberId,
-            },
-            label,
-          });
-        });
-
       dataToCreate.custodianTeamMember = {
         connect: { id: booking.custodianTeamMemberId },
       };
-
-      /**
-       * If there is a user associated with team member,
-       * we connect it to the booking user as well.
-       */
-      if (custodianTeamMember.user?.id) {
-        dataToCreate.custodianUser = {
-          connect: { id: custodianTeamMember.user.id },
-        };
-      }
     }
 
     return await db.booking.create({
@@ -307,24 +271,24 @@ export async function updateBasicBooking({
 > &
   Pick<Booking, "id" | "organizationId">) {
   try {
-    const booking = await db.booking.findFirst({
-      where: { id, organizationId },
-      select: {
-        id: true,
-        status: true,
-        custodianUserId: true,
-      },
-    });
-
-    if (!booking) {
-      throw new ShelfError({
-        cause: null,
-        status: 404,
-        message:
-          "Could not find booking or the booking exists in another workspace.",
-        label,
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: {
+          id: true,
+          status: true,
+          custodianUserId: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          status: 404,
+          message:
+            "Could not find booking or the booking exists in another workspace.",
+          label,
+        });
       });
-    }
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
@@ -375,34 +339,15 @@ export async function updateBasicBooking({
           disconnect: true,
         };
       } else if (custodianTeamMemberId) {
-        const teamMember = await db.teamMember
-          .findUniqueOrThrow({
-            where: { id: custodianTeamMemberId },
-            select: { id: true, user: true },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Cannot find team member",
-              additionalData: { custodianTeamMemberId },
-              label,
-            });
-          });
-
         dataToUpdate.custodianTeamMember = {
           connect: { id: custodianTeamMemberId },
         };
 
-        /**
-         * If there is a user associated with team member
-         * we connect it to the booking user as well.
-         */
-        if (teamMember.user?.id) {
-          dataToUpdate.custodianUser = {
-            connect: { id: teamMember.user.id },
-          };
-        } else if (booking.custodianUserId) {
-          /** If there isn't we need to run a disconnect, so if the previous custodian had a user, we need to remove it. */
+        if (booking.custodianUserId) {
+          /**
+           * If there isn't we need to run a disconnect,
+           * so if the previous custodian had a user, we need to remove it.
+           * */
           dataToUpdate.custodianUser = {
             disconnect: true,
           };
@@ -437,26 +382,26 @@ export async function reserveBooking({
   isSelfServiceOrBase: boolean;
 }) {
   try {
-    const bookingFound = await db.booking.findFirst({
-      where: { id, organizationId },
-      include: {
-        custodianUser: true,
-        custodianTeamMember: true,
-        organization: {
-          include: { owner: { select: { email: true } } },
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: {
+          custodianUser: true,
+          custodianTeamMember: true,
+          organization: {
+            include: { owner: { select: { email: true } } },
+          },
+          _count: { select: { assets: true } },
         },
-        _count: { select: { assets: true } },
-      },
-    });
-
-    if (!bookingFound) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Booking not found. Are you sure it exists in current workspace?",
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
       });
-    }
 
     /** Validate the booking dates */
     if (!bookingFound.from || !bookingFound.to) {
@@ -488,10 +433,6 @@ export async function reserveBooking({
     const updatedBooking = await db.booking.update({
       where: { id: bookingFound.id },
       data: { status: BookingStatus.RESERVED },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        assets: true,
-      },
     });
 
     /** Start the reminder scheduler */
@@ -592,26 +533,26 @@ export async function checkoutBooking({
   intentChoice?: CheckoutIntentEnum;
 }) {
   try {
-    const bookingFound = await db.booking.findFirst({
-      where: { id, organizationId },
-      include: { assets: true },
-    });
-
-    if (!bookingFound) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Booking not found, are you sure it exists in current workspace?z",
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: { assets: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace?",
+        });
       });
-    }
 
     /**
      * This checks if the booking end date is in the past
      * We need this because sometimes the user can checkout a booking
      * that is already overdue for check in
      */
-    const isExpired = isBookingExpired({ to: bookingFound.to });
+    const isExpired = isBookingExpired({ to: bookingFound.to! });
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
@@ -623,12 +564,14 @@ export async function checkoutBooking({
     const kitIds = getKitIdsByAssets(bookingFound.assets);
     const hasKits = kitIds.length > 0;
 
+    const isEarlyCheckout = isBookingEarlyCheckout(bookingFound.from!);
+
     /**
      * If user is doing an early checkout of booking then update the
      * booking's `from` date accordingly
      */
     if (
-      isBookingEarlyCheckout(bookingFound.from!) &&
+      isEarlyCheckout &&
       intentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
       // Update originalFrom to old `from` date of booking
@@ -663,17 +606,21 @@ export async function checkoutBooking({
       return tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        include: {
-          ...BOOKING_COMMON_INCLUDE,
-          assets: true,
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-        },
+        include: BOOKING_INCLUDE_FOR_EMAIL,
       });
     });
 
+    /**
+     * If the booking is being early checkout that means that our checkout reminder
+     * has not been sent yet. So we have to cancel it.
+     * */
+    if (isEarlyCheckout) {
+      await cancelScheduler(updatedBooking);
+    }
+
     const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
     if (hours < 1) {
-      sendCheckinReminder(updatedBooking, updatedBooking.assets.length, hints);
+      sendCheckinReminder(updatedBooking, updatedBooking._count.assets, hints);
     }
 
     return updatedBooking;
@@ -698,20 +645,20 @@ export async function checkinBooking({
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
-    const bookingFound = await db.booking.findFirst({
-      where: { id, organizationId },
-      include: { assets: { select: { id: true, kitId: true } } },
-    });
-
-    if (!bookingFound) {
-      throw new ShelfError({
-        cause: null,
-        status: 404,
-        label,
-        message:
-          "Booking not found, are you sure it exists in current workspace.",
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: { assets: { select: { id: true, kitId: true } } },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          status: 404,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace.",
+        });
       });
-    }
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.COMPLETE,
@@ -720,12 +667,14 @@ export async function checkinBooking({
     const kitIds = getKitIdsByAssets(bookingFound.assets);
     const hasKits = kitIds.length > 0;
 
+    const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
+
     /**
      * If user is doing an early checkin of booking then update
      * the booking's `to` date accordingly
      */
     if (
-      isBookingEarlyCheckin(bookingFound.to!) &&
+      isEarlyCheckin &&
       intentChoice === CheckinIntentEnum["with-adjusted-date"]
     ) {
       // Update originalTo to booking's to date
@@ -760,13 +709,17 @@ export async function checkinBooking({
       return tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        include: {
-          ...BOOKING_COMMON_INCLUDE,
-          assets: true,
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-        },
+        include: BOOKING_INCLUDE_FOR_EMAIL,
       });
     });
+
+    /**
+     * If the booking is being early checkin, that means that our checkin reminder
+     * has not been sent yet. So we have to cancel it.
+     */
+    if (isEarlyCheckin) {
+      await cancelScheduler(updatedBooking);
+    }
 
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
@@ -826,11 +779,6 @@ export async function updateBookingAssets({
           connect: assetIds.map((id) => ({ id })),
         },
       },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        assets: true,
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-      },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -848,20 +796,20 @@ export async function archiveBooking({
   organizationId,
 }: Pick<Booking, "id" | "organizationId">) {
   try {
-    const booking = await db.booking.findFirst({
-      where: { id, organizationId },
-      select: { id: true, status: true },
-    });
-
-    if (!booking) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        title: "Not found",
-        message:
-          "Booking not found, are you sure it exists in current workspace?",
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          title: "Not found",
+          message:
+            "Booking not found, are you sure it exists in current workspace?",
+        });
       });
-    }
 
     /** Booking can be archived only if it is COMPLETE */
     if (booking.status !== BookingStatus.COMPLETE) {
@@ -875,11 +823,6 @@ export async function archiveBooking({
     return await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        assets: true,
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-      },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -900,23 +843,23 @@ export async function cancelBooking({
   hints: ClientHint;
 }) {
   try {
-    const bookingFound = await db.booking.findFirst({
-      where: { id, organizationId },
-      select: {
-        id: true,
-        status: true,
-        assets: { select: { id: true, kitId: true } },
-      },
-    });
-
-    if (!bookingFound) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Booking not found. Are you sure it exists in current workspace?",
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: {
+          id: true,
+          status: true,
+          assets: { select: { id: true, kitId: true } },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
       });
-    }
 
     const allowedStatusForCancel: BookingStatus[] = [
       BookingStatus.ONGOING,
@@ -956,7 +899,6 @@ export async function cancelBooking({
         where: { id: bookingFound.id },
         data: { status: BookingStatus.CANCELLED },
         include: {
-          ...BOOKING_COMMON_INCLUDE,
           assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
         },
@@ -1012,19 +954,19 @@ export async function revertBookingToDraft({
   organizationId,
 }: Pick<Booking, "id" | "organizationId">) {
   try {
-    const booking = await db.booking.findFirst({
-      where: { id, organizationId },
-      select: { id: true, status: true },
-    });
-
-    if (!booking) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Booking not found, are you sure the booking exists in current workspace?",
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found, are you sure the booking exists in current workspace?",
+        });
       });
-    }
 
     /** User can only revert the booking to DRAFT from RESERVED */
     if (booking.status !== BookingStatus.RESERVED) {
@@ -1038,11 +980,6 @@ export async function revertBookingToDraft({
     return await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.DRAFT },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        assets: true,
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-      },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -2289,12 +2226,8 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
 }
 
 /** This function checks if the booking is expired or not */
-export function isBookingExpired({ to }: { to: Booking["to"] }) {
+export function isBookingExpired({ to }: { to: NonNullable<Booking["to"]> }) {
   try {
-    if (!to) {
-      return false;
-    }
-
     const end = DateTime.fromJSDate(to);
     const now = DateTime.now();
 
