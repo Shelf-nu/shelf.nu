@@ -606,7 +606,10 @@ export async function checkoutBooking({
       return tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        include: BOOKING_INCLUDE_FOR_EMAIL,
+        include: {
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          assets: true,
+        },
       });
     });
 
@@ -709,7 +712,10 @@ export async function checkinBooking({
       return tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        include: BOOKING_INCLUDE_FOR_EMAIL,
+        include: {
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          assets: true,
+        },
       });
     });
 
