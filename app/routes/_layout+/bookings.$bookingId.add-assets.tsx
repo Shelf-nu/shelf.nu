@@ -575,6 +575,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    assetId={item.id}
                   />
                 </When>
 
@@ -582,7 +583,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   isAddedThroughKit={isAddedThroughKit}
                   showKitStatus
                   asset={item as unknown as AssetWithBooking}
-                  isCheckedOut={item.status === "CHECKED_OUT"}
+                  isCheckedOut={item.status === AssetStatus.CHECKED_OUT}
                 />
               </div>
             </div>

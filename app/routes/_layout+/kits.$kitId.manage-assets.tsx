@@ -452,10 +452,7 @@ export default function ManageAssetsInKit() {
    */
   useEffect(() => {
     const disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
-      const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
-      const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
-
-      if (isCheckedOut || isInCustody) {
+      if (asset.status !== AssetStatus.AVAILABLE) {
         acc.push(asset);
       }
 
@@ -536,10 +533,7 @@ export default function ManageAssetsInKit() {
         <List
           ItemComponent={RowComponent}
           navigate={(_assetId, item) => {
-            if (item.status === AssetStatus.CHECKED_OUT) {
-              return;
-            }
-            if (item.status === AssetStatus.IN_CUSTODY) {
+            if (item.status !== AssetStatus.AVAILABLE) {
               return;
             }
             updateItem(item);
@@ -600,9 +594,8 @@ export default function ManageAssetsInKit() {
 
 const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
   const { category, tags, location } = item;
-  const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
-  const isInCustody = item.status === AssetStatus.IN_CUSTODY;
-  const allowCursor = isInCustody || isCheckedOut ? "cursor-not-allowed" : "";
+  const allowCursor =
+    item.status !== AssetStatus.AVAILABLE ? "cursor-not-allowed" : "";
   return (
     <>
       {/* Name */}
@@ -634,11 +627,12 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    assetId={item.id}
                   />
                 </When>
 
                 {/* When asset is in other custody, show special badge */}
-                <When truthy={isInCustody}>
+                <When truthy={item.status === AssetStatus.IN_CUSTODY}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -665,8 +659,37 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   </TooltipProvider>
                 </When>
 
+                {/* Asset is signature pending */}
+                <When truthy={item.status === AssetStatus.SIGNATURE_PENDING}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                          Signature pending
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset has a pending signature
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Assets with a pending signature are in the process of
+                          being assigned to a team member. <br /> Make sure the
+                          asset has an Available status in order to add it to
+                          this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
+
                 {/* Asset is in checked out */}
-                <When truthy={isCheckedOut}>
+                <When truthy={item.status === AssetStatus.CHECKED_OUT}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>

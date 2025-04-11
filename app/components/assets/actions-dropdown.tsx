@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { AlarmClockIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -33,7 +34,9 @@ const ConditionalActionsDropdown = () => {
   const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
 
   const assetCanBeReleased = asset.custody;
-  const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+  const assetIsCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
+  const assetHasSignaturePending =
+    asset.status === AssetStatus.SIGNATURE_PENDING;
 
   const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
   const user = useUserData();
@@ -47,7 +50,7 @@ const ConditionalActionsDropdown = () => {
   } = useControlledDropdownMenu();
 
   const assetIsPartOfUnavailableKit = Boolean(
-    asset.kit && asset.kit.status !== "AVAILABLE"
+    asset.kit && asset.kit.status !== KitStatus.AVAILABLE
   );
 
   function handleMenuClose() {
@@ -145,7 +148,10 @@ const ConditionalActionsDropdown = () => {
                     }
                   >
                     <span className="flex items-center gap-1">
-                      <Icon icon="release-custody" /> Release custody
+                      <Icon icon="release-custody" />{" "}
+                      {assetHasSignaturePending
+                        ? "Cancel custody"
+                        : "Release custody"}
                     </span>
                   </Button>
                 ) : (

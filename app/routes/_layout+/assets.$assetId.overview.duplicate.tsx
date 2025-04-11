@@ -165,6 +165,7 @@ export default function DuplicateAsset() {
               <div>
                 <AssetStatusBadge
                   status={asset.status}
+                  assetId={asset.id}
                   availableToBook={asset.availableToBook}
                 />
               </div>

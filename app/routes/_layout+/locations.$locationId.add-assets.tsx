@@ -542,6 +542,7 @@ const RowComponent = ({
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
+                assetId={item.id}
               />
             </div>
           </div>

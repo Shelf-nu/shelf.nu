@@ -342,6 +342,7 @@ const ListAssetContent = ({
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
+                assetId={item.id}
               />
             </div>
           </div>
