@@ -23,7 +23,7 @@ export function ExportNrmButton() {
     /** If user is selecting all, then remove other ids and add the ALL_SELECTED_KEY */
     if (allSelected) {
       searchParamsCopy.delete(NRM_ID_PARAM);
-      searchParams.append(NRM_ID_PARAM, ALL_SELECTED_KEY);
+      searchParamsCopy.append(NRM_ID_PARAM, ALL_SELECTED_KEY);
       return `?${searchParamsCopy.toString()}`;
     }
 
