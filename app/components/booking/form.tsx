@@ -383,7 +383,7 @@ export function BookingForm({
                   required
                 >
                   <Input
-                    key={endDate}
+                    key={"end-date-input"}
                     label="End Date"
                     type="datetime-local"
                     hideLabel
