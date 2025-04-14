@@ -8,6 +8,7 @@ import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 
 import { createBooking } from "~/modules/booking/service.server";
@@ -115,6 +116,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { name, custodian, assetIds, description } = payload;
     const hints = getHints(request);
 
+    /**
+     * Validate if the user is self user and is assigning the booking to
+     * him/herself only.
+     */
+    if (isSelfServiceOrBase) {
+      const custodianFromDb = await db.teamMember.findFirst({
+        where: { id: custodian.id },
+        select: { id: true, userId: true },
+      });
+
+      if (custodianFromDb?.userId !== userId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can assign booking to themselves only.",
+          label: "Booking",
+        });
+      }
+    }
+
     const from = DateTime.fromFormat(
       formData.get("startDate")!.toString()!,
       DATE_TIME_FORMAT,
@@ -135,13 +155,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       booking: {
         from,
         to,
-        custodianTeamMemberId: custodian?.id,
+        custodianTeamMemberId: custodian.id,
         custodianUserId: custodian?.userId ?? null,
         name: name!,
         description: description ?? null,
         organizationId,
         creatorId: authSession.userId,
-        ...(isSelfServiceOrBase && { custodianUserId: authSession.userId }),
       },
       assetIds: assetIds?.length ? assetIds : [],
       hints: getClientHint(request),

@@ -171,11 +171,10 @@ export async function createBooking({
     | "description"
     | "creatorId"
     | "custodianUserId"
-    | "custodianTeamMemberId"
     | "organizationId"
     | "from"
     | "to"
-  >;
+  > & { custodianTeamMemberId: string };
 
   /**
    * Asset IDs that are connected to the booking
@@ -202,6 +201,9 @@ export async function createBooking({
        */
       originalFrom: booking.from,
       originalTo: booking.to,
+      custodianTeamMember: {
+        connect: { id: booking.custodianTeamMemberId },
+      },
     };
 
     /**
@@ -219,10 +221,6 @@ export async function createBooking({
     if (booking.custodianUserId) {
       dataToCreate.custodianUser = {
         connect: { id: booking.custodianUserId },
-      };
-    } else if (booking.custodianTeamMemberId) {
-      dataToCreate.custodianTeamMember = {
-        connect: { id: booking.custodianTeamMemberId },
       };
     }
 
@@ -326,30 +324,23 @@ export async function updateBasicBooking({
         dataToUpdate.originalTo = to;
       }
 
-      if (custodianUserId) {
-        dataToUpdate.custodianUser = {
-          connect: { id: custodianUserId },
-        };
-
-        /**
-         * To change custodian we disconnect the old team member
-         * and connect new one
-         */
-        dataToUpdate.custodianTeamMember = {
-          disconnect: true,
-        };
-      } else if (custodianTeamMemberId) {
+      if (custodianTeamMemberId) {
         dataToUpdate.custodianTeamMember = {
           connect: { id: custodianTeamMemberId },
         };
 
+        /**
+         * If custodian had a user, we need to remove it
+         */
         if (booking.custodianUserId) {
-          /**
-           * If there isn't we need to run a disconnect,
-           * so if the previous custodian had a user, we need to remove it.
-           * */
           dataToUpdate.custodianUser = {
             disconnect: true,
+          };
+        }
+
+        if (custodianUserId) {
+          dataToUpdate.custodianUser = {
+            connect: { id: custodianUserId },
           };
         }
       }
