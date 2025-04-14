@@ -67,13 +67,23 @@ const getSchema = ({
       }
       return v;
     }),
+    amount: required
+      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
+      : z.coerce.number(params).optional().nullable(),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
 export type CustomFieldZodSchema = {
   id: string;
   name: string;
-  type: "text" | "number" | "date" | "boolean" | "option" | "multiline_text";
+  type:
+    | "text"
+    | "number"
+    | "date"
+    | "boolean"
+    | "option"
+    | "multiline_text"
+    | "amount";
   helpText: string;
   required: boolean;
   options?: CustomField["options"];
