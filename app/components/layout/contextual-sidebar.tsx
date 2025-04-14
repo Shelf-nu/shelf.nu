@@ -50,24 +50,31 @@ export default function ContextualSidebar() {
           "flex w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]"
         )}
       >
-        <div className="flex h-screen w-full flex-col">
-          <Header
-            title={
-              // We render as child with span to avoid nesting of H2
-              <SheetTitle asChild>
-                <span>{data.header.title}</span>
-              </SheetTitle>
-            }
-            subHeading={
-              <SheetDescription>{data.header.subHeading}</SheetDescription>
-            }
-            hideBreadcrumbs
-            classNames="text-left mb-3 [&>div]:px-6 mx-0"
-          />
-          <div className="h-full flex-1 overflow-hidden scrollbar-thin">
-            <Outlet />
+        {showSidebar && (
+          <div className="flex h-screen w-full flex-col">
+            {data?.header?.title && (
+              <Header
+                title={
+                  data?.header?.title && (
+                    // We render as child with span to avoid nesting of H2
+                    <SheetTitle asChild>
+                      <span>{data.header.title}</span>
+                    </SheetTitle>
+                  )
+                }
+                subHeading={
+                  <SheetDescription>{data.header.subHeading}</SheetDescription>
+                }
+                hideBreadcrumbs
+                classNames="text-left mb-3 [&>div]:px-6 mx-0"
+              />
+            )}
+
+            <div className="h-full flex-1 overflow-hidden scrollbar-thin">
+              <Outlet />
+            </div>
           </div>
-        </div>
+        )}
       </SheetContent>
     </Sheet>
   );
