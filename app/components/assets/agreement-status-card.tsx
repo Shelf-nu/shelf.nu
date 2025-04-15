@@ -1,31 +1,30 @@
-import { CustodySignatureStatus } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
+import type { User } from "@prisma/client";
 import { PenLineIcon } from "lucide-react";
-import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 
 type AgreementStatusCardProps = {
-  asset: SerializeFrom<typeof loader>["asset"];
+  className?: string;
+  receiptId: string | null;
+  isSignaturePending: boolean;
+  custodian: {
+    name: string;
+    user?: Partial<Pick<User, "firstName" | "lastName" | "email">> | null;
+  };
+  agreementName: string;
 };
 
 export default function AgreementStatusCard({
-  asset,
+  className,
+  receiptId,
+  isSignaturePending,
+  custodian,
+  agreementName,
 }: AgreementStatusCardProps) {
-  if (!asset.custody) {
-    return null;
-  }
-
-  const receiptId = asset.custodyReceipts.length
-    ? asset.custodyReceipts[0].id
-    : null;
-
-  const isSignaturePending =
-    asset.custody.signatureStatus === CustodySignatureStatus.PENDING;
-
   return (
-    <Card className="my-3 flex items-center gap-2">
+    <Card className={tw("my-3 flex items-center gap-2", className)}>
       <div className="flex size-12 items-center justify-center rounded-full bg-gray-50">
         <div className="flex size-10 items-center justify-center rounded-full bg-gray-100 text-gray-700">
           <PenLineIcon className="size-4" />
@@ -35,12 +34,9 @@ export default function AgreementStatusCard({
       <div>
         <p className="font-semibold">
           {isSignaturePending ? (
-            <>
-              Awaiting signature from{" "}
-              {resolveTeamMemberName(asset.custody.custodian)}
-            </>
+            <>Awaiting signature from {resolveTeamMemberName(custodian)}</>
           ) : (
-            asset.custody?.agreement?.name
+            agreementName
           )}
         </p>
 

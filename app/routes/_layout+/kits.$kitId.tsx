@@ -9,6 +9,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -131,6 +132,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   },
                 },
               },
+              agreement: true,
             },
           },
           qrCodes: true,
@@ -517,22 +519,35 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          <CustodyCard
-            // @ts-expect-error - we are passing the correct props
-            booking={currentBooking || undefined}
-            hasPermission={userHasPermission({
-              roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
-            })}
-            custody={kit.custody}
-          />
+          {kit.custody ? (
+            <AgreementStatusCard
+              className="my-0"
+              custodian={kit.custody.custodian}
+              receiptId="@TODO"
+              agreementName={kit.custody.agreement?.name ?? ""}
+              isSignaturePending={kit.status === KitStatus.SIGNATURE_PENDING}
+            />
+          ) : null}
+
+          <When truthy={kit.status === KitStatus.IN_CUSTODY}>
+            <CustodyCard
+              // @ts-expect-error - we are passing the correct props
+              booking={currentBooking || undefined}
+              hasPermission={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+              custody={kit.custody}
+            />
+          </When>
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <Card className="my-3 flex justify-between">
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
+
           <QrPreview
             qrObj={qrObj}
             item={{

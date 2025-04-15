@@ -1,5 +1,9 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodySignatureStatus,
+  CustomFieldType,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -502,7 +506,21 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <AgreementStatusCard asset={asset} />
+          {asset.custody ? (
+            <AgreementStatusCard
+              custodian={asset.custody.custodian}
+              agreementName={asset.custody?.agreement?.name ?? ""}
+              receiptId={
+                asset.custodyReceipts.length
+                  ? asset.custodyReceipts[0].id
+                  : null
+              }
+              isSignaturePending={
+                asset.custody?.signatureStatus ===
+                CustodySignatureStatus.PENDING
+              }
+            />
+          ) : null}
 
           <When truthy={asset.status === AssetStatus.IN_CUSTODY}>
             <CustodyCard
