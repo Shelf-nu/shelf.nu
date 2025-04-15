@@ -612,16 +612,22 @@ export async function checkoutBooking({
       });
     });
 
-    /**
-     * If the booking is being early checkout that means that our checkout reminder
-     * has not been sent yet. So we have to cancel it.
-     * */
-    if (isEarlyCheckout) {
+    /** Calculate the time difference between the booking.to and the current time */
+    const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
+    const lessThanOneHourToCheckin = hours < 1;
+    // Don't schedule any reminders if the booking is already expired/overdue
+    if (isExpired) {
+      /**
+       * If its expired that means its status will directly go to OVERDUE,
+       * so we can cancel everything and dont schedule any more events */
       await cancelScheduler(updatedBooking);
+      return updatedBooking;
     }
 
-    const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
-    if (hours < 1) {
+    // For any checkout (early or not), what matters is time until check-in
+    if (lessThanOneHourToCheckin) {
+      // Less than 1 hour until check-in time
+      // Send checkin reminder immediately
       sendCheckinReminder(updatedBooking, updatedBooking._count.assets, hints);
     }
 
@@ -982,10 +988,15 @@ export async function revertBookingToDraft({
       });
     }
 
-    return await db.booking.update({
+    const cancelledBooking = await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.DRAFT },
     });
+
+    /** Cancels all scheduled events */
+    await cancelScheduler(cancelledBooking);
+
+    return cancelledBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,

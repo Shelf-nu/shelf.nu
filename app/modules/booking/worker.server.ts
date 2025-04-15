@@ -68,6 +68,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (booking.to) {
     const when = new Date(booking.to);
     when.setHours(when.getHours() - 1);
+
     await scheduleNextBookingJob({
       data: {
         ...data,
@@ -108,7 +109,9 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   }
 
   //schedule the next job
-  if (booking.to) {
+  // if the booking is ongoing and has a to date, we schedule the overdue handler
+  // this is to make sure we dont schedule the overdue handler if the booking is already OVERDUE && still RESERVED
+  if (booking.to && booking.status === BookingStatus.ONGOING) {
     const when = new Date(booking.to);
     await scheduleNextBookingJob({
       data: {
