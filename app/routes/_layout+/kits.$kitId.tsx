@@ -376,6 +376,7 @@ export default function KitDetails() {
       <Header
         subHeading={
           <KitStatusBadge
+            kitId={kit.id}
             status={kit.status}
             availableToBook={!kitHasUnavailableAssets}
           />
@@ -597,7 +598,7 @@ function ListContent({
                 </Button>
               </span>
               <AssetStatusBadge
-                assetId={item.id}
+                shareAgreementUrl={`/kits/${item.id}/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

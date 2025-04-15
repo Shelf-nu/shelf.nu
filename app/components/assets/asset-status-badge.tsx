@@ -33,18 +33,18 @@ export const assetStatusColorMap = (status: AssetStatus) => {
 export function AssetStatusBadge({
   status,
   availableToBook = true,
-  assetId,
+  shareAgreementUrl,
 }: {
   status: AssetStatus;
   availableToBook: boolean;
-  assetId: string;
+  shareAgreementUrl: string;
 }) {
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
   return (
     <div className="flex items-center gap-[6px]">
       <When
-        truthy={status === AssetStatus.SIGNATURE_PENDING && !!assetId}
+        truthy={status === AssetStatus.SIGNATURE_PENDING}
         fallback={
           <Badge color={assetStatusColorMap(status)}>
             {userFriendlyAssetStatus(status)}
@@ -52,7 +52,8 @@ export function AssetStatusBadge({
         }
       >
         <AwaitingSignatureTooltip
-          assetId={assetId!}
+          type="asset"
+          navigateTo={shareAgreementUrl}
           trigger={
             <Badge
               color={assetStatusColorMap(status)}

@@ -62,6 +62,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -575,7 +576,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
-                    assetId={item.id}
+                    shareAgreementUrl={getShareAgreementUrl(item)}
                   />
                 </When>
 

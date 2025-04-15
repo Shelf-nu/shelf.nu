@@ -274,6 +274,7 @@ function ListContent({
               </span>
               <div>
                 <KitStatusBadge
+                  kitId={item.id}
                   status={item.status}
                   availableToBook={!item.assets.some((a) => !a.availableToBook)}
                 />

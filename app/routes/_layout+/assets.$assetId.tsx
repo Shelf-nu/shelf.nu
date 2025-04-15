@@ -30,6 +30,7 @@ import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -293,7 +294,7 @@ export default function AssetDetailsPage() {
               <AssetStatusBadge
                 status={asset.status}
                 availableToBook={asset.availableToBook}
-                assetId={asset.id}
+                shareAgreementUrl={getShareAgreementUrl(asset)}
               />
             </div>
           </div>

@@ -60,6 +60,7 @@ import {
 } from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -422,7 +423,7 @@ const ListAssetContent = ({
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
-                  assetId={item.id}
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                 />
               </div>
             </div>

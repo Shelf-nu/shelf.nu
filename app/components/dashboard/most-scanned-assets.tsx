@@ -1,6 +1,7 @@
 import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -98,7 +99,7 @@ const Row = ({
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
-                assetId={item.id}
+                shareAgreementUrl={getShareAgreementUrl(item)}
               />
             </div>
           </div>

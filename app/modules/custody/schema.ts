@@ -41,4 +41,5 @@ export const createCustodianSchema = (errorMessage?: string) =>
 /** Used for assigning singular custody for kit or asset */
 export const AssignCustodySchema = z.object({
   custodian: createCustodianSchema(),
+  agreement: z.string().optional(),
 });

@@ -1,7 +1,9 @@
-import type { Prisma } from "@prisma/client";
+import { useState } from "react";
+import type { CustodyAgreement, Prisma } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
   KitStatus,
   OrganizationRoles,
 } from "@prisma/client";
@@ -15,6 +17,7 @@ import {
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import CustodyAgreementSelector from "~/components/custody/custody-agreement-selector";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
@@ -160,7 +163,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -168,7 +171,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const { custodian } = parseData(
+    const { custodian, agreement } = parseData(
       await request.formData(),
       AssignCustodySchema,
       {
@@ -198,54 +201,136 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    const kit = await db.kit.update({
-      where: { id: kitId },
-      data: {
-        status: KitStatus.IN_CUSTODY,
-        custody: { create: { custodian: { connect: { id: custodianId } } } },
-      },
-      include: {
-        assets: true,
-      },
-    });
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired"
+    > | null = null;
 
-    await Promise.all([
-      /**
-       * Assign custody to all assets of kit
-       */
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: { custodian: { connect: { id: custodianId } } },
+    /** Find and validate the agreement if it is provided by user */
+    if (agreement) {
+      agreementFound = await db.custodyAgreement
+        .findUniqueOrThrow({
+          where: { id: agreement, organizationId },
+          select: { id: true, name: true, signatureRequired: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Could not find find the agreement, are you sure it exists in the current workspace.",
+            label: "Kit",
+          });
+        });
+    }
+
+    const kitFound = await db.kit
+      .findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: { id: true, assets: { select: { id: true, title: true } } },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Kit",
+          message:
+            "Kit not found, are you sure it exists in the current workspace?",
+        });
+      });
+
+    const updatedKit = await db.$transaction(async (tx) => {
+      const kit = await tx.kit.update({
+        where: { id: kitId },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? KitStatus.SIGNATURE_PENDING
+            : KitStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: custodian.id } },
+              /**
+               * If agreement requires a signature then signature status is PENDING
+               * otherwise signature status is NOT_REQUIRED
+               */
+              signatureStatus: agreementFound?.signatureRequired
+                ? CustodySignatureStatus.PENDING
+                : CustodySignatureStatus.NOT_REQUIRED,
+              ...(agreementFound
+                ? {
+                    agreement: { connect: { id: agreementFound.id } },
+                  }
+                : {}),
             },
           },
-        })
-      ),
-      /**
-       * Create note for each asset
-       */
-      db.note.createMany({
-        data: kit.assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
+        },
+      });
+
+      /* Assign custody to all assets of the kit */
+      await Promise.all(
+        kitFound.assets.map((asset) =>
+          tx.asset.update({
+            where: { id: asset.id },
+            data: {
+              status: agreementFound?.signatureRequired
+                ? AssetStatus.SIGNATURE_PENDING
+                : AssetStatus.IN_CUSTODY,
+              custody: {
+                create: {
+                  custodian: { connect: { id: custodian.id } },
+                  /**
+                   * If agreement requires a signature then signature status is PENDING
+                   * otherwise signature status is NOT_REQUIRED
+                   */
+                  signatureStatus: agreementFound?.signatureRequired
+                    ? CustodySignatureStatus.PENDING
+                    : CustodySignatureStatus.NOT_REQUIRED,
+                  ...(agreementFound
+                    ? {
+                        agreement: { connect: { id: agreementFound.id } },
+                      }
+                    : {}),
+                },
+              },
+            },
+          })
+        )
+      );
+
+      /* Create notes for all assets in kit */
+      await tx.note.createMany({
+        data: kitFound.assets.map((asset) => ({
+          content: agreementFound?.signatureRequired
+            ? `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+                isSelfService ? "taken" : `given **${custodianName.trim()}**`
+              } custody over **${asset.title.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`
+            : `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
+                kit.name
+              }](/kits/${kit.id})**`,
+          type: "UPDATE" as const,
           userId,
           assetId: asset.id,
         })),
-      }),
-    ]);
+      });
 
-    sendNotification({
-      title: `‘${kit.name}’ is now in custody of ${custodianName}`,
-      message:
-        "Remember, this kit will be unavailable until it is manually checked in.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
+      return kit;
     });
+
+    if (agreementFound?.signatureRequired) {
+      sendNotification({
+        title: `'${updatedKit.name}' would go in custody of ${custodianName}`,
+        message:
+          "This kit will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    } else {
+      sendNotification({
+        title: `‘${updatedKit.name}’ is now in custody of ${custodianName}`,
+        message:
+          "Remember, this kit will be unavailable until it is manually checked in.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    }
 
     return redirect(`/kits/${kitId}`);
   } catch (cause) {
@@ -263,6 +348,7 @@ export default function GiveKitCustody() {
   const disabled = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
   const { kit, teamMembers } = useLoaderData<typeof loader>();
+  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
 
   const { isSelfService } = useUserRoleHelper();
 
@@ -318,10 +404,19 @@ export default function GiveKitCustody() {
               }),
             })}
             renderItem={(item) => resolveTeamMemberName(item, true)}
+            onChange={(value) => {
+              setHasCustodianSelected(!!value);
+            }}
           />
         </div>
+
+        <CustodyAgreementSelector
+          className="my-5"
+          hasCustodianSelected={hasCustodianSelected}
+        />
+
         {error ? (
-          <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
+          <div className="mb-8 text-sm text-error-500">{error}</div>
         ) : null}
 
         {hasBookings ? (

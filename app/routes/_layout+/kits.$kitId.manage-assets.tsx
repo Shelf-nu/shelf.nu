@@ -41,6 +41,7 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -627,7 +628,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
-                    assetId={item.id}
+                    shareAgreementUrl={getShareAgreementUrl(item)}
                   />
                 </When>
 

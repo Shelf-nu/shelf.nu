@@ -33,6 +33,7 @@ import {
 } from "~/modules/asset/service.server";
 
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -542,7 +543,7 @@ const RowComponent = ({
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
-                assetId={item.id}
+                shareAgreementUrl={getShareAgreementUrl(item)}
               />
             </div>
           </div>

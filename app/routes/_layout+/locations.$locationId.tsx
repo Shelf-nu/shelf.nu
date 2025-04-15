@@ -31,6 +31,7 @@ import { Td, Th } from "~/components/table";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -342,7 +343,7 @@ const ListAssetContent = ({
               <AssetStatusBadge
                 status={item.status}
                 availableToBook={item.availableToBook}
-                assetId={item.id}
+                shareAgreementUrl={getShareAgreementUrl(item)}
               />
             </div>
           </div>

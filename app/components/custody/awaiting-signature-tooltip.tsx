@@ -4,22 +4,24 @@ import Icon from "../icons/icon";
 import { CustomTooltip } from "../shared/custom-tooltip";
 
 type AwaitingSignatureTooltipProps = {
-  assetId: string;
   trigger?: React.ReactElement<{
     onClick: (event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => void;
   }>;
+  navigateTo: string;
+  type: "asset" | "kit";
 };
 
 export default function AwaitingSignatureTooltip({
-  assetId,
   trigger,
+  navigateTo,
+  type,
 }: AwaitingSignatureTooltipProps) {
   const navigate = useNavigate();
 
   function handleClick(event: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     event.preventDefault();
     event.stopPropagation();
-    navigate(`/assets/${assetId}/overview/share-agreement`);
+    navigate(navigateTo);
   }
 
   return (
@@ -30,8 +32,8 @@ export default function AwaitingSignatureTooltip({
             Awaiting signature to complete custody assignment
           </h6>
           <div className="whitespace-normal text-xs font-medium text-gray-500">
-            Asset status will change to "In custody" after signing. To cancel
-            custody assignment, go to{" "}
+            {type === "kit" ? "Kit" : "Asset"} status will change to "In
+            custody" after signing. To cancel custody assignment, go to{" "}
             <span className="font-semibold text-gray-600">
               {"Actions > Release Custody"}
             </span>

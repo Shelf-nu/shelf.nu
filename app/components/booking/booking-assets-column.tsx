@@ -7,6 +7,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { tw } from "~/utils/tw";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
@@ -314,9 +315,9 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
               </span>
               <div>
                 <AssetStatusBadge
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                   status={item.status}
                   availableToBook={item.availableToBook}
-                  assetId={item.id}
                 />
               </div>
             </div>
