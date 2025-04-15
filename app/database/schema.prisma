@@ -602,6 +602,7 @@ model CustodyAgreement {
   custodies             Custody[]
   custodyAgreementFiles CustodyAgreementFile[]
   custodyReceipts       CustodyReceipt[]
+  kitCustodies          KitCustody[]
 }
 
 model CustodyAgreementFile {
@@ -824,6 +825,7 @@ model Kit {
 
 enum KitStatus {
   AVAILABLE
+  SIGNATURE_PENDING
   IN_CUSTODY
   CHECKED_OUT
 }
@@ -836,6 +838,15 @@ model KitCustody {
 
   kit   Kit    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   kitId String @unique
+
+  agreement   CustodyAgreement? @relation(fields: [agreementId], references: [id])
+  agreementId String?
+
+  agreementSigned   Boolean?                @default(false)
+  signatureStatus   CustodySignatureStatus? @default(NOT_REQUIRED)
+  signatureText     String?
+  signatureImage    String?
+  agreementSignedOn DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
