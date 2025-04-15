@@ -1,6 +1,7 @@
 import type {
   Booking,
   Kit,
+  KitCustody,
   Organization,
   Prisma,
   Qr,
@@ -1258,6 +1259,114 @@ export async function getAvailableKitAssetForBooking(
         cause?.message ||
         "Something went wrong while getting available assets.",
       label: "Assets",
+    });
+  }
+}
+
+export async function getAgreementByKitCustodyId({
+  custodyId,
+  organizationId,
+}: {
+  custodyId: KitCustody["id"];
+  organizationId: Kit["organizationId"];
+}) {
+  try {
+    const kitCustody = await db.kitCustody.findUniqueOrThrow({
+      where: { id: custodyId },
+      include: {
+        kit: { select: { id: true, name: true, organizationId: true } },
+        agreement: true,
+        custodian: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (organizationId && organizationId !== kitCustody.kit.organizationId) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "This custody belongs to any other workspace.",
+      });
+    }
+
+    const custodyAgreement = kitCustody.agreement;
+    if (!custodyAgreement) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "There is not an agreement associated with this custody.",
+      });
+    }
+
+    const custodian = kitCustody.custodian;
+    if (!custodian) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "There is no custodian associated with this custody.",
+      });
+    }
+
+    return {
+      kit: kitCustody.kit,
+      custodyAgreement,
+      custody: kitCustody,
+      custodian,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error fetching agreement",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while fetching the custody agreement. Please try again or contact support.",
+    });
+  }
+}
+
+export async function getAgreementByKitId({
+  kitId,
+  organizationId,
+}: {
+  kitId: Kit["id"];
+  organizationId: Kit["organizationId"];
+}) {
+  try {
+    const custody = await db.kitCustody
+      .findUniqueOrThrow({
+        where: { kitId },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message: "There is no custody over this kit.",
+        });
+      });
+
+    return await getAgreementByKitCustodyId({
+      custodyId: custody.id,
+      organizationId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error fetching agreement",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while fetching the custody agreement. Please try again or contact support.",
     });
   }
 }

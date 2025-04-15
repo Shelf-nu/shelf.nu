@@ -1,20 +1,14 @@
-import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import Input from "~/components/forms/input";
-import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
-import { Button } from "~/components/shared/button";
-import When from "~/components/when/when";
+import ShareAgreementContent from "~/components/custody/share-agreement-content";
 import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByAssetId } from "~/modules/custody-agreement";
 import { assetCustodyAssignedWithAgreementEmailText } from "~/modules/invite/helpers";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -128,75 +122,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 export default function ShareAgreement() {
   const { custodyAgreement, custodian, signUrl, isCustodianNrm } =
     useLoaderData<typeof loader>();
-  const [isCopied, setIsCopied] = useState(false);
-
-  const transition = useNavigation();
-  const disabled = isFormProcessing(transition.state);
-
-  async function handleCopy() {
-    await navigator.clipboard.writeText(signUrl).then(() => {
-      setIsCopied(true);
-
-      setTimeout(() => {
-        setIsCopied(false);
-      }, 1000);
-    });
-  }
 
   return (
-    <div className="modal-content-wrapper">
-      <ShareAssetIcon className="mb-3" />
-
-      <h4 className="mb-1">{custodyAgreement.name}</h4>
-      <p className="mb-5 text-gray-600">
-        This PDF agreement page has been published.{" "}
-        <span className="font-semibold">
-          {resolveTeamMemberName(custodian)}
-        </span>{" "}
-        {isCustodianNrm
-          ? `will be able to visit this page to read (and sign) the document. Make sure
-          you send them the link. You can visit the asset page to open this modal in
-          case you need to acquire the share link again.`
-          : `will receive an email and will be able to visit this page to read (and
-        sign) the document. You can visit the asset page to open this modal in
-        case you need to acquire the share link or re-send the email.`}
-      </p>
-      <div className="font-semibold text-gray-600">Share link</div>
-
-      <div className="mb-5 flex items-end gap-x-2">
-        <Input
-          readOnly
-          className="flex-1 cursor-text"
-          value={signUrl}
-          disabled
-          label=""
-        />
-
-        <Button onClick={handleCopy} variant="secondary" className="h-fit p-3">
-          {isCopied ? (
-            <CheckIcon className="size-4" />
-          ) : (
-            <CopyIcon className="size-4" />
-          )}
-        </Button>
-
-        <When truthy={!isCustodianNrm}>
-          <Form method="post">
-            <Button
-              disabled={disabled}
-              type="submit"
-              variant="secondary"
-              className="h-fit p-[9px]"
-            >
-              <SendRotatedIcon />
-            </Button>
-          </Form>
-        </When>
-      </div>
-
-      <Button to=".." variant="secondary" className="h-fit w-full">
-        Close
-      </Button>
-    </div>
+    <ShareAgreementContent
+      type="asset"
+      agreementName={custodyAgreement.name}
+      custodian={custodian}
+      isCustodianNrm={isCustodianNrm}
+      signUrl={signUrl}
+    />
   );
 }

@@ -451,15 +451,6 @@ export async function getAgreementByCustodyId({
     }
 
     const custodian = custody.custodian;
-
-    if (!custodyAgreement) {
-      throw new ShelfError({
-        cause: null,
-        message: "Agreement not found.",
-        label: "Assets",
-      });
-    }
-
     if (!custodian) {
       throw new ShelfError({
         cause: null,
