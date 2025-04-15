@@ -12,12 +12,13 @@ import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
+import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
@@ -29,7 +30,12 @@ import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
-import { bookingSchedulerEventsEnum } from "./constants";
+import {
+  BOOKING_COMMON_INCLUDE,
+  BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_SCHEDULER_EVENTS_ENUM,
+  BOOKING_WITH_ASSETS_INCLUDE,
+} from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -38,30 +44,21 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
-import type { ClientHint, SchedulerData } from "./types";
-// eslint-disable-next-line import/no-cycle
-import { getBookingWhereInput } from "./utils.server";
+import type {
+  BookingLoaderResponse,
+  BookingWithExtraInclude,
+  SchedulerData,
+} from "./types";
+import {
+  formatBookingsDates,
+  getBookingWhereInput,
+  isBookingExpired,
+} from "./utils.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
-
-/** Includes needed for booking to have all data required for emails */
-export const BOOKING_INCLUDE_FOR_EMAIL = {
-  custodianTeamMember: true,
-  custodianUser: true,
-  organization: {
-    include: {
-      owner: {
-        select: { email: true },
-      },
-    },
-  },
-  _count: {
-    select: { assets: true },
-  },
-};
 
 async function cancelScheduler(b?: Booking | null) {
   try {
@@ -152,11 +149,6 @@ async function updateBookingKitStates({
   }
 }
 
-export const BOOKING_COMMON_INCLUDE = {
-  custodianTeamMember: true,
-  custodianUser: true,
-} as Prisma.BookingInclude;
-
 export async function createBooking({
   booking,
   assetIds,
@@ -201,6 +193,9 @@ export async function createBooking({
        */
       originalFrom: booking.from,
       originalTo: booking.to,
+      /**
+       * Custodian team member will always be passed,
+       * even if assigning to a user, so we directly connect it to the booking */
       custodianTeamMember: {
         connect: { id: booking.custodianTeamMemberId },
       },
@@ -303,6 +298,7 @@ export async function updateBasicBooking({
     if (notAllowedStatus.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
+        title: "Update failed",
         message: "Booking update is not allowed at this state of booking",
         label,
       });
@@ -324,28 +320,43 @@ export async function updateBasicBooking({
         dataToUpdate.originalTo = to;
       }
 
+      /**
+       * Custodian team member should always be passed.
+       * This is also validated by the schema `NewBookingFormSchema`.
+       * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
+       */
       if (custodianTeamMemberId) {
         dataToUpdate.custodianTeamMember = {
           connect: { id: custodianTeamMemberId },
         };
 
         /**
-         * If custodian had a user, we need to remove it
+         * If a userId is passed, meaning the team member is connected to a user, we connct to it.
+         * This will override the value if there were any previous custodians`
          */
-        if (booking.custodianUserId) {
-          dataToUpdate.custodianUser = {
-            disconnect: true,
-          };
-        }
-
         if (custodianUserId) {
           dataToUpdate.custodianUser = {
             connect: { id: custodianUserId },
           };
+        } else if (booking.custodianUserId) {
+          /**
+           * If previous booking custodian had a user, we need to remove it
+           * because we are now connecting to an NRM. If we dont do this the teamMemberID and the userId will be connected to different entities
+           */
+          dataToUpdate.custodianUser = {
+            disconnect: true,
+          };
         }
+      } else {
+        throw new ShelfError({
+          cause: null,
+          title: "Update failed",
+          message:
+            "Custodian team member is required to update booking. This should not happen. Please refresh the page and try agian. If the issue persists, contact support",
+          label,
+        });
       }
     }
-
     return await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
@@ -354,8 +365,10 @@ export async function updateBasicBooking({
     throw new ShelfError({
       cause,
       label,
-      title: "Error",
-      message: "Could not update the details of booking",
+      title: "Update failed",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Could not update the details of booking",
     });
   }
 }
@@ -377,12 +390,7 @@ export async function reserveBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          custodianUser: true,
-          custodianTeamMember: true,
-          organization: {
-            include: { owner: { select: { email: true } } },
-          },
-          _count: { select: { assets: true } },
+          ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       })
       .catch((cause) => {
@@ -434,7 +442,7 @@ export async function reserveBooking({
       data: {
         id: bookingFound.id,
         hints,
-        eventType: bookingSchedulerEventsEnum.checkoutReminder,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
       },
       when,
     });
@@ -1424,25 +1432,6 @@ export async function deleteBooking(
   }
 }
 
-const BOOKING_WITH_ASSETS_INCLUDE = {
-  ...BOOKING_COMMON_INCLUDE,
-  assets: {
-    select: {
-      id: true,
-      availableToBook: true,
-      status: true,
-      kitId: true,
-    },
-  },
-} satisfies Prisma.BookingInclude;
-
-type BookingWithExtraInclude<T extends Prisma.BookingInclude | undefined> =
-  T extends Prisma.BookingInclude
-    ? Prisma.BookingGetPayload<{
-        include: MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
-      }>
-    : Prisma.BookingGetPayload<{ include: typeof BOOKING_WITH_ASSETS_INCLUDE }>;
-
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
@@ -2127,37 +2116,6 @@ export async function getExistingBookingDetails(bookingId: string) {
   }
 }
 
-export function formatBookingsDates(bookings: Booking[], request: Request) {
-  const dateFormat = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
-
-  return bookings.map((b) => {
-    if (b.from && b.to) {
-      const displayFrom = dateFormat.format(b.from).split(",");
-      const displayTo = dateFormat.format(b.to).split(",");
-
-      const displayOriginalFrom = b.originalFrom
-        ? dateFormat.format(b.originalFrom).split(",")
-        : null;
-
-      const displayOriginalTo = b.originalTo
-        ? dateFormat.format(b.originalTo).split(",")
-        : null;
-
-      return {
-        ...b,
-        displayFrom,
-        displayTo,
-        displayOriginalFrom,
-        displayOriginalTo,
-      };
-    }
-    return b;
-  });
-}
-
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][]
 ): Promise<string[]> {
@@ -2222,18 +2180,69 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
   }
 }
 
-/** This function checks if the booking is expired or not */
-export function isBookingExpired({ to }: { to: NonNullable<Booking["to"]> }) {
-  try {
-    const end = DateTime.fromJSDate(to);
-    const now = DateTime.now();
+/**
+ * Shared function to load booking data for both assets and kits routes for add-to-existing-booking
+ * @param params - Parameters required for loading bookings
+ * @returns Formatted booking data response
+ */
+export async function loadBookingsData({
+  request,
+  organizationId,
+  userId,
+  isSelfServiceOrBase,
+  ids,
+}: {
+  request: Request;
+  organizationId: string;
+  userId: string;
+  isSelfServiceOrBase: boolean;
+  ids?: string[];
+}): Promise<BookingLoaderResponse> {
+  // Get search parameters and pagination settings
+  const searchParams = getCurrentSearchParams(request);
+  const { page, search } = getParamsValues(searchParams);
+  const perPage = 20;
 
-    return end < now;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while checking if the booking is expired.",
-      label,
-    });
-  }
+  // Fetch bookings with filters
+  const { bookings, bookingCount } = await getBookings({
+    organizationId,
+    page,
+    perPage,
+    search,
+    userId,
+    statuses: ["DRAFT", "RESERVED"],
+    ...(isSelfServiceOrBase && {
+      custodianUserId: userId,
+    }),
+  });
+
+  // Set up header and model name
+  const header: HeaderData = {
+    title: "Bookings",
+  };
+
+  const modelName = {
+    singular: "booking",
+    plural: "bookings",
+  };
+
+  const totalPages = Math.ceil(bookingCount / perPage);
+  const hints = getClientHint(request);
+
+  // Format booking dates
+  const items = formatBookingsDates(bookings, request);
+
+  return {
+    showModal: true,
+    header,
+    bookings: items,
+    search,
+    page,
+    bookingCount,
+    totalPages,
+    perPage,
+    modelName,
+    ids,
+    hints,
+  };
 }

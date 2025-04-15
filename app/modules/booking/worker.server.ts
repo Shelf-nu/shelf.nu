@@ -8,16 +8,16 @@ import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { bookingSchedulerEventsEnum } from "./constants";
+import {
+  BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_SCHEDULER_EVENTS_ENUM,
+} from "./constants";
 import {
   checkoutReminderEmailContent,
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import {
-  BOOKING_INCLUDE_FOR_EMAIL,
-  scheduleNextBookingJob,
-} from "./service.server";
+import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
@@ -71,7 +71,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     await scheduleNextBookingJob({
       data: {
         ...data,
-        eventType: bookingSchedulerEventsEnum.checkinReminder,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
       },
       when,
     });
@@ -111,7 +111,10 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (booking.to) {
     const when = new Date(booking.to);
     await scheduleNextBookingJob({
-      data: { ...data, eventType: bookingSchedulerEventsEnum.overdueHandler },
+      data: {
+        ...data,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
       when,
     });
   }
@@ -139,7 +142,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     await scheduleNextBookingJob({
       data: {
         ...data,
-        eventType: bookingSchedulerEventsEnum.overdueReminder,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueReminder,
       },
       when,
     });
@@ -196,13 +199,13 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const event2HandlerMap: Record<
-  bookingSchedulerEventsEnum,
+  BOOKING_SCHEDULER_EVENTS_ENUM,
   (job: PgBoss.Job<SchedulerData>) => Promise<void>
 > = {
-  [bookingSchedulerEventsEnum.checkoutReminder]: checkoutReminder,
-  [bookingSchedulerEventsEnum.checkinReminder]: checkinReminder,
-  [bookingSchedulerEventsEnum.overdueHandler]: overdueHandler,
-  [bookingSchedulerEventsEnum.overdueReminder]: overdueReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder]: checkoutReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder]: checkinReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler]: overdueHandler,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.overdueReminder]: overdueReminder,
 };
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */

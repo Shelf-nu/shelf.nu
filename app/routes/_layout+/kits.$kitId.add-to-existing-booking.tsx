@@ -9,9 +9,9 @@ import { Button } from "~/components/shared/button";
 
 import {
   getExistingBookingDetails,
+  loadBookingsData,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { loadBookingsData } from "~/modules/booking/utils.server";
 import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";

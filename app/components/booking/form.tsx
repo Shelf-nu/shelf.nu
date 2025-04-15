@@ -363,7 +363,11 @@ export function BookingForm({
                        * in that case, we have to update endDate to be the endDay date of startDate.
                        */
                       const newStartDate = new Date(event.target.value);
-                      if (endDate && newStartDate > new Date(endDate)) {
+                      if (
+                        isNewBooking &&
+                        endDate &&
+                        newStartDate > new Date(endDate)
+                      ) {
                         const newEndDate = dateForDateTimeInputValue(
                           new Date(newStartDate.setHours(18, 0, 0))
                         );

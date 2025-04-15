@@ -8,10 +8,10 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 
 import {
+  loadBookingsData,
   processBooking,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { loadBookingsData } from "~/modules/booking/utils.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
