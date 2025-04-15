@@ -598,7 +598,7 @@ function ListContent({
                 </Button>
               </span>
               <AssetStatusBadge
-                shareAgreementUrl={`/kits/${item.id}/share-agreement`}
+                shareAgreementUrl={`/kits/${item.kitId}/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

@@ -24,8 +24,10 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { kitCustodyAssignedWithAgreementEmailText } from "~/modules/kit/emais";
 import { getKit } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -262,6 +264,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         },
+        include: { custody: { select: { id: true } } },
       });
 
       /* Assign custody to all assets of the kit */
@@ -314,14 +317,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return kit;
     });
 
-    if (agreementFound?.signatureRequired) {
-      sendNotification({
-        title: `'${updatedKit.name}' would go in custody of ${custodianName}`,
-        message:
-          "This kit will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
-      });
+    if (agreementFound) {
+      if (custodian.email) {
+        sendEmail({
+          to: custodian.email,
+          subject: `You have been assigned custody over ${updatedKit.name}.`,
+          text: kitCustodyAssignedWithAgreementEmailText({
+            kitName: updatedKit.name,
+            assignerName: resolveTeamMemberName(custodian),
+            kitId,
+            custodyId: updatedKit?.custody?.id ?? "",
+            signatureRequired: agreementFound.signatureRequired,
+          }),
+        });
+      }
+
+      if (agreementFound.signatureRequired) {
+        sendNotification({
+          title: `'${updatedKit.name}' would go in custody of ${custodianName}`,
+          message:
+            "This kit will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+      }
     } else {
       sendNotification({
         title: `‘${updatedKit.name}’ is now in custody of ${custodianName}`,
