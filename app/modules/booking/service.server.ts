@@ -821,7 +821,7 @@ export async function archiveBooking({
       throw new ShelfError({
         cause: null,
         label,
-        message: "Archive is not allowed at current state of booking.",
+        message: "Archiving is only allowed for Completed bookings.",
       });
     }
 
