@@ -73,8 +73,7 @@ function ConditionalDropdown() {
    */
 
   const allKitsInCustody =
-    allSelected ||
-    selectedKits.every((kit) => kit.status === KitStatus.IN_CUSTODY);
+    allSelected || selectedKits.every((kit) => !!kit.custody);
 
   const allKitsAvailable =
     allSelected ||

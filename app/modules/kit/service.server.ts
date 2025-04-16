@@ -1268,13 +1268,20 @@ export async function getAgreementByKitCustodyId({
   organizationId,
 }: {
   custodyId: KitCustody["id"];
-  organizationId: Kit["organizationId"];
+  organizationId?: Kit["organizationId"];
 }) {
   try {
     const kitCustody = await db.kitCustody.findUniqueOrThrow({
       where: { id: custodyId },
       include: {
-        kit: { select: { id: true, name: true, organizationId: true } },
+        kit: {
+          select: {
+            id: true,
+            name: true,
+            organizationId: true,
+            assets: { select: { id: true } },
+          },
+        },
         agreement: true,
         custodian: {
           include: {

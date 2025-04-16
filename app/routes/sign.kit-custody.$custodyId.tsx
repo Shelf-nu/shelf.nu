@@ -1,23 +1,16 @@
-import {
-  AssetStatus,
-  CustodySignatureStatus,
-  CustodyStatus,
-} from "@prisma/client";
+import { AssetStatus, CustodySignatureStatus, KitStatus } from "@prisma/client";
+import { json } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
-  LoaderFunctionArgs,
   MetaFunction,
+  LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
-import { useCrisp } from "~/components/marketing/crisp";
-
 import SignCustodyPage from "~/components/sign/sign-custody-page";
 import { db } from "~/database/db.server";
-import { getAgreementByCustodyId } from "~/modules/custody-agreement";
-import { createNote } from "~/modules/note/service.server";
+import { getAgreementByKitCustodyId } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -33,25 +26,27 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveTeamMemberName } from "~/utils/user";
 
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+export async function loader({ context, params, request }: LoaderFunctionArgs) {
+  const authSession = context.getOptionalSession();
   const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
   try {
-    const { custodian, custody, custodyAgreement } =
-      await getAgreementByCustodyId({ custodyId });
+    const { custodian, custody, custodyAgreement, kit } =
+      await getAgreementByKitCustodyId({ custodyId });
 
-    /** If there is a user associated with the custodian then make sure that right user is signing the custody. */
+    /**
+     * If there is a user associated with the custodian then make sure
+     * the right authenticated user is signing the custody.
+     */
     if (custodian.user) {
-      const authSession = context.getOptionalSession();
       if (!authSession?.userId) {
         throw new ShelfError({
           cause: null,
           label: "Custody Agreement",
+          title: "Not allowed",
           message:
             "This custody agreement requires you to be logged in to sign it.",
-          title: "Not allowed",
           additionalData: { showLogin: true },
         });
       }
@@ -67,9 +62,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         throw new ShelfError({
           cause: null,
           title: "Not allowed",
-          message: "You are not allowed to sign this asset.",
-          additionalData: { userId: authSession.userId },
-          label: "Assets",
+          message: "You are not allowed to sign this kit's custody.",
+          label: "Kit",
           status: 401,
         });
       }
@@ -82,17 +76,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Custody Agreement file not found",
-          status: 404,
           label: "Custody Agreement",
+          status: 404,
+          message: "Custody Agreement file not found.",
         });
       });
 
     const header: HeaderData = {
       title: `Sign "${custodyAgreement.name}"`,
     };
-
-    const authSession = context.getOptionalSession();
 
     return json(
       data({
@@ -101,7 +93,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         custodyAgreementFile,
         isAgreementSigned: !!custody.agreementSigned,
         isLoggedIn: !!authSession,
-        asset: custody.asset,
+        kit,
       })
     );
   } catch (cause) {
@@ -111,38 +103,40 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data?.header.title) },
+  { title: appendToMetaTitle(data?.header?.title) },
 ];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getOptionalSession();
-
   const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
   try {
     assertIsPost(request);
 
-    const { custodian, custody, custodyAgreement, asset } =
-      await getAgreementByCustodyId({ custodyId });
+    const { custodian, custody, custodyAgreement, kit } =
+      await getAgreementByKitCustodyId({ custodyId });
 
     if (!custodyAgreement.signatureRequired) {
       throw new ShelfError({
         cause: null,
-        message: "This custody agreement does not require a signature.",
         label: "Custody Agreement",
+        message: "This custody agreement does not require a signature.",
       });
     }
 
     if (custody.agreementSigned) {
       throw new ShelfError({
         cause: null,
-        message: "Asset custody has already been signed",
+        label: "Kit",
         status: 400,
-        label: "Assets",
+        message: "Kit custody has already been signed.",
       });
     }
 
-    /** If there is a user associated with the custodian then make sure that right user is signing the custody. */
+    /**
+     * If there is a user associated with the custodian then make sure
+     * that the right user is signing the custody.
+     */
     if (custodian.user) {
       if (!authSession?.userId) {
         throw new ShelfError({
@@ -162,9 +156,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
           cause: null,
-          message: "You are not authorized to sign this custody",
-          additionalData: { userId: authSession.userId },
-          label: "Assets",
+          label: "Kit",
+          title: "Not allowed",
+          message: "You are not authorized to sign this custody.",
           status: 401,
         });
       }
@@ -172,14 +166,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { signatureText, signatureImage } = parseData(
       await request.formData(),
-      z.object({
-        signatureText: z.string(),
-        signatureImage: z.string(),
-      })
+      z.object({ signatureText: z.string(), signatureImage: z.string() })
     );
 
+    const assetIds = kit.assets.map((a) => a.id);
+
     await db.$transaction(async (tx) => {
-      await tx.custody.update({
+      /** Update sign info in kit's custody */
+      await tx.kitCustody.update({
         where: { id: custody.id },
         data: {
           signatureImage,
@@ -190,54 +184,35 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         },
       });
 
-      await tx.asset.update({
-        where: { id: custody.asset.id },
+      /** Update kit's status */
+      await db.kit.update({
+        where: { id: kit.id },
+        data: { status: KitStatus.IN_CUSTODY },
+      });
+
+      /** Update status of all assets inside the kit */
+      await db.asset.updateMany({
+        where: { id: { in: assetIds } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
-      /** At this point, we must have a CustodyReceipt for the custody, if not then it is a bug in our system */
-      const custodyReceipt = await tx.custodyReceipt.findFirst({
-        where: { assetId: asset.id, custodyStatus: CustodyStatus.ACTIVE },
-        select: { id: true },
+      /** Update the sign status of all custodies of assets */
+      await db.custody.updateMany({
+        where: { assetId: { in: assetIds } },
+        data: { signatureStatus: CustodySignatureStatus.SIGNED },
       });
-      if (!custodyReceipt) {
-        throw new ShelfError({
-          cause: null,
-          label: "Custody Agreement",
-          message: "Could not find custody receipt, please contact support.",
-        });
-      }
 
-      await tx.custodyReceipt.update({
-        where: { id: custodyReceipt.id },
-        data: {
-          custodyStatus: CustodyStatus.ACTIVE,
-          signatureStatus: CustodySignatureStatus.SIGNED,
-          signatureImage,
-          signatureText,
-          agreementSigned: true,
-          agreementSignedOn: new Date(),
-        },
-      });
+      /**@TODO Handle custody receipt for kits */
     });
 
     if (authSession?.userId) {
       sendNotification({
-        title: "Asset signed",
-        message: "Your asset has been signed successfully",
+        title: "Kit custody signed",
+        message: "Your kit has been signed successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });
     }
-
-    await createNote({
-      content: `**${resolveTeamMemberName(custodian)}** has signed [${
-        custodyAgreement.name
-      }](/receipts?receiptId=${custody.id})`,
-      type: "UPDATE",
-      userId: authSession?.userId ?? custodyAgreement.createdById,
-      assetId: custody.asset.id,
-    });
 
     return json(data({ success: true }));
   } catch (cause) {
@@ -246,14 +221,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
-export default function Sign() {
-  useCrisp();
+export default function SignKitCustody() {
   const {
     custodyAgreement,
     custodyAgreementFile,
     isAgreementSigned,
     isLoggedIn,
-    asset,
+    kit,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -263,8 +237,8 @@ export default function Sign() {
       isAgreementSigned={isAgreementSigned}
       isLoggedIn={isLoggedIn}
       overviewButton={{
-        label: "To Asset's Overview",
-        url: `/assets/${asset.id}/overview`,
+        label: "To Kit's Page",
+        url: `/kits/${kit.id}`,
       }}
     />
   );
