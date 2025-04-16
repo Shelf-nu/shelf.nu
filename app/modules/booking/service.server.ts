@@ -624,10 +624,20 @@ export async function checkoutBooking({
       return updatedBooking;
     }
 
+    // @TODO WE still have 1 case pending
+    /**
+     * If the checkout is performed more than 1 hour before booking.from
+     * the checkout reminder has not been sent yet
+     * So we need to cancel it and manually schedule check-in reminder
+     */
+
     // For any checkout (early or not), what matters is time until check-in
     if (lessThanOneHourToCheckin) {
       // Less than 1 hour until check-in time
       // Send checkin reminder immediately
+      // @TODO here insted of sending it, we should use the scheduler to schedule it for DateTime.now()
+      // This will make sute it automatically creates the next job for overdue
+
       sendCheckinReminder(updatedBooking, updatedBooking._count.assets, hints);
     }
 
