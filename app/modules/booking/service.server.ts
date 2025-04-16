@@ -41,6 +41,7 @@ import {
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
+  sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type {
@@ -433,18 +434,32 @@ export async function reserveBooking({
       data: { status: BookingStatus.RESERVED },
     });
 
-    /** Start the reminder scheduler */
-    const when = new Date(bookingFound.from);
-    when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking starts
+    /** Calculate the time difference between the booking.to and the current time */
+    const { hours } = calcTimeDifference(updatedBooking.from!, new Date());
+    const moreThanOneHourToCheckOut = hours > 1;
 
-    await scheduleNextBookingJob({
-      data: {
-        id: bookingFound.id,
-        hints,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
-      },
-      when,
-    });
+    /**
+     * We send the checkout reminder, when there is 1 h left to booking.from
+     * This is to make sure that the user is reminded to check out the booking
+     *
+     * If there is more than 1 hour to check out, we need to schedule the reminder
+     * else we don't need to send a reminder
+     * Start the reminder scheduler
+     * */
+
+    if (moreThanOneHourToCheckOut) {
+      const when = new Date(bookingFound.from);
+      when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking starts
+
+      await scheduleNextBookingJob({
+        data: {
+          id: bookingFound.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
+        },
+        when,
+      });
+    }
 
     if (bookingFound.custodianUser?.email) {
       const custodian = bookingFound?.custodianUser
@@ -534,7 +549,10 @@ export async function checkoutBooking({
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        include: { assets: true },
+        include: {
+          assets: true,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -615,7 +633,7 @@ export async function checkoutBooking({
     const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
 
-    /** We always have to cancel scheduler in every case */
+    /** We cancel just in case there is something pending */
     await cancelScheduler(updatedBooking);
 
     /**
@@ -627,23 +645,24 @@ export async function checkoutBooking({
     }
 
     // For any checkout (early or not), what matters is time until check-in
-
     /**
      * If less than 1 hour until check-in time, then
      * send checkin reminder immediately.
-     * We do it via scheduler because it will make sure it automatically
-     * creates the next job for overdue
+     * We also schedule the overdue handler for the booking
      */
     if (lessThanOneHourToCheckin) {
-      const when = new Date();
-      await scheduleNextBookingJob({
-        data: {
-          id: bookingFound.id,
-          hints,
-          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-        },
-        when,
-      });
+      sendCheckinReminder(bookingFound, bookingFound._count.assets, hints);
+      if (bookingFound.to) {
+        const when = new Date(bookingFound.to);
+        await scheduleNextBookingJob({
+          data: {
+            id: bookingFound.id,
+            hints,
+            eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+          },
+          when,
+        });
+      }
     } else {
       /**
        * If the checkout is performed more than 1 hour before booking.to

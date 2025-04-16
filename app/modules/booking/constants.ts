@@ -40,6 +40,5 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
 export enum BOOKING_SCHEDULER_EVENTS_ENUM {
   checkoutReminder = `booking-checkout-reminder`,
   checkinReminder = `booking-checkin-reminder`,
-  overdueReminder = `booking-overdue-reminder`,
   overdueHandler = `booking-overdue-handler`,
 }

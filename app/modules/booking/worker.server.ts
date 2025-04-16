@@ -63,20 +63,6 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       }),
     });
   }
-
-  //schedule the next job
-  if (booking.to) {
-    const when = new Date(booking.to);
-    when.setHours(when.getHours() - 1);
-
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-      },
-      when,
-    });
-  }
 };
 
 const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
@@ -128,6 +114,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     .update({
       where: { id: data.id, status: BookingStatus.ONGOING },
       data: { status: BookingStatus.OVERDUE },
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -138,35 +125,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  //schedule the next job
-  if (booking.to) {
-    const when = new Date(booking.to);
-    when.setHours(when.getHours());
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueReminder,
-      },
-      when,
-    });
-  }
-};
-
-const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
-    });
-
+  /** Check this just in case  */
   if (booking.status !== BookingStatus.OVERDUE) {
     Logger.warn(
       `ignoring overdueReminder for booking with id ${data.id}, as its not in overdue status`
@@ -174,6 +133,7 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     return;
   }
 
+  /** Send the OVERDUE email */
   const email = booking.custodianUser?.email;
 
   if (email) {
@@ -208,7 +168,6 @@ const event2HandlerMap: Record<
   [BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder]: checkoutReminder,
   [BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder]: checkinReminder,
   [BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler]: overdueHandler,
-  [BOOKING_SCHEDULER_EVENTS_ENUM.overdueReminder]: overdueReminder,
 };
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
