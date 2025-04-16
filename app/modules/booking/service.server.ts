@@ -41,7 +41,6 @@ import {
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
-  sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type {
@@ -615,30 +614,52 @@ export async function checkoutBooking({
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
-    // Don't schedule any reminders if the booking is already expired/overdue
+
+    /** We always have to cancel scheduler in every case */
+    await cancelScheduler(updatedBooking);
+
+    /**
+     * If its expired that means its status will directly go to OVERDUE,
+     * so we can cancel everything and don't schedule any more events
+     * */
     if (isExpired) {
-      /**
-       * If its expired that means its status will directly go to OVERDUE,
-       * so we can cancel everything and dont schedule any more events */
-      await cancelScheduler(updatedBooking);
       return updatedBooking;
     }
 
-    // @TODO WE still have 1 case pending
-    /**
-     * If the checkout is performed more than 1 hour before booking.from
-     * the checkout reminder has not been sent yet
-     * So we need to cancel it and manually schedule check-in reminder
-     */
-
     // For any checkout (early or not), what matters is time until check-in
-    if (lessThanOneHourToCheckin) {
-      // Less than 1 hour until check-in time
-      // Send checkin reminder immediately
-      // @TODO here insted of sending it, we should use the scheduler to schedule it for DateTime.now()
-      // This will make sute it automatically creates the next job for overdue
 
-      sendCheckinReminder(updatedBooking, updatedBooking._count.assets, hints);
+    /**
+     * If less than 1 hour until check-in time, then
+     * send checkin reminder immediately.
+     * We do it via scheduler because it will make sure it automatically
+     * creates the next job for overdue
+     */
+    if (lessThanOneHourToCheckin) {
+      const when = new Date();
+      await scheduleNextBookingJob({
+        data: {
+          id: bookingFound.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+        },
+        when,
+      });
+    } else {
+      /**
+       * If the checkout is performed more than 1 hour before booking.to
+       * the checkout reminder has not been sent yet
+       * So we need to cancel it and manually schedule check-in reminder
+       */
+      const when = new Date(updatedBooking.to!);
+      when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
+      await scheduleNextBookingJob({
+        data: {
+          id: bookingFound.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+        },
+        when,
+      });
     }
 
     return updatedBooking;
@@ -735,15 +756,12 @@ export async function checkinBooking({
     });
 
     /**
-     * If the booking is being early checkin, that means that our checkin reminder
-     * has not been sent yet. So we have to cancel it.
-     * @TODO this is not going to work. Needs to be re-done
-     *
-     * - if checkIn happens before booking.to, cancel scheduler - this will handle both the case when its 1h before(cancels checkin reminder) or less than 1h before(cancels overdue handler)
+     * At this point when user is checking in the booking,
+     * we just have to cancel all active scheduler (if there is any).
+     * Because, if the only possible case is OVERDUE, and if it was OVERDUE
+     * during the checkin it must have been handled by overdueHandler.
      */
-    if (isEarlyCheckin) {
-      await cancelScheduler(updatedBooking);
-    }
+    await cancelScheduler(updatedBooking);
 
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
