@@ -808,10 +808,11 @@ model Kit {
   image           String?
   imageExpiration DateTime?
 
-  assets  Asset[]
-  custody KitCustody?
-  qrCodes Qr[]
-  reports ReportFound[]
+  assets          Asset[]
+  custody         KitCustody?
+  qrCodes         Qr[]
+  reports         ReportFound[]
+  custodyReceipts CustodyReceipt[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
@@ -893,8 +894,11 @@ model CustodyReceipt {
   custodian   TeamMember @relation(fields: [custodianId], references: [id])
   custodianId String
 
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String?
 
   agreement   CustodyAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   agreementId String?

@@ -184,7 +184,7 @@ function ReceiptRow({
 
   return (
     <>
-      <Td>{item.asset.title}</Td>
+      <Td>{item?.asset?.title}</Td>
       <Td>{resolveTeamMemberName(item.custodian)}</Td>
       <Td>{item?.agreement?.name}</Td>
       <Td>
