@@ -737,6 +737,9 @@ export async function checkinBooking({
     /**
      * If the booking is being early checkin, that means that our checkin reminder
      * has not been sent yet. So we have to cancel it.
+     * @TODO this is not going to work. Needs to be re-done
+     *
+     * - if checkIn happens before booking.to, cancel scheduler - this will handle both the case when its 1h before(cancels checkin reminder) or less than 1h before(cancels overdue handler)
      */
     if (isEarlyCheckin) {
       await cancelScheduler(updatedBooking);
