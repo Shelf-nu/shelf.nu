@@ -92,6 +92,9 @@ export async function getPaginatedAndFilterableReceipts({
               },
             },
           },
+          kit: {
+            select: { id: true, name: true },
+          },
         },
         orderBy: { createdAt: "desc" },
       }),

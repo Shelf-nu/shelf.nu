@@ -36,8 +36,6 @@ export async function createCustodyAgreement({
       where: { type: "CUSTODY", organizationId },
     });
 
-    // const isMaxActiveAgreementsReached =
-
     const data = {
       name,
       type: "CUSTODY",
@@ -49,7 +47,7 @@ export async function createCustodyAgreement({
       isActive,
     } satisfies Prisma.CustodyAgreementCreateInput;
 
-    return await db.custodyAgreement.create({ data });
+    return db.custodyAgreement.create({ data });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -294,7 +292,7 @@ export async function makeCustodyAgreementDefault({
     });
 
     // Make the selected agreement default
-    return await db.custodyAgreement.update({
+    return db.custodyAgreement.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });

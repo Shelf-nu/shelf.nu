@@ -298,6 +298,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         )
       );
 
+      /** Create Receipt for custody */
+      await tx.custodyReceipt.create({
+        data: {
+          kitId: kit.id,
+          custodianId,
+          organizationId,
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+        },
+      });
+
       /* Create notes for all assets in kit */
       await tx.note.createMany({
         data: kitFound.assets.map((asset) => ({

@@ -1,4 +1,9 @@
-import { AssetStatus, CustodySignatureStatus, KitStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
+  KitStatus,
+} from "@prisma/client";
 import { json } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -202,7 +207,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         data: { signatureStatus: CustodySignatureStatus.SIGNED },
       });
 
-      /**@TODO Handle custody receipt for kits */
+      /** Update custody receipt */
+      const custodyReceipt = await tx.custodyReceipt.findFirst({
+        where: { kitId: kit.id, custodyStatus: CustodyStatus.ACTIVE },
+        select: { id: true },
+      });
+      if (!custodyReceipt) {
+        throw new ShelfError({
+          cause: null,
+          label: "Custody Agreement",
+          message: "Could not find custody receipt, please contact support.",
+        });
+      }
+
+      await tx.custodyReceipt.update({
+        where: { id: custodyReceipt.id },
+        data: {
+          custodyStatus: CustodyStatus.ACTIVE,
+          signatureStatus: CustodySignatureStatus.SIGNED,
+          signatureImage,
+          signatureText,
+          agreementSigned: true,
+          agreementSignedOn: new Date(),
+        },
+      });
     });
 
     if (authSession?.userId) {

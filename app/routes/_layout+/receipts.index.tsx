@@ -153,6 +153,7 @@ export default function Receipts() {
           headerChildren={
             <>
               <Th>Asset</Th>
+              <Th>Kit</Th>
               <Th>Custodian</Th>
               <Th>Agreement</Th>
               <Th>Signature status</Th>
@@ -184,7 +185,8 @@ function ReceiptRow({
 
   return (
     <>
-      <Td>{item?.asset?.title}</Td>
+      <Td>{item?.asset?.title ?? "-"}</Td>
+      <Td>{item?.kit?.name ?? "-"}</Td>
       <Td>{resolveTeamMemberName(item.custodian)}</Td>
       <Td>{item?.agreement?.name}</Td>
       <Td>
