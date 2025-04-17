@@ -1135,7 +1135,14 @@ export async function bulkReleaseKitCustody({
         select: {
           id: true,
           status: true,
-          custody: { select: { id: true, custodian: true } },
+          custody: {
+            select: {
+              id: true,
+              custodian: true,
+              agreementSigned: true,
+              agreement: { select: { signatureRequired: true } },
+            },
+          },
           assets: {
             select: {
               id: true,
@@ -1145,6 +1152,10 @@ export async function bulkReleaseKitCustody({
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
             },
           },
+          custodyReceipts: {
+            select: { id: true },
+            where: { custodyStatus: CustodyStatus.ACTIVE },
+          },
         },
       }),
       getUserByID(userId),
@@ -1153,9 +1164,7 @@ export async function bulkReleaseKitCustody({
     const custodian = kits[0].custody?.custodian;
 
     /** Kits will be released only if all the selected kits are IN_CUSTODY */
-    const allKitsInCustody = kits.every(
-      (kit) => kit.status === KitStatus.IN_CUSTODY
-    );
+    const allKitsInCustody = kits.every((kit) => !!kit.custody);
     if (!allKitsInCustody) {
       throw new ShelfError({
         cause: null,
@@ -1204,6 +1213,37 @@ export async function bulkReleaseKitCustody({
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      await Promise.all(
+        kits.map((kit) => {
+          const receiptId = kit.custodyReceipts[0]?.id;
+          /**
+           * If we do not find a receipt associated with kit
+           * that means this custody was created before Signed Custody feature.
+           * In that case we do not have to update the receipt.
+           */
+          if (!receiptId) {
+            return null;
+          }
+
+          const custodyRequireSignatureButNotSigned =
+            kit.custody?.agreement &&
+            kit.custody.agreement.signatureRequired &&
+            !kit.custody.agreementSigned;
+
+          return tx.custodyReceipt.update({
+            where: { id: receiptId },
+            data: {
+              custodyStatus: custodyRequireSignatureButNotSigned
+                ? CustodyStatus.CANCELLED
+                : CustodyStatus.FINISHED,
+              signatureStatus: custodyRequireSignatureButNotSigned
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+            },
+          });
+        })
+      );
 
       /** Creating notes for all the assets */
       await tx.note.createMany({
