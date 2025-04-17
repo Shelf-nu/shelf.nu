@@ -342,9 +342,18 @@ export default function AddAssetsToNewBooking() {
   /**
    * Set selected items for kit based on the route data
    */
-  useEffect(() => {
-    setSelectedBulkItems(bookingAssets);
-  }, [bookingAssets, setSelectedBulkItems]);
+  useEffect(
+    function updateDefaultSelectedItems() {
+      /**
+       * We are setting the default items here, so we do not have to
+       * set the assets again if there are any items already present
+       */
+      if (!selectedBulkItems.length) {
+        setSelectedBulkItems(bookingAssets);
+      }
+    },
+    [bookingAssets, selectedBulkItems.length, setSelectedBulkItems]
+  );
 
   /**
    * Set disabled items for kit
