@@ -407,7 +407,7 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        <AssetCustomFields zo={zo} schema={FormSchema} />
+        <AssetCustomFields zo={zo} schema={FormSchema} currency={currency} />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto">

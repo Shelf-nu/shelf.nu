@@ -115,6 +115,7 @@ filterSchema.refine(
         BOOLEAN: "boolean",
         DATE: "date",
         OPTION: "enum",
+        AMOUNT: "number",
       };
       const filterType = customFieldTypeToFilterType[data.fieldType];
       return operatorsPerType[filterType].includes(data.operator);
