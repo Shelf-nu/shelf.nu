@@ -30,6 +30,7 @@ import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -78,7 +79,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: {
-        custody: { include: { custodian: true } },
+        custody: {
+          include: {
+            custodian: true,
+            agreement: { select: { signatureRequired: true } },
+          },
+        },
         kit: true,
         qrCodes: true,
       },
@@ -244,7 +250,6 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
-
   /**
    * Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
@@ -285,10 +290,13 @@ export default function AssetDetailsPage() {
         }}
         subHeading={
           <div className="flex gap-2">
-            <AssetStatusBadge
-              status={asset.status}
-              availableToBook={asset.availableToBook}
-            />
+            <div className="flex items-center gap-x-1">
+              <AssetStatusBadge
+                status={asset.status}
+                availableToBook={asset.availableToBook}
+                shareAgreementUrl={getShareAgreementUrl(asset)}
+              />
+            </div>
           </div>
         }
       >

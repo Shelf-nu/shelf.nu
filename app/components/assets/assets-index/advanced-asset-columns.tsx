@@ -1,6 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType, type AssetStatus } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
@@ -38,6 +39,7 @@ import {
   ListItemTagsColumn,
   type AssetIndexLoaderData,
 } from "~/routes/_layout+/assets._index";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isLink } from "~/utils/misc";
 import {
@@ -173,7 +175,12 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn status={item.status} />;
+      return (
+        <StatusColumn
+          shareUrl={getShareAgreementUrl(item)}
+          status={item.status}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -294,11 +301,23 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ status }: { status: AssetStatus }) {
+function StatusColumn({
+  status,
+  shareUrl,
+}: {
+  status: AssetStatus;
+  shareUrl: string;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
-      <AssetStatusBadge status={status} availableToBook={true} />
+      <div className="flex items-center gap-2">
+        {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
+        <AssetStatusBadge
+          status={status}
+          availableToBook
+          shareAgreementUrl={shareUrl}
+        />
+      </div>
     </Td>
   );
 }

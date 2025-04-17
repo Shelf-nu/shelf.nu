@@ -12,10 +12,13 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  CustodyAgreement,
 } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
@@ -26,6 +29,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
@@ -104,6 +108,7 @@ import {
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { assetCustodyAssignedWithAgreementEmailText } from "../invite/helpers";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -2040,7 +2045,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
   try {
     /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
     const checkedOutAssetsIds = assets
-      .filter((a) => a.status === "CHECKED_OUT")
+      .filter((a) => a.status === AssetStatus.CHECKED_OUT)
       .map((a) => a.id);
 
     if (checkedOutAssetsIds.length > 0) {
@@ -2269,16 +2274,20 @@ export async function bulkDeleteAssets({
 
 export async function bulkCheckOutAssets({
   userId,
+  custodyAgreement,
   assetIds,
   custodianId,
   custodianName,
+  custodianEmail,
   organizationId,
   currentSearchParams,
 }: {
   userId: User["id"];
+  custodyAgreement?: CustodyAgreement["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
+  custodianEmail?: User["email"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
 }) {
@@ -2302,7 +2311,7 @@ export async function bulkCheckOutAssets({
     ]);
 
     const assetsNotAvailable = assets.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) => asset.status !== AssetStatus.AVAILABLE
     );
 
     if (assetsNotAvailable) {
@@ -2315,31 +2324,107 @@ export async function bulkCheckOutAssets({
       });
     }
 
+    /** Check if the agreement exists and is in same organization */
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired"
+    > | null = null;
+    if (custodyAgreement) {
+      agreementFound = await db.custodyAgreement.findUnique({
+        where: { id: custodyAgreement, organizationId },
+        select: {
+          id: true,
+          name: true,
+          signatureRequired: true,
+        },
+      });
+
+      if (!agreementFound) {
+        throw new ShelfError({
+          message:
+            "Agreement not found. Please refresh and if the issue persists contact support.",
+          label: "Assets",
+          cause: null,
+        });
+      }
+    }
+
+    function getContent(asset: string) {
+      const fullName = `**${user.firstName?.trim()} ${user.lastName?.trim()}**`;
+
+      const content =
+        agreementFound && agreementFound.signatureRequired
+          ? `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`
+          : `${fullName} has given **${custodianName.trim()}** custody over **${asset.trim()}**`;
+
+      return content;
+    }
+
+    let custodies: Prisma.CustodyGetPayload<{
+      select: {
+        id: true;
+        agreementId: true;
+        asset: { select: { id: true; title: true } };
+      };
+    }>[] = [];
+
     /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
      * 2. Update status of all assets to IN_CUSTODY
+     * 3. Create CustodyReceipt
      */
     await db.$transaction(async (tx) => {
       /** Creating custodies over assets */
-      await tx.custody.createMany({
+      custodies = await tx.custody.createManyAndReturn({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          // Add agreement in custody if exists
+          ...(agreementFound
+            ? {
+                agreementId: agreementFound.id,
+              }
+            : {}),
+        })),
+        select: {
+          id: true,
+          agreementId: true,
+          asset: { select: { id: true, title: true } },
+        },
+      });
+
+      /** Creating a custody receipt */
+      await tx.custodyReceipt.createMany({
+        data: assets.map((asset) => ({
+          assetId: asset.id,
+          custodianId,
+          organizationId,
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
         })),
       });
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.SIGNATURE_PENDING
+            : AssetStatus.IN_CUSTODY,
+        },
       });
 
       /** Creating notes for the assets */
       await tx.note.createMany({
         data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: getContent(asset.title),
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -2347,7 +2432,24 @@ export async function bulkCheckOutAssets({
       });
     });
 
-    return true;
+    /** Send email */
+    if (agreementFound && custodianEmail) {
+      custodies.forEach((custody) => {
+        sendEmail({
+          to: custodianEmail,
+          subject: `You have been assigned custody over ${custody.asset.title}.`,
+          text: assetCustodyAssignedWithAgreementEmailText({
+            assetName: custody.asset.title,
+            assignerName: user.firstName + " " + user.lastName,
+            assetId: custody.asset.id,
+            custodyId: custody.id,
+            signatureRequired: agreementFound.signatureRequired,
+          }),
+        });
+      });
+    }
+
+    return { custodies, agreementFound };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -2391,8 +2493,17 @@ export async function bulkCheckInAssets({
         select: {
           id: true,
           title: true,
+          custodyReceipts: {
+            where: { custodyStatus: CustodyStatus.ACTIVE },
+            select: { id: true },
+          },
           custody: {
-            select: { id: true, custodian: { include: { user: true } } },
+            select: {
+              id: true,
+              custodian: { include: { user: true } },
+              agreementSigned: true,
+              agreement: { select: { signatureRequired: true } },
+            },
           },
         },
       }),
@@ -2416,6 +2527,7 @@ export async function bulkCheckInAssets({
      * so we have to make two queries to bulk release custody of assets
      * 1. Delete all custodies for all assets
      * 2. Update status of all assets to AVAILABLE
+     * 3. Update the CustodyReceipt status
      */
     await db.$transaction(async (tx) => {
       /** Deleting custodies over assets */
@@ -2444,6 +2556,38 @@ export async function bulkCheckInAssets({
         data: { status: AssetStatus.AVAILABLE },
       });
 
+      /** Updating status of CustodyReceipt */
+      await Promise.all(
+        assets.map((asset) => {
+          const receiptId = asset.custodyReceipts[0]?.id;
+          const custodyRequireSignButNotSinged =
+            asset.custody?.agreement &&
+            asset.custody.agreement.signatureRequired &&
+            !asset.custody.agreementSigned;
+
+          /**
+           * If we do not find a receipt associated with an asset
+           * that means this custody was created before Signed Custody feature.
+           * In that case we do not have to update the receipt.
+           */
+          if (!receiptId) {
+            return null;
+          }
+
+          return tx.custodyReceipt.update({
+            where: { id: receiptId },
+            data: {
+              custodyStatus: custodyRequireSignButNotSinged
+                ? CustodyStatus.CANCELLED
+                : CustodyStatus.FINISHED,
+              signatureStatus: custodyRequireSignButNotSinged
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+            },
+          });
+        })
+      );
+
       /** Creating notes for the assets */
       await tx.note.createMany({
         data: assets.map((asset) => ({
@@ -2464,7 +2608,7 @@ export async function bulkCheckInAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking in assSets.";
+        : "Something went wrong while releasing custody of assets.";
 
     throw new ShelfError({
       cause,

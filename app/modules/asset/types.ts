@@ -12,6 +12,7 @@ import type {
   CustomFieldType,
   AssetReminder,
   Organization,
+  CustodySignatureStatus,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -126,6 +127,7 @@ export type AdvancedIndexAsset = Pick<
   tags: Pick<Tag, "id" | "name">[];
   location: Pick<Location, "name"> | null;
   custody: {
+    signatureStatus: CustodySignatureStatus;
     custodian: {
       name: string;
       user: {

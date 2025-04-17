@@ -1,5 +1,9 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodySignatureStatus,
+  CustomFieldType,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -9,6 +13,7 @@ import { json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { Switch } from "~/components/forms/switch";
@@ -501,15 +506,33 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userHasPermission({
-              roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
-            })}
-          />
+          {asset.custody && !asset.kitId ? (
+            <AgreementStatusCard
+              custodian={asset.custody.custodian}
+              agreementName={asset.custody?.agreement?.name ?? ""}
+              receiptId={
+                asset.custodyReceipts.length
+                  ? asset.custodyReceipts[0].id
+                  : null
+              }
+              isSignaturePending={
+                asset.custody?.signatureStatus ===
+                CustodySignatureStatus.PENDING
+              }
+            />
+          ) : null}
+
+          <When truthy={asset.status === AssetStatus.IN_CUSTODY}>
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            />
+          </When>
 
           {asset && (
             <QrPreview

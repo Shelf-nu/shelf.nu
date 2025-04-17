@@ -1,4 +1,5 @@
-import { OrganizationType, type Organization } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
+import type { Organization } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -388,3 +389,138 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Agreement Features */
+
+/**
+ * This validates if a user can create more agreements
+ */
+export function canCreateMoreAgreements({
+  tierLimit,
+  totalAgreements,
+}: {
+  tierLimit: { maxCustodyAgreements: number } | null | undefined;
+  totalAgreements: number;
+}) {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit?.maxCustodyAgreements) return false;
+
+  return totalAgreements < tierLimit?.maxCustodyAgreements;
+}
+
+export async function assertUserCanCreateMoreAgreements({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  const canCreateMore = canCreateMoreAgreements({
+    tierLimit,
+    totalAgreements: await db.custodyAgreement.count({
+      where: { organizationId, isActive: true },
+    }),
+  });
+
+  if (!canCreateMore) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: "Your user cannot create more agreements",
+      additionalData: { organizationId },
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+export async function assertUserCanActivateMoreAgreements({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!premiumIsEnabled) {
+    return;
+  }
+
+  if (!tierLimit.maxActiveCustodyAgreements) {
+    return;
+  }
+
+  const activeAgreements = await db.custodyAgreement.count({
+    where: { organizationId, isActive: true },
+  });
+
+  if (activeAgreements >= tierLimit.maxActiveCustodyAgreements) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      message:
+        "You cannot activate more agreements because you have reached your limit.",
+    });
+  }
+}
+
+export async function isMaxActiveAgreementsLimitReached({
+  organizationId,
+  organizations,
+}: {
+  organizationId: string;
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!premiumIsEnabled) {
+    return false;
+  }
+
+  if (!tierLimit.maxActiveCustodyAgreements) {
+    return false;
+  }
+
+  const activeAgreements = await db.custodyAgreement.count({
+    where: { organizationId, isActive: true },
+  });
+
+  return activeAgreements >= tierLimit.maxActiveCustodyAgreements;
+}
+
+export function canUseSignedCustody(
+  currentOrganization: Pick<Organization, "type">
+) {
+  if (!premiumIsEnabled) {
+    return true;
+  }
+
+  if (currentOrganization.type !== OrganizationType.TEAM) {
+    return false;
+  }
+
+  return true;
+}
+
+/** End agreement features */

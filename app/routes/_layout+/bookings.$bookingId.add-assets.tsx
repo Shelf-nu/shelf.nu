@@ -62,6 +62,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -587,6 +588,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   <AssetStatusBadge
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    shareAgreementUrl={getShareAgreementUrl(item)}
                   />
                 </When>
 
@@ -594,7 +596,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   isAddedThroughKit={isAddedThroughKit}
                   showKitStatus
                   asset={item as unknown as AssetWithBooking}
-                  isCheckedOut={item.status === "CHECKED_OUT"}
+                  isCheckedOut={item.status === AssetStatus.CHECKED_OUT}
                 />
               </div>
             </div>

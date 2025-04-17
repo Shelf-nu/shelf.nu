@@ -1,4 +1,4 @@
-import { type Tag } from "@prisma/client";
+import type { Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -60,6 +60,7 @@ import {
 } from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -418,10 +419,11 @@ const ListAssetContent = ({
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div>
+              <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                 />
               </div>
             </div>

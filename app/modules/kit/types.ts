@@ -21,6 +21,8 @@ export const GET_KIT_STATIC_INCLUDES = {
     select: {
       id: true,
       createdAt: true,
+      agreement: true,
+      signatureStatus: true,
       custodian: {
         select: {
           id: true,
@@ -40,7 +42,7 @@ export const GET_KIT_STATIC_INCLUDES = {
   organization: {
     select: { currency: true },
   },
-};
+} satisfies Prisma.KitInclude;
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },

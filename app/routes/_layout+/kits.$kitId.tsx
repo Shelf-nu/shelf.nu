@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -9,6 +9,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -131,6 +132,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   },
                 },
               },
+              agreement: true,
             },
           },
           qrCodes: true,
@@ -349,7 +351,7 @@ export default function KitDetails() {
     ? kit.assets[0]?.bookings.every((b) =>
         allowedBookingStatus.includes(b.status)
       )
-    : kit.status === "AVAILABLE";
+    : kit.status === KitStatus.AVAILABLE;
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
 
@@ -376,6 +378,7 @@ export default function KitDetails() {
       <Header
         subHeading={
           <KitStatusBadge
+            kitId={kit.id}
             status={kit.status}
             availableToBook={!kitHasUnavailableAssets}
           />
@@ -516,22 +519,35 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          <CustodyCard
-            // @ts-expect-error - we are passing the correct props
-            booking={currentBooking || undefined}
-            hasPermission={userHasPermission({
-              roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
-            })}
-            custody={kit.custody}
-          />
+          {kit.custody ? (
+            <AgreementStatusCard
+              className="mt-0"
+              custodian={kit.custody.custodian}
+              receiptId="@TODO"
+              agreementName={kit.custody.agreement?.name ?? ""}
+              isSignaturePending={kit.status === KitStatus.SIGNATURE_PENDING}
+            />
+          ) : null}
+
+          <When truthy={kit.status === KitStatus.IN_CUSTODY}>
+            <CustodyCard
+              // @ts-expect-error - we are passing the correct props
+              booking={currentBooking || undefined}
+              hasPermission={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+              custody={kit.custody}
+            />
+          </When>
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card className="my-3 flex justify-between">
+          <Card className="mb-3 mt-0 flex justify-between">
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
+
           <QrPreview
             qrObj={qrObj}
             item={{
@@ -597,6 +613,7 @@ function ListContent({
                 </Button>
               </span>
               <AssetStatusBadge
+                shareAgreementUrl={`/kits/${item.kitId}/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />
