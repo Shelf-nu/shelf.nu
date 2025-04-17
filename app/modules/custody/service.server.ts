@@ -64,7 +64,7 @@ export async function releaseCustody({
 
       /** Update the status of CustodyReceipt */
       if (custodyReceipt) {
-        await db.custodyReceipt.update({
+        await tx.custodyReceipt.update({
           where: { id: custodyReceipt.id },
           data: {
             custodyStatus: custodyRequireSignButNotSigned

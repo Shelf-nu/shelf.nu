@@ -292,7 +292,7 @@ export async function makeCustodyAgreementDefault({
     });
 
     // Make the selected agreement default
-    return db.custodyAgreement.update({
+    return await db.custodyAgreement.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });

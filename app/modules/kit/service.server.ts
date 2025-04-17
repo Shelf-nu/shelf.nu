@@ -12,6 +12,8 @@ import type {
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
   ErrorCorrection,
   KitStatus,
 } from "@prisma/client";
@@ -601,35 +603,92 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        assets: true,
-        createdBy: { select: { firstName: true, lastName: true } },
-        custody: { select: { custodian: true } },
-      },
+    /**
+     * We have 2 cases to handle for releasing custody
+     * 1. If the custody requires a signature and user has not signed it
+     * 2. If the custody does not require any signature
+     */
+    const kit = await db.kit
+      .findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          name: true,
+          assets: true,
+          createdBy: { select: { firstName: true, lastName: true } },
+          custody: {
+            select: {
+              custodian: true,
+              agreementSigned: true,
+              agreement: {
+                select: { signatureRequired: true },
+              },
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Kit",
+          message:
+            "Kit not found, are you sure it exists in the current workspace.",
+        });
+      });
+
+    const custody = kit.custody;
+    if (!custody) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message: "No custody exists on the kit.",
+      });
+    }
+
+    const custodyRequireSignatureButNotSigned =
+      custody.agreement &&
+      custody.agreement.signatureRequired &&
+      !custody.agreementSigned;
+
+    await db.$transaction(async (tx) => {
+      /** Update the kit */
+      await tx.kit.update({
+        where: { id: kit.id },
+        data: { status: KitStatus.AVAILABLE, custody: { delete: true } },
+      });
+
+      /** Make all the assets of the kit AVAILABLE */
+      await Promise.all(
+        kit.assets.map((asset) =>
+          tx.asset.update({
+            where: { id: asset.id },
+            data: { status: AssetStatus.AVAILABLE, custody: { delete: true } },
+          })
+        )
+      );
+
+      /** Update the custody receipt */
+      const custodyReceipt = await tx.custodyReceipt.findFirst({
+        where: { custodyStatus: CustodyStatus.ACTIVE, kitId: kit.id },
+        select: { id: true },
+      });
+      if (custodyReceipt) {
+        await tx.custodyReceipt.update({
+          where: { id: custodyReceipt.id },
+          data: {
+            custodyStatus: custodyRequireSignatureButNotSigned
+              ? CustodyStatus.CANCELLED
+              : CustodyStatus.FINISHED,
+            signatureStatus: custodyRequireSignatureButNotSigned
+              ? CustodySignatureStatus.CANCELLED
+              : undefined,
+          },
+        });
+      }
     });
 
-    await Promise.all([
-      db.kit.update({
-        where: { id: kitId, organizationId },
-        data: {
-          status: KitStatus.AVAILABLE,
-          custody: { delete: true },
-        },
-      }),
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.AVAILABLE,
-            custody: { delete: true },
-          },
-        })
-      ),
-      ...kit.assets.map((asset) =>
+    await Promise.all(
+      kit.assets.map((asset) =>
         createNote({
           content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
             .custody?.custodian
@@ -640,8 +699,8 @@ export async function releaseCustody({
           userId,
           assetId: asset.id,
         })
-      ),
-    ]);
+      )
+    );
 
     return kit;
   } catch (cause) {

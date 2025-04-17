@@ -521,7 +521,7 @@ export default function KitDetails() {
           {/* Kit Custody */}
           {kit.custody ? (
             <AgreementStatusCard
-              className="my-0"
+              className="mt-0"
               custodian={kit.custody.custodian}
               receiptId="@TODO"
               agreementName={kit.custody.agreement?.name ?? ""}
@@ -543,7 +543,7 @@ export default function KitDetails() {
           </When>
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card className="my-3 flex justify-between">
+          <Card className="mb-3 mt-0 flex justify-between">
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
