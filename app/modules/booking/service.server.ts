@@ -719,7 +719,10 @@ export async function checkoutBooking({
      * We also schedule the overdue handler for the booking
      */
     if (lessThanOneHourToCheckin) {
-      sendCheckinReminder(bookingFound, bookingFound._count.assets, hints);
+      if (bookingFound.custodianUser?.email) {
+        sendCheckinReminder(bookingFound, bookingFound._count.assets, hints);
+      }
+
       if (bookingFound.to) {
         const when = new Date(bookingFound.to);
         await scheduleNextBookingJob({
