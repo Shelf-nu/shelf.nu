@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
@@ -362,7 +363,11 @@ export function BookingForm({
                        * in that case, we have to update endDate to be the endDay date of startDate.
                        */
                       const newStartDate = new Date(event.target.value);
-                      if (endDate && newStartDate > new Date(endDate)) {
+                      if (
+                        isNewBooking &&
+                        endDate &&
+                        newStartDate > new Date(endDate)
+                      ) {
                         const newEndDate = dateForDateTimeInputValue(
                           new Date(newStartDate.setHours(18, 0, 0))
                         );
@@ -410,6 +415,7 @@ export function BookingForm({
                       ? JSON.stringify({
                           id: defaultTeamMember?.id,
                           name: resolveTeamMemberName(defaultTeamMember),
+                          userId: defaultTeamMember?.userId,
                         })
                       : undefined
                   }
@@ -428,12 +434,15 @@ export function BookingForm({
                   placeholder="Select a team member"
                   allowClear
                   closeOnSelect
-                  transformItem={(item) => ({
+                  transformItem={(
+                    item: ModelFilterItem & { userId?: string }
+                  ) => ({
                     ...item,
                     id: JSON.stringify({
                       id: item.id,
                       //If there is a user, we use its name, otherwise we use the name of the team member
                       name: resolveTeamMemberName(item),
+                      userId: item?.userId,
                     }),
                   })}
                   renderItem={(item) => resolveTeamMemberName(item, true)}

@@ -6,7 +6,7 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
-import type { ClientHint } from "~/modules/booking/types";
+import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { AdminFooter, UserFooter } from "./components/footers";

@@ -1,6 +1,6 @@
 import { format, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import type { ClientHint } from "~/modules/booking/types";
+import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "./client-hints";
 
 export function getDifferenceInSeconds(

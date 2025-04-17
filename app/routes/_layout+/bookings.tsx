@@ -28,10 +28,10 @@ import When from "~/components/when/when";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
-  formatBookingsDates,
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";

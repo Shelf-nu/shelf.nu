@@ -1,11 +1,15 @@
-import type { BookingStatus, Organization, Prisma } from "@prisma/client";
-import type { HeaderData } from "~/components/layout/header/types";
-import { getClientHint } from "~/utils/client-hints";
-import type { ResponsePayload } from "~/utils/http.server";
-import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
-// eslint-disable-next-line import/no-cycle
-import { formatBookingsDates, getBookings } from "./service.server";
+import type {
+  Booking,
+  BookingStatus,
+  Organization,
+  Prisma,
+} from "@prisma/client";
+import { DateTime } from "luxon";
+import { getDateTimeFormat } from "~/utils/client-hints";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
+
+const label: ErrorLabel = "Booking";
 
 export function getBookingWhereInput({
   organizationId,
@@ -34,96 +38,52 @@ export function getBookingWhereInput({
   return where;
 }
 
-interface LoadBookingsParams {
-  request: Request;
-  organizationId: string;
-  userId: string;
-  isSelfServiceOrBase: boolean;
-  ids?: string[];
+/** This function checks if the booking is expired or not */
+export function isBookingExpired({ to }: { to: NonNullable<Booking["to"]> }) {
+  try {
+    const end = DateTime.fromJSDate(to);
+    const now = DateTime.now();
+
+    return end < now;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking if the booking is expired.",
+      label,
+    });
+  }
 }
 
 /**
- * Base interface for booking loader response
+ * Formats the dates of bookings to be properly displayed in the UI based on the user's locale
  */
-interface BaseBookingLoaderResponse {
-  showModal: boolean;
-  header: HeaderData;
-  bookings: any[];
-  search: string | null;
-  page: number;
-  bookingCount: number;
-  totalPages: number;
-  perPage: number;
-  modelName: {
-    singular: string;
-    plural: string;
-  };
-  ids?: string[];
-  hints: any;
-}
-
-/**
- * Combined type for booking loader response that includes ResponsePayload requirements
- */
-type BookingLoaderResponse = BaseBookingLoaderResponse & ResponsePayload;
-
-/**
- * Shared function to load booking data for both assets and kits routes for add-to-existing-booking
- * @param params - Parameters required for loading bookings
- * @returns Formatted booking data response
- */
-export async function loadBookingsData({
-  request,
-  organizationId,
-  userId,
-  isSelfServiceOrBase,
-  ids,
-}: LoadBookingsParams): Promise<BookingLoaderResponse> {
-  // Get search parameters and pagination settings
-  const searchParams = getCurrentSearchParams(request);
-  const { page, search } = getParamsValues(searchParams);
-  const perPage = 20;
-
-  // Fetch bookings with filters
-  const { bookings, bookingCount } = await getBookings({
-    organizationId,
-    page,
-    perPage,
-    search,
-    userId,
-    statuses: ["DRAFT", "RESERVED"],
-    ...(isSelfServiceOrBase && {
-      custodianUserId: userId,
-    }),
+export function formatBookingsDates(bookings: Booking[], request: Request) {
+  const dateFormat = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
   });
 
-  // Set up header and model name
-  const header: HeaderData = {
-    title: "Bookings",
-  };
+  return bookings.map((b) => {
+    if (b.from && b.to) {
+      const displayFrom = dateFormat.format(b.from).split(",");
+      const displayTo = dateFormat.format(b.to).split(",");
 
-  const modelName = {
-    singular: "booking",
-    plural: "bookings",
-  };
+      const displayOriginalFrom = b.originalFrom
+        ? dateFormat.format(b.originalFrom).split(",")
+        : null;
 
-  const totalPages = Math.ceil(bookingCount / perPage);
-  const hints = getClientHint(request);
+      const displayOriginalTo = b.originalTo
+        ? dateFormat.format(b.originalTo).split(",")
+        : null;
 
-  // Format booking dates
-  const items = formatBookingsDates(bookings, request);
-
-  return {
-    showModal: true,
-    header,
-    bookings: items,
-    search,
-    page,
-    bookingCount,
-    totalPages,
-    perPage,
-    modelName,
-    ids,
-    hints,
-  };
+      return {
+        ...b,
+        displayFrom,
+        displayTo,
+        displayOriginalFrom,
+        displayOriginalTo,
+      };
+    }
+    return b;
+  });
 }
