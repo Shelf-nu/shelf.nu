@@ -378,13 +378,32 @@ export async function updateBasicBooking({
  */
 export async function reserveBooking({
   id,
+  name,
+  from,
+  to,
+  custodianTeamMemberId,
+  custodianUserId,
+  description,
   organizationId,
   hints,
   isSelfServiceOrBase,
-}: Pick<Booking, "id" | "organizationId"> & {
-  hints: ClientHint;
-  isSelfServiceOrBase: boolean;
-}) {
+}: Partial<
+  Pick<
+    Booking,
+    | "id"
+    | "name"
+    | "from"
+    | "to"
+    | "custodianTeamMemberId"
+    | "custodianUserId"
+    | "description"
+    | "organizationId"
+  >
+> &
+  Pick<Booking, "id" | "organizationId"> & {
+    hints: ClientHint;
+    isSelfServiceOrBase: boolean;
+  }) {
   try {
     const bookingFound = await db.booking
       .findUniqueOrThrow({
@@ -403,7 +422,7 @@ export async function reserveBooking({
       });
 
     /** Validate the booking dates */
-    if (!bookingFound.from || !bookingFound.to) {
+    if (!from || !to) {
       throw new ShelfError({
         cause: null,
         label,
@@ -412,7 +431,7 @@ export async function reserveBooking({
     }
 
     /** Make sure that the start date is in future */
-    if (isBefore(bookingFound.from, new Date())) {
+    if (from && isBefore(from, new Date())) {
       throw new ShelfError({
         cause: null,
         label,
@@ -421,7 +440,7 @@ export async function reserveBooking({
     }
 
     /** Make sure that the end date is after startDate */
-    if (isBefore(bookingFound.to, bookingFound.from)) {
+    if (to && isBefore(to, from)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -429,9 +448,58 @@ export async function reserveBooking({
       });
     }
 
+    const dataToUpdate: Prisma.BookingUpdateInput = {
+      status: BookingStatus.RESERVED,
+      name,
+      description,
+    };
+
+    dataToUpdate.from = from;
+    dataToUpdate.originalFrom = from;
+
+    dataToUpdate.to = to;
+    dataToUpdate.originalTo = to;
+
+    /**
+     * Custodian team member should always be passed.
+     * This is also validated by the schema `NewBookingFormSchema`.
+     * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
+     */
+    if (custodianTeamMemberId) {
+      dataToUpdate.custodianTeamMember = {
+        connect: { id: custodianTeamMemberId },
+      };
+
+      /**
+       * If a userId is passed, meaning the team member is connected to a user, we connct to it.
+       * This will override the value if there were any previous custodians`
+       */
+      if (custodianUserId) {
+        dataToUpdate.custodianUser = {
+          connect: { id: custodianUserId },
+        };
+      } else if (bookingFound.custodianUserId) {
+        /**
+         * If previous booking custodian had a user, we need to remove it
+         * because we are now connecting to an NRM. If we dont do this the teamMemberID and the userId will be connected to different entities
+         */
+        dataToUpdate.custodianUser = {
+          disconnect: true,
+        };
+      }
+    } else {
+      throw new ShelfError({
+        cause: null,
+        title: "Update failed",
+        message:
+          "Custodian team member is required to update booking. This should not happen. Please refresh the page and try agian. If the issue persists, contact support",
+        label,
+      });
+    }
+
     const updatedBooking = await db.booking.update({
       where: { id: bookingFound.id },
-      data: { status: BookingStatus.RESERVED },
+      data: dataToUpdate,
     });
 
     /** Calculate the time difference between the booking.to and the current time */
@@ -448,7 +516,7 @@ export async function reserveBooking({
      * */
 
     if (moreThanOneHourToCheckOut) {
-      const when = new Date(bookingFound.from);
+      const when = new Date(from);
       when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking starts
 
       await scheduleNextBookingJob({
@@ -473,8 +541,8 @@ export async function reserveBooking({
         bookingName: bookingFound.name,
         assetsCount: bookingFound._count.assets,
         custodian: custodian,
-        from: bookingFound.from,
-        to: bookingFound.to,
+        from,
+        to,
         hints,
         bookingId: bookingFound.id,
       });

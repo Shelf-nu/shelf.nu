@@ -415,9 +415,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
+        const payload = parseData(
+          formData,
+          NewBookingFormSchema(false, false, getHints(request)),
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
+
+        const hints = getHints(request);
+
+        const from = formData.get("startDate");
+        const to = formData.get("endDate");
+
+        const formattedFrom = from
+          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const formattedTo = to
+          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
         const booking = await reserveBooking({
           id,
           organizationId,
+          description: payload.description,
+          from: formattedFrom,
+          to: formattedTo,
+          custodianUserId: payload.custodian?.userId,
+          custodianTeamMemberId: payload.custodian?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
         });
