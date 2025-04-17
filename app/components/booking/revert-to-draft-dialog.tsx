@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BookingStatus, type Booking } from "@prisma/client";
+import { useDisabled } from "~/hooks/use-disabled";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 
@@ -9,7 +10,7 @@ type RevertToDraftProps = {
 
 export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-
+  const disabled = useDisabled();
   function handleOpenDialog() {
     setIsDialogOpen(true);
   }
@@ -57,7 +58,9 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
               >
                 Cancel
               </Button>
-              <Button className="flex-1">Confirm</Button>
+              <Button className="flex-1" disabled={disabled}>
+                Confirm
+              </Button>
             </form>
           </div>
         </Dialog>

@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -22,14 +21,17 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
-  createNotesForBookingUpdate,
+  archiveBooking,
+  cancelBooking,
+  checkinBooking,
+  checkoutBooking,
   deleteBooking,
   getBooking,
   getBookingFlags,
-  isBookingExpired,
   removeAssets,
-  sendBookingUpdateNotification,
-  upsertBooking,
+  reserveBooking,
+  revertBookingToDraft,
+  updateBasicBooking,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -73,9 +75,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { page, perPageParam } = paramsValues;
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  /** Needed for getting the assets */
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
   try {
     const { organizationId, isSelfServiceOrBase, userOrganizations } =
@@ -98,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
+    // Get the booking with basic asset information
     const booking = await getBooking({
       id: bookingId,
       organizationId: organizationId,
@@ -116,7 +116,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembersData, assets, totalAssets, bookingFlags] =
+    // Group assets by kitId for pagination purposes
+    const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
+    const individualAssets: Array<(typeof booking.assets)[0]> = [];
+
+    booking.assets.forEach((asset) => {
+      if (asset.kitId) {
+        if (!assetsByKit[asset.kitId]) {
+          assetsByKit[asset.kitId] = [];
+        }
+        assetsByKit[asset.kitId].push(asset);
+      } else {
+        individualAssets.push(asset);
+      }
+    });
+
+    // Create pagination items where each kit or individual asset is one item
+    const paginationItems: Array<{
+      type: "kit" | "asset";
+      id: string;
+      assets: Array<(typeof booking.assets)[0]>;
+    }> = [
+      ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
+        type: "kit" as const,
+        id: kitId,
+        assets,
+      })),
+      ...individualAssets.map((asset) => ({
+        type: "asset" as const,
+        id: asset.id,
+        assets: [asset],
+      })),
+    ];
+
+    // Calculate pagination
+    const totalPaginationItems = paginationItems.length;
+    const totalPages = Math.ceil(totalPaginationItems / perPage);
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const paginatedItems = paginationItems.slice(skip, skip + perPage);
+
+    // Get all asset IDs from the current pagination page
+    const assetIdsToFetch = paginatedItems.flatMap((item) =>
+      item.assets.map((asset) => asset.id)
+    );
+
+    // Execute all necessary queries in parallel
+    const [teamMembersData, assetDetails, totalAssets, bookingFlags, kits] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -129,29 +174,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           selectedTeamMembers: booking.custodianTeamMemberId
             ? [booking.custodianTeamMemberId]
             : [],
-          isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+          isSelfService: isSelfServiceOrBase,
           userId,
         }),
 
         /**
-         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-         * That way we know if the asset is available or not because we can see if they are booked for the same period
+         * Get detailed asset information with bookings for the paginated assets
          */
         db.asset.findMany({
           where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
+            id: { in: assetIdsToFetch },
           },
-          skip,
-          take,
           include: {
             category: true,
             custody: true,
             kit: true,
             bookings: {
               where: {
-                // id: { not: booking.id },
                 ...(booking.from && booking.to
                   ? {
                       status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
@@ -171,26 +210,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
         }),
-        /** Count assets them */
+
+        /** Count all assets in the booking */
         db.asset.count({
           where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
+            id: { in: booking.assets.map((a) => a.id) },
           },
         }),
-        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+
+        /** Calculate booking flags considering all assets */
         getBookingFlags({
           id: booking.id,
           assetIds: booking.assets.map((a) => a.id),
           from: booking.from,
           to: booking.to,
         }),
+
+        /** Get kit details for the kits in the current page */
+        db.kit.findMany({
+          where: {
+            id: {
+              in: paginatedItems
+                .filter((item) => item.type === "kit")
+                .map((item) => item.id),
+            },
+          },
+          include: {
+            _count: { select: { assets: true } },
+          },
+        }),
       ]);
 
-    /** We replace the assets ids in the booking object with the assets fetched in the separate request.
-     * This is useful for more consistent data in the front-end */
-    booking.assets = assets;
+    // Create maps for easy lookup
+    const assetDetailsMap = new Map(
+      assetDetails.map((asset) => [asset.id, asset])
+    );
+    const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
+
+    // Enrich the paginated items with full asset details
+    const enrichedPaginatedItems = paginatedItems.map((item) => ({
+      ...item,
+      assets: item.assets.map((asset) => {
+        const details = assetDetailsMap.get(asset.id);
+        return details || asset;
+      }),
+      kit: item.type === "kit" ? kitsMap.get(item.id) : null,
+    }));
 
     const modelName = {
       singular: "asset",
@@ -200,16 +265,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
-    const totalPages = Math.ceil(totalAssets / perPage);
 
     return json(
       data({
         header,
         booking,
         modelName,
-        items: booking.assets,
+        paginatedItems: enrichedPaginatedItems,
         page,
         totalItems: totalAssets,
+        totalPaginationItems,
         perPage,
         totalPages,
         ...teamMembersData,
@@ -235,8 +300,7 @@ export const handle = {
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId } = context.getSession();
   const { bookingId: id } = getParams(
     params,
     z.object({ bookingId: z.string() }),
@@ -246,12 +310,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const {
-      intent,
-      nameChangeOnly,
-      checkoutIntentChoice,
-      checkinIntentChoice,
-    } = parseData(
+    const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -293,13 +352,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { organizationId, role, isSelfServiceOrBase } =
       await requirePermission({
-        userId: authSession?.userId,
+        userId,
         request,
         entity: PermissionEntity.booking,
         action: intent2ActionMap[intent],
       });
 
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID(userId);
 
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
@@ -307,113 +366,154 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
 
     switch (intent) {
-      case "save":
-      case "reserve":
-      case "checkOut":
-      case "checkIn":
-        // What status to set based on the intent
-        const intentToStatusMap = {
-          save: undefined,
-          reserve: BookingStatus.RESERVED,
-          checkOut: BookingStatus.ONGOING,
-          checkIn: BookingStatus.COMPLETE,
-        };
-
-        const isExpired = await isBookingExpired({ id });
-
-        // Modify status if expired during checkout
-        const status =
-          intent === "checkOut" && isExpired
-            ? BookingStatus.OVERDUE
-            : intentToStatusMap[intent];
-
-        let upsertBookingData = { organizationId, id };
-
-        if (intent === "checkOut" && checkoutIntentChoice) {
-          Object.assign(upsertBookingData, { checkoutIntentChoice });
-        }
-
-        if (intent === "checkIn" && checkinIntentChoice) {
-          Object.assign(upsertBookingData, { checkinIntentChoice });
-        }
-
-        // We are only changing the name so we do things simpler
-        if (nameChangeOnly) {
-          const { name, description } = parseData(
-            formData,
-            z.object({
-              name: z.string(),
-              description: z.string().optional(),
-            }),
-            {
-              additionalData: { userId, id, organizationId, role },
-            }
-          );
-
-          Object.assign(upsertBookingData, { name, description });
-        } else {
-          /** WE are updating the whole booking */
-          const payload = parseData(
-            formData,
-            NewBookingFormSchema(false, false, getHints(request)), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
-            {
-              additionalData: { userId, id, organizationId, role },
-            }
-          );
-
-          const { name, custodian, description } = payload;
-
-          const hints = getHints(request);
-
-          const from = DateTime.fromFormat(
-            formData.get("startDate")!.toString()!,
-            DATE_TIME_FORMAT,
-            {
-              zone: hints.timeZone,
-            }
-          ).toJSDate();
-
-          const to = DateTime.fromFormat(
-            formData.get("endDate")!.toString()!,
-            DATE_TIME_FORMAT,
-            {
-              zone: hints.timeZone,
-            }
-          ).toJSDate();
-
-          Object.assign(upsertBookingData, {
-            custodianUserId: custodian?.userId,
-            custodianTeamMemberId: custodian?.id,
-            name,
-            from,
-            to,
-            description,
-          });
-        }
-
-        // Add the status if it exists
-        Object.assign(upsertBookingData, {
-          ...(status && {
-            status,
-          }),
-          // Make sure to pass isExpired when checking out
-          ...(intent === "checkOut" && { isExpired }),
-        });
-
-        // Update and save the booking
-        const booking = await upsertBooking(
-          upsertBookingData,
-          getClientHint(request),
-          isSelfServiceOrBase
+      case "save": {
+        const payload = parseData(
+          formData,
+          NewBookingFormSchema(false, false, getHints(request)),
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
         );
 
-        await createNotesForBookingUpdate(intent, booking, {
-          firstName: user?.firstName || "",
-          lastName: user?.lastName || "",
-          id: authSession.userId,
+        const hints = getHints(request);
+
+        const from = formData.get("startDate");
+        const to = formData.get("endDate");
+
+        const formattedFrom = from
+          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const formattedTo = to
+          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const booking = await updateBasicBooking({
+          id,
+          organizationId,
+          name: payload.name,
+          description: payload.description,
+          from: formattedFrom,
+          to: formattedTo,
+          custodianUserId: payload.custodian?.userId,
+          custodianTeamMemberId: payload.custodian?.id,
         });
 
-        sendBookingUpdateNotification(intent, authSession.userId);
+        sendNotification({
+          title: "Booking saved",
+          message: "Your booking has been saved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
+      case "reserve": {
+        const payload = parseData(
+          formData,
+          NewBookingFormSchema(false, false, getHints(request)),
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
+
+        const hints = getHints(request);
+
+        const from = formData.get("startDate");
+        const to = formData.get("endDate");
+
+        const formattedFrom = from
+          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const formattedTo = to
+          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const booking = await reserveBooking({
+          id,
+          organizationId,
+          description: payload.description,
+          from: formattedFrom,
+          to: formattedTo,
+          custodianUserId: payload.custodian?.userId,
+          custodianTeamMemberId: payload.custodian?.id,
+          hints: getClientHint(request),
+          isSelfServiceOrBase,
+        });
+
+        sendNotification({
+          title: "Booking reserved",
+          message: "Your booking has been reserved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
+      case "checkOut": {
+        const booking = await checkoutBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          intentChoice: checkoutIntentChoice,
+        });
+
+        await createNotes({
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
+            booking.name
+          }](/bookings/${booking.id})**.`,
+          type: "UPDATE",
+          userId: user.id,
+          assetIds: booking.assets.map((a) => a.id),
+        });
+
+        sendNotification({
+          title: "Booking checked-out",
+          message: "Your booking has been checked-out successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking }), {
+          headers,
+        });
+      }
+      case "checkIn":
+        const booking = await checkinBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          intentChoice: checkinIntentChoice,
+        });
+
+        await createNotes({
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
+            booking.name
+          }](/bookings/${booking.id})**.`,
+          type: "UPDATE",
+          userId: user.id,
+          assetIds: booking.assets.map((a) => a.id),
+        });
+
+        sendNotification({
+          title: "Booking checked-in",
+          message: "Your booking has been checked-in successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
         return json(data({ booking }), {
           headers,
@@ -427,10 +527,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
           const b = await getBooking({ id, organizationId });
-          if (
-            b?.creatorId !== authSession.userId &&
-            b?.custodianUserId !== authSession.userId
-          ) {
+          if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
             throw new ShelfError({
               cause: null,
               message: "You are not authorized to delete this booking",
@@ -450,7 +547,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             deletedBooking.name
           }**.`,
           type: "UPDATE",
-          userId: authSession.userId,
+          userId: userId,
           assetIds: deletedBooking.assets.map((a) => a.id),
         });
 
@@ -458,7 +555,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking deleted",
           message: "Your booking has been deleted successfully",
           icon: { name: "trash", variant: "error" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return redirect("/bookings", {
@@ -480,7 +577,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking: { id, assetIds: [assetId as string] },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
-          userId: authSession.userId,
+          userId,
           organizationId,
         });
 
@@ -488,7 +585,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Asset removed",
           message: "Your asset has been removed from the booking",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ booking: b }), {
@@ -496,36 +593,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
-        await upsertBooking(
-          { id, status: BookingStatus.ARCHIVED },
-          getClientHint(request)
-        );
+        await archiveBooking({ id, organizationId });
 
         sendNotification({
           title: "Booking archived",
           message: "Your booking has been archived successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
-        return json(
-          { success: true },
-          {
-            headers,
-          }
-        );
+
+        return json(data({ success: true }), { headers });
       }
       case "cancel": {
-        const cancelledBooking = await upsertBooking(
-          { id, status: BookingStatus.CANCELLED },
-          getClientHint(request)
-        );
+        const cancelledBooking = await cancelBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+        });
 
         await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
             cancelledBooking.name
           }](/bookings/${cancelledBooking.id})**.`,
           type: "UPDATE",
-          userId: authSession.userId,
+          userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
         });
 
@@ -533,7 +624,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Booking canceled",
           message: "Your booking has been canceled successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(
@@ -557,7 +648,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking: { id, assetIds: kit.assets.map((a) => a.id) },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
-          userId: authSession.userId,
+          userId,
           organizationId,
         });
 
@@ -565,7 +656,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           title: "Kit removed",
           message: "Your kit has been removed from the booking",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ booking: b }), {
@@ -573,16 +664,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "revert-to-draft": {
-        await upsertBooking(
-          { id, status: BookingStatus.DRAFT },
-          getClientHint(request)
-        );
+        await revertBookingToDraft({ id, organizationId });
 
         sendNotification({
           title: "Booking reverted",
           message: "Your booking has been reverted back to draft successfully",
           icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+          senderId: userId,
         });
 
         return json(data({ success: true }));

@@ -58,12 +58,11 @@ import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getShareAgreementUrl } from "~/utils/asset";
-import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -247,13 +246,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** We only update the booking if there are assets to add */
     if (assetIds.length > 0) {
       /** We update the booking with the new assets */
-      const b = await upsertBooking(
-        {
-          id: bookingId,
-          assetIds,
-        },
-        getClientHint(request)
-      );
+      const b = await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds,
+      });
 
       /** We create notes for the assets that were added */
       await createNotes({
@@ -311,18 +308,24 @@ export default function AddAssetsToNewBooking() {
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
+  /** Assets with kits has to be handled from manage-kits */
+  const bookingAssets = useMemo(
+    () => booking.assets.filter((asset) => !asset.kitId),
+    [booking.assets]
+  );
+
   const removedAssets = useMemo(
     () =>
-      booking.assets.filter(
+      bookingAssets.filter(
         (asset) =>
           !selectedBulkItems.some(
             (selectedItem) => selectedItem.id === asset.id
           )
       ),
-    [booking.assets, selectedBulkItems]
+    [bookingAssets, selectedBulkItems]
   );
 
-  const hasUnsavedChanges = selectedBulkItemsCount !== booking.assets.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -341,8 +344,8 @@ export default function AddAssetsToNewBooking() {
    * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedBulkItems(booking.assets);
-  }, [booking.assets, setSelectedBulkItems]);
+    setSelectedBulkItems(bookingAssets);
+  }, [bookingAssets, setSelectedBulkItems]);
 
   /**
    * Set disabled items for kit
@@ -461,6 +464,7 @@ export default function AddAssetsToNewBooking() {
             if (disabledBulkItems.some((item) => item.id === asset.id)) {
               return;
             }
+
             updateItem(asset);
           }}
           emptyStateClassName="py-10"

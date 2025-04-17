@@ -1,9 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
-import {
-  formatBookingsDates,
-  getBookings,
-} from "~/modules/booking/service.server";
+import { getBookings } from "~/modules/booking/service.server";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
