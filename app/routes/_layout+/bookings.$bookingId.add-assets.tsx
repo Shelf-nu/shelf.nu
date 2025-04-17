@@ -342,18 +342,17 @@ export default function AddAssetsToNewBooking() {
   /**
    * Set selected items for kit based on the route data
    */
-  useEffect(
-    function updateDefaultSelectedItems() {
-      /**
-       * We are setting the default items here, so we do not have to
-       * set the assets again if there are any items already present
-       */
-      if (!selectedBulkItems.length) {
-        setSelectedBulkItems(bookingAssets);
-      }
-    },
-    [bookingAssets, selectedBulkItems.length, setSelectedBulkItems]
-  );
+  useEffect(function updateDefaultSelectedItems() {
+    /**
+     * We are setting the default items here, so we do not have to
+     * set the assets again if there are any items already present
+     */
+    if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingAssets);
+    }
+    // We only need to run this when component mounts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Set disabled items for kit
