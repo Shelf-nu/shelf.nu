@@ -506,7 +506,7 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {asset.custody ? (
+          {asset.custody && !asset.kitId ? (
             <AgreementStatusCard
               custodian={asset.custody.custodian}
               agreementName={asset.custody?.agreement?.name ?? ""}
