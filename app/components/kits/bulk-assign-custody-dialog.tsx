@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { TeamMember } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
@@ -7,12 +8,14 @@ import { createCustodianSchema } from "~/modules/custody/schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
+import CustodyAgreementSelector from "../custody/custody-agreement-selector";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
 export const BulkAssignKitCustodySchema = z.object({
   kitIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
+  agreement: z.string().optional(),
 });
 
 export default function BulkAssignCustodyDialog() {
@@ -20,6 +23,7 @@ export default function BulkAssignCustodyDialog() {
 
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<{ teamMembers: TeamMember[] }>();
+  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
 
   return (
     <BulkUpdateDialogContent
@@ -67,6 +71,9 @@ export default function BulkAssignCustodyDialog() {
                 }),
               })}
               renderItem={(item) => resolveTeamMemberName(item, true)}
+              onChange={(value) => {
+                setHasCustodianSelected(!!value);
+              }}
             />
             {zo.errors.custodian()?.message ? (
               <p className="text-sm text-error-500">
@@ -77,6 +84,11 @@ export default function BulkAssignCustodyDialog() {
               <p className="text-sm text-error-500">{fetcherError}</p>
             ) : null}
           </div>
+
+          <CustodyAgreementSelector
+            className="my-5"
+            hasCustodianSelected={hasCustodianSelected}
+          />
 
           <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
             <Button

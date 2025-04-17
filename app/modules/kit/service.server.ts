@@ -1,5 +1,6 @@
 import type {
   Booking,
+  CustodyAgreement,
   Kit,
   KitCustody,
   Organization,
@@ -918,6 +919,7 @@ export async function bulkAssignKitCustody({
   custodianName,
   userId,
   currentSearchParams,
+  custodyAgreement,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
@@ -925,6 +927,7 @@ export async function bulkAssignKitCustody({
   custodianName: TeamMember["name"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  custodyAgreement?: CustodyAgreement["id"];
 }) {
   try {
     /**
@@ -983,6 +986,31 @@ export async function bulkAssignKitCustody({
       });
     }
 
+    /** Check if the agreement exists and is in the same organization */
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired"
+    > | null = null;
+    if (custodyAgreement) {
+      agreementFound = await db.custodyAgreement
+        .findUniqueOrThrow({
+          where: { id: custodyAgreement, organizationId },
+          select: {
+            id: true,
+            name: true,
+            signatureRequired: true,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            label: "Custody",
+            message:
+              "Custody agreement not found. Are you sure it exists in the same organization.",
+          });
+        });
+    }
+
     /**
      * updateMany does not allow to create nested relationship rows so we have
      * to make two queries to assign custody over
@@ -995,13 +1023,21 @@ export async function bulkAssignKitCustody({
         data: kits.map((kit) => ({
           custodianId,
           kitId: kit.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreementId: agreementFound?.id,
         })),
       });
 
       /** Updating status of all kits */
       await tx.kit.updateMany({
         where: { id: { in: kits.map((kit) => kit.id) } },
-        data: { status: KitStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? KitStatus.SIGNATURE_PENDING
+            : KitStatus.IN_CUSTODY,
+        },
       });
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
@@ -1011,13 +1047,21 @@ export async function bulkAssignKitCustody({
         data: allAssetsOfAllKits.map((asset) => ({
           teamMemberId: custodianId,
           assetId: asset.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreementId: agreementFound?.id,
         })),
       });
 
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.SIGNATURE_PENDING
+            : AssetStatus.IN_CUSTODY,
+        },
       });
 
       /** Creating notes for all the assets of the kit */
@@ -1028,6 +1072,19 @@ export async function bulkAssignKitCustody({
           type: "UPDATE",
           userId,
           assetId: asset.id,
+        })),
+      });
+
+      /** Creating a Receipt for custody */
+      await tx.custodyReceipt.createMany({
+        data: kitIds.map((kitId) => ({
+          kitId,
+          custodianId,
+          organizationId,
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
         })),
       });
     });

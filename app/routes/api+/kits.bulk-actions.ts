@@ -77,7 +77,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
 
       case "bulk-assign-custody": {
-        const { kitIds, custodian } = parseData(
+        const { kitIds, custodian, agreement } = parseData(
           formData,
           BulkAssignKitCustodySchema
         );
@@ -106,6 +106,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
+          custodyAgreement: agreement,
         });
 
         sendNotification({
