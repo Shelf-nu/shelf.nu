@@ -4,9 +4,13 @@
  */
 import { parseISO } from "date-fns";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
-import type { ClientHint } from "~/modules/booking/types";
 import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
+
+export interface ClientHint {
+  timeZone: string;
+  locale: string;
+}
 
 export const clientHints = {
   timeZone: {

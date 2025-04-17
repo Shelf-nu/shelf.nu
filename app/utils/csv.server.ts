@@ -29,13 +29,13 @@ import type {
   FixedField,
 } from "~/modules/asset-index-settings/helpers";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
-  BOOKING_COMMON_INCLUDE,
-  formatBookingsDates,
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { SERVER_URL } from "./env";

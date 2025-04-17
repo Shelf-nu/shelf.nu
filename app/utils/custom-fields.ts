@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/modules/booking/types";
+import type { ClientHint } from "~/utils/client-hints";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
