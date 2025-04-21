@@ -47,7 +47,7 @@ export async function createCustodyAgreement({
       isActive,
     } satisfies Prisma.CustodyAgreementCreateInput;
 
-    return db.custodyAgreement.create({ data });
+    return await db.custodyAgreement.create({ data });
   } catch (cause) {
     throw new ShelfError({
       cause,
