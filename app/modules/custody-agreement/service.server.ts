@@ -195,7 +195,7 @@ export async function updateAgreementFile({
     });
     const agreementFile = custodyAgreement.custodyAgreementFiles[0];
 
-    const publicUrl = await getPublicFileURL({
+    const publicUrl = getPublicFileURL({
       bucketName: "custody-agreements",
       filename: newFileName,
     });
@@ -292,7 +292,7 @@ export async function makeCustodyAgreementDefault({
     });
 
     // Make the selected agreement default
-    return await db.custodyAgreement.update({
+    await db.custodyAgreement.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });
