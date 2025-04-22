@@ -1,9 +1,10 @@
-import { useEffect } from "react";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { useEffect, useRef } from "react";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { AlertCircleIcon } from "lucide-react";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -27,6 +28,14 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
 import {
   Tooltip,
   TooltipContent,
@@ -98,7 +107,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       db.kit
         .findFirstOrThrow({
           where: { id: kitId },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            assets: { select: { id: true } },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -433,6 +447,9 @@ export default function ManageAssetsInKit() {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
+  const formRef = useRef<HTMLFormElement>(null);
+  const submit = useSubmit();
+
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
@@ -464,6 +481,10 @@ export default function ManageAssetsInKit() {
 
     setDisabledBulkItems(disabledBulkItems);
   }, [items, setDisabledBulkItems]);
+
+  function handleSubmit() {
+    submit(formRef.current);
+  }
 
   return (
     <div className="flex size-full flex-col overflow-y-hidden">
@@ -574,7 +595,7 @@ export default function ManageAssetsInKit() {
           <Button variant="secondary" to="..">
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {selectedBulkItems.map((asset, i) => (
               <input
                 key={asset.id}
@@ -583,14 +604,51 @@ export default function ManageAssetsInKit() {
                 value={asset.id}
               />
             ))}
-            <Button
-              type="submit"
-              name="intent"
-              value="addAssets"
-              disabled={isSearching}
-            >
-              Confirm
-            </Button>
+
+            {kit.status === KitStatus.IN_CUSTODY ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button disabled={isSearching}>Confirm</Button>
+                </AlertDialogTrigger>
+
+                <AlertDialogContent>
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-red-200/20">
+                      <div className="flex size-10 items-center justify-center rounded-full bg-red-200/50">
+                        <AlertCircleIcon className="size-4 text-error-500" />
+                      </div>
+                    </div>
+
+                    <h3>Add Assets to kit in custody?</h3>
+                  </div>
+
+                  <p>
+                    This kit is currently assigned custody. Adding assets to it
+                    will also assign custody to those assets and update their
+                    status accordingly. Are you sure you want to continue?
+                  </p>
+
+                  <AlertDialogFooter>
+                    <AlertDialogCancel asChild>
+                      <Button variant="secondary">Cancel</Button>
+                    </AlertDialogCancel>
+
+                    <AlertDialogAction asChild>
+                      <Button onClick={handleSubmit}>Continue</Button>
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button
+                type="submit"
+                name="intent"
+                value="addAssets"
+                disabled={isSearching}
+              >
+                Confirm
+              </Button>
+            )}
           </Form>
         </div>
       </footer>
