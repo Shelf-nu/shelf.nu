@@ -603,7 +603,8 @@ export default function ManageAssetsInKit() {
               />
             ))}
 
-            {kit.status === KitStatus.IN_CUSTODY ? (
+            {kit.status === KitStatus.IN_CUSTODY ||
+            kit.status === KitStatus.CHECKED_OUT ? (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button disabled={isSearching}>Confirm</Button>
@@ -617,13 +618,16 @@ export default function ManageAssetsInKit() {
                       </div>
                     </div>
 
-                    <h3>Add Assets to kit in custody?</h3>
+                    <h3>Add Assets to kit?</h3>
                   </div>
 
                   <p>
-                    This kit is currently assigned custody. Adding assets to it
-                    will also assign custody to those assets and update their
-                    status accordingly. Are you sure you want to continue?
+                    This kit is currently{" "}
+                    {kit.status === KitStatus.IN_CUSTODY
+                      ? "in custody"
+                      : "checked out"}
+                    . Adding assets to it will also inherit their status
+                    accordingly. Are you sure you want to continue?
                   </p>
 
                   <AlertDialogFooter>
