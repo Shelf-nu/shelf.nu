@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
@@ -303,25 +303,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** User is not allowed to add asset to any of these booking status */
-    const disallowedBookingStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
     const kitBookings =
       kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
-
-    if (
-      kitBookings &&
-      kitBookings.some((b) => disallowedBookingStatus.includes(b.status))
-    ) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add asset to an unavailable kit.",
-        additionalData: { userId, kitId },
-        label: "Kit",
-      });
-    }
 
     await db.kit.update({
       where: { id: kit.id, organizationId },
@@ -412,11 +395,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /**
-     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
+     * If user is adding/removing an asset to a kit which is a part of DRAFT, RESERVED, ONGOING or OVERDUE booking,
      * then we have to add or remove these assets to booking also
      */
     const bookingsToUpdate = kitBookings.filter(
-      (b) => b.status === "DRAFT" || b.status === "RESERVED"
+      (b) =>
+        b.status === "DRAFT" ||
+        b.status === "RESERVED" ||
+        b.status === "ONGOING" ||
+        b.status === "OVERDUE"
     );
 
     if (bookingsToUpdate?.length) {
@@ -433,6 +420,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         )
       );
+    }
+
+    /**
+     * If the kit is part of an ONGOING booking, then we have to make all
+     * the assets CHECKED_OUT
+     */
+    if (kit.status === KitStatus.CHECKED_OUT) {
+      await db.asset.updateMany({
+        where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
     }
 
     return redirect(`/kits/${kitId}`);
