@@ -689,6 +689,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           newEndDate: endDate,
         });
 
+        sendNotification({
+          title: "Booking extended",
+          message: "Your booking has been extended to new end date.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
         return json(data({ success: true }));
       }
       default: {

@@ -18,7 +18,11 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import { getClientHint, type ClientHint } from "~/utils/client-hints";
+import {
+  getClientHint,
+  getDateTimeFormatFromHints,
+  type ClientHint,
+} from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
@@ -41,6 +45,7 @@ import {
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
+  extendBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
@@ -1144,7 +1149,12 @@ export async function extendBooking({
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        select: { id: true, status: true, activeSchedulerReference: true },
+        select: {
+          id: true,
+          status: true,
+          to: true,
+          activeSchedulerReference: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1182,7 +1192,47 @@ export async function extendBooking({
             : undefined,
         to: newEndDate,
       },
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     });
+
+    /** Send extended booking email */
+    if (updatedBooking?.custodianUser?.email) {
+      const custodian = updatedBooking?.custodianUser
+        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        : updatedBooking.custodianTeamMember?.name ?? "";
+
+      const text = extendBookingEmailContent({
+        bookingName: updatedBooking.name,
+        assetsCount: updatedBooking._count.assets,
+        custodian,
+        from: updatedBooking.from!,
+        to: updatedBooking.to!,
+        hints,
+        bookingId: updatedBooking.id,
+        oldToDate: booking.to!,
+      });
+
+      const { format } = getDateTimeFormatFromHints(hints, {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+
+      const html = bookingUpdatesTemplateString({
+        booking: updatedBooking,
+        heading: `Booking extended from ${format(booking.to!)} to ${format(
+          newEndDate
+        )}`,
+        assetCount: updatedBooking._count.assets,
+        hints,
+      });
+
+      sendEmail({
+        to: updatedBooking.custodianUser.email,
+        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
+        text,
+        html,
+      });
+    }
 
     /**
      * If the booking was RESERVED then a checkin reminder was scheduled.
