@@ -307,18 +307,24 @@ export default function AddAssetsToNewBooking() {
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
+  /** Assets with kits has to be handled from manage-kits */
+  const bookingAssets = useMemo(
+    () => booking.assets.filter((asset) => !asset.kitId),
+    [booking.assets]
+  );
+
   const removedAssets = useMemo(
     () =>
-      booking.assets.filter(
+      bookingAssets.filter(
         (asset) =>
           !selectedBulkItems.some(
             (selectedItem) => selectedItem.id === asset.id
           )
       ),
-    [booking.assets, selectedBulkItems]
+    [bookingAssets, selectedBulkItems]
   );
 
-  const hasUnsavedChanges = selectedBulkItemsCount !== booking.assets.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -336,9 +342,17 @@ export default function AddAssetsToNewBooking() {
   /**
    * Set selected items for kit based on the route data
    */
-  useEffect(() => {
-    setSelectedBulkItems(booking.assets);
-  }, [booking.assets, setSelectedBulkItems]);
+  useEffect(function updateDefaultSelectedItems() {
+    /**
+     * We are setting the default items here, so we do not have to
+     * set the assets again if there are any items already present
+     */
+    if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingAssets);
+    }
+    // We only need to run this when component mounts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Set disabled items for kit
@@ -457,6 +471,7 @@ export default function AddAssetsToNewBooking() {
             if (disabledBulkItems.some((item) => item.id === asset.id)) {
               return;
             }
+
             updateItem(asset);
           }}
           emptyStateClassName="py-10"

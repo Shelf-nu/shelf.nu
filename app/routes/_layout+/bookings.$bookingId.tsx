@@ -75,9 +75,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { page, perPageParam } = paramsValues;
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  /** Needed for getting the assets */
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
   try {
     const { organizationId, isSelfServiceOrBase, userOrganizations } =
@@ -100,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
+    // Get the booking with basic asset information
     const booking = await getBooking({
       id: bookingId,
       organizationId: organizationId,
@@ -118,7 +116,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembersData, assets, totalAssets, bookingFlags] =
+    // Group assets by kitId for pagination purposes
+    const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
+    const individualAssets: Array<(typeof booking.assets)[0]> = [];
+
+    booking.assets.forEach((asset) => {
+      if (asset.kitId) {
+        if (!assetsByKit[asset.kitId]) {
+          assetsByKit[asset.kitId] = [];
+        }
+        assetsByKit[asset.kitId].push(asset);
+      } else {
+        individualAssets.push(asset);
+      }
+    });
+
+    // Create pagination items where each kit or individual asset is one item
+    const paginationItems: Array<{
+      type: "kit" | "asset";
+      id: string;
+      assets: Array<(typeof booking.assets)[0]>;
+    }> = [
+      ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
+        type: "kit" as const,
+        id: kitId,
+        assets,
+      })),
+      ...individualAssets.map((asset) => ({
+        type: "asset" as const,
+        id: asset.id,
+        assets: [asset],
+      })),
+    ];
+
+    // Calculate pagination
+    const totalPaginationItems = paginationItems.length;
+    const totalPages = Math.ceil(totalPaginationItems / perPage);
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const paginatedItems = paginationItems.slice(skip, skip + perPage);
+
+    // Get all asset IDs from the current pagination page
+    const assetIdsToFetch = paginatedItems.flatMap((item) =>
+      item.assets.map((asset) => asset.id)
+    );
+
+    // Execute all necessary queries in parallel
+    const [teamMembersData, assetDetails, totalAssets, bookingFlags, kits] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -131,29 +174,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           selectedTeamMembers: booking.custodianTeamMemberId
             ? [booking.custodianTeamMemberId]
             : [],
-          isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+          isSelfService: isSelfServiceOrBase,
           userId,
         }),
 
         /**
-         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-         * That way we know if the asset is available or not because we can see if they are booked for the same period
+         * Get detailed asset information with bookings for the paginated assets
          */
         db.asset.findMany({
           where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
+            id: { in: assetIdsToFetch },
           },
-          skip,
-          take,
           include: {
             category: true,
             custody: true,
             kit: true,
             bookings: {
               where: {
-                // id: { not: booking.id },
                 ...(booking.from && booking.to
                   ? {
                       status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
@@ -173,26 +210,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
         }),
-        /** Count assets them */
+
+        /** Count all assets in the booking */
         db.asset.count({
           where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
+            id: { in: booking.assets.map((a) => a.id) },
           },
         }),
-        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+
+        /** Calculate booking flags considering all assets */
         getBookingFlags({
           id: booking.id,
           assetIds: booking.assets.map((a) => a.id),
           from: booking.from,
           to: booking.to,
         }),
+
+        /** Get kit details for the kits in the current page */
+        db.kit.findMany({
+          where: {
+            id: {
+              in: paginatedItems
+                .filter((item) => item.type === "kit")
+                .map((item) => item.id),
+            },
+          },
+          include: {
+            _count: { select: { assets: true } },
+          },
+        }),
       ]);
 
-    /** We replace the assets ids in the booking object with the assets fetched in the separate request.
-     * This is useful for more consistent data in the front-end */
-    booking.assets = assets;
+    // Create maps for easy lookup
+    const assetDetailsMap = new Map(
+      assetDetails.map((asset) => [asset.id, asset])
+    );
+    const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
+
+    // Enrich the paginated items with full asset details
+    const enrichedPaginatedItems = paginatedItems.map((item) => ({
+      ...item,
+      assets: item.assets.map((asset) => {
+        const details = assetDetailsMap.get(asset.id);
+        return details || asset;
+      }),
+      kit: item.type === "kit" ? kitsMap.get(item.id) : null,
+    }));
 
     const modelName = {
       singular: "asset",
@@ -202,16 +265,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
-    const totalPages = Math.ceil(totalAssets / perPage);
 
     return json(
       data({
         header,
         booking,
         modelName,
-        items: booking.assets,
+        paginatedItems: enrichedPaginatedItems,
         page,
         totalItems: totalAssets,
+        totalPaginationItems,
         perPage,
         totalPages,
         ...teamMembersData,
@@ -352,9 +415,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
+        const payload = parseData(
+          formData,
+          NewBookingFormSchema(false, false, getHints(request)),
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
+
+        const hints = getHints(request);
+
+        const from = formData.get("startDate");
+        const to = formData.get("endDate");
+
+        const formattedFrom = from
+          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
+        const formattedTo = to
+          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
+              zone: hints.timeZone,
+            }).toJSDate()
+          : undefined;
+
         const booking = await reserveBooking({
           id,
           organizationId,
+          description: payload.description,
+          from: formattedFrom,
+          to: formattedTo,
+          custodianUserId: payload.custodian?.userId,
+          custodianTeamMemberId: payload.custodian?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
         });
