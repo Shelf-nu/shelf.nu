@@ -84,6 +84,7 @@ function makeSentryContext(event: unknown | null | undefined) {
     },
     tags: {
       label: maybeShelfError.label || "Unknown",
+      traceId: maybeShelfError.traceId,
     },
     extra: {
       ...(maybeShelfError.additionalData || {}),
