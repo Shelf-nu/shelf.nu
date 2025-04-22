@@ -57,7 +57,7 @@ export function AssetStatusBadge({
           trigger={
             <Badge
               color={assetStatusColorMap(status)}
-              className={"bg-warning-50"}
+              className={"cursor-pointer bg-warning-50"}
             >
               {userFriendlyAssetStatus(status)}
             </Badge>
