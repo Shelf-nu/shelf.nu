@@ -11,6 +11,7 @@ import {
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
   PermissionAction,
   PermissionEntity,
@@ -18,6 +19,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
+import ExtendBookingDialog from "./extend-booking-dialog";
 import { GenerateBookingPdf } from "./generate-booking-pdf";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
@@ -47,6 +49,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     entity: PermissionEntity.booking,
     action: PermissionAction.cancel,
   });
+
+  const canExtendBooking = isOngoing || isReserved || isOverdue;
 
   return (
     <DropdownMenu modal={false}>
@@ -100,6 +104,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 Cancel
               </Button>
             </DropdownMenuItem>
+          </When>
+          <When truthy={canExtendBooking}>
+            <ExtendBookingDialog
+              currentEndDate={dateForDateTimeInputValue(new Date(booking.to!))}
+            />
           </When>
           <When truthy={isCompleted && canArchiveBooking}>
             <DropdownMenuItem asChild>

@@ -12,6 +12,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
+import { ExtendBookingSchema } from "~/components/booking/extend-booking-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -26,6 +27,7 @@ import {
   checkinBooking,
   checkoutBooking,
   deleteBooking,
+  extendBooking,
   getBooking,
   getBookingFlags,
   removeAssets,
@@ -324,6 +326,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "cancel",
           "removeKit",
           "revert-to-draft",
+          "extend-booking",
         ]),
         nameChangeOnly: z
           .string()
@@ -348,6 +351,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
+      "extend-booking": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -671,6 +675,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           message: "Your booking has been reverted back to draft successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      case "extend-booking": {
+        const { endDate } = parseData(formData, ExtendBookingSchema);
+
+        await extendBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          newEndDate: endDate,
         });
 
         return json(data({ success: true }));

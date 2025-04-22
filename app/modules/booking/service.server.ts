@@ -60,7 +60,9 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
-async function cancelScheduler(b?: Booking | null) {
+async function cancelScheduler(
+  b?: Pick<Booking, "activeSchedulerReference"> | null
+) {
   try {
     if (b?.activeSchedulerReference) {
       await scheduler.cancel(b.activeSchedulerReference);
@@ -1125,6 +1127,98 @@ export async function revertBookingToDraft({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while reverting the booking to draft.",
+    });
+  }
+}
+
+export async function extendBooking({
+  id,
+  organizationId,
+  newEndDate,
+  hints,
+}: Pick<Booking, "id" | "organizationId"> & {
+  newEndDate: Date;
+  hints: ClientHint;
+}) {
+  try {
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { id: true, status: true, activeSchedulerReference: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in the current workspace?",
+        });
+      });
+
+    /** Extending booking is allowed only for these status */
+    const allowedStatus: BookingStatus[] = [
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ];
+
+    if (!allowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Extending booking is not allowed for current status.",
+      });
+    }
+
+    const updatedBooking = await db.booking.update({
+      where: { id: booking.id },
+      data: {
+        /**
+         * If booking is currently OVERDUE we have to make it ONGOING
+         */
+        status:
+          booking.status === BookingStatus.OVERDUE
+            ? BookingStatus.ONGOING
+            : undefined,
+        to: newEndDate,
+      },
+    });
+
+    /**
+     * If the booking was RESERVED then a checkin reminder was scheduled.
+     * We do not have to reschedule anything in this case.
+     */
+    if (booking.status === BookingStatus.RESERVED) {
+      return updatedBooking;
+    }
+
+    /**
+     * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
+     * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
+     */
+    await cancelScheduler(booking);
+
+    const when = newEndDate;
+    when.setHours(newEndDate.getHours() - 1);
+
+    await scheduleNextBookingJob({
+      data: {
+        id: updatedBooking.id,
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+      },
+      when,
+    });
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while extending the booking.",
     });
   }
 }
