@@ -75,6 +75,7 @@ interface Props {
   id?: Asset["id"];
   title?: Asset["title"];
   mainImage?: Asset["mainImage"];
+  thumbnailImage?: Asset["thumbnailImage"];
   mainImageExpiration?: string;
   category?: Asset["categoryId"];
   location?: Asset["locationId"];
@@ -88,6 +89,7 @@ export const AssetForm = ({
   id,
   title,
   mainImage,
+  thumbnailImage,
   mainImageExpiration,
   category,
   location,
@@ -191,9 +193,11 @@ export const AssetForm = ({
                 asset={{
                   assetId: id,
                   mainImage: mainImage,
+                  thumbnailImage: thumbnailImage,
                   mainImageExpiration: new Date(mainImageExpiration),
                   alt: "",
                 }}
+                useThumbnail
               />
             ) : null}
             <div>

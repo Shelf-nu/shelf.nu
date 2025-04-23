@@ -135,11 +135,13 @@ export function AdvancedIndexColumn({
                   asset={{
                     assetId: item.id,
                     mainImage: item.mainImage,
+                    thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
                     alt: item.title,
                   }}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={!!item.mainImage}
+                  useThumbnail
                 />
               ) : null}
 

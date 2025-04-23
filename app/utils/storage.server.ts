@@ -76,7 +76,7 @@ export async function createSignedUrl({
   }
 }
 
-async function uploadFile(
+export async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
   {
     filename,
@@ -105,8 +105,17 @@ async function uploadFile(
 
     // If thumbnail generation is requested
     if (generateThumbnail) {
-      // Generate a thumbnail filename by adding '-thumbnail' before the extension
-      const thumbFilename = filename.replace(/(\.[^.]+)$/, "-thumbnail$1");
+      // Generate a thumbnail filename
+      let thumbFilename: string;
+
+      // Check if the file has an extension
+      if (filename.includes(".")) {
+        // File has extension, add '-thumbnail' before the extension
+        thumbFilename = filename.replace(/(\.[^.]+)$/, "-thumbnail$1");
+      } else {
+        // File has no extension, just append '-thumbnail'
+        thumbFilename = `${filename}-thumbnail`;
+      }
 
       // Create thumbnail version with Sharp
       const thumbnailFile = await cropImage(

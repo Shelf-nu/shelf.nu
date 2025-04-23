@@ -322,6 +322,7 @@ const ListAssetContent = ({
                 asset={{
                   assetId: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
@@ -329,6 +330,7 @@ const ListAssetContent = ({
                   "size-full rounded-[4px] border object-cover",
                   isKitAsset ? "border-gray-300" : ""
                 )}
+                useThumbnail
               />
             </div>
             <div className="min-w-[180px]">

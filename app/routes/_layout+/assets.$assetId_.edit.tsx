@@ -241,6 +241,7 @@ export default function AssetEditPage() {
         <AssetForm
           id={asset.id}
           mainImage={asset.mainImage}
+          thumbnailImage={asset.thumbnailImage}
           mainImageExpiration={String(asset.mainImageExpiration)}
           title={asset.title}
           category={asset.categoryId}

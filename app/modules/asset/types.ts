@@ -111,6 +111,7 @@ export type AdvancedIndexAsset = Pick<
   | "updatedAt"
   | "userId"
   | "mainImage"
+  | "thumbnailImage"
   | "mainImageExpiration"
   | "categoryId"
   | "locationId"

@@ -1,12 +1,12 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
-
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { data, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
@@ -29,7 +29,14 @@ async function generateThumbnailIfMissing(asset: {
     });
 
     if (!originalPath) {
-      console.error(`Could not extract image path for asset ${asset.id}`);
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: `Could not extract image path for asset ${asset.id}`,
+          additionalData: { assetId: asset.id, originalPath },
+          label: "Assets",
+        })
+      );
       return null;
     }
 
@@ -38,10 +45,15 @@ async function generateThumbnailIfMissing(asset: {
       await getSupabaseAdmin().storage.from("assets").download(originalPath);
 
     if (downloadError) {
-      console.error(
-        `Error downloading image for asset ${asset.id}:`,
-        downloadError
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: `Error downloading image for asset ${asset.id}: ${downloadError.message}`,
+          additionalData: { assetId: asset.id, originalPath },
+          label: "Assets",
+        })
       );
+
       return null;
     }
 
@@ -49,15 +61,26 @@ async function generateThumbnailIfMissing(asset: {
     const arrayBuffer = await originalFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
+    // Create an async iterable from the buffer - use a proper async generator
+    async function* createAsyncIterable() {
+      await Promise.resolve(); // Add await to satisfy eslint
       yield new Uint8Array(buffer);
     }
 
     // Generate thumbnail filename
-    const thumbnailPath = originalPath.replace(/(\.[^.]+)$/, "-thumbnail$1");
+    let thumbnailPath: string;
+
+    // Check if the file has an extension
+    if (originalPath.includes(".")) {
+      // File has extension, replace before the extension
+      thumbnailPath = originalPath.replace(/(\.[^.]+)$/, "-thumbnail$1");
+    } else {
+      // File has no extension, just append -thumbnail
+      thumbnailPath = `${originalPath}-thumbnail`;
+    }
 
     // Create and upload thumbnail
-    const paths = await uploadFile(toAsyncIterable(), {
+    const paths = await uploadFile(createAsyncIterable(), {
       filename: thumbnailPath,
       contentType: originalFile.type,
       bucketName: "assets",
@@ -77,7 +100,14 @@ async function generateThumbnailIfMissing(asset: {
 
     return thumbnailSignedUrl;
   } catch (error) {
-    console.error(`Error generating thumbnail for asset ${asset.id}:`, error);
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: `Error generating thumbnail for asset ${asset.id}: ${error}`,
+        additionalData: { assetId: asset.id },
+        label: "Assets",
+      })
+    );
     return null;
   }
 }

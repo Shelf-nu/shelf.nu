@@ -152,10 +152,12 @@ export default function DuplicateAsset() {
                 asset={{
                   assetId: asset.id,
                   mainImage: asset.mainImage,
+                  thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
                   alt: asset.title,
                 }}
                 className="size-full rounded-[4px] border object-cover"
+                useThumbnail
               />
             </div>
             <div className="min-w-[130px]">

@@ -273,6 +273,7 @@ export default function AssetDetailsPage() {
               asset={{
                 assetId: asset.id,
                 mainImage: asset.mainImage,
+                thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
                 alt: asset.title,
               }}
@@ -280,6 +281,7 @@ export default function AssetDetailsPage() {
                 "mr-4 size-[56px] cursor-pointer rounded border object-cover"
               )}
               withPreview
+              useThumbnail
             />
           ),
         }}
