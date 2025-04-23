@@ -14,11 +14,13 @@ type AssetImageProps = {
   asset: {
     assetId: Asset["id"];
     mainImage: Asset["mainImage"];
+    thumbnailImage?: Asset["thumbnailImage"];
     mainImageExpiration: Date | string | null;
     alt: string;
   };
   withPreview?: boolean;
   className?: string;
+  useThumbnail?: boolean;
   rest?: HTMLImageElement;
 };
 
@@ -26,18 +28,37 @@ export const AssetImage = ({
   asset,
   className,
   withPreview = false,
+  useThumbnail = true,
   ...rest
 }: AssetImageProps) => {
-  const fetcher = useFetcher<typeof action>();
-  const { assetId, mainImage, mainImageExpiration, alt } = asset;
-  const updatedAssetMainImage = fetcher.data?.error
-    ? null
-    : fetcher.data?.asset.mainImage;
+  const imageFetcher = useFetcher<typeof action>();
+  const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
 
-  const url =
-    mainImage ||
-    updatedAssetMainImage ||
-    "/static/images/asset-placeholder.jpg";
+  const { assetId, mainImage, thumbnailImage, mainImageExpiration, alt } =
+    asset;
+  const updatedAssetMainImage = imageFetcher.data?.error
+    ? null
+    : imageFetcher.data?.asset.mainImage;
+  const updatedAssetThumbnailImage = imageFetcher.data?.error
+    ? null
+    : imageFetcher.data?.asset.thumbnailImage;
+
+  // Get thumbnail from thumbnail fetcher if available
+  const dynamicThumbnailImage = thumbnailFetcher.data?.asset?.thumbnailImage;
+
+  // Choose the appropriate image URL
+  const currentThumbnail =
+    dynamicThumbnailImage || thumbnailImage || updatedAssetThumbnailImage;
+  const currentMainImage = mainImage || updatedAssetMainImage;
+
+  const imageUrl =
+    useThumbnail && currentThumbnail
+      ? currentThumbnail
+      : currentMainImage || "/static/images/asset-placeholder.jpg";
+
+  // For preview dialog, always use the full-size image
+  const previewImageUrl =
+    currentMainImage || "/static/images/asset-placeholder.jpg";
 
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -54,12 +75,13 @@ export const AssetImage = ({
     setIsDialogOpen(false);
   };
 
+  // Check for image expiration - this will also handle thumbnail generation
   useEffect(() => {
     if (mainImage && mainImageExpiration) {
       const now = new Date();
       const expiration = new Date(mainImageExpiration);
       if (now > expiration) {
-        fetcher.submit(
+        imageFetcher.submit(
           { assetId, mainImage: mainImage || "" },
           {
             method: "post",
@@ -70,6 +92,33 @@ export const AssetImage = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Check if we need to generate a thumbnail (separate from refresh)
+  useEffect(() => {
+    // Only generate if:
+    // 1. We want to use thumbnails
+    // 2. We have a main image
+    // 3. We don't have a thumbnail yet
+    // 4. We're not already fetching one
+    // 5. The refresh fetcher is not already handling it
+    if (
+      useThumbnail &&
+      mainImage &&
+      !thumbnailImage &&
+      !dynamicThumbnailImage &&
+      thumbnailFetcher.state === "idle" &&
+      imageFetcher.state === "idle"
+    ) {
+      thumbnailFetcher.submit(
+        { assetId },
+        {
+          method: "post",
+          action: "/api/asset/generate-thumbnail",
+        }
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useThumbnail, mainImage, thumbnailImage, assetId, imageFetcher.state]);
 
   useEffect(
     function handleEscShortcut() {
@@ -93,11 +142,14 @@ export const AssetImage = ({
   return (
     <>
       <div className={tw("relative overflow-hidden", className)}>
-        {isLoading && (
+        {(isLoading ||
+          (useThumbnail &&
+            (thumbnailFetcher.state === "submitting" ||
+              (imageFetcher.state === "submitting" && !thumbnailImage)))) && (
           <div
             className={tw(
               "absolute inset-0 flex items-center justify-center bg-gray-100",
-              "transition-opacity" // Fallback animation
+              "transition-opacity"
             )}
           >
             <Spinner className="[&_.spinner]:before:border-t-gray-400" />
@@ -106,7 +158,9 @@ export const AssetImage = ({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
-          src={url}
+          src={imageUrl}
+          width={108}
+          height={108}
           className={tw(
             "size-full object-cover",
             withPreview && "cursor-pointer"
@@ -126,7 +180,7 @@ export const AssetImage = ({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className=" text-lg font-semibold text-gray-900">
+                <div className="text-lg font-semibold text-gray-900">
                   {asset.alt}
                 </div>
                 <div className="text-sm font-normal text-gray-600">
@@ -141,7 +195,8 @@ export const AssetImage = ({
               }
             >
               <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
-                <img src={url} className={"max-h-full"} alt={alt} />
+                {/* Always use full-size image in the preview dialog */}
+                <img src={previewImageUrl} className={"max-h-full"} alt={alt} />
               </div>
               <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
                 <Button

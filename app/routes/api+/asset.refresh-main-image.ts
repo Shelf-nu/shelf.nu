@@ -1,29 +1,89 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { z } from "zod";
-import { updateAsset } from "~/modules/asset/service.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ShelfError } from "~/utils/error";
+import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { data, error, parseData } from "~/utils/http.server";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
-import { createSignedUrl } from "~/utils/storage.server";
+import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
-export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
+const THUMBNAIL_SIZE = 108;
+
+async function generateThumbnailIfMissing(asset: {
+  id: string;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+}) {
+  if (asset.thumbnailImage || !asset.mainImage) {
+    return asset.thumbnailImage;
+  }
 
   try {
-    // This is kind of a special case. Even tho we are editing the asset by updating the image
-    // we should still use "read" permission because we need base and self-service users to be able to see the images
-    const { organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+    // Extract the original filename from the mainImage URL
+    const originalPath = extractImageNameFromSupabaseUrl({
+      url: asset.mainImage,
+      bucketName: "assets",
     });
+
+    if (!originalPath) {
+      console.error(`Could not extract image path for asset ${asset.id}`);
+      return null;
+    }
+
+    // Download the original image from Supabase
+    const { data: originalFile, error: downloadError } =
+      await getSupabaseAdmin().storage.from("assets").download(originalPath);
+
+    if (downloadError) {
+      console.error(
+        `Error downloading image for asset ${asset.id}:`,
+        downloadError
+      );
+      return null;
+    }
+
+    // Convert to AsyncIterable for the uploadFile function
+    const arrayBuffer = await originalFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
+      yield new Uint8Array(buffer);
+    }
+
+    // Generate thumbnail filename
+    const thumbnailPath = originalPath.replace(/(\.[^.]+)$/, "-thumbnail$1");
+
+    // Create and upload thumbnail
+    const paths = await uploadFile(toAsyncIterable(), {
+      filename: thumbnailPath,
+      contentType: originalFile.type,
+      bucketName: "assets",
+      resizeOptions: {
+        width: THUMBNAIL_SIZE,
+        height: THUMBNAIL_SIZE,
+        fit: "cover",
+        withoutEnlargement: true,
+      },
+    });
+
+    // Create signed URL for the thumbnail
+    const thumbnailSignedUrl = await createSignedUrl({
+      filename: typeof paths === "string" ? paths : paths.originalPath,
+      bucketName: "assets",
+    });
+
+    return thumbnailSignedUrl;
+  } catch (error) {
+    console.error(`Error generating thumbnail for asset ${asset.id}:`, error);
+    return null;
+  }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  try {
     const { assetId, mainImage } = parseData(
       await request.formData(),
       z.object({
@@ -32,36 +92,73 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const url = new URL(mainImage);
-    const path = url.pathname;
-    const start = path.indexOf("/assets/");
-    const filename =
-      start !== -1 ? path.slice(start + "/assets/".length) : null;
+    // Get asset details
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { id: assetId },
+      select: {
+        id: true,
+        mainImage: true,
+        thumbnailImage: true,
+      },
+    });
 
-    if (!filename) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot find filename",
-        additionalData: { userId, assetId, mainImage },
-        label: "Assets",
+    // Generate new signed URL for main image
+    const newMainImageUrl = await createSignedUrl({
+      filename:
+        extractImageNameFromSupabaseUrl({
+          url: mainImage,
+          bucketName: "assets",
+        }) || mainImage,
+      bucketName: "assets",
+    });
+
+    // Check if thumbnail exists, generate if missing
+    let thumbnailUrl = null;
+    if (asset.thumbnailImage) {
+      // Refresh existing thumbnail URL
+      const thumbnailPath = extractImageNameFromSupabaseUrl({
+        url: asset.thumbnailImage,
+        bucketName: "assets",
+      });
+
+      if (thumbnailPath) {
+        thumbnailUrl = await createSignedUrl({
+          filename: thumbnailPath,
+          bucketName: "assets",
+        });
+      }
+    } else {
+      // Generate thumbnail if missing
+      thumbnailUrl = await generateThumbnailIfMissing({
+        id: asset.id,
+        mainImage: asset.mainImage,
+        thumbnailImage: asset.thumbnailImage,
       });
     }
 
-    const signedUrl = await createSignedUrl({
-      filename,
+    // Update the asset with new signed URLs and expiration date
+    const updatedAsset = await db.asset.update({
+      where: { id: assetId },
+      data: {
+        mainImage: newMainImageUrl,
+        thumbnailImage: thumbnailUrl,
+        mainImageExpiration: oneDayFromNow(),
+      },
+      select: {
+        id: true,
+        mainImage: true,
+        thumbnailImage: true,
+      },
     });
 
-    const asset = await updateAsset({
-      id: assetId,
-      mainImage: signedUrl,
-      mainImageExpiration: oneDayFromNow(),
-      userId,
-      organizationId,
-    });
-
-    return json(data({ asset }));
+    return json(data({ asset: updatedAsset }));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    const reason = new ShelfError({
+      cause,
+      message: "Error refreshing image.",
+      label: "Assets",
+    });
+
+    return json(error(reason), { status: 400 });
   }
 }
