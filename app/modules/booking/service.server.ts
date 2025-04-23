@@ -1235,7 +1235,7 @@ export async function extendBooking({
     }
 
     /**
-     * If the booking was RESERVED then a checkin reminder was scheduled.
+     * If the booking was RESERVED then a checkout reminder was scheduled.
      * We do not have to reschedule anything in this case.
      */
     if (booking.status === BookingStatus.RESERVED) {
@@ -1248,17 +1248,42 @@ export async function extendBooking({
      */
     await cancelScheduler(booking);
 
-    const when = newEndDate;
-    when.setHours(newEndDate.getHours() - 1);
+    const { hours } = calcTimeDifference(newEndDate, new Date());
 
-    await scheduleNextBookingJob({
-      data: {
-        id: updatedBooking.id,
-        hints,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-      },
-      when,
-    });
+    /**
+     * If there is less than 1 hours left for checkin, then we immediately send the checkin
+     * reminder and we schedule the overdue handler.
+     */
+    if (hours < 1) {
+      if (updatedBooking?.custodianUser?.email) {
+        sendCheckinReminder(
+          updatedBooking,
+          updatedBooking._count.assets,
+          hints
+        );
+      }
+
+      await scheduleNextBookingJob({
+        data: {
+          id: updatedBooking.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+        },
+        when: newEndDate,
+      });
+    } else {
+      const when = newEndDate;
+      when.setHours(newEndDate.getHours() - 1);
+
+      await scheduleNextBookingJob({
+        data: {
+          id: updatedBooking.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+        },
+        when,
+      });
+    }
 
     return updatedBooking;
   } catch (cause) {

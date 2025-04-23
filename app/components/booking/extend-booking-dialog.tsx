@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -33,7 +33,7 @@ export default function ExtendBookingDialog({
   }>();
 
   const zo = useZorm("ExtendBooking", ExtendBookingSchema);
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled(fetcher);
 
   function handleOpen() {
     setOpen(true);
@@ -78,7 +78,10 @@ export default function ExtendBookingDialog({
           }
         >
           <div className="px-6 pb-4">
-            <h3 className="mb-4">Extend booking date</h3>
+            <h3 className="mb-1">Extend booking date</h3>
+            <p className="mb-4">
+              Change the end date of your booking to a date in the future.
+            </p>
 
             <fetcher.Form ref={zo.ref} method="POST">
               <div className="required-input-label mb-1 text-text-sm font-medium text-gray-700">
@@ -108,6 +111,7 @@ export default function ExtendBookingDialog({
 
               <div className="flex items-center gap-2">
                 <Button
+                  disabled={disabled}
                   type="button"
                   variant="secondary"
                   className="flex-1"
@@ -115,7 +119,9 @@ export default function ExtendBookingDialog({
                 >
                   Cancel
                 </Button>
-                <Button className="flex-1">Submit</Button>
+                <Button className="flex-1" disabled={disabled}>
+                  Submit
+                </Button>
               </div>
             </fetcher.Form>
           </div>
