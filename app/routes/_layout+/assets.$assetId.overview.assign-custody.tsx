@@ -8,12 +8,7 @@ import {
 } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Link,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
+import { Link, useActionData, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import CustodyAgreementSelector from "~/components/custody/custody-agreement-selector";
@@ -23,8 +18,10 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   assetCustodyAssignedEmailText,
@@ -35,7 +32,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
@@ -82,6 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .findUnique({
         where: { id: assetId, organizationId },
         select: {
+          kitId: true,
           custody: { select: { id: true } },
           bookings: {
             where: { status: { in: [BookingStatus.RESERVED] } },
@@ -379,8 +376,7 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers } = useLoaderData<typeof loader>();
-  const transition = useNavigation();
-  const disabled = isFormProcessing(transition.state);
+  const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
   const zo = useZorm("AssignAssetCustody", AssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
@@ -389,6 +385,8 @@ export default function Custody() {
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+
+  const isPartOfKit = !!asset?.kitId;
 
   return (
     <Form className="modal-content-wrapper" method="post" ref={zo.ref}>
@@ -468,6 +466,14 @@ export default function Custody() {
             </>
           </WarningBox>
         ) : null}
+
+        <When truthy={isPartOfKit}>
+          <WarningBox className="my-8">
+            This asset is part of a kit. By assigning it individual custody, you
+            might get some inconsistent information and face limitations when
+            trying to update the kit custody later on.
+          </WarningBox>
+        </When>
 
         <div className="mt-8 flex gap-3">
           <Button to=".." variant="secondary" width="full" disabled={disabled}>

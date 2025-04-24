@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
@@ -13,6 +15,7 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
 import CustodyAgreementSelector from "../custody/custody-agreement-selector";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
+import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
 export const BulkAssignCustodySchema = z.object({
@@ -28,6 +31,9 @@ export default function BulkAssignCustodyDialog() {
 
   const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  const assetsSelected = useAtomValue(selectedBulkItemsAtom);
+  const someAssetsPartOfKit = assetsSelected.some((asset) => !!asset.kitId);
 
   return (
     <BulkUpdateDialogContent
@@ -104,6 +110,14 @@ export default function BulkAssignCustodyDialog() {
                 hasCustodianSelected={hasCustodianSelected}
               />
             </div>
+
+            <When truthy={someAssetsPartOfKit}>
+              <WarningBox className="mb-8">
+                Some assets are part of a kit. By assigning it individual
+                custody, you might get some inconsistent information and face
+                limitations when trying to update the kit custody later on.
+              </WarningBox>
+            </When>
 
             <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
               <Button
