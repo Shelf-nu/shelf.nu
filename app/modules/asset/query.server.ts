@@ -230,23 +230,30 @@ function addCustomFieldNumberFilter(
   whereClause: Prisma.Sql,
   filter: Filter,
   subquery: Prisma.Sql
-) {
+): Prisma.Sql {
+  // Ensure the filter value is a number
+  const numericValue =
+    typeof filter.value === "string" ? parseFloat(filter.value) : filter.value;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND ${subquery} = ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float = ${numericValue}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND ${subquery} != ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float != ${numericValue}`;
     case "gt":
-      return Prisma.sql`${whereClause} AND ${subquery} > ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float > ${numericValue}`;
     case "lt":
-      return Prisma.sql`${whereClause} AND ${subquery} < ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float < ${numericValue}`;
     case "gte":
-      return Prisma.sql`${whereClause} AND ${subquery} >= ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float >= ${numericValue}`;
     case "lte":
-      return Prisma.sql`${whereClause} AND ${subquery} <= ${filter.value}`;
+      return Prisma.sql`${whereClause} AND (${subquery})::float <= ${numericValue}`;
     case "between":
       const [min, max] = filter.value as [number, number];
-      return Prisma.sql`${whereClause} AND ${subquery} BETWEEN ${min} AND ${max}`;
+      // Ensure min and max are numbers
+      const minValue = typeof min === "string" ? parseFloat(min) : min;
+      const maxValue = typeof max === "string" ? parseFloat(max) : max;
+      return Prisma.sql`${whereClause} AND (${subquery})::float BETWEEN ${minValue} AND ${maxValue}`;
     default:
       return whereClause;
   }
