@@ -14,6 +14,7 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useSubmit,
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -22,7 +23,19 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
 import { WarningBox } from "~/components/shared/warning-box";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -93,24 +106,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     if (kit.custody) {
-      return redirect(`/kits/${kitId}`);
-    }
-
-    /**
-     * If any asset is not available in a kit,
-     * then a kit cannot be assigned a custody
-     */
-    const someUnavailableAsset = kit.assets.some(
-      (asset) => asset.status !== AssetStatus.AVAILABLE
-    );
-    if (someUnavailableAsset) {
-      sendNotification({
-        title: "Cannot assign custody at this time.",
-        message: "One of the asset in kit is not available",
-        icon: { name: "trash", variant: "error" },
-        senderId: userId,
-      });
-
       return redirect(`/kits/${kitId}`);
     }
 
@@ -228,7 +223,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const kitFound = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
-        select: { id: true, assets: { select: { id: true, title: true } } },
+        select: {
+          id: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              custody: { select: { id: true } },
+            },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -238,6 +242,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Kit not found, are you sure it exists in the current workspace?",
         });
       });
+
+    const assetCustodies = kitFound.assets
+      .map((asset) => asset.custody?.id)
+      .filter(Boolean) as string[];
 
     const updatedKit = await db.$transaction(async (tx) => {
       const kit = await tx.kit.update({
@@ -256,15 +264,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               signatureStatus: agreementFound?.signatureRequired
                 ? CustodySignatureStatus.PENDING
                 : CustodySignatureStatus.NOT_REQUIRED,
-              ...(agreementFound
-                ? {
-                    agreement: { connect: { id: agreementFound.id } },
-                  }
-                : {}),
+              agreement: agreementFound
+                ? { connect: { id: agreementFound.id } }
+                : undefined,
             },
           },
         },
         include: { custody: { select: { id: true } } },
+      });
+
+      /**
+       * If there are some custodies over assets, then we have to remove them
+       * then we can create the new custodies over them.
+       */
+      await tx.custody.deleteMany({
+        where: { id: { in: assetCustodies } },
       });
 
       /* Assign custody to all assets of the kit */
@@ -286,11 +300,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
                   signatureStatus: agreementFound?.signatureRequired
                     ? CustodySignatureStatus.PENDING
                     : CustodySignatureStatus.NOT_REQUIRED,
-                  ...(agreementFound
-                    ? {
-                        agreement: { connect: { id: agreementFound.id } },
-                      }
-                    : {}),
+                  agreement: agreementFound
+                    ? { connect: { id: agreementFound.id } }
+                    : undefined,
                 },
               },
             },
@@ -381,12 +393,34 @@ export default function GiveKitCustody() {
   const actionData = useActionData<typeof action>();
   const { kit, teamMembers } = useLoaderData<typeof loader>();
   const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const submit = useSubmit();
+
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
 
   const { isSelfService } = useUserRoleHelper();
 
   const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
+
+  const someAssetsUnavailable = kit.assets.some(
+    (asset) => asset.status !== "AVAILABLE"
+  );
+
+  function showAlert() {
+    setIsAlertOpen(true);
+  }
+
+  function hideAlert() {
+    setIsAlertOpen(false);
+  }
+
+  function handleSubmit() {
+    if (zo.form) {
+      submit(zo.form);
+      hideAlert();
+    }
+  }
 
   return (
     <Form method="post" ref={zo.ref}>
@@ -468,18 +502,80 @@ export default function GiveKitCustody() {
           </WarningBox>
         ) : null}
 
+        <When truthy={someAssetsUnavailable}>
+          <WarningBox className="mb-4">
+            The kit already has some assets in custody. My assigning custody to
+            the kit, the asset custody will be synchronized with the kit. All
+            current custody or pending custody of the assets will be released
+            and they will get assigned custody via the kit.
+          </WarningBox>
+        </When>
+
         <div className="flex gap-3">
           <Button to=".." variant="secondary" width="full" disabled={disabled}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            width="full"
-            type="submit"
-            disabled={disabled}
-          >
-            Confirm
-          </Button>
+
+          {someAssetsUnavailable ? (
+            <AlertDialog open={isAlertOpen}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="primary"
+                  width="full"
+                  disabled={disabled}
+                  onClick={() => {
+                    const validation = zo.validate();
+                    if (validation.success) {
+                      showAlert();
+                    }
+                  }}
+                >
+                  Confirm
+                </Button>
+              </AlertDialogTrigger>
+
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The kit already has some assets in custody. My assigning
+                    custody to the kit, the asset custody will be synchronized
+                    with the kit. All current custody or pending custody of the
+                    assets will be released and they will get assigned custody
+                    via the kit.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+
+                <AlertDialogFooter>
+                  <AlertDialogCancel asChild>
+                    <Button
+                      onClick={hideAlert}
+                      variant="secondary"
+                      disabled={disabled}
+                    >
+                      Cancel
+                    </Button>
+                  </AlertDialogCancel>
+
+                  <AlertDialogAction asChild>
+                    <Button onClick={handleSubmit} disabled={disabled}>
+                      Confirm
+                    </Button>
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : (
+            <Button
+              variant="primary"
+              width="full"
+              type="submit"
+              disabled={disabled}
+            >
+              Confirm
+            </Button>
+          )}
         </div>
       </div>
     </Form>
