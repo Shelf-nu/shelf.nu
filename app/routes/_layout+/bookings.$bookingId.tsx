@@ -12,7 +12,6 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { ExtendBookingSchema } from "~/components/booking/extend-booking-dialog";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
