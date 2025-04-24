@@ -9,7 +9,7 @@ import type {
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";

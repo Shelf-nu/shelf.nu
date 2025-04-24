@@ -4,7 +4,7 @@ import type { Kit } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import type { action } from "~/routes/api+/kit.refresh-image";
 import { tw } from "~/utils/tw";
-import { DIALOG_CLOSE_SHORTCUT } from "../assets/asset-image";
+import { DIALOG_CLOSE_SHORTCUT } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";

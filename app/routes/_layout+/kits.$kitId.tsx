@@ -10,7 +10,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
@@ -587,11 +587,11 @@ function ListContent({
               />
             </div>
             <div className="min-w-[180px]">
-              <span className="word-break mb-1 block font-medium">
+              <span className="word-break mb-1 block">
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover
                 >

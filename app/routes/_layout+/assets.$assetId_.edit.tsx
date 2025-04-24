@@ -240,12 +240,15 @@ export default function AssetEditPage() {
       <div className=" items-top flex justify-between">
         <AssetForm
           id={asset.id}
-          mainImage={asset.mainImage}
           thumbnailImage={asset.thumbnailImage}
-          mainImageExpiration={String(asset.mainImageExpiration)}
+          mainImageExpiration={
+            asset.mainImageExpiration
+              ? new Date(asset.mainImageExpiration)
+              : null
+          }
           title={asset.title}
-          category={asset.categoryId}
-          location={asset.locationId}
+          categoryId={asset.categoryId}
+          locationId={asset.locationId}
           description={asset.description}
           valuation={asset.valuation}
           tags={tags}

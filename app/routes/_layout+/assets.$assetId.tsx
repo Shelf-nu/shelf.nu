@@ -11,7 +11,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
@@ -271,12 +271,12 @@ export default function AssetDetailsPage() {
           "left-of-title": (
             <AssetImage
               asset={{
-                assetId: asset.id,
+                id: asset.id,
                 mainImage: asset.mainImage,
                 thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
-                alt: asset.title,
               }}
+              alt={asset.title}
               className={tw(
                 "mr-4 size-[56px] cursor-pointer rounded border object-cover"
               )}

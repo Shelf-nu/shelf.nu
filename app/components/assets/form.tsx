@@ -71,28 +71,29 @@ export const NewAssetFormSchema = z.object({
 });
 
 /** Pass props of the values to be used as default for the form fields */
-interface Props {
-  id?: Asset["id"];
-  title?: Asset["title"];
-  mainImage?: Asset["mainImage"];
-  thumbnailImage?: Asset["thumbnailImage"];
-  mainImageExpiration?: string;
-  category?: Asset["categoryId"];
-  location?: Asset["locationId"];
-  description?: Asset["description"];
-  valuation?: Asset["valuation"];
+
+type Props = Pick<
+  Asset,
+  | "id"
+  | "title"
+  | "thumbnailImage"
+  | "mainImageExpiration"
+  | "categoryId"
+  | "locationId"
+  | "description"
+  | "valuation"
+> & {
   qrId?: Qr["id"] | null;
   tags?: Tag[];
-}
+};
 
 export const AssetForm = ({
   id,
   title,
-  mainImage,
   thumbnailImage,
   mainImageExpiration,
-  category,
-  location,
+  categoryId,
+  locationId,
   description,
   valuation,
   qrId,
@@ -187,17 +188,15 @@ export const AssetForm = ({
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
           <div className="flex items-center gap-2">
-            {id && mainImage && mainImageExpiration ? (
+            {id && thumbnailImage && mainImageExpiration ? (
               <AssetImage
                 className="size-16"
                 asset={{
-                  assetId: id,
-                  mainImage: mainImage,
+                  id,
                   thumbnailImage: thumbnailImage,
                   mainImageExpiration: new Date(mainImageExpiration),
-                  alt: "",
                 }}
-                useThumbnail
+                alt={`${title} main image`}
               />
             ) : null}
             <div>
@@ -274,7 +273,7 @@ export const AssetForm = ({
         >
           <DynamicSelect
             disabled={disabled}
-            defaultValue={category ?? undefined}
+            defaultValue={categoryId ?? undefined}
             model={{ name: "category", queryKey: "name" }}
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             contentLabel="Categories"
@@ -336,14 +335,14 @@ export const AssetForm = ({
           <input
             type="hidden"
             name="currentLocationId"
-            value={location || ""}
+            value={locationId || ""}
           />
           <DynamicSelect
             disabled={disabled}
             selectionMode="set"
             fieldName="newLocationId"
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            defaultValue={location || undefined}
+            defaultValue={locationId || undefined}
             model={{ name: "location", queryKey: "name" }}
             contentLabel="Locations"
             label="Location"

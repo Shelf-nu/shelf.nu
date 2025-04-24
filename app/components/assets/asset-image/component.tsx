@@ -1,41 +1,36 @@
 import { useEffect, useState } from "react";
-import type { Asset } from "@prisma/client";
 
 import { useFetcher } from "@remix-run/react";
+import { Dialog, DialogPortal } from "~/components/layout/dialog";
+import { Button } from "~/components/shared/button";
+import { Spinner } from "~/components/shared/spinner";
 import type { action } from "~/routes/api+/asset.refresh-main-image";
 import { tw } from "~/utils/tw";
-import { Dialog, DialogPortal } from "../layout/dialog";
-import { Button } from "../shared/button";
-import { Spinner } from "../shared/spinner";
+import type { AssetImageProps } from "./types";
 
 export const DIALOG_CLOSE_SHORTCUT = "Escape";
-
-type AssetImageProps = {
-  asset: {
-    assetId: Asset["id"];
-    mainImage: Asset["mainImage"];
-    thumbnailImage?: Asset["thumbnailImage"];
-    mainImageExpiration: Date | string | null;
-    alt: string;
-  };
-  withPreview?: boolean;
-  className?: string;
-  useThumbnail?: boolean;
-  rest?: HTMLImageElement;
-};
 
 export const AssetImage = ({
   asset,
   className,
   withPreview = false,
   useThumbnail = true,
+  alt,
   ...rest
 }: AssetImageProps) => {
   const imageFetcher = useFetcher<typeof action>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
 
-  const { assetId, mainImage, thumbnailImage, mainImageExpiration, alt } =
-    asset;
+  const { id: assetId, thumbnailImage } = asset;
+
+  // Type guard to safely access mainImage and mainImageExpiration only when available
+  const mainImage =
+    withPreview && "mainImage" in asset ? asset.mainImage : null;
+  const mainImageExpiration =
+    withPreview && "mainImageExpiration" in asset
+      ? asset.mainImageExpiration
+      : null;
+
   const updatedAssetMainImage = imageFetcher.data?.error
     ? null
     : imageFetcher.data?.asset.mainImage;
@@ -75,9 +70,9 @@ export const AssetImage = ({
     setIsDialogOpen(false);
   };
 
-  // Check for image expiration - this will also handle thumbnail generation
+  // Check for image expiration - only if withPreview is true and mainImage exists
   useEffect(() => {
-    if (mainImage && mainImageExpiration) {
+    if (withPreview && mainImage && mainImageExpiration) {
       const now = new Date();
       const expiration = new Date(mainImageExpiration);
       if (now > expiration) {
@@ -97,13 +92,11 @@ export const AssetImage = ({
   useEffect(() => {
     // Only generate if:
     // 1. We want to use thumbnails
-    // 2. We have a main image
-    // 3. We don't have a thumbnail yet
-    // 4. We're not already fetching one
-    // 5. The refresh fetcher is not already handling it
+    // 2. We don't have a thumbnail yet
+    // 3. We're not already fetching one
+    // 4. The refresh fetcher is not already handling it
     if (
       useThumbnail &&
-      mainImage &&
       !thumbnailImage &&
       !dynamicThumbnailImage &&
       thumbnailFetcher.state === "idle" &&
@@ -118,7 +111,7 @@ export const AssetImage = ({
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useThumbnail, mainImage, thumbnailImage, assetId, imageFetcher.state]);
+  }, [useThumbnail, thumbnailImage, assetId, imageFetcher.state]);
 
   useEffect(
     function handleEscShortcut() {
@@ -180,9 +173,7 @@ export const AssetImage = ({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className="text-lg font-semibold text-gray-900">
-                  {asset.alt}
-                </div>
+                <div className="text-lg font-semibold text-gray-900">{alt}</div>
                 <div className="text-sm font-normal text-gray-600">
                   1 image(s)
                 </div>
@@ -199,10 +190,7 @@ export const AssetImage = ({
                 <img src={previewImageUrl} className={"max-h-full"} alt={alt} />
               </div>
               <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
-                <Button
-                  to={`/assets/${asset.assetId}/edit`}
-                  variant="secondary"
-                >
+                <Button to={`/assets/${assetId}/edit`} variant="secondary">
                   Edit image(s)
                 </Button>
                 <Button variant="secondary" onClick={handleCloseDialog}>

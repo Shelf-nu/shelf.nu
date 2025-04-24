@@ -2,9 +2,10 @@ import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
-import { AssetImage } from "../assets/asset-image";
+import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
 
@@ -85,19 +86,27 @@ const Row = ({
             <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
                 useThumbnail
               />
             </div>
             <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {item.title}
+              <span className="word-break mb-1 block">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  target={"_blank"}
+                  onlyNewTabIconOnHover={true}
+                >
+                  {item.title}
+                </Button>
               </span>
               <div>
                 <AssetStatusBadge

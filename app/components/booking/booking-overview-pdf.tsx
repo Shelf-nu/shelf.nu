@@ -6,7 +6,7 @@ import { Button } from "~/components/shared/button";
 
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { tw } from "~/utils/tw";
-import { AssetImage } from "../assets/asset-image";
+import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { Spinner } from "../shared/spinner";

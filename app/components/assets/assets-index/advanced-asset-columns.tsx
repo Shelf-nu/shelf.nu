@@ -47,7 +47,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { freezeColumnClassNames } from "./freeze-column-classes";
-import { AssetImage } from "../asset-image";
+import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
@@ -133,14 +133,14 @@ export function AdvancedIndexColumn({
               {showAssetImage ? (
                 <AssetImage
                   asset={{
-                    assetId: item.id,
+                    id: item.id,
                     mainImage: item.mainImage,
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
-                    alt: item.title,
                   }}
+                  alt={item.title}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
-                  withPreview={!!item.mainImage}
+                  withPreview={true}
                   useThumbnail
                 />
               ) : null}
