@@ -47,7 +47,8 @@ export async function createCustodyAgreement({
       isActive,
     } satisfies Prisma.CustodyAgreementCreateInput;
 
-    return await db.custodyAgreement.create({ data });
+    const custody = await db.custodyAgreement.create({ data });
+    return custody;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -195,7 +196,7 @@ export async function updateAgreementFile({
     });
     const agreementFile = custodyAgreement.custodyAgreementFiles[0];
 
-    const publicUrl = await getPublicFileURL({
+    const publicUrl = getPublicFileURL({
       bucketName: "custody-agreements",
       filename: newFileName,
     });
@@ -292,7 +293,7 @@ export async function makeCustodyAgreementDefault({
     });
 
     // Make the selected agreement default
-    return await db.custodyAgreement.update({
+    await db.custodyAgreement.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });
