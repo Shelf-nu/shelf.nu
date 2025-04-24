@@ -72,16 +72,18 @@ export const NewAssetFormSchema = z.object({
 
 /** Pass props of the values to be used as default for the form fields */
 
-type Props = Pick<
-  Asset,
-  | "id"
-  | "title"
-  | "thumbnailImage"
-  | "mainImageExpiration"
-  | "categoryId"
-  | "locationId"
-  | "description"
-  | "valuation"
+type Props = Partial<
+  Pick<
+    Asset,
+    | "id"
+    | "title"
+    | "thumbnailImage"
+    | "mainImageExpiration"
+    | "categoryId"
+    | "locationId"
+    | "description"
+    | "valuation"
+  >
 > & {
   qrId?: Qr["id"] | null;
   tags?: Tag[];

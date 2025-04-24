@@ -83,7 +83,7 @@ const Row = ({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 px-4 py-3 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   id: item.id,
@@ -94,6 +94,7 @@ const Row = ({
                 alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
                 useThumbnail
+                withPreview
               />
             </div>
             <div className="min-w-[130px]">

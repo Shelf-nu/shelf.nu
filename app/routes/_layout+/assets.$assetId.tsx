@@ -278,7 +278,7 @@ export default function AssetDetailsPage() {
               }}
               alt={asset.title}
               className={tw(
-                "mr-4 size-[56px] cursor-pointer rounded border object-cover"
+                "mr-4 size-14 cursor-pointer rounded border object-cover"
               )}
               withPreview
               useThumbnail

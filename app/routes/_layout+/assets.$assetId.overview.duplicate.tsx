@@ -147,7 +147,7 @@ export default function DuplicateAsset() {
 
         <div className="flex flex-col items-center gap-3 ">
           <div className="flex w-full items-center gap-3 rounded-md border p-4">
-            <div className="flex size-[56px] shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   id: asset.id,

@@ -338,15 +338,14 @@ const RowComponent = ({ item }: { item: Asset }) => (
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex size-12 shrink-0 items-center justify-center">
+          <div className="flex size-14 shrink-0 items-center justify-center">
             <AssetImage
               asset={{
-                assetId: item.id,
-                mainImage: item.mainImage,
+                id: item.id,
                 thumbnailImage: item.thumbnailImage,
                 mainImageExpiration: item.mainImageExpiration,
-                alt: item.title,
               }}
+              alt={item.title}
               className="size-full rounded-[4px] border object-cover"
               useThumbnail
             />

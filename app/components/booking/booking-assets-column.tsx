@@ -331,6 +331,7 @@ const ListAssetContent = ({
                   isKitAsset ? "border-gray-300" : ""
                 )}
                 useThumbnail
+                withPreview
               />
             </div>
             <div className="min-w-[180px]">

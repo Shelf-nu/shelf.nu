@@ -24,12 +24,13 @@ export const AssetImage = ({
   const { id: assetId, thumbnailImage } = asset;
 
   // Type guard to safely access mainImage and mainImageExpiration only when available
-  const mainImage =
-    withPreview && "mainImage" in asset ? asset.mainImage : null;
+  // For checking if we have main image data, regardless of withPreview prop
+  const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
+
+  // Type guard to safely access mainImage and mainImageExpiration only when available
+  const mainImage = hasMainImageData ? (asset.mainImage as string) : null;
   const mainImageExpiration =
-    withPreview && "mainImageExpiration" in asset
-      ? asset.mainImageExpiration
-      : null;
+    "mainImageExpiration" in asset ? asset.mainImageExpiration : null;
 
   const updatedAssetMainImage = imageFetcher.data?.error
     ? null
@@ -92,11 +93,13 @@ export const AssetImage = ({
   useEffect(() => {
     // Only generate if:
     // 1. We want to use thumbnails
-    // 2. We don't have a thumbnail yet
-    // 3. We're not already fetching one
-    // 4. The refresh fetcher is not already handling it
+    // 2. We have a main image (can't generate thumbnail without it)
+    // 3. We don't have a thumbnail yet
+    // 4. We're not already fetching one
+    // 5. The refresh fetcher is not already handling it
     if (
       useThumbnail &&
+      mainImage && // Only try to generate thumbnail if we have a main image
       !thumbnailImage &&
       !dynamicThumbnailImage &&
       thumbnailFetcher.state === "idle" &&
@@ -111,7 +114,7 @@ export const AssetImage = ({
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useThumbnail, thumbnailImage, assetId, imageFetcher.state]);
+  }, [useThumbnail, mainImage, thumbnailImage, assetId, imageFetcher.state]);
 
   useEffect(
     function handleEscShortcut() {

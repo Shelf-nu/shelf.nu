@@ -90,11 +90,16 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (!asset.mainImage) {
-      throw new ShelfError({
-        cause: null,
-        message: "Asset has no main image",
-        label: "Assets",
-      });
+      // If there's no main image, we can't generate a thumbnail
+      // Return success with null thumbnail instead of throwing an error
+      return json(
+        data({
+          asset: {
+            id: asset.id,
+            thumbnailImage: null,
+          },
+        })
+      );
     }
 
     // Extract the original filename from the mainImage URL

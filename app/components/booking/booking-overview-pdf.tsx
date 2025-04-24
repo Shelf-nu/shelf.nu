@@ -268,12 +268,11 @@ const BookingPDFPreview = ({
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     <AssetImage
                       asset={{
-                        assetId: asset.id,
-                        mainImage: asset.mainImage,
+                        id: asset.id,
                         thumbnailImage: asset.thumbnailImage,
                         mainImageExpiration: asset.mainImageExpiration,
-                        alt: asset.title,
                       }}
+                      alt={asset.title}
                       className="!size-14 object-cover"
                       useThumbnail
                     />

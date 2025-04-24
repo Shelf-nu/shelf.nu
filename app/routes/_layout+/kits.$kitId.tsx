@@ -389,7 +389,7 @@ export default function KitDetails() {
                 imageExpiration: kit.imageExpiration,
                 alt: kit.name,
               }}
-              className={tw("mr-4 size-[56px] rounded border object-cover")}
+              className={tw("mr-4 size-14 rounded border object-cover")}
               withPreview
             />
           ),
@@ -573,17 +573,18 @@ function ListContent({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="relative flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
                 useThumbnail
+                withPreview
               />
             </div>
             <div className="min-w-[180px]">

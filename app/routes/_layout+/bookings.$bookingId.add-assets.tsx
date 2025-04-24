@@ -567,7 +567,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-[56px] shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   id: item.id,
