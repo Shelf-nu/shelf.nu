@@ -680,13 +680,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
       case "extend-booking": {
-        const { endDate } = parseData(formData, ExtendBookingSchema);
+        const endDate = formData.get("endDate")!.toString()!;
+        if (!endDate) {
+          throw new ShelfError({
+            cause: null,
+            label: "Booking",
+            message: "End date is required.",
+          });
+        }
+
+        const hints = getClientHint(request);
+
+        const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
 
         await extendBooking({
           id,
           organizationId,
-          hints: getClientHint(request),
-          newEndDate: endDate,
+          hints,
+          newEndDate,
         });
 
         sendNotification({
