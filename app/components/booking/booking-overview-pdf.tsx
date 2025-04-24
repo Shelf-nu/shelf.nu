@@ -12,7 +12,7 @@ import { DateS } from "../shared/date";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
-export const GenerateBookingPdf = ({
+export const BookingOverviewPDF = ({
   booking,
   timeStamp,
 }: {
