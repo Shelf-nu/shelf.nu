@@ -132,33 +132,62 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Generate new signed URL for main image
-    const newMainImageUrl = await createSignedUrl({
-      filename:
-        extractImageNameFromSupabaseUrl({
-          url: mainImage,
-          bucketName: "assets",
-        }) || mainImage,
+    // Extract the path from the URL
+    const mainImagePath = extractImageNameFromSupabaseUrl({
+      url: mainImage,
       bucketName: "assets",
     });
 
-    // Check if thumbnail exists, generate if missing
-    let thumbnailUrl = null;
+    let newMainImageUrl = asset.mainImage; // Default to existing URL
+
+    if (mainImagePath) {
+      try {
+        // Try to create a new signed URL
+        newMainImageUrl = await createSignedUrl({
+          filename: mainImagePath,
+          bucketName: "assets",
+        });
+      } catch (error) {
+        // If it fails, keep the existing URL
+        Logger.warn(
+          new ShelfError({
+            cause: error,
+            message: `Failed to refresh main image URL for asset ${assetId}`,
+            additionalData: { assetId, mainImagePath },
+            label: "Assets",
+          })
+        );
+      }
+    }
+
+    // Check if thumbnail exists and refresh it
+    let thumbnailUrl = asset.thumbnailImage; // Default to existing URL
+
     if (asset.thumbnailImage) {
-      // Refresh existing thumbnail URL
       const thumbnailPath = extractImageNameFromSupabaseUrl({
         url: asset.thumbnailImage,
         bucketName: "assets",
       });
 
       if (thumbnailPath) {
-        thumbnailUrl = await createSignedUrl({
-          filename: thumbnailPath,
-          bucketName: "assets",
-        });
+        try {
+          thumbnailUrl = await createSignedUrl({
+            filename: thumbnailPath,
+            bucketName: "assets",
+          });
+        } catch (error) {
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message: `Failed to refresh thumbnail URL for asset ${assetId}`,
+              additionalData: { assetId, thumbnailPath },
+              label: "Assets",
+            })
+          );
+        }
       }
-    } else {
-      // Generate thumbnail if missing
+    } else if (asset.mainImage && !asset.thumbnailImage) {
+      // If we have a main image but no thumbnail, try to generate one
       thumbnailUrl = await generateThumbnailIfMissing({
         id: asset.id,
         mainImage: asset.mainImage,

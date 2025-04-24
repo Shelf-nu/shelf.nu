@@ -91,12 +91,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!asset.mainImage) {
       // If there's no main image, we can't generate a thumbnail
-      // Return success with null thumbnail instead of throwing an error
+      // Return success with existing values instead of throwing an error
       return json(
         data({
           asset: {
             id: asset.id,
-            thumbnailImage: null,
+            thumbnailImage: asset.thumbnailImage, // Will be null
           },
         })
       );
@@ -106,15 +106,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const originalPath = extractStoragePath(asset.mainImage, "assets");
 
     if (!originalPath) {
-      throw new ShelfError({
-        cause: null,
-        message: "Could not extract image path from URL",
-        label: "Assets",
-        additionalData: {
-          mainImageUrl: asset.mainImage,
-          assetId: asset.id,
-        },
-      });
+      // If we can't extract the path, return existing values
+      return json(
+        data({
+          asset: {
+            id: asset.id,
+            thumbnailImage: asset.thumbnailImage,
+          },
+        })
+      );
     }
 
     // Download the original image from Supabase
@@ -122,15 +122,15 @@ export async function action({ request }: ActionFunctionArgs) {
       await getSupabaseAdmin().storage.from("assets").download(originalPath);
 
     if (downloadError) {
-      throw new ShelfError({
-        cause: downloadError,
-        message: "Error downloading original image",
-        label: "Assets",
-        additionalData: {
-          originalPath,
-          downloadError: downloadError.message,
-        },
-      });
+      // If download fails, return existing values
+      return json(
+        data({
+          asset: {
+            id: asset.id,
+            thumbnailImage: asset.thumbnailImage,
+          },
+        })
+      );
     }
 
     // Convert to AsyncIterable for the uploadFile function
@@ -192,12 +192,26 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return json(data({ asset: updatedAsset }));
   } catch (cause) {
-    const reason = new ShelfError({
-      cause,
-      message: "Error generating thumbnail.",
-      label: "Assets",
-    });
+    // In case of any error, return existing values instead of failing
+    try {
+      const asset = await db.asset.findUnique({
+        where: { id: (request.body as any).assetId },
+        select: {
+          id: true,
+          thumbnailImage: true,
+        },
+      });
 
-    return json(error(reason), { status: 400 });
+      return json(data({ asset }));
+    } catch {
+      // If everything fails, return minimal error response
+      const reason = new ShelfError({
+        cause,
+        message: "Error generating thumbnail.",
+        label: "Assets",
+      });
+
+      return json(error(reason), { status: 400 });
+    }
   }
 }

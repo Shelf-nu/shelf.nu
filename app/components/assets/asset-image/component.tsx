@@ -24,6 +24,7 @@ export const AssetImage = ({
   const { id: assetId, thumbnailImage } = asset;
 
   // Type guard to safely access mainImage and mainImageExpiration only when available
+  // Type guard to safely access mainImage and mainImageExpiration only when available
   // For checking if we have main image data, regardless of withPreview prop
   const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
 
