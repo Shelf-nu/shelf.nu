@@ -60,6 +60,10 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     (asset) => asset.status !== AssetStatus.AVAILABLE
   );
 
+  const someAssetsCheckedOut = kit.assets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
+  );
+
   const { roles, isSelfService } = useUserRoleHelper();
   const user = useUserData();
 
@@ -174,6 +178,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     width="full"
                     onClick={() => setOpen(false)}
                     aria-label="Assign/Take Custody"
+                    disabled={someAssetsCheckedOut}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}

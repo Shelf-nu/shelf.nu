@@ -105,6 +105,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    const someAssetsCheckedOut = kit.assets.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+    if (someAssetsCheckedOut) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message:
+          "Cannot assign custody to kit because some of it's assets are checked out.",
+      });
+    }
+
     if (kit.custody) {
       return redirect(`/kits/${kitId}`);
     }
@@ -229,6 +241,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             select: {
               id: true,
               title: true,
+              status: true,
               custody: { select: { id: true } },
             },
           },
@@ -242,6 +255,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Kit not found, are you sure it exists in the current workspace?",
         });
       });
+
+    const someAssetsCheckedOut = kitFound.assets.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+    if (someAssetsCheckedOut) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message:
+          "Cannot assign custody to kit because some of it's assets are checked out",
+      });
+    }
 
     const assetCustodies = kitFound.assets
       .map((asset) => asset.custody?.id)

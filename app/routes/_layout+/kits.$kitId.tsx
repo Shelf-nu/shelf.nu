@@ -519,7 +519,7 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          {kit.custody ? (
+          {kit.custody && kit.custody.agreement ? (
             <AgreementStatusCard
               className="mt-0"
               custodian={kit.custody.custodian}
@@ -531,6 +531,7 @@ export default function KitDetails() {
 
           <When truthy={kit.status === KitStatus.IN_CUSTODY}>
             <CustodyCard
+              className="mt-0"
               // @ts-expect-error - we are passing the correct props
               booking={currentBooking || undefined}
               hasPermission={userHasPermission({

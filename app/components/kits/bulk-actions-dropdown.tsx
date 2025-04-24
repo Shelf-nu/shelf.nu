@@ -83,19 +83,11 @@ function ConditionalDropdown() {
     (kit) => kit.status === KitStatus.CHECKED_OUT
   );
 
-  const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
+  const someAssetsInsideKitsCheckedOut = selectedKits.some(
     (kit) =>
       kit.assets?.some(
         (asset: { status: AssetStatus }) =>
           asset.status === AssetStatus.CHECKED_OUT
-      ) ||
-      kit.assets?.some(
-        (asset: { status: AssetStatus }) =>
-          asset.status === AssetStatus.IN_CUSTODY
-      ) ||
-      kit.assets.some(
-        (asset: { status: AssetStatus }) =>
-          asset.status === AssetStatus.SIGNATURE_PENDING
       )
   );
 
@@ -223,10 +215,9 @@ function ConditionalDropdown() {
                   label={isSelfService ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
-                    !allKitsAvailable ||
-                    someAssetsInsideKitsCheckedOutOrInCustody
+                    !allKitsAvailable || someAssetsInsideKitsCheckedOut
                       ? {
-                          reason: someAssetsInsideKitsCheckedOutOrInCustody
+                          reason: someAssetsInsideKitsCheckedOut
                             ? "Some of the asset(s) inside this kits are either checked out, in custody or have a signature pending. You need to resolve that before you can assign custody."
                             : "Some of the selected kits are not available",
                         }

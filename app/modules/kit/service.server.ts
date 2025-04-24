@@ -110,9 +110,11 @@ export async function createKit({
       qrCodes,
     };
 
-    return await db.kit.create({
+    const createdKit = await db.kit.create({
       data,
     });
+
+    return createdKit;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, organizationId },
@@ -131,7 +133,7 @@ export async function updateKit({
   organizationId,
 }: UpdateKitPayload) {
   try {
-    return await db.kit.update({
+    const updatedKit = await db.kit.update({
       where: { id, organizationId },
       data: {
         name,
@@ -141,6 +143,8 @@ export async function updateKit({
         status,
       },
     });
+
+    return updatedKit;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, id },
@@ -544,7 +548,8 @@ export async function deleteKit({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    return await db.kit.delete({ where: { id, organizationId } });
+    const deletedKit = await db.kit.delete({ where: { id, organizationId } });
+    return deletedKit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -889,7 +894,7 @@ export async function bulkDeleteKits({
       select: { id: true, image: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all kits */
       await tx.kit.deleteMany({
         where: { id: { in: kits.map((kit) => kit.id) } },
@@ -953,6 +958,7 @@ export async function bulkAssignKitCustody({
               title: true,
               status: true,
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              custody: { select: { id: true } },
             },
           },
         },
@@ -974,17 +980,21 @@ export async function bulkAssignKitCustody({
 
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
-    const someAssetsUnavailable = allAssetsOfAllKits.some(
-      (asset) => asset.status !== AssetStatus.AVAILABLE
+    const someAssetsCheckedOut = allAssetsOfAllKits.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
     );
-    if (someAssetsUnavailable) {
+    if (someAssetsCheckedOut) {
       throw new ShelfError({
         cause: null,
         message:
-          "There are some unavailable assets in some kits. Please make sure you have all available assets in kits.",
+          "There are some checked out assets in some kits. Please make sure you have all available assets in kits.",
         label,
       });
     }
+
+    const assetCustodies = allAssetsOfAllKits
+      .map((asset) => asset.custody?.id)
+      .filter(Boolean) as string[];
 
     /** Check if the agreement exists and is in the same organization */
     let agreementFound: Pick<
@@ -1017,7 +1027,7 @@ export async function bulkAssignKitCustody({
      * 1. Create custodies for kit
      * 2. Update status of all kits to IN_CUSTODY
      */
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
@@ -1041,6 +1051,11 @@ export async function bulkAssignKitCustody({
       });
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
+
+      /** If the assets of kit already have a custody, then we have to remove it before assigning the new custody */
+      await tx.custody.deleteMany({
+        where: { id: { in: assetCustodies } },
+      });
 
       /** Creating custodies over assets of kits */
       await tx.custody.createMany({
@@ -1176,7 +1191,7 @@ export async function bulkReleaseKitCustody({
 
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all custodies of kits */
       await tx.kitCustody.deleteMany({
         where: {
@@ -1369,7 +1384,7 @@ export async function updateKitQrCode({
       });
 
     // Connect the new QR code
-    return await db.kit
+    const updatedKit = await db.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -1386,6 +1401,8 @@ export async function updateKitQrCode({
           additionalData: { kitId, organizationId, newQrId },
         });
       });
+
+    return updatedKit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1518,10 +1535,12 @@ export async function getAgreementByKitId({
         });
       });
 
-    return await getAgreementByKitCustodyId({
+    const agreement = await getAgreementByKitCustodyId({
       custodyId: custody.id,
       organizationId,
     });
+
+    return agreement;
   } catch (cause) {
     throw new ShelfError({
       cause,
