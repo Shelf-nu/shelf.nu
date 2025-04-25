@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { data, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
@@ -206,14 +207,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
       throw json(data({ asset }));
     } catch {
-      // If everything fails, return minimal error response
+      // If everything fails Instead of throwing, return a successful response with error information
       const reason = new ShelfError({
         cause,
-        message: "Error generating thumbnail.",
+        message: "Error refreshing image.",
         label: "Assets",
       });
 
-      throw json(error(reason), { status: 400 });
+      // Log the error for debugging
+      Logger.error(reason);
+
+      // Return a successful response with error flag
+      return json(
+        data({
+          asset: null,
+          error: reason.message,
+        })
+      );
     }
   }
 }
