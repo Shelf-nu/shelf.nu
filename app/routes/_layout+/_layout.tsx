@@ -5,13 +5,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Link,
-  NavLink,
-  Outlet,
-  ShouldRevalidateFunctionArgs,
-  useLoaderData,
-} from "@remix-run/react";
+import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
@@ -172,23 +166,6 @@ export const meta: MetaFunction<typeof loader> = ({ error }) => {
     { title: appendToMetaTitle(title) },
   ];
 };
-
-export function shouldRevalidate({
-  formAction,
-  defaultShouldRevalidate,
-}: ShouldRevalidateFunctionArgs) {
-  // Don't revalidate this route if we're just generating thumbnails
-  if (formAction?.includes("/api/asset/generate-thumbnail")) {
-    return false;
-  }
-
-  // Don't revalidate this route if we're just refreshing images
-  if (formAction?.includes("/api/asset/refresh-main-image")) {
-    return false;
-  }
-
-  return defaultShouldRevalidate;
-}
 
 export default function App() {
   useCrisp();

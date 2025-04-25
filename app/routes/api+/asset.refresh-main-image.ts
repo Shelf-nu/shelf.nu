@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -112,16 +112,17 @@ async function generateThumbnailIfMissing(asset: {
   }
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+
   try {
     const { assetId, mainImage } = parseData(
-      await request.formData(),
+      url.searchParams,
       z.object({
         assetId: z.string(),
         mainImage: z.string(),
       })
     );
-
     // Get asset details
     const asset = await db.asset.findUniqueOrThrow({
       where: { id: assetId },
@@ -218,6 +219,6 @@ export async function action({ request }: ActionFunctionArgs) {
       label: "Assets",
     });
 
-    return json(error(reason), { status: 400 });
+    throw json(error(reason), { status: 400 });
   }
 }

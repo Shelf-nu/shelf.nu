@@ -221,7 +221,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export function shouldRevalidate({
   actionResult,
-  formAction,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   /**
@@ -229,16 +228,6 @@ export function shouldRevalidate({
    * Revalidation happens in _layout
    */
   if (actionResult?.isTogglingSidebar) {
-    return false;
-  }
-
-  // Don't revalidate this route if we're just generating thumbnails
-  if (formAction?.includes("/api/asset/generate-thumbnail")) {
-    return false;
-  }
-
-  // Don't revalidate this route if we're just refreshing images
-  if (formAction?.includes("/api/asset/refresh-main-image")) {
     return false;
   }
 

@@ -4,7 +4,7 @@ import { useFetcher } from "@remix-run/react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import type { action } from "~/routes/api+/asset.refresh-main-image";
+import type { loader as refreshImageLoader } from "~/routes/api+/asset.refresh-main-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
@@ -17,7 +17,7 @@ export const AssetImage = ({
   alt,
   ...rest
 }: AssetImageProps) => {
-  const imageFetcher = useFetcher<typeof action>();
+  const imageFetcher = useFetcher<typeof refreshImageLoader>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
 
   const { id: assetId, thumbnailImage } = asset;
@@ -77,7 +77,7 @@ export const AssetImage = ({
         imageFetcher.submit(
           { assetId, mainImage: mainImage || "" },
           {
-            method: "post",
+            method: "get",
             action: "/api/asset/refresh-main-image",
           }
         );
@@ -102,7 +102,7 @@ export const AssetImage = ({
       thumbnailFetcher.submit(
         { assetId },
         {
-          method: "post",
+          method: "get",
           action: "/api/asset/generate-thumbnail",
         }
       );

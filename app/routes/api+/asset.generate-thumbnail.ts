@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -57,10 +57,12 @@ function extractStoragePath(url: string, bucketName: string): string | null {
   }
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+
   try {
     const { assetId } = parseData(
-      await request.formData(),
+      url.searchParams,
       z.object({
         assetId: z.string(),
       })
@@ -202,7 +204,7 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      return json(data({ asset }));
+      throw json(data({ asset }));
     } catch {
       // If everything fails, return minimal error response
       const reason = new ShelfError({
@@ -211,7 +213,7 @@ export async function action({ request }: ActionFunctionArgs) {
         label: "Assets",
       });
 
-      return json(error(reason), { status: 400 });
+      throw json(error(reason), { status: 400 });
     }
   }
 }
