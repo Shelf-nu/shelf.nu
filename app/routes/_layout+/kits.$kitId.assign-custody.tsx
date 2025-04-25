@@ -492,6 +492,7 @@ export default function GiveKitCustody() {
               id: JSON.stringify({
                 id: item.id,
                 name: resolveTeamMemberName(item),
+                email: item.user?.email,
               }),
             })}
             renderItem={(item) => resolveTeamMemberName(item, true)}
@@ -529,7 +530,7 @@ export default function GiveKitCustody() {
 
         <When truthy={someAssetsUnavailable}>
           <WarningBox className="mb-4">
-            The kit already has some assets in custody. My assigning custody to
+            The kit already has some assets in custody. By assigning custody to
             the kit, the asset custody will be synchronized with the kit. All
             current custody or pending custody of the assets will be released
             and they will get assigned custody via the kit.
@@ -564,7 +565,7 @@ export default function GiveKitCustody() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The kit already has some assets in custody. My assigning
+                    The kit already has some assets in custody. By assigning
                     custody to the kit, the asset custody will be synchronized
                     with the kit. All current custody or pending custody of the
                     assets will be released and they will get assigned custody

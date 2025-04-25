@@ -68,6 +68,7 @@ export default function BulkAssignCustodyDialog() {
                 id: JSON.stringify({
                   id: item.id,
                   name: resolveTeamMemberName(item),
+                  email: item.user?.email,
                 }),
               })}
               renderItem={(item) => resolveTeamMemberName(item, true)}
