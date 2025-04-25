@@ -1,6 +1,9 @@
+import { useMemo } from "react";
+import type { Kit } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import AwaitingSignatureTooltip from "../custody/awaiting-signature-tooltip";
+import { useNavigate } from "@remix-run/react";
 import { Badge } from "../shared/badge";
+import { CustomTooltip } from "../shared/custom-tooltip";
 import { UnavailableBadge } from "../shared/unavailable-badge";
 import When from "../when/when";
 
@@ -34,35 +37,104 @@ export function AssetStatusBadge({
   status,
   availableToBook = true,
   shareAgreementUrl,
+  kit,
 }: {
   status: AssetStatus;
   availableToBook: boolean;
   shareAgreementUrl: string;
+  kit?: Pick<Kit, "id" | "name"> | null;
 }) {
+  const navigate = useNavigate();
+
+  const isPartOfKit = !!kit;
+
+  const inCustodyViaKit = status === AssetStatus.IN_CUSTODY && isPartOfKit;
+  const signPendingViaKit =
+    status === AssetStatus.SIGNATURE_PENDING && isPartOfKit;
+
+  const showTooltip =
+    status === AssetStatus.SIGNATURE_PENDING || inCustodyViaKit;
+
+  const assetStatus = useMemo(() => {
+    if (inCustodyViaKit) {
+      return "In custody via kit";
+    }
+
+    if (signPendingViaKit) {
+      return "Signature Pending via Kit";
+    }
+
+    return userFriendlyAssetStatus(status);
+  }, [inCustodyViaKit, signPendingViaKit, status]);
+
+  const tooltipContent = useMemo(() => {
+    if (inCustodyViaKit) {
+      return (
+        <div>
+          <h6 className="mb-1">In custody via kit</h6>
+          <p className="text-xs text-gray-500">
+            This asset has been assigned custody via a kit: {kit.name}.
+          </p>
+        </div>
+      );
+    }
+
+    if (signPendingViaKit) {
+      return (
+        <div>
+          <h6 className="mb-1">Signature pending via kit</h6>
+          <p className="text-gray-500">
+            This asset has been assigned custody via a kit: {kit.name}. The
+            custody is still awaiting signature. To find more information go to
+            the kit page.
+          </p>
+        </div>
+      );
+    }
+
+    if (status === AssetStatus.SIGNATURE_PENDING) {
+      return (
+        <div>
+          <h6 className="mb-1">Signature Pending</h6>
+          <p className="text-gray-500">
+            Asset status will change to "In custody" after signing. To cancel
+            custody assignment, go to{" "}
+            <span className="font-semibold text-gray-600">
+              {"Actions > Release Custody"}
+            </span>
+          </p>
+        </div>
+      );
+    }
+
+    return null;
+  }, [inCustodyViaKit, kit?.name, signPendingViaKit, status]);
+
+  function handleClick() {
+    if (status === AssetStatus.SIGNATURE_PENDING) {
+      navigate(shareAgreementUrl);
+    }
+  }
+
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
   return (
     <div className="flex items-center gap-[6px]">
       <When
-        truthy={status === AssetStatus.SIGNATURE_PENDING}
+        truthy={showTooltip}
         fallback={
-          <Badge color={assetStatusColorMap(status)}>
-            {userFriendlyAssetStatus(status)}
-          </Badge>
+          <Badge color={assetStatusColorMap(status)}>{assetStatus}</Badge>
         }
       >
-        <AwaitingSignatureTooltip
-          type="asset"
-          navigateTo={shareAgreementUrl}
-          trigger={
-            <Badge
-              color={assetStatusColorMap(status)}
-              className={"cursor-pointer bg-warning-50"}
-            >
-              {userFriendlyAssetStatus(status)}
-            </Badge>
-          }
-        />
+        <CustomTooltip content={tooltipContent}>
+          <Badge
+            color={assetStatusColorMap(status)}
+            className="cursor-pointer bg-warning-50"
+            onClick={handleClick}
+          >
+            {assetStatus}
+          </Badge>
+        </CustomTooltip>
       </When>
 
       {!availableToBook && (

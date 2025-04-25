@@ -304,8 +304,10 @@ const ConditionalActionsDropdown = () => {
               ) : null}
               {assetIsPartOfUnavailableKit ? (
                 <div className=" border-t p-2 text-left text-xs">
-                  Some actions are disabled due to the asset being part of a
-                  kit.
+                  The custody of this asset has been assigned via a Kit, so you
+                  cannot currently release its custody individually. If you want
+                  to make it available again, without affecting the Kit custody,
+                  you need to remove this asset from the kit from the kit page.
                 </div>
               ) : null}
             </When>

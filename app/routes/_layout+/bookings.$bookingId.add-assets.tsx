@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody, Kit } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -87,6 +87,7 @@ export type AssetWithBooking = Asset & {
   category: Category;
   kitId?: string | null;
   qrScanned: string;
+  kit: Pick<Kit, "id" | "name"> | null;
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -586,6 +587,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
               <div className="flex flex-row gap-x-2">
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    kit={item?.kit}
                     status={item.status}
                     availableToBook={item.availableToBook}
                     shareAgreementUrl={getShareAgreementUrl(item)}

@@ -1,4 +1,4 @@
-import type { User } from "@prisma/client";
+import type { Kit, User } from "@prisma/client";
 import { PenLineIcon } from "lucide-react";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -14,6 +14,7 @@ type AgreementStatusCardProps = {
     user?: Partial<Pick<User, "firstName" | "lastName" | "email">> | null;
   };
   agreementName: string;
+  kit?: Pick<Kit, "id" | "name">;
 };
 
 export default function AgreementStatusCard({
@@ -22,6 +23,7 @@ export default function AgreementStatusCard({
   isSignaturePending,
   custodian,
   agreementName,
+  kit,
 }: AgreementStatusCardProps) {
   return (
     <Card className={tw("my-3 flex items-center gap-2", className)}>
@@ -39,6 +41,15 @@ export default function AgreementStatusCard({
             agreementName
           )}
         </p>
+
+        {kit ? (
+          <p className="mb-1 font-semibold">
+            Custody assigned via{" "}
+            <Button to={`/kits/${kit.id}`} target="_blank" variant="link-gray">
+              {kit.name}
+            </Button>
+          </p>
+        ) : null}
 
         <Button
           to={

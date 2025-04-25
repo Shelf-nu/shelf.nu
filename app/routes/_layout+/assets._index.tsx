@@ -421,6 +421,7 @@ const ListAssetContent = ({
               </span>
               <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
+                  kit={item?.kit}
                   status={item.status}
                   availableToBook={item.availableToBook}
                   shareAgreementUrl={getShareAgreementUrl(item)}

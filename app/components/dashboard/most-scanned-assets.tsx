@@ -1,4 +1,4 @@
-import type { Asset } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { getShareAgreementUrl } from "~/utils/asset";
@@ -10,6 +10,7 @@ import { Td, Table, Tr } from "../table";
 
 export default function MostScannedAssets() {
   const { mostScannedAssets } = useLoaderData<typeof loader>();
+
   return (
     <>
       <div className="rounded-t border border-b-0 border-gray-200">
@@ -37,16 +38,7 @@ export default function MostScannedAssets() {
           <tbody>
             {mostScannedAssets.map((asset) => (
               <Tr key={asset.id}>
-                <Row
-                  item={{
-                    ...asset,
-                    mainImageExpiration: asset.mainImageExpiration
-                      ? new Date(asset.mainImageExpiration)
-                      : null,
-                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
-                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
-                  }}
-                />
+                <Row item={asset} />
               </Tr>
             ))}
             {mostScannedAssets.length < 5 &&
@@ -71,9 +63,7 @@ export default function MostScannedAssets() {
 const Row = ({
   item,
 }: {
-  item: Asset & {
-    scanCount?: number;
-  };
+  item: SerializeFrom<typeof loader>["mostScannedAssets"][number];
 }) => (
   <>
     {/* Item */}
@@ -97,6 +87,7 @@ const Row = ({
             </span>
             <div>
               <AssetStatusBadge
+                kit={item?.kit}
                 status={item.status}
                 availableToBook={item.availableToBook}
                 shareAgreementUrl={getShareAgreementUrl(item)}

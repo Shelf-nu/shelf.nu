@@ -1,10 +1,10 @@
-import type { Asset, Category, Tag, Location } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
+  SerializeFrom,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
@@ -305,13 +305,10 @@ export default function LocationPage() {
 const ListAssetContent = ({
   item,
 }: {
-  item: Asset & {
-    category?: Category;
-    tags?: Tag[];
-    location?: Location;
-  };
+  item: SerializeFrom<typeof loader>["items"][number];
 }) => {
   const { category, tags } = item;
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -341,6 +338,7 @@ const ListAssetContent = ({
                 </Button>
               </span>
               <AssetStatusBadge
+                kit={item?.kit}
                 status={item.status}
                 availableToBook={item.availableToBook}
                 shareAgreementUrl={getShareAgreementUrl(item)}

@@ -1,7 +1,7 @@
 import { KitStatus } from "@prisma/client";
 import { userFriendlyAssetStatus } from "../assets/asset-status-badge";
-import AwaitingSignatureTooltip from "../custody/awaiting-signature-tooltip";
 import { Badge } from "../shared/badge";
+import { CustomTooltip } from "../shared/custom-tooltip";
 import { UnavailableBadge } from "../shared/unavailable-badge";
 import When from "../when/when";
 
@@ -48,18 +48,26 @@ export function KitStatusBadge({
           </Badge>
         }
       >
-        <AwaitingSignatureTooltip
-          type="kit"
-          navigateTo={`/kits/${kitId}/share-agreement`}
-          trigger={
-            <Badge
-              color={assetStatusColorMap(status)}
-              className={"bg-warning-50"}
-            >
-              {userFriendlyAssetStatus(status)}
-            </Badge>
+        <CustomTooltip
+          content={
+            <div className="max-w-[260px] text-left sm:max-w-[320px]">
+              <p className="text-xs text-gray-700">
+                Kit status will change to "In custody" after signing. To cancel
+                custody assignment, go to{" "}
+                <span className="font-semibold text-gray-600">
+                  {"Actions > Release Custody"}
+                </span>
+              </p>
+            </div>
           }
-        />
+        >
+          <Badge
+            color={assetStatusColorMap(status)}
+            className={"bg-warning-50"}
+          >
+            {userFriendlyAssetStatus(status)}
+          </Badge>
+        </CustomTooltip>
       </When>
       {!availableToBook && (
         <UnavailableBadge title="This kit is not available for Bookings because some of its assets are marked as unavailable" />

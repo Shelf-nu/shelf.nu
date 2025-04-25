@@ -585,6 +585,8 @@ function ListContent({
   const { location, category, tags } = item;
 
   const { roles } = useUserRoleHelper();
+  const { kit } = useLoaderData<typeof loader>();
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -614,6 +616,7 @@ function ListContent({
                 </Button>
               </span>
               <AssetStatusBadge
+                kit={kit}
                 shareAgreementUrl={`/kits/${item.kitId}/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}

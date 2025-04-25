@@ -244,7 +244,11 @@ export function getCustodiansOrderedByTotalCustodies({
 /**
  * Most scanned assets
  */
-export function getMostScannedAssets({ assets }: { assets: Asset[] }) {
+export function getMostScannedAssets<T extends Asset>({
+  assets,
+}: {
+  assets: T[];
+}) {
   const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
 
   const assetsWithScanCount = assetsWithScans.map((asset) => ({

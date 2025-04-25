@@ -292,6 +292,7 @@ export default function AssetDetailsPage() {
           <div className="flex gap-2">
             <div className="flex items-center gap-x-1">
               <AssetStatusBadge
+                kit={asset?.kit}
                 status={asset.status}
                 availableToBook={asset.availableToBook}
                 shareAgreementUrl={getShareAgreementUrl(asset)}

@@ -46,6 +46,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      include: { kit: { select: { id: true, name: true } } },
     });
 
     return json(
@@ -165,6 +166,7 @@ export default function DuplicateAsset() {
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={asset?.kit}
                   shareAgreementUrl={getShareAgreementUrl(asset)}
                   status={asset.status}
                   availableToBook={asset.availableToBook}

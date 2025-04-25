@@ -258,6 +258,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               id: true,
             },
           },
+          kit: { select: { id: true, name: true } },
         },
       })
       .catch((cause) => {
@@ -514,6 +515,7 @@ const RowComponent = ({
       location: true;
       category: true;
       tags: true;
+      kit: { select: { id: true; name: true } };
     };
   }>;
 }) => {
@@ -541,6 +543,7 @@ const RowComponent = ({
                 {item.title}
               </p>
               <AssetStatusBadge
+                kit={item?.kit}
                 status={item.status}
                 availableToBook={item.availableToBook}
                 shareAgreementUrl={getShareAgreementUrl(item)}

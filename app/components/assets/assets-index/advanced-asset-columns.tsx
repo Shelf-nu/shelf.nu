@@ -1,7 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { CustomFieldType } from "@prisma/client";
-import type { AssetStatus } from "@prisma/client";
+import type { AssetStatus, Kit } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
@@ -179,6 +179,7 @@ export function AdvancedIndexColumn({
         <StatusColumn
           shareUrl={getShareAgreementUrl(item)}
           status={item.status}
+          kit={item.kit}
         />
       );
 
@@ -304,9 +305,11 @@ function TextColumn({
 function StatusColumn({
   status,
   shareUrl,
+  kit,
 }: {
   status: AssetStatus;
   shareUrl: string;
+  kit?: Pick<Kit, "id" | "name"> | null;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -316,6 +319,7 @@ function StatusColumn({
           status={status}
           availableToBook
           shareAgreementUrl={shareUrl}
+          kit={kit}
         />
       </div>
     </Td>

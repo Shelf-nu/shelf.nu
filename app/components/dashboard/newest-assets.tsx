@@ -1,4 +1,4 @@
-import type { Asset } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { getShareAgreementUrl } from "~/utils/asset";
@@ -11,6 +11,7 @@ import { Td, Table, Tr } from "../table";
 
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
+
   return (
     <>
       <div className="border border-b-0 border-gray-200">
@@ -35,16 +36,7 @@ export default function NewestAssets() {
           <tbody>
             {newAssets.map((asset) => (
               <Tr key={asset.id}>
-                <Row
-                  item={{
-                    ...asset,
-                    mainImageExpiration: asset.mainImageExpiration
-                      ? new Date(asset.mainImageExpiration)
-                      : null,
-                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
-                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
-                  }}
-                />
+                <Row item={asset} />
               </Tr>
             ))}
             {newAssets.length < 5 &&
@@ -69,12 +61,7 @@ export default function NewestAssets() {
 const Row = ({
   item,
 }: {
-  item: Asset & {
-    category?: {
-      color: string;
-      name: string;
-    } | null;
-  };
+  item: SerializeFrom<typeof loader>["newAssets"][number];
 }) => {
   const { category } = item;
   return (
@@ -100,6 +87,7 @@ const Row = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={item?.kit}
                   status={item.status}
                   shareAgreementUrl={getShareAgreementUrl(item)}
                   availableToBook={item.availableToBook}

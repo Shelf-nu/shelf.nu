@@ -188,7 +188,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           include: {
             category: true,
             custody: true,
-            kit: true,
+            kit: { select: { id: true, name: true } },
             bookings: {
               where: {
                 ...(booking.from && booking.to

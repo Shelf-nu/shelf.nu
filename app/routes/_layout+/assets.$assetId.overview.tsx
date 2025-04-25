@@ -506,8 +506,9 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {asset.custody && !asset.kitId ? (
+          {asset.custody && asset.custody?.agreement ? (
             <AgreementStatusCard
+              kit={asset.kit ? asset.kit : undefined}
               custodian={asset.custody.custodian}
               agreementName={asset.custody?.agreement?.name ?? ""}
               receiptId={
