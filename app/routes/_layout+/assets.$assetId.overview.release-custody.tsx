@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { KitStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -44,45 +44,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    const custody = await db.custody
-      .findUniqueOrThrow({
-        where: { assetId },
-        select: {
-          custodian: {
-            select: {
-              id: true,
-              name: true,
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                  email: true,
-                },
-              },
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching custody. Please try again or contact support.",
-          additionalData: { userId, assetId },
-          label: "Assets",
-        });
-      });
-
-    if (!custody) {
-      return redirect(`/assets/${assetId}`);
-    }
-
     const asset = await db.asset
       .findUniqueOrThrow({
         where: { id: params.assetId as string },
         select: {
           title: true,
+          kit: { select: { status: true } },
+          custody: {
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -93,6 +78,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           label: "Assets",
         });
       });
+
+    const custody = asset.custody;
+    if (!custody) {
+      return redirect(`/assets/${assetId}`);
+    }
+
+    /**
+     * If the custody was via kit then user is not allowed to release it's custody
+     * individually.
+     */
+    if (
+      asset.kit &&
+      (asset.kit.status === KitStatus.IN_CUSTODY ||
+        asset.kit.status === KitStatus.SIGNATURE_PENDING)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Custody",
+        message: "Custody assigned via cannot be released individually.",
+      });
+    }
 
     return json(
       data({
@@ -149,6 +155,36 @@ export const action = async ({
           label: "Assets",
         });
       }
+    }
+
+    const assetFound = await db.asset
+      .findFirstOrThrow({
+        where: { id: assetId, organizationId },
+        select: { id: true, kit: { select: { status: true } } },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Custody",
+          message:
+            "Asset not found. Are you sure it exists in the current workspace.",
+        });
+      });
+
+    /**
+     * If the custody was assigned via kit, then user is not allowed to release
+     * the custody of asset individually.
+     */
+    if (
+      assetFound.kit &&
+      (assetFound.kit.status === KitStatus.IN_CUSTODY ||
+        assetFound.kit.status === KitStatus.SIGNATURE_PENDING)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Custody",
+        message: "Custody assigned via cannot be released individually.",
+      });
     }
 
     const asset = await releaseCustody({ assetId, organizationId });
