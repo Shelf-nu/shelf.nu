@@ -1167,7 +1167,6 @@ export async function extendBooking({
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
-      BookingStatus.RESERVED,
       BookingStatus.ONGOING,
       BookingStatus.OVERDUE,
     ];
@@ -1232,14 +1231,6 @@ export async function extendBooking({
         text,
         html,
       });
-    }
-
-    /**
-     * If the booking was RESERVED then a checkout reminder was scheduled.
-     * We do not have to reschedule anything in this case.
-     */
-    if (booking.status === BookingStatus.RESERVED) {
-      return updatedBooking;
     }
 
     /**

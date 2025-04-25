@@ -50,7 +50,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     action: PermissionAction.cancel,
   });
 
-  const canExtendBooking = isOngoing || isReserved || isOverdue;
+  const canExtendBooking = isOngoing || isOverdue;
 
   return (
     <DropdownMenu modal={false}>
