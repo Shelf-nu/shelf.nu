@@ -18,7 +18,11 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import { getClientHint, type ClientHint } from "~/utils/client-hints";
+import {
+  getClientHint,
+  getDateTimeFormatFromHints,
+  type ClientHint,
+} from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
@@ -41,6 +45,7 @@ import {
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
+  extendBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
@@ -60,7 +65,9 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
-async function cancelScheduler(b?: Booking | null) {
+async function cancelScheduler(
+  b?: Pick<Booking, "activeSchedulerReference"> | null
+) {
   try {
     if (b?.activeSchedulerReference) {
       await scheduler.cancel(b.activeSchedulerReference);
@@ -1125,6 +1132,159 @@ export async function revertBookingToDraft({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while reverting the booking to draft.",
+    });
+  }
+}
+
+export async function extendBooking({
+  id,
+  organizationId,
+  newEndDate,
+  hints,
+}: Pick<Booking, "id" | "organizationId"> & {
+  newEndDate: Date;
+  hints: ClientHint;
+}) {
+  try {
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        select: {
+          id: true,
+          status: true,
+          to: true,
+          activeSchedulerReference: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in the current workspace?",
+        });
+      });
+
+    /** Extending booking is allowed only for these status */
+    const allowedStatus: BookingStatus[] = [
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ];
+
+    if (!allowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Extending booking is not allowed for current status.",
+      });
+    }
+
+    const updatedBooking = await db.booking.update({
+      where: { id: booking.id },
+      data: {
+        /**
+         * If booking is currently OVERDUE we have to make it ONGOING
+         */
+        status:
+          booking.status === BookingStatus.OVERDUE
+            ? BookingStatus.ONGOING
+            : undefined,
+        to: newEndDate,
+      },
+      include: BOOKING_INCLUDE_FOR_EMAIL,
+    });
+
+    /** Send extended booking email */
+    if (updatedBooking?.custodianUser?.email) {
+      const custodian = updatedBooking?.custodianUser
+        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        : updatedBooking.custodianTeamMember?.name ?? "";
+
+      const text = extendBookingEmailContent({
+        bookingName: updatedBooking.name,
+        assetsCount: updatedBooking._count.assets,
+        custodian,
+        from: updatedBooking.from!,
+        to: updatedBooking.to!,
+        hints,
+        bookingId: updatedBooking.id,
+        oldToDate: booking.to!,
+      });
+
+      const { format } = getDateTimeFormatFromHints(hints, {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+
+      const html = bookingUpdatesTemplateString({
+        booking: updatedBooking,
+        heading: `Booking extended from ${format(booking.to!)} to ${format(
+          newEndDate
+        )}`,
+        assetCount: updatedBooking._count.assets,
+        hints,
+      });
+
+      sendEmail({
+        to: updatedBooking.custodianUser.email,
+        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
+        text,
+        html,
+      });
+    }
+
+    /**
+     * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
+     * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
+     */
+    await cancelScheduler(booking);
+
+    const { hours } = calcTimeDifference(newEndDate, new Date());
+
+    /**
+     * If there is less than 1 hours left for checkin, then we immediately send the checkin
+     * reminder and we schedule the overdue handler.
+     */
+    if (hours < 1) {
+      if (updatedBooking?.custodianUser?.email) {
+        sendCheckinReminder(
+          updatedBooking,
+          updatedBooking._count.assets,
+          hints
+        );
+      }
+
+      await scheduleNextBookingJob({
+        data: {
+          id: updatedBooking.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+        },
+        when: newEndDate,
+      });
+    } else {
+      const when = newEndDate;
+      when.setHours(newEndDate.getHours() - 1);
+
+      await scheduleNextBookingJob({
+        data: {
+          id: updatedBooking.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+        },
+        when,
+      });
+    }
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while extending the booking.",
     });
   }
 }
