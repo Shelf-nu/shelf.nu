@@ -3,6 +3,7 @@ import {
   AssetStatus,
   CustodySignatureStatus,
   CustomFieldType,
+  KitStatus,
 } from "@prisma/client";
 import type {
   MetaFunction,
@@ -508,7 +509,13 @@ export default function AssetOverview() {
 
           {asset.custody && asset.custody?.agreement ? (
             <AgreementStatusCard
-              kit={asset.kit ? asset.kit : undefined}
+              kit={
+                asset.kit &&
+                (asset.kit.status === KitStatus.SIGNATURE_PENDING ||
+                  asset.kit.status === KitStatus.IN_CUSTODY)
+                  ? asset.kit
+                  : undefined
+              }
               custodian={asset.custody.custodian}
               agreementName={asset.custody?.agreement?.name ?? ""}
               receiptId={

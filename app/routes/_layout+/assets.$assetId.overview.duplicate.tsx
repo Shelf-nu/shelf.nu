@@ -46,7 +46,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: { kit: { select: { id: true, name: true } } },
+      include: { kit: { select: { id: true, name: true, status: true } } },
     });
 
     return json(

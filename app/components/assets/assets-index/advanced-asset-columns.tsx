@@ -309,7 +309,7 @@ function StatusColumn({
 }: {
   status: AssetStatus;
   shareUrl: string;
-  kit?: Pick<Kit, "id" | "name"> | null;
+  kit?: Pick<Kit, "id" | "name" | "status"> | null;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">

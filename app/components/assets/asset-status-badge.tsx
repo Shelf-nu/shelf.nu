@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Kit } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { useNavigate } from "@remix-run/react";
 import { Badge } from "../shared/badge";
 import { CustomTooltip } from "../shared/custom-tooltip";
@@ -42,15 +42,19 @@ export function AssetStatusBadge({
   status: AssetStatus;
   availableToBook: boolean;
   shareAgreementUrl: string;
-  kit?: Pick<Kit, "id" | "name"> | null;
+  kit?: Pick<Kit, "id" | "name" | "status"> | null;
 }) {
   const navigate = useNavigate();
 
-  const isPartOfKit = !!kit;
+  const isPartOfNotAvailableKit =
+    kit &&
+    (kit.status === KitStatus.IN_CUSTODY ||
+      kit.status === KitStatus.SIGNATURE_PENDING);
 
-  const inCustodyViaKit = status === AssetStatus.IN_CUSTODY && isPartOfKit;
+  const inCustodyViaKit =
+    status === AssetStatus.IN_CUSTODY && isPartOfNotAvailableKit;
   const signPendingViaKit =
-    status === AssetStatus.SIGNATURE_PENDING && isPartOfKit;
+    status === AssetStatus.SIGNATURE_PENDING && isPartOfNotAvailableKit;
 
   const showTooltip =
     status === AssetStatus.SIGNATURE_PENDING || inCustodyViaKit;
@@ -110,7 +114,10 @@ export function AssetStatusBadge({
     return null;
   }, [inCustodyViaKit, kit?.name, signPendingViaKit, status]);
 
-  function handleClick() {
+  function handleClick(event: React.MouseEvent<HTMLSpanElement, MouseEvent>) {
+    event.preventDefault();
+    event.stopPropagation();
+
     if (status === AssetStatus.SIGNATURE_PENDING) {
       navigate(shareAgreementUrl);
     }

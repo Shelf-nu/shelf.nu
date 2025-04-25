@@ -87,7 +87,7 @@ export type AssetWithBooking = Asset & {
   category: Category;
   kitId?: string | null;
   qrScanned: string;
-  kit: Pick<Kit, "id" | "name"> | null;
+  kit: Pick<Kit, "id" | "name" | "status"> | null;
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];

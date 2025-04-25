@@ -122,7 +122,7 @@ export type AdvancedIndexAsset = Pick<
   | "kitId"
 > & {
   qrId: string; // QR code will always be available
-  kit: Pick<Kit, "id" | "name"> | null;
+  kit: Pick<Kit, "id" | "name" | "status"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name">[];
   location: Pick<Location, "name"> | null;
