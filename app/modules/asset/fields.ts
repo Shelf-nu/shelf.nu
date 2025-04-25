@@ -83,6 +83,7 @@ export const ASSET_OVERVIEW_FIELDS = {
   custodyReceipts: {
     select: { id: true },
     where: { signatureStatus: CustodySignatureStatus.SIGNED },
+    orderBy: { agreementSignedOn: "desc" },
   },
 } satisfies Prisma.AssetInclude;
 

@@ -22,6 +22,7 @@ export default function CustodyReceiptDialog() {
   const custodyAgreement = receipt?.agreement;
   const custodian = receipt?.custodian;
   const asset = receipt?.asset;
+  const kit = receipt?.kit;
   const agreementFile = custodyAgreement?.custodyAgreementFiles[0];
 
   const handlePrint = useReactToPrint({
@@ -29,7 +30,11 @@ export default function CustodyReceiptDialog() {
     documentTitle: asset?.title ?? "",
   });
 
-  if (!receipt || !custodyAgreement || !custodian || !asset || !agreementFile) {
+  if (!receipt || !custodyAgreement || !custodian || !agreementFile) {
+    return null;
+  }
+
+  if (!kit && !asset) {
     return null;
   }
 
@@ -122,16 +127,18 @@ export default function CustodyReceiptDialog() {
               </p>
               <Separator className="col-span-3" />
 
-              <p className="p-2 font-medium">Asset</p>
+              <p className="p-2 font-medium">{asset ? "Asset" : "Kit"}</p>
               <p className="col-span-2 py-2 text-gray-600">
                 <Button
                   className="mb-1 items-start text-start"
-                  to={`/assets/${asset.id}/overview`}
+                  to={
+                    asset ? `/assets/${asset.id}/overview` : `/kits/${kit?.id}`
+                  }
                   target="_blank"
                   variant="link-gray"
                 >
-                  <p>{asset.title}</p>
-                  <p>{asset.id}</p>
+                  <p>{asset ? asset.title : kit?.name}</p>
+                  <p>{asset ? asset.id : kit?.id}</p>
                 </Button>
               </p>
               <Separator className="col-span-3" />

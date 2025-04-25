@@ -101,7 +101,7 @@ export async function getPaginatedAndFilterableReceipts({
       db.custodyReceipt.count({ where }),
     ]);
 
-    const totalPages = Math.ceil(totalReceipts / perPageParam);
+    const totalPages = Math.ceil(totalReceipts / perPage);
 
     return {
       receipts,

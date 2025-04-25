@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  CustodySignatureStatus,
+  KitStatus,
+} from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -136,6 +141,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           qrCodes: true,
+          custodyReceipts: {
+            select: { id: true },
+            where: { signatureStatus: CustodySignatureStatus.SIGNED },
+            orderBy: { agreementSignedOn: "desc" },
+          },
         },
         userOrganizations,
         request,
@@ -523,7 +533,9 @@ export default function KitDetails() {
             <AgreementStatusCard
               className="mt-0"
               custodian={kit.custody.custodian}
-              receiptId="@TODO"
+              receiptId={
+                kit.custodyReceipts.length ? kit.custodyReceipts[0].id : null
+              }
               agreementName={kit.custody.agreement?.name ?? ""}
               isSignaturePending={kit.status === KitStatus.SIGNATURE_PENDING}
             />
