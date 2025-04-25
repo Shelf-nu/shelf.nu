@@ -156,7 +156,6 @@ export default function DuplicateAsset() {
                 }}
                 alt={asset.title}
                 className="size-full rounded-[4px] border object-cover"
-                useThumbnail
               />
             </div>
             <div className="min-w-[130px]">

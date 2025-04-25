@@ -330,7 +330,6 @@ const ListAssetContent = ({
                   "size-full rounded-[4px] border object-cover",
                   isKitAsset ? "border-gray-300" : ""
                 )}
-                useThumbnail
                 withPreview
               />
             </div>

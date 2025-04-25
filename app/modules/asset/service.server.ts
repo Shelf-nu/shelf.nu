@@ -736,7 +736,7 @@ export async function updateAsset({
   description,
   mainImage,
   mainImageExpiration,
-  thumbnailImage, // Add this new property
+  thumbnailImage,
   categoryId,
   tags,
   id,
@@ -746,7 +746,7 @@ export async function updateAsset({
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
   organizationId,
-}: UpdateAssetPayload & { thumbnailImage?: string | null }) {
+}: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
     const data: Prisma.AssetUpdateInput = {
@@ -755,7 +755,7 @@ export async function updateAsset({
       valuation,
       mainImage,
       mainImageExpiration,
-      thumbnailImage, // Add this new property
+      thumbnailImage,
     };
 
     /** If uncategorized is passed, disconnect the category */

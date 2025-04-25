@@ -533,7 +533,6 @@ const RowComponent = ({
                 }}
                 alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
-                useThumbnail
               />
             </div>
             <div className="flex flex-col gap-y-1">

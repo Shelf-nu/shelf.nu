@@ -5,10 +5,9 @@ import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { action } from "~/routes/api+/asset.refresh-main-image";
+import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
-
-export const DIALOG_CLOSE_SHORTCUT = "Escape";
 
 export const AssetImage = ({
   asset,
@@ -24,11 +23,8 @@ export const AssetImage = ({
   const { id: assetId, thumbnailImage } = asset;
 
   // Type guard to safely access mainImage and mainImageExpiration only when available
-  // Type guard to safely access mainImage and mainImageExpiration only when available
   // For checking if we have main image data, regardless of withPreview prop
   const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
-
-  // Type guard to safely access mainImage and mainImageExpiration only when available
   const mainImage = hasMainImageData ? (asset.mainImage as string) : null;
   const mainImageExpiration =
     "mainImageExpiration" in asset ? asset.mainImageExpiration : null;

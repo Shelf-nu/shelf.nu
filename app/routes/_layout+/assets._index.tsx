@@ -397,7 +397,6 @@ const ListAssetContent = ({
                 }}
                 alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
-                useThumbnail
                 withPreview
               />
 

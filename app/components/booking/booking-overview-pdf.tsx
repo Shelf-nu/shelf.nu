@@ -274,7 +274,6 @@ const BookingPDFPreview = ({
                       }}
                       alt={asset.title}
                       className="!size-14 object-cover"
-                      useThumbnail
                     />
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">

@@ -141,7 +141,6 @@ export function AdvancedIndexColumn({
                   alt={item.title}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={true}
-                  useThumbnail
                 />
               ) : null}
 
