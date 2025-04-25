@@ -26,6 +26,7 @@ import {
   checkinBooking,
   checkoutBooking,
   deleteBooking,
+  extendBooking,
   getBooking,
   getBookingFlags,
   removeAssets,
@@ -324,6 +325,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "cancel",
           "removeKit",
           "revert-to-draft",
+          "extend-booking",
         ]),
         nameChangeOnly: z
           .string()
@@ -348,6 +350,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
+      "extend-booking": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -669,6 +672,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         sendNotification({
           title: "Booking reverted",
           message: "Your booking has been reverted back to draft successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      case "extend-booking": {
+        const endDate = formData.get("endDate")!.toString()!;
+        if (!endDate) {
+          throw new ShelfError({
+            cause: null,
+            label: "Booking",
+            message: "End date is required.",
+          });
+        }
+
+        const hints = getClientHint(request);
+
+        const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate();
+
+        await extendBooking({
+          id,
+          organizationId,
+          hints,
+          newEndDate,
+        });
+
+        sendNotification({
+          title: "Booking extended",
+          message: "Your booking has been extended to new end date.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
