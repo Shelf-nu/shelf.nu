@@ -93,14 +93,11 @@ export const AssetImage = ({
     // 2. We have a main image (can't generate thumbnail without it)
     // 3. We don't have a thumbnail yet
     // 4. We're not already fetching one
-    // 5. The refresh fetcher is not already handling it
     if (
       useThumbnail &&
       mainImage && // Only try to generate thumbnail if we have a main image
       !thumbnailImage &&
-      !dynamicThumbnailImage &&
-      thumbnailFetcher.state === "idle" &&
-      imageFetcher.state === "idle"
+      !dynamicThumbnailImage
     ) {
       thumbnailFetcher.submit(
         { assetId },
@@ -111,7 +108,7 @@ export const AssetImage = ({
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useThumbnail, mainImage, thumbnailImage, assetId, imageFetcher.state]);
+  }, []);
 
   useEffect(
     function handleEscShortcut() {
