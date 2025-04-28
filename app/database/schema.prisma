@@ -582,6 +582,7 @@ enum CustomFieldType {
   BOOLEAN
   DATE
   MULTILINE_TEXT
+  AMOUNT
 }
 
 model AssetCustomFieldValue {
