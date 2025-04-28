@@ -1,6 +1,5 @@
 import { useState } from "react";
-import type { CustomField } from "@prisma/client";
-import { CustomFieldType } from "@prisma/client";
+import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -72,6 +71,8 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   DATE: "A date picker for selecting a date.",
   MULTILINE_TEXT:
     "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes.",
+  AMOUNT:
+    "Enter numerical values to be formatted in your workspace's currency. Supports decimals.",
 };
 
 export const CustomFieldForm = ({
