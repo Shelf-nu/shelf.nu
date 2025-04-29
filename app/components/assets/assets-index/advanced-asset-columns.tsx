@@ -40,6 +40,7 @@ import {
   type AssetIndexLoaderData,
 } from "~/routes/_layout+/assets._index";
 import { getShareAgreementUrl } from "~/utils/asset";
+import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isLink } from "~/utils/misc";
 import {
@@ -116,6 +117,12 @@ export function AdvancedIndexColumn({
           >
             {customFieldDisplayValue as string}
           </Button>
+        ) : field.customField.type === CustomFieldType.AMOUNT ? (
+          formatCurrency({
+            value: fieldValue.raw as number,
+            locale,
+            currency: currentOrganization.currency,
+          })
         ) : (
           (customFieldDisplayValue as string)
         )}

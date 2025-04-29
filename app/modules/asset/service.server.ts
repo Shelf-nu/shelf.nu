@@ -1032,7 +1032,12 @@ export async function deleteOtherImages({
         .list(`${userId}/${assetId}`);
 
     if (deletedImagesError) {
-      throw new Error(`Error fetching images: ${deletedImagesError.message}`);
+      throw new ShelfError({
+        cause: deletedImagesError,
+        message: "Failed to fetch images",
+        additionalData: { userId, assetId, currentImage, data },
+        label,
+      });
     }
 
     // Extract the image names and filter out the one to keep
