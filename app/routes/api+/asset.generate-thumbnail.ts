@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
@@ -10,53 +11,6 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
-
-/**
- * Extracts the storage path from a Supabase URL, handling different URL formats
- */
-function extractStoragePath(url: string, bucketName: string): string | null {
-  try {
-    const parsedUrl = new URL(url);
-    const pathname = parsedUrl.pathname;
-
-    // Handle signed URLs (format: /storage/v1/object/sign/bucket/path?token=...)
-    if (pathname.includes("/object/sign/")) {
-      const signMatch = pathname.match(`/object/sign/${bucketName}/(.+)`);
-      if (signMatch && signMatch[1]) {
-        return signMatch[1];
-      }
-    }
-
-    // Handle public URLs (format: /storage/v1/object/public/bucket/path)
-    if (pathname.includes("/object/public/")) {
-      const publicMatch = pathname.match(`/object/public/${bucketName}/(.+)`);
-      if (publicMatch && publicMatch[1]) {
-        return publicMatch[1];
-      }
-    }
-
-    // Handle authenticated URLs (format: /storage/v1/object/authenticated/bucket/path)
-    if (pathname.includes("/object/authenticated/")) {
-      const authMatch = pathname.match(
-        `/object/authenticated/${bucketName}/(.+)`
-      );
-      if (authMatch && authMatch[1]) {
-        return authMatch[1];
-      }
-    }
-
-    // Fallback: try to find bucket name anywhere in the path
-    const parts = pathname.split("/");
-    const bucketIndex = parts.indexOf(bucketName);
-    if (bucketIndex !== -1 && bucketIndex < parts.length - 1) {
-      return parts.slice(bucketIndex + 1).join("/");
-    }
-
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
@@ -80,21 +34,58 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     });
 
-    // If thumbnail already exists, return it
+    // If thumbnail already exists, refresh its URL
     if (asset.thumbnailImage) {
-      return json(
-        data({
-          asset: {
-            id: asset.id,
-            thumbnailImage: asset.thumbnailImage,
-          },
-        })
-      );
+      // Extract the path from the existing thumbnail URL
+      const thumbnailPath = extractStoragePath(asset.thumbnailImage, "assets");
+
+      if (thumbnailPath) {
+        try {
+          // Generate a fresh signed URL
+          const refreshedThumbnailUrl = await createSignedUrl({
+            filename: thumbnailPath,
+            bucketName: "assets",
+          });
+
+          // Update with the fresh URL
+          const updatedAsset = await db.asset.update({
+            where: { id: assetId },
+            data: {
+              thumbnailImage: refreshedThumbnailUrl,
+              mainImageExpiration: oneDayFromNow(),
+            },
+            select: {
+              id: true,
+              thumbnailImage: true,
+            },
+          });
+
+          return json(data({ asset: updatedAsset }));
+        } catch (error) {
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message: `Failed to refresh thumbnail URL for asset ${assetId}`,
+              additionalData: { assetId, thumbnailPath },
+              label: "Assets",
+            })
+          );
+
+          // Return the existing thumbnail rather than failing
+          return json(
+            data({
+              asset: {
+                id: asset.id,
+                thumbnailImage: asset.thumbnailImage,
+              },
+            })
+          );
+        }
+      }
     }
 
+    // If there's no main image, we can't generate a thumbnail
     if (!asset.mainImage) {
-      // If there's no main image, we can't generate a thumbnail
-      // Return success with existing values instead of throwing an error
       return json(
         data({
           asset: {
@@ -105,7 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
     }
 
-    // Extract the original filename from the mainImage URL
+    // Extract the original filename from the mainImage URL using the consistent function
     const originalPath = extractStoragePath(asset.mainImage, "assets");
 
     if (!originalPath) {
@@ -180,7 +171,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       bucketName: "assets",
     });
 
-    // Update the asset record
+    // Update the asset record with both the thumbnail and a fresh expiration
     const updatedAsset = await db.asset.update({
       where: { id: assetId },
       data: {
@@ -195,35 +186,42 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return json(data({ asset: updatedAsset }));
   } catch (cause) {
-    // In case of any error, return existing values instead of failing
+    // In case of any error, try to return existing values instead of failing
     try {
-      const asset = await db.asset.findUnique({
-        where: { id: (request.body as any).assetId },
-        select: {
-          id: true,
-          thumbnailImage: true,
-        },
-      });
+      const assetId = url.searchParams.get("assetId");
+      if (assetId) {
+        const asset = await db.asset.findUnique({
+          where: { id: assetId },
+          select: {
+            id: true,
+            thumbnailImage: true,
+          },
+        });
 
-      throw json(data({ asset }));
+        if (asset) {
+          return json(data({ asset }));
+        }
+      }
     } catch {
-      // If everything fails Instead of throwing, return a successful response with error information
-      const reason = new ShelfError({
-        cause,
-        message: "Error refreshing image.",
-        label: "Assets",
-      });
-
-      // Log the error for debugging
-      Logger.error(reason);
-
-      // Return a successful response with error flag
-      return json(
-        data({
-          asset: null,
-          error: reason.message,
-        })
-      );
+      // Fall through to error response
     }
+
+    // If everything fails, log the error and return a response with error information
+    const reason = new ShelfError({
+      cause,
+      message: "Error generating thumbnail.",
+      label: "Assets",
+    });
+
+    // Log the error for debugging
+    Logger.error(reason);
+
+    // Return a successful response with error flag
+    return json(
+      data({
+        asset: null,
+        error: reason.message,
+      })
+    );
   }
 }

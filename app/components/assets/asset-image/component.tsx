@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 import { useFetcher } from "@remix-run/react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
@@ -8,6 +8,9 @@ import type { loader as refreshImageLoader } from "~/routes/api+/asset.refresh-m
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
+import { isAssetForPreview } from "./utils";
+// Import the debug helper (uncomment during debugging)
+// import { debugImageUrl } from "~/utils/debug-helpers";
 
 export const AssetImage = ({
   asset,
@@ -20,44 +23,98 @@ export const AssetImage = ({
   const imageFetcher = useFetcher<typeof refreshImageLoader>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [isImageError, setIsImageError] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  // Track if we've already tried refreshing to prevent loops
+  const [hasAttemptedRefresh, setHasAttemptedRefresh] = useState(false);
+
   const { id: assetId, thumbnailImage } = asset;
 
-  // Type guard to safely access mainImage and mainImageExpiration only when available
-  // For checking if we have main image data, regardless of withPreview prop
+  // Safely access main image properties using the type guard
   const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
-  const mainImage = hasMainImageData ? (asset.mainImage as string) : null;
-  const mainImageExpiration =
-    "mainImageExpiration" in asset ? asset.mainImageExpiration : null;
+  const isPreviewAsset = isAssetForPreview(asset);
 
+  // Extract main image data when available
+  const mainImage = hasMainImageData ? asset.mainImage : null;
+  const mainImageExpiration = isPreviewAsset ? asset.mainImageExpiration : null;
+
+  // Get updated images from fetchers when available
   const updatedAssetMainImage = imageFetcher.data?.error
     ? null
-    : imageFetcher.data?.asset.mainImage;
+    : imageFetcher.data?.asset?.mainImage;
   const updatedAssetThumbnailImage = imageFetcher.data?.error
     ? null
-    : imageFetcher.data?.asset.thumbnailImage;
+    : imageFetcher.data?.asset?.thumbnailImage;
 
   // Get thumbnail from thumbnail fetcher if available
   const dynamicThumbnailImage = thumbnailFetcher.data?.asset?.thumbnailImage;
 
-  // Choose the appropriate image URL
+  // Choose the appropriate image URL with fallbacks
+  // Create a stable cache-busting key that won't change on re-renders
+  const [cacheBuster] = useState(isImageError ? `?t=${Date.now()}` : "");
+
   const currentThumbnail =
-    dynamicThumbnailImage || thumbnailImage || updatedAssetThumbnailImage;
-  const currentMainImage = mainImage || updatedAssetMainImage;
+    dynamicThumbnailImage || updatedAssetThumbnailImage || thumbnailImage;
+  const currentMainImage = updatedAssetMainImage || mainImage;
 
+  // Only add cache-buster if we've had an error and attempted refresh
   const imageUrl =
-    useThumbnail && currentThumbnail
+    (useThumbnail && currentThumbnail
       ? currentThumbnail
-      : currentMainImage || "/static/images/asset-placeholder.jpg";
+      : currentMainImage || "/static/images/asset-placeholder.jpg") +
+    (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
-  // For preview dialog, always use the full-size image
+  // For preview dialog, also add cache buster only when needed
   const previewImageUrl =
-    currentMainImage || "/static/images/asset-placeholder.jpg";
+    (currentMainImage || "/static/images/asset-placeholder.jpg") +
+    (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  // Safe refresh function that prevents loops
+  const refreshImage = useCallback(() => {
+    if (assetId && mainImage && !hasAttemptedRefresh) {
+      setHasAttemptedRefresh(true);
+      imageFetcher.submit(
+        { assetId, mainImage },
+        {
+          method: "get",
+          action: "/api/asset/refresh-main-image",
+        }
+      );
+    }
+  }, [assetId, mainImage, imageFetcher, hasAttemptedRefresh]);
+
+  // Safe thumbnail generator that prevents loops
+  const generateThumbnail = useCallback(() => {
+    if (assetId && !hasAttemptedRefresh) {
+      setHasAttemptedRefresh(true);
+      thumbnailFetcher.submit(
+        { assetId },
+        {
+          method: "get",
+          action: "/api/asset/generate-thumbnail",
+        }
+      );
+    }
+  }, [assetId, thumbnailFetcher, hasAttemptedRefresh]);
 
   const handleImageLoad = () => {
+    // Successfully loaded, clear both loading and error states
     setIsLoading(false);
+    if (isImageError) {
+      setIsImageError(false);
+    }
+  };
+
+  const handleImageError = () => {
+    setIsLoading(false);
+
+    // Only set error state and refresh once
+    if (!isImageError && !hasAttemptedRefresh) {
+      setIsImageError(true);
+      refreshImage();
+    }
   };
 
   const handleOpenDialog = () => {
@@ -68,48 +125,64 @@ export const AssetImage = ({
     setIsDialogOpen(false);
   };
 
-  // Check for image expiration - only if withPreview is true and mainImage exists
+  // Check for image expiration and generate thumbnail on component mount only
   useEffect(() => {
+    // Reset refresh attempt state when component mounts
+    setHasAttemptedRefresh(false);
+
+    // Check for expiration
     if (withPreview && mainImage && mainImageExpiration) {
-      const now = new Date();
-      const expiration = new Date(mainImageExpiration);
-      if (now > expiration) {
-        imageFetcher.submit(
-          { assetId, mainImage: mainImage || "" },
-          {
-            method: "get",
-            action: "/api/asset/refresh-main-image",
-          }
-        );
+      try {
+        const now = new Date();
+        const expiration = new Date(mainImageExpiration);
+        // Only refresh if it's actually expired and we haven't tried yet
+        if (now > expiration && !hasAttemptedRefresh) {
+          refreshImage();
+        }
+      } catch (e) {
+        // If date parsing fails, don't refresh
+        // eslint-disable-next-line no-console
+        console.error("Error parsing expiration date", e);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  // Check if we need to generate a thumbnail (separate from refresh)
-  useEffect(() => {
-    // Only generate if:
-    // 1. We want to use thumbnails
-    // 2. We have a main image (can't generate thumbnail without it)
-    // 3. We don't have a thumbnail yet
-    // 4. We're not already fetching one
+    // Generate thumbnail if needed and we haven't tried yet
     if (
       useThumbnail &&
-      mainImage && // Only try to generate thumbnail if we have a main image
+      mainImage &&
       !thumbnailImage &&
-      !dynamicThumbnailImage
+      !dynamicThumbnailImage &&
+      !hasAttemptedRefresh
     ) {
-      thumbnailFetcher.submit(
-        { assetId },
-        {
-          method: "get",
-          action: "/api/asset/generate-thumbnail",
-        }
-      );
+      generateThumbnail();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Empty dependency array to run only on mount
 
+  // Reset error state when fetchers successfully provide new image URLs
+  useEffect(() => {
+    const hasValidNewImage =
+      updatedAssetMainImage || updatedAssetThumbnailImage;
+
+    if (hasValidNewImage && isImageError) {
+      // We have new images, clear the error state but don't trigger new loading
+      setIsImageError(false);
+    }
+  }, [updatedAssetMainImage, updatedAssetThumbnailImage, isImageError]);
+
+  // Debug the image URLs - uncomment during debugging
+  // useEffect(() => {
+  //   if (currentMainImage) {
+  //     console.log("AssetImage - Main Image URL:", assetId);
+  //     debugImageUrl(currentMainImage);
+  //   }
+  //   if (currentThumbnail) {
+  //     console.log("AssetImage - Thumbnail URL:", assetId);
+  //     debugImageUrl(currentThumbnail);
+  //   }
+  // }, [assetId, currentMainImage, currentThumbnail]);
+
+  // Handle dialog keyboard shortcuts
   useEffect(
     function handleEscShortcut() {
       if (!withPreview || !isDialogOpen) {
@@ -157,6 +230,7 @@ export const AssetImage = ({
           )}
           alt={alt}
           onLoad={handleImageLoad}
+          onError={handleImageError}
           loading="lazy"
           decoding="async"
           {...rest}
