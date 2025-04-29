@@ -10,7 +10,6 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -19,8 +18,9 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 
 import {
-  EditWorkspaceFormSchema,
-  WorkspaceEditForm,
+  EditGeneralWorkspaceSettingsFormSchema,
+  EditWorkspaceSSOSettingsFormSchema,
+  WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
@@ -118,6 +118,7 @@ export const handle = {
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  /** Get the id of the organization from the params */
   const { workspaceId: id } = getParams(
     params,
     z.object({ workspaceId: z.string() }),
@@ -166,61 +167,118 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
-    const { enabledSso } = organization;
-
     const clonedRequest = request.clone();
-
     const formData = await clonedRequest.formData();
 
-    const schema = EditWorkspaceFormSchema(
-      enabledSso,
-      organization.type === "PERSONAL"
-    );
-
-    const payload = parseData(formData, schema, {
-      additionalData: { userId, id },
-    });
-
-    const {
-      name,
-      currency,
-      selfServiceGroupId,
-      adminGroupId,
-      baseUserGroupId,
-    } = payload;
-
-    const formDataFile = await unstable_parseMultipartFormData(
-      request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-    );
-
-    const file = formDataFile.get("image") as File | null;
-    invariant(file instanceof File, "file not the right type");
-
-    await updateOrganization({
-      id,
-      name,
-      image: file || null,
-      userId: authSession.userId,
-      currency,
-      ...(enabledSso && {
-        ssoDetails: {
-          selfServiceGroupId: selfServiceGroupId as string, // We can safely assume this is a string because when ssoDetails are enabled, we require the user to provide a value
-          adminGroupId: adminGroupId as string,
-          baseUserGroupId: baseUserGroupId as string,
-        },
+    const { intent } = parseData(
+      formData,
+      z.object({
+        intent: z.enum(["general", "permissions", "sso"]),
       }),
-    });
+      {
+        additionalData: {
+          organizationId: organization.id,
+        },
+      }
+    );
 
-    sendNotification({
-      title: "Workspace updated",
-      message: "Your workspace  has been updated successfully",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
+    switch (intent) {
+      case "general": {
+        // const { enabledSso } = currentOrganization;
+        const schema = EditGeneralWorkspaceSettingsFormSchema(
+          organization.type === "PERSONAL"
+        );
 
-    return json({ success: true });
-    // return redirect("/account-details/workspace");
+        const payload = parseData(formData, schema, {
+          additionalData: { userId, organizationId: id },
+        });
+
+        const {
+          name,
+          currency,
+          // selfServiceGroupId,
+          // adminGroupId,
+          // baseUserGroupId,
+        } = payload;
+
+        const formDataFile = await unstable_parseMultipartFormData(
+          request,
+          unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+        );
+
+        const file = formDataFile.get("image") as File | null;
+
+        await updateOrganization({
+          id,
+          name,
+          image: file || null,
+          userId: authSession.userId,
+          currency,
+          // ...(enabledSso && {
+          //   ssoDetails: {
+          //     selfServiceGroupId: selfServiceGroupId as string,
+          //     adminGroupId: adminGroupId as string,
+          //     baseUserGroupId: baseUserGroupId as string,
+          //   },
+          // }),
+        });
+
+        sendNotification({
+          title: "Workspace updated",
+          message: "Your workspace  has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json({ success: true });
+      }
+      case "sso": {
+        const { enabledSso } = organization;
+        if (!enabledSso) {
+          throw new ShelfError({
+            cause: null,
+            message: "SSO is not enabled for this organization.",
+            additionalData: { userId, id },
+            label: "Organization",
+          });
+        }
+
+        const schema = EditWorkspaceSSOSettingsFormSchema(enabledSso);
+
+        const payload = parseData(formData, schema, {
+          additionalData: { userId, organizationId: id },
+        });
+
+        const { selfServiceGroupId, adminGroupId, baseUserGroupId } = payload;
+
+        await updateOrganization({
+          id,
+          userId: authSession.userId,
+          ssoDetails: {
+            selfServiceGroupId: selfServiceGroupId as string,
+            adminGroupId: adminGroupId as string,
+            baseUserGroupId: baseUserGroupId as string,
+          },
+        });
+
+        sendNotification({
+          title: "Workspace updated",
+          message: "Your workspace has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json({ success: true });
+      }
+      default: {
+        throw new ShelfError({
+          cause: null,
+          message: "Invalid action",
+          additionalData: { intent },
+          label: "Team",
+        });
+      }
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });
@@ -238,10 +296,11 @@ export default function WorkspaceEditPage() {
         hideBreadcrumbs
         classNames="-mt-5"
       />
-      <div className=" items-top flex justify-between">
-        <WorkspaceEditForm
+      <div className="items-top flex justify-between">
+        <WorkspaceEditForms
           name={organization.name || name}
           currency={organization.currency}
+          className="mt-4"
         />
       </div>
     </>

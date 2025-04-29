@@ -217,10 +217,11 @@ export async function updateOrganization({
   userId,
   currency,
   ssoDetails,
-}: Pick<Organization, "id" | "currency"> & {
+}: Pick<Organization, "id"> & {
+  currency?: Organization["currency"];
   name?: string;
   userId: User["id"];
-  image: File | null;
+  image?: File | null;
   ssoDetails?: {
     selfServiceGroupId: string;
     adminGroupId: string;
@@ -230,7 +231,7 @@ export async function updateOrganization({
   try {
     const data = {
       name,
-      currency,
+      ...(currency && { currency }),
       ...(ssoDetails && {
         ssoDetails: {
           update: ssoDetails,
