@@ -1,4 +1,8 @@
-import { type Organization, type Currency } from "@prisma/client";
+import {
+  type Organization,
+  type Currency,
+  OrganizationType,
+} from "@prisma/client";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -14,6 +18,7 @@ import CurrencySelector from "./currency-selector";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
+import { Switch } from "../forms/switch";
 import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -41,6 +46,7 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
 export const WorkspaceEditForms = ({ name, currency, className }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms name={name} currency={currency} />
+    <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
   </div>
 );
@@ -148,152 +154,177 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
           </Button>
         </div>
       </Card>
-
-      {/* {organization.type === OrganizationType.TEAM ? (
-        <Card className={tw("my-0 w-full", className)}>
-          <div className=" border-b pb-5">
-            <h2 className=" text-[18px] font-semibold">Permissions</h2>
-            <p>
-              Adjust specific permissions for <b>Self Service</b> and{" "}
-              <b>Base</b> users.
-            </p>
-          </div>
-
-          <h4 className="mt-5 text-text-md">Self service users</h4>
-          <FormRow
-            rowLabel={`View custody`}
-            subHeading={
-              <div>
-                Allow <b>self service</b> users to <b>see</b> custody of assets
-                which are not assigned to them. By default they can only see
-                custodian for assets that they are the custodian of.
-              </div>
-            }
-            className="border-b-0 pb-[10px]"
-            required
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={`self-service-custody`}
-                id="selfServiceCustody"
-                disabled={disabled}
-                defaultChecked={
-                  false
-                  // getCustomFieldVal(field.id) === "Yes" || field.required
-                }
-              />
-              <label
-                htmlFor={`selfServiceCustody`}
-                className=" hidden text-gray-500"
-              >
-                Allow
-              </label>
-            </div>
-          </FormRow>
-
-          <FormRow
-            rowLabel={`View bookings`}
-            subHeading={
-              <div>
-                Allow <b>self service</b> users to <b>see</b> bookings which are
-                not assigned to them. By default they can only see bookings that
-                they are the custodian of.
-              </div>
-            }
-            className="border-b-0 pb-[10px]"
-            required
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={`self-service-bookings`}
-                id="selfServiceBookings"
-                disabled={disabled}
-                defaultChecked={
-                  false
-                  // getCustomFieldVal(field.id) === "Yes" || field.required
-                }
-              />
-              <label
-                htmlFor={`selfServiceBookings`}
-                className=" hidden text-gray-500"
-              >
-                Allow
-              </label>
-            </div>
-          </FormRow>
-
-          <h4 className="border-t pt-5 text-text-md">Base users</h4>
-          <FormRow
-            rowLabel={`View custody`}
-            subHeading={
-              <div>
-                Allow <b>base</b> users to <b>see</b> custody of assets which
-                are not assigned to them. By default they can only see custodian
-                for assets that they are the custodian of.
-              </div>
-            }
-            className="border-b-0 pb-[10px]"
-            required
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={`base-user-custody`}
-                id="baseUserCustody"
-                disabled={disabled}
-                defaultChecked={
-                  false
-                  // getCustomFieldVal(field.id) === "Yes" || field.required
-                }
-              />
-              <label
-                htmlFor={`baseUserCustody`}
-                className=" hidden text-gray-500"
-              >
-                Allow
-              </label>
-            </div>
-          </FormRow>
-
-          <FormRow
-            rowLabel={`View bookings`}
-            subHeading={
-              <div>
-                Allow <b>base</b> users to <b>see</b> bookings which are not
-                assigned to them. By default they can only see bookings that
-                they are the custodian of.
-              </div>
-            }
-            className="border-b-0 pb-[10px]"
-            required
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={`base-user-bookings`}
-                id="selfServiceBookings"
-                disabled={disabled}
-                defaultChecked={
-                  false
-                  // getCustomFieldVal(field.id) === "Yes" || field.required
-                }
-              />
-              <label
-                htmlFor={`baseUserBookings`}
-                className=" hidden text-gray-500"
-              >
-                Allow
-              </label>
-            </div>
-          </FormRow>
-
-          <div className="text-right">
-            <Button type="submit" disabled={disabled}>
-              {disabled ? <Spinner /> : "Save"}
-            </Button>
-          </div>
-        </Card>
-      ) : null} */}
     </fetcher.Form>
   );
+};
+
+export const EditWorkspacePermissionsSettingsFormSchema = () =>
+  z.object({
+    id: z.string(),
+    selfServiceCustody: z
+      .string()
+      .transform((val) => val === "on")
+      .default("false"),
+    selfServiceBookings: z
+      .string()
+      .transform((value) => value === "on")
+      .default("false"),
+    baseUserCustody: z
+      .string()
+      .transform((value) => value === "on")
+      .default("false"),
+    baseUserBookings: z
+      .string()
+      .transform((value) => value === "on")
+      .default("false"),
+  });
+
+const WorkspacePermissionsEditForm = ({ className }: Props) => {
+  const { organization } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher({ key: "permissions" });
+  let schema = EditWorkspacePermissionsSettingsFormSchema();
+  const zo = useZorm("NewQuestionWizardScreen", schema);
+  const disabled = useDisabled(fetcher);
+
+  return organization.type === OrganizationType.TEAM ? (
+    <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
+      <Card className={tw("my-0 w-full", className)}>
+        <div className=" border-b pb-5">
+          <h2 className=" text-[18px] font-semibold">Permissions</h2>
+          <p>
+            Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
+            users.
+          </p>
+        </div>
+        <input type="hidden" value={organization.id} name="id" />
+
+        <h4 className="mt-5 text-text-md">Self service users</h4>
+        <FormRow
+          rowLabel={`View custody`}
+          subHeading={
+            <div>
+              Allow <b>self service</b> users to <b>see</b> custody of assets
+              which are not assigned to them. By default they can only see
+              custodian for assets that they are the custodian of.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+          required
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Switch
+              name={zo.fields.selfServiceCustody()}
+              id="selfServiceCustody"
+              disabled={disabled}
+              defaultChecked={false}
+            />
+            <label
+              htmlFor={`selfServiceCustody`}
+              className=" hidden text-gray-500"
+            >
+              Allow
+            </label>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={`View bookings`}
+          subHeading={
+            <div>
+              Allow <b>self service</b> users to <b>see</b> bookings which are
+              not assigned to them. By default they can only see bookings that
+              they are the custodian of.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+          required
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Switch
+              name={zo.fields.selfServiceBookings()}
+              id="selfServiceBookings"
+              disabled={disabled}
+              defaultChecked={false}
+            />
+            <label
+              htmlFor={`selfServiceBookings`}
+              className=" hidden text-gray-500"
+            >
+              Allow
+            </label>
+          </div>
+        </FormRow>
+
+        <h4 className="border-t pt-5 text-text-md">Base users</h4>
+        <FormRow
+          rowLabel={`View custody`}
+          subHeading={
+            <div>
+              Allow <b>base</b> users to <b>see</b> custody of assets which are
+              not assigned to them. By default they can only see custodian for
+              assets that they are the custodian of.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+          required
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Switch
+              name={zo.fields.baseUserCustody()}
+              id="baseUserCustody"
+              disabled={disabled}
+              defaultChecked={false}
+            />
+            <label
+              htmlFor={`baseUserCustody`}
+              className=" hidden text-gray-500"
+            >
+              Allow
+            </label>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={`View bookings`}
+          subHeading={
+            <div>
+              Allow <b>base</b> users to <b>see</b> bookings which are not
+              assigned to them. By default they can only see bookings that they
+              are the custodian of.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+          required
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Switch
+              name={zo.fields.baseUserBookings()}
+              id="baseUserBookings"
+              disabled={disabled}
+              defaultChecked={false}
+            />
+            <label
+              htmlFor={`baseUserBookings`}
+              className=" hidden text-gray-500"
+            >
+              Allow
+            </label>
+          </div>
+        </FormRow>
+
+        <div className="text-right">
+          <Button
+            type="submit"
+            disabled={disabled}
+            name="intent"
+            value="permissions"
+          >
+            {disabled ? <Spinner /> : "Save"}
+          </Button>
+        </div>
+      </Card>
+    </fetcher.Form>
+  ) : null;
 };
 
 export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>

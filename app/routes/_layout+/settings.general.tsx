@@ -21,6 +21,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Card } from "~/components/shared/card";
 import {
   EditGeneralWorkspaceSettingsFormSchema,
+  EditWorkspacePermissionsSettingsFormSchema,
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
@@ -173,7 +174,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "general": {
-        // const { enabledSso } = currentOrganization;
         const schema = EditGeneralWorkspaceSettingsFormSchema(
           currentOrganization.type === "PERSONAL"
         );
@@ -182,14 +182,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const {
-          name,
-          currency,
-          id,
-          // selfServiceGroupId,
-          // adminGroupId,
-          // baseUserGroupId,
-        } = payload;
+        const { name, currency, id } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -213,14 +206,49 @@ export async function action({ context, request }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
-          // ...(enabledSso && {
-          //   ssoDetails: {
-          //     selfServiceGroupId: selfServiceGroupId as string,
-          //     adminGroupId: adminGroupId as string,
-          //     baseUserGroupId: baseUserGroupId as string,
-          //   },
-          // }),
         });
+
+        sendNotification({
+          title: "Workspace updated",
+          message: "Your workspace  has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect("/settings/general");
+      }
+      case "permissions": {
+        const schema = EditWorkspacePermissionsSettingsFormSchema();
+
+        const payload = parseData(formData, schema, {
+          additionalData: { userId, organizationId },
+        });
+
+        const {
+          id,
+          selfServiceCustody,
+          selfServiceBookings,
+          baseUserCustody,
+          baseUserBookings,
+        } = payload;
+        console.log(payload);
+
+        /** User is allowed to edit his/her current organization only not other organizations. */
+        if (currentOrganization.id !== id) {
+          throw new ShelfError({
+            cause: null,
+            message: "You are not allowed to edit this organization.",
+            label: "Organization",
+          });
+        }
+
+        // await updateOrganization({
+        //   id,
+        //   name,
+        //   image: file || null,
+        //   userId: authSession.userId,
+        //   currency,
+        // });
 
         sendNotification({
           title: "Workspace updated",
