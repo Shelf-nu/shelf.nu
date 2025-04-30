@@ -436,7 +436,7 @@ model Organization {
   enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
-
+  
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
@@ -454,6 +454,26 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+
+  configuration OrganizationConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configurationId String @unique
+}
+
+
+// This model is used to store the configuration for the organization
+model OrganizationConfiguration {
+  id   String           @id @unique @default(cuid())
+
+  organization Organization?
+
+  // Permissions - those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
+  selfServiceCanSeeCustody Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
+  baseUserCanSeeCustody   Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings  Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 }
 
 model UserOrganization {

@@ -226,10 +226,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const {
           id,
-          selfServiceCustody,
-          selfServiceBookings,
-          baseUserCustody,
-          baseUserBookings,
+          configurationId,
+          selfServiceCanSeeCustody,
+          selfServiceCanSeeBookingCustodian,
+          baseUserCanSeeCustody,
+          baseUserCanSeeBookingCustodian,
         } = payload;
         console.log(payload);
 

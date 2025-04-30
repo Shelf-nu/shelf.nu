@@ -161,19 +161,20 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
 export const EditWorkspacePermissionsSettingsFormSchema = () =>
   z.object({
     id: z.string(),
-    selfServiceCustody: z
+    configurationId: z.string(),
+    selfServiceCanSeeCustody: z
       .string()
       .transform((val) => val === "on")
       .default("false"),
-    selfServiceBookings: z
+    selfServiceCanSeeBookingCustodian: z
       .string()
       .transform((value) => value === "on")
       .default("false"),
-    baseUserCustody: z
+    baseUserCanSeeCustody: z
       .string()
       .transform((value) => value === "on")
       .default("false"),
-    baseUserBookings: z
+    baseUserCanSeeBookingCustodian: z
       .string()
       .transform((value) => value === "on")
       .default("false"),
@@ -197,6 +198,11 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
           </p>
         </div>
         <input type="hidden" value={organization.id} name="id" />
+        <input
+          type="hidden"
+          value={organization.configurationId}
+          name="configurationId"
+        />
 
         <h4 className="mt-5 text-text-md">Self service users</h4>
         <FormRow
@@ -213,7 +219,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.selfServiceCustody()}
+              name={zo.fields.selfServiceCanSeeCustody()}
               id="selfServiceCustody"
               disabled={disabled}
               defaultChecked={false}
@@ -241,7 +247,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.selfServiceBookings()}
+              name={zo.fields.selfServiceCanSeeBookingCustodian()}
               id="selfServiceBookings"
               disabled={disabled}
               defaultChecked={false}
@@ -270,7 +276,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.baseUserCustody()}
+              name={zo.fields.baseUserCanSeeCustody()}
               id="baseUserCustody"
               disabled={disabled}
               defaultChecked={false}
@@ -298,7 +304,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.baseUserBookings()}
+              name={zo.fields.baseUserCanSeeBookingCustodian()}
               id="baseUserBookings"
               disabled={disabled}
               defaultChecked={false}
