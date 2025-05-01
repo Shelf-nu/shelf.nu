@@ -111,6 +111,8 @@ function addCustomFieldFilter(
       return addCustomFieldBooleanFilter(whereClause, filter, subquery);
     case "OPTION":
       return addCustomFieldOptionFilter(whereClause, filter, subquery);
+    case "AMOUNT":
+      return addCustomFieldNumberFilter(whereClause, filter, subquery);
     default:
       return whereClause;
   }
@@ -219,6 +221,39 @@ function addCustomFieldOptionFilter(
 
       return Prisma.sql`${whereClause} AND ${subquery} = ANY(${arrayLiteral}::text[])`;
     }
+    default:
+      return whereClause;
+  }
+}
+
+function addCustomFieldNumberFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  subquery: Prisma.Sql
+): Prisma.Sql {
+  // Ensure the filter value is a number
+  const numericValue =
+    typeof filter.value === "string" ? parseFloat(filter.value) : filter.value;
+
+  switch (filter.operator) {
+    case "is":
+      return Prisma.sql`${whereClause} AND (${subquery})::float = ${numericValue}`;
+    case "isNot":
+      return Prisma.sql`${whereClause} AND (${subquery})::float != ${numericValue}`;
+    case "gt":
+      return Prisma.sql`${whereClause} AND (${subquery})::float > ${numericValue}`;
+    case "lt":
+      return Prisma.sql`${whereClause} AND (${subquery})::float < ${numericValue}`;
+    case "gte":
+      return Prisma.sql`${whereClause} AND (${subquery})::float >= ${numericValue}`;
+    case "lte":
+      return Prisma.sql`${whereClause} AND (${subquery})::float <= ${numericValue}`;
+    case "between":
+      const [min, max] = filter.value as [number, number];
+      // Ensure min and max are numbers
+      const minValue = typeof min === "string" ? parseFloat(min) : min;
+      const maxValue = typeof max === "string" ? parseFloat(max) : max;
+      return Prisma.sql`${whereClause} AND (${subquery})::float BETWEEN ${minValue} AND ${maxValue}`;
     default:
       return whereClause;
   }
@@ -943,6 +978,7 @@ function parseFilterValue(
         case CustomFieldType.BOOLEAN:
           return value.toLowerCase() === "true";
         case CustomFieldType.DATE:
+        case CustomFieldType.AMOUNT:
           return operator === "between" ? value.split(",") : value;
         default:
           return value;

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CustomField as RawCustomField,
   CustomFieldType,
+  Currency,
 } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -35,12 +36,12 @@ type CustomField = WithDateFields<RawCustomField, string>;
 export default function AssetCustomFields({
   zo,
   schema,
+  currency,
 }: {
   zo: Zorm<z.ZodObject<any, any, any>>;
   schema: z.ZodObject<any, any, any>;
+  currency: Currency;
 }) {
-  /** Get the custom fields from the loader */
-
   const { customFields, asset } = useLoaderData<typeof loader>();
 
   const customFieldsValues =
@@ -161,10 +162,34 @@ export default function AssetCustomFields({
         </>
       );
     },
+    AMOUNT: (field) => (
+      <div className="relative w-full">
+        <Input
+          hideLabel
+          type="number"
+          label={field.name}
+          name={`cf-${field.id}`}
+          placeholder={field.helpText || undefined}
+          error={zo.errors[`cf-${field.id}`]()?.message}
+          defaultValue={getCustomFieldVal(field.id)}
+          inputClassName="pl-[70px] valuation-input"
+          disabled={disabled}
+          step="any"
+          min={0}
+          className="w-full"
+          required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
+        />
+        <span className="absolute bottom-0 border-r px-3 py-2.5  text-gray-600 ">
+          {currency}
+        </span>
+      </div>
+    ),
   };
+
   const requiredFields = customFields.filter(
     (field) => field.required
   ) as CustomField[];
+
   const optionalFields = customFields.filter(
     (field) => !field.required
   ) as CustomField[];

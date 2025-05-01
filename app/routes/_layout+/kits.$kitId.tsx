@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
@@ -31,7 +30,6 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
-import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
@@ -45,6 +43,7 @@ import {
   getKit,
   getKitCurrentBooking,
 } from "~/modules/kit/service.server";
+import type { ListItemForKitPage } from "~/modules/kit/types";
 import { createNote } from "~/modules/note/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -493,19 +492,7 @@ export default function KitDetails() {
   );
 }
 
-function ListContent({
-  item,
-}: {
-  item: Prisma.AssetGetPayload<{
-    include: {
-      location: {
-        include: { image: { select: { id: true; updatedAt: true } } };
-      };
-      category: true;
-      tags: true;
-    };
-  }>;
-}) {
+function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
   const { roles } = useUserRoleHelper();
@@ -557,14 +544,6 @@ function ListContent({
       <Td>
         {location ? (
           <GrayBadge>
-            {location.image ? (
-              <Image
-                imageId={location.image.id}
-                alt="img"
-                className="mr-1 size-4 rounded-full object-cover"
-                updatedAt={location.image?.updatedAt}
-              />
-            ) : null}
             <span>{location.name}</span>
           </GrayBadge>
         ) : null}
