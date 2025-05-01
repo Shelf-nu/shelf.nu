@@ -65,3 +65,37 @@ export const KITS_INCLUDE_FIELDS = {
     },
   },
 } satisfies Prisma.KitInclude;
+
+/** Select used on the kit page for fetching the assets with minimal data */
+export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
+  id: true,
+  title: true,
+  mainImage: true,
+  mainImageExpiration: true,
+  status: true,
+  availableToBook: true,
+  category: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  },
+  location: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  tags: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+};
+
+/** Type used for the list item component */
+export type ListItemForKitPage = Prisma.AssetGetPayload<{
+  select: typeof KIT_SELECT_FIELDS_FOR_LIST_ITEMS;
+}>;

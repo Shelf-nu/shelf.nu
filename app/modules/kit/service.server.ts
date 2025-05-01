@@ -42,7 +42,11 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
-import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
+import {
+  GET_KIT_STATIC_INCLUDES,
+  KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
+  KITS_INCLUDE_FIELDS,
+} from "./types";
 import { getKitsWhereInput } from "./utils.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { createNote } from "../note/service.server";
@@ -512,13 +516,7 @@ export async function getAssetsForKits({
         skip,
         take,
         where: finalQuery,
-        include: {
-          kit: true,
-          custody: { select: { id: true } },
-          category: true,
-          location: { include: { image: true } },
-          tags: true,
-        },
+        select: KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
         orderBy: { [orderBy]: orderDirection },
       }),
       db.asset.count({ where: finalQuery }),
