@@ -9,7 +9,7 @@ import {
 } from "../shared/dropdown";
 
 type AssetRowActionsDropdownProps = {
-  asset: Asset;
+  asset: Pick<Asset, "id" | "title">;
   fullWidth?: boolean;
 };
 

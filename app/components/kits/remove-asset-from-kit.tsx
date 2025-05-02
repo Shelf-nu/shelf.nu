@@ -15,7 +15,11 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 
-export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
+export default function RemoveAssetFromKit({
+  asset,
+}: {
+  asset: Pick<Asset, "id" | "title">;
+}) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
