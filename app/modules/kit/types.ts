@@ -74,6 +74,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImageExpiration: true,
   status: true,
   availableToBook: true,
+  kitId: true,
   category: {
     select: {
       id: true,
@@ -93,7 +94,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
       name: true,
     },
   },
-};
+} satisfies Prisma.AssetSelect;
 
 /** Type used for the list item component */
 export type ListItemForKitPage = Prisma.AssetGetPayload<{
