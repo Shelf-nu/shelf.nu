@@ -62,8 +62,8 @@ export default function CheckinDialog({
           <AlertDialogTitle>Early Check-in Warning</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogDescription>
-          You are checking in the booking before the end date. If you proceed,
-          the end date will be adjusted to now:{" "}
+          You are checking in the booking more than 15 minutes before the end
+          date. If you proceed, the end date will be adjusted to now:{" "}
           <span className="font-bold text-gray-700">
             <DateS date={new Date()} includeTime />
           </span>
