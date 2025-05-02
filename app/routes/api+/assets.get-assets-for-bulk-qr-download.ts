@@ -56,6 +56,15 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       select: { id: true, title: true, createdAt: true },
     });
 
+    if (assets.length > 100) {
+      throw new ShelfError({
+        cause: null,
+        label: "Assets",
+        message:
+          "Bulk downloading QR codes is only available for maximum 100 codes at a time. Please select less codes to download.",
+      });
+    }
+
     const assetsWithQrObj = [];
 
     for (const asset of assets) {

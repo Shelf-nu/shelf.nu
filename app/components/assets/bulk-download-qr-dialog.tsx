@@ -40,6 +40,8 @@ export default function BulkDownloadQrDialog({
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const allAssetsSelected = isSelectingAllItems(selectedAssets);
 
+  const isSelectingMoreThan100 = selectedAssets.length > 100;
+
   const disabled =
     selectedAssets.length === 0 || downloadState.status === "loading";
 
@@ -49,6 +51,10 @@ export default function BulkDownloadQrDialog({
   }
 
   async function handleBulkDownloadQr() {
+    if (isSelectingMoreThan100) {
+      return;
+    }
+
     const query = new URLSearchParams();
 
     selectedAssets.forEach((asset) => {
@@ -159,14 +165,25 @@ export default function BulkDownloadQrDialog({
             </div>
           ) : (
             <>
-              <h4 className="mb-1">
-                Download qr codes for{" "}
-                {allAssetsSelected ? "all" : selectedAssets.length} asset(s).
-              </h4>
-              <p className="mb-4">
-                {allAssetsSelected ? "All" : selectedAssets.length} qr code(s)
-                will be downloaded in a zip file.
-              </p>
+              <When
+                truthy={!isSelectingMoreThan100}
+                fallback={
+                  <p className="mb-4">
+                    Bulk downloading QR codes is only available for maximum 100
+                    codes at a time. Please select less codes to download.
+                  </p>
+                }
+              >
+                <h4 className="mb-1">
+                  Download qr codes for{" "}
+                  {allAssetsSelected ? "all" : selectedAssets.length} asset(s).
+                </h4>
+                <p className="mb-4">
+                  {allAssetsSelected ? "All" : selectedAssets.length} qr code(s)
+                  will be downloaded in a zip file.
+                </p>
+              </When>
+
               <When truthy={downloadState.status === "success"}>
                 <p className="mb-4 text-success-500">
                   Successfully downloaded qr codes.
@@ -191,7 +208,7 @@ export default function BulkDownloadQrDialog({
                   <Button
                     className="flex-1"
                     onClick={handleBulkDownloadQr}
-                    disabled={disabled}
+                    disabled={disabled || isSelectingMoreThan100}
                   >
                     Download
                   </Button>
