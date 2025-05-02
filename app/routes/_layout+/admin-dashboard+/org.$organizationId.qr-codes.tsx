@@ -168,7 +168,7 @@ export default function AdminOrgQrCodes() {
               name="intent"
               value="createOrphans"
             >
-              Generate Unlinkned QR codes
+              Generate Unlinked QR codes
             </Button>
           </Form>
           <div className="flex justify-end gap-3">
@@ -180,7 +180,7 @@ export default function AdminOrgQrCodes() {
               className="whitespace-nowrap"
               variant="secondary"
             >
-              Print unlinkned codes
+              Print unlinked codes
             </Button>
             <Button
               to={`/api/${organization.id}/qr-codes.zip`}
