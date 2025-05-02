@@ -62,8 +62,8 @@ export default function CheckoutDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Early Check-Out Warning</AlertDialogTitle>
           <AlertDialogDescription>
-            You are checking out the booking before the start date. If you
-            proceed, the start date will be adjusted to now:{" "}
+            You are checking out the booking more than 15 minutes before the
+            start date. If you proceed, the start date will be adjusted to now:{" "}
             <span className="font-bold text-gray-700">
               <DateS date={new Date()} includeTime />
             </span>
