@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { toBlob } from "html-to-image";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
@@ -32,6 +33,8 @@ export default function BulkDownloadQrDialog({
   isDialogOpen,
   onClose,
 }: BulkDownloadQrDialogProps) {
+  const { totalItems } = useLoaderData<{ totalItems: number }>();
+
   const [downloadState, setDownloadState] = useState<DownloadState>({
     status: "idle",
   });
@@ -40,7 +43,8 @@ export default function BulkDownloadQrDialog({
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const allAssetsSelected = isSelectingAllItems(selectedAssets);
 
-  const isSelectingMoreThan100 = selectedAssets.length > 100;
+  const isSelectingMoreThan100 =
+    selectedAssets.length > 100 || (allAssetsSelected && totalItems > 100);
 
   const disabled =
     selectedAssets.length === 0 || downloadState.status === "loading";
