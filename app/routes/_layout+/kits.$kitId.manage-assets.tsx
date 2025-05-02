@@ -626,8 +626,8 @@ export default function ManageAssetsInKit() {
                     {kit.status === KitStatus.IN_CUSTODY
                       ? "in custody"
                       : "checked out"}
-                    . Adding assets to it will also inherit their status
-                    accordingly. Are you sure you want to continue?
+                    . Any assets you add will automatically inherit the kit's
+                    status. Are you sure you want to continue?
                   </p>
 
                   <AlertDialogFooter>
