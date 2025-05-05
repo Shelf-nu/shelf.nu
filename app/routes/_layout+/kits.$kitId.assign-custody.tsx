@@ -22,7 +22,7 @@ import { z } from "zod";
 import CustodyAgreementSelector from "~/components/custody/custody-agreement-selector";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { UserIcon } from "~/components/icons/library";
+import { AlertIcon, UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -594,13 +594,18 @@ export default function GiveKitCustody() {
 
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                  <div className="mx-auto md:m-0">
+                    <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+                      <AlertIcon />
+                    </span>
+                  </div>
+                  <AlertDialogTitle>
+                    Confirm custody assignment
+                  </AlertDialogTitle>
                   <AlertDialogDescription>
-                    The kit already has some assets in custody. By assigning
-                    custody to the kit, the asset custody will be synchronized
-                    with the kit. All current custody or pending custody of the
-                    assets will be released and they will get assigned custody
-                    via the kit.
+                    Some of the assets in this kit already have custody. By
+                    assigning custody to the kit, the asset custody will be
+                    synchronized with the kit.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
 

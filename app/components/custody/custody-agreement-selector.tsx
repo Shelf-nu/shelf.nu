@@ -147,7 +147,7 @@ function PdfSwitchLabel({ hasAgreements }: { hasAgreements: boolean }) {
       <p className="text-sm text-gray-500">
         {hasAgreements
           ? "Custodian needs to read (and sign) a document before receiving custody."
-          : "You need to create an agreement before you can add them here."}
+          : "You need to create an agreement before you can add them here. "}
         {hasAgreements ? (
           <Link target="_blank" className="text-gray-700 underline" to="#">
             Learn more

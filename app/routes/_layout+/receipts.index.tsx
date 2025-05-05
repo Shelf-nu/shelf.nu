@@ -64,6 +64,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const header: HeaderData = {
       title: "Receipts",
+      subHeading:
+        "View the receipts of all your signed custodies. If a custody required a signature, you can click on the receipt to view the signed document.",
     };
 
     const modelName = {
