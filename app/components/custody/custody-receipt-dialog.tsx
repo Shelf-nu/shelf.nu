@@ -4,6 +4,7 @@ import { useReactToPrint } from "react-to-print";
 import { useSearchParams } from "~/hooks/search-params";
 import { type loader } from "~/routes/_layout+/receipts.index";
 import { useHints } from "~/utils/client-hints";
+import { formatEnum } from "~/utils/misc";
 import { resolveTeamMemberName } from "~/utils/user";
 import { Dialog } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -57,7 +58,7 @@ export default function CustodyReceiptDialog() {
               <h4>Receipt not available</h4>
               <p>
                 The receipt is not generated yet because the signature is{" "}
-                {receipt.signatureStatus.toLowerCase()}.
+                {formatEnum(receipt.signatureStatus).toLowerCase()}.
               </p>
             </div>
           }

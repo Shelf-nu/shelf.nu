@@ -1051,9 +1051,22 @@ export async function bulkAssignKitCustody({
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
 
       /** If the assets of kit already have a custody, then we have to remove it before assigning the new custody */
-      await tx.custody.deleteMany({
-        where: { id: { in: assetCustodies } },
-      });
+      if (assetCustodies.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: assetCustodies } },
+        });
+
+        /** We also have to cancel all the receipts for these custodies */
+        await tx.custodyReceipt.updateMany({
+          where: {
+            assetId: { in: allAssetsOfAllKits.map((asset) => asset.id) },
+            custodyStatus: CustodyStatus.ACTIVE,
+          },
+          data: {
+            custodyStatus: CustodyStatus.CANCELLED,
+          },
+        });
+      }
 
       /** Creating custodies over assets of kits */
       await tx.custody.createMany({

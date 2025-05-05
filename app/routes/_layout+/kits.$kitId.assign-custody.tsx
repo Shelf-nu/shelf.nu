@@ -4,6 +4,7 @@ import {
   AssetStatus,
   BookingStatus,
   CustodySignatureStatus,
+  CustodyStatus,
   KitStatus,
   OrganizationRoles,
 } from "@prisma/client";
@@ -302,9 +303,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * If there are some custodies over assets, then we have to remove them
        * then we can create the new custodies over them.
        */
-      await tx.custody.deleteMany({
-        where: { id: { in: assetCustodies } },
-      });
+      if (assetCustodies.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: assetCustodies } },
+        });
+
+        /** We also have to cancel all the receipts for these custodies */
+        await tx.custodyReceipt.updateMany({
+          where: {
+            assetId: { in: kitFound.assets.map((asset) => asset.id) },
+            custodyStatus: CustodyStatus.ACTIVE,
+          },
+          data: {
+            custodyStatus: CustodyStatus.CANCELLED,
+          },
+        });
+      }
 
       /* Assign custody to all assets of the kit */
       await Promise.all(

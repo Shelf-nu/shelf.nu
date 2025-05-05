@@ -23,7 +23,12 @@ export async function getPaginatedAndFilterableReceipts({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const where: Prisma.CustodyReceiptWhereInput = { organizationId };
+    const where: Prisma.CustodyReceiptWhereInput = {
+      organizationId,
+      agreement: {
+        isNot: null,
+      },
+    };
 
     if (search) {
       const searchTerm = search.toLowerCase().trim();
