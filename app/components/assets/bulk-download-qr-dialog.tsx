@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { toBlob } from "html-to-image";
 import { useAtomValue } from "jotai";
