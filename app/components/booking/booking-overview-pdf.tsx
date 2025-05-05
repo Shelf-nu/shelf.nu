@@ -5,14 +5,14 @@ import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
-import { SERVER_URL } from "~/utils/env";
 import { tw } from "~/utils/tw";
+import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
-export const GenerateBookingPdf = ({
+export const BookingOverviewPDF = ({
   booking,
   timeStamp,
 }: {
@@ -266,12 +266,14 @@ const BookingPDFPreview = ({
                     {index + 1}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <img
-                      src={
-                        asset?.mainImage ||
-                        `${SERVER_URL}/static/images/asset-placeholder.jpg`
-                      }
-                      alt="Asset"
+                    <AssetImage
+                      asset={{
+                        id: asset.id,
+                        mainImage: asset.mainImage,
+                        thumbnailImage: asset.thumbnailImage,
+                        mainImageExpiration: asset.mainImageExpiration,
+                      }}
+                      alt={asset.title}
                       className="!size-14 object-cover"
                     />
                   </td>

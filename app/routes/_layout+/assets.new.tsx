@@ -234,7 +234,7 @@ export default function NewAssetPage() {
     <div className="relative">
       <Header title={title ? title : "Untitled Asset"} />
       <div>
-        <AssetForm qrId={qrId} category={categoryFromUrl || undefined} />
+        <AssetForm qrId={qrId} categoryId={categoryFromUrl} />
       </div>
     </div>
   );
