@@ -265,10 +265,15 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           {...props}
-          className={finalStyles}
+          className={tw(finalStyles)}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}
+          /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
+          {...(isDisabled && {
+            onClick: (e: React.MouseEvent) => e.preventDefault(),
+            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+          })}
         >
           {buttonContent}
         </Component>
