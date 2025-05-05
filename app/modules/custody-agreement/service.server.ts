@@ -173,6 +173,7 @@ export async function updateAgreementFile({
     });
 
     const pdf = fileData.get("pdf") as string;
+
     if (!pdf) {
       return null;
     }
@@ -194,9 +195,10 @@ export async function updateAgreementFile({
       where: { id: custodyAgreementId, organizationId },
       select: { id: true, custodyAgreementFiles: { select: { id: true } } },
     });
+
     const agreementFile = custodyAgreement.custodyAgreementFiles[0];
 
-    const publicUrl = getPublicFileURL({
+    const publicUrl = await getPublicFileURL({
       bucketName: "custody-agreements",
       filename: newFileName,
     });

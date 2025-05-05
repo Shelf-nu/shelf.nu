@@ -40,6 +40,7 @@ export interface UpdateAssetPayload {
   newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
+  thumbnailImage?: string | null;
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
   userId: User["id"];
@@ -112,6 +113,7 @@ export type AdvancedIndexAsset = Pick<
   | "updatedAt"
   | "userId"
   | "mainImage"
+  | "thumbnailImage"
   | "mainImageExpiration"
   | "categoryId"
   | "locationId"

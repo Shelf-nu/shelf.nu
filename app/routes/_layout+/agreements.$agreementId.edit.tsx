@@ -60,7 +60,6 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     });
 
     const agreementFile = await getLatestCustodyAgreementFile(agreementId);
-
     const canUpdateAgreementFile = await canUserUpdateAgreementFile({
       agreementId: agreement.id,
       organizationId,

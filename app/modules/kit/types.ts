@@ -71,6 +71,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   id: true,
   title: true,
   mainImage: true,
+  thumbnailImage: true,
   mainImageExpiration: true,
   status: true,
   availableToBook: true,

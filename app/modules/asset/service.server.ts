@@ -741,6 +741,7 @@ export async function updateAsset({
   description,
   mainImage,
   mainImageExpiration,
+  thumbnailImage,
   categoryId,
   tags,
   id,
@@ -759,6 +760,7 @@ export async function updateAsset({
       valuation,
       mainImage,
       mainImageExpiration,
+      thumbnailImage,
     };
 
     /** If uncategorized is passed, disconnect the category */
@@ -961,19 +963,46 @@ export async function updateAssetMainImage({
         width: 1200,
         withoutEnlargement: true,
       },
+      generateThumbnail: true, // Enable thumbnail generation
+      thumbnailSize: 108, // Size matches what we use in AssetImage component
     });
 
-    const image = fileData.get("mainImage") as string;
+    const image = fileData.get("mainImage") as string | null;
 
     if (!image) {
       return;
     }
 
-    const signedUrl = await createSignedUrl({ filename: image });
+    // Handle both the old string response and new stringified object response
+    let mainImagePath: string;
+    let thumbnailPath: string | null = null;
+
+    // Try parsing as JSON first (for new thumbnail format)
+    try {
+      const parsedImage = JSON.parse(image);
+      if (parsedImage.originalPath) {
+        mainImagePath = parsedImage.originalPath;
+        thumbnailPath = parsedImage.thumbnailPath;
+      } else {
+        // Fallback to string if parsing succeeds but no originalPath
+        mainImagePath = image;
+      }
+    } catch {
+      // If parsing fails, it's just a regular path string
+      mainImagePath = image;
+    }
+
+    const signedUrl = await createSignedUrl({ filename: mainImagePath });
+    let thumbnailSignedUrl: string | null = null;
+
+    if (thumbnailPath) {
+      thumbnailSignedUrl = await createSignedUrl({ filename: thumbnailPath });
+    }
 
     await updateAsset({
       id: assetId,
       mainImage: signedUrl,
+      thumbnailImage: thumbnailSignedUrl,
       mainImageExpiration: oneDayFromNow(),
       userId,
       organizationId,
@@ -981,10 +1010,14 @@ export async function updateAssetMainImage({
 
     /**
      * If updateAssetMainImage is called from new asset route, then we don't have to delete other images
-     * bcause no others images for this assets exists yet.
+     * because no others images for this assets exists yet.
      */
     if (!isNewAsset) {
-      await deleteOtherImages({ userId, assetId, data: { path: image } });
+      await deleteOtherImages({
+        userId,
+        assetId,
+        data: { path: mainImagePath },
+      });
     }
   } catch (cause) {
     throw new ShelfError({
@@ -1018,14 +1051,21 @@ export async function deleteOtherImages({
 }): Promise<void> {
   try {
     if (!data?.path) {
-      // asset image stroage failure. do nothing
+      // asset image storage failure. do nothing
       return;
     }
+
     const currentImage = extractMainImageName(data.path);
     if (!currentImage) {
-      //do nothing
+      // do nothing
       return;
     }
+
+    // Derive thumbnail name from current image
+    const currentThumbnail = currentImage.includes(".")
+      ? currentImage.replace(/(\.[^.]+)$/, "-thumbnail$1")
+      : `${currentImage}-thumbnail`;
+
     const { data: deletedImagesData, error: deletedImagesError } =
       await getSupabaseAdmin()
         .storage.from("assets")
@@ -1040,10 +1080,14 @@ export async function deleteOtherImages({
       });
     }
 
-    // Extract the image names and filter out the one to keep
+    // Extract the image names and filter out the ones to keep
     const imagesToDelete = (
       deletedImagesData?.map((image) => image.name) || []
-    ).filter((image) => image !== currentImage);
+    ).filter(
+      (image) =>
+        // Keep the current main image and its thumbnail
+        image !== currentImage && image !== currentThumbnail
+    );
 
     // Delete the images
     await Promise.all(
@@ -1091,8 +1135,8 @@ async function uploadDuplicateAssetMainImage(
     if (error) {
       throw error;
     }
-    /** Getting the signed url from supabase to we can view image  */
     await deleteOtherImages({ userId, assetId, data });
+    /** Getting the signed url from supabase to we can view image  */
     return await createSignedUrl({ filename: data.path });
   } catch (cause) {
     throw new ShelfError({

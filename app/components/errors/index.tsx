@@ -47,7 +47,7 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
       )}
     >
       <div className="flex flex-col items-center text-center">
-        <span className="mb-5 size-[56px] text-primary">
+        <span className="mb-5 size-14 text-primary">
           <ErrorIcon />
         </span>
         <h2 className="mb-2">{title}</h2>

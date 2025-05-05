@@ -89,6 +89,7 @@ model Asset {
   title               String
   description         String?
   mainImage           String?
+  thumbnailImage      String?
   mainImageExpiration DateTime?
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset

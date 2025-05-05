@@ -13,7 +13,7 @@ import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
-import { AssetImage } from "../assets/asset-image";
+import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
@@ -321,23 +321,25 @@ const ListAssetContent = ({
             <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className={tw(
                   "size-full rounded-[4px] border object-cover",
                   isKitAsset ? "border-gray-300" : ""
                 )}
+                withPreview
               />
             </div>
             <div className="min-w-[180px]">
-              <span className="word-break mb-1 block font-medium">
+              <span className="word-break mb-1 block">
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover={true}
                 >
