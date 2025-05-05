@@ -7,10 +7,10 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { Link, useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
+import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 // eslint-disable-next-line import/no-cycle
 import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
@@ -379,23 +379,25 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <Link
+        <div
           className={tw(
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
           )}
-          to={`/assets/${item.id}`}
+          // to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
-            <div className="relative flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
+                withPreview
               />
 
               {kit?.id ? (
@@ -415,8 +417,14 @@ const ListAssetContent = ({
               ) : null}
             </div>
             <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {item.title}
+              <span className="word-break mb-1 block ">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                >
+                  {item.title}
+                </Button>
               </span>
               <div>
                 <AssetStatusBadge
@@ -426,7 +434,7 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-        </Link>
+        </div>
       </Td>
 
       {/* Category */}

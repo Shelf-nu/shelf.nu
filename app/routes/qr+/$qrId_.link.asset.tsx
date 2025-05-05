@@ -9,7 +9,7 @@ import type {
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";
@@ -338,14 +338,15 @@ const RowComponent = ({ item }: { item: Asset }) => (
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex size-12 shrink-0 items-center justify-center">
+          <div className="flex size-14 shrink-0 items-center justify-center">
             <AssetImage
               asset={{
-                assetId: item.id,
+                id: item.id,
                 mainImage: item.mainImage,
+                thumbnailImage: item.thumbnailImage,
                 mainImageExpiration: item.mainImageExpiration,
-                alt: item.title,
               }}
+              alt={item.title}
               className="size-full rounded-[4px] border object-cover"
             />
           </div>

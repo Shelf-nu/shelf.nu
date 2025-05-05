@@ -6,7 +6,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { EmptyState } from "./empty-state";
 import { Button } from "../shared/button";
@@ -107,21 +106,21 @@ function Row({
                 alt={`${resolveTeamMemberName(custodian)}'s profile`}
               />
               <div>
-                {canNavigate && custodian.userId ? (
-                  <Button
-                    to={`/settings/team/users/${custodian.userId}/assets`}
-                    variant="link"
-                    className={tw(
-                      "mt-px font-medium text-gray-900 hover:text-gray-700 hover:underline",
-                      "[&_.external-link-icon]:opacity-0 [&_.external-link-icon]:duration-100 [&_.external-link-icon]:ease-in-out [&_.external-link-icon]:hover:opacity-100"
-                    )}
-                    target="_blank"
-                  >
-                    {teamMemberName}
-                  </Button>
-                ) : (
-                  <span className="mt-px">{teamMemberName}</span>
-                )}
+                <span className="word-break block">
+                  {canNavigate && custodian.userId ? (
+                    <Button
+                      to={`/settings/team/users/${custodian.userId}/assets`}
+                      variant="link"
+                      className="text-left font-medium text-gray-900 hover:text-gray-700"
+                      target={"_blank"}
+                      onlyNewTabIconOnHover={true}
+                    >
+                      {teamMemberName}
+                    </Button>
+                  ) : (
+                    <span className="mt-px">{teamMemberName}</span>
+                  )}
+                </span>
                 <span className="block text-gray-600">{count} Assets</span>
               </div>
             </div>
