@@ -26,8 +26,10 @@ import {
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
-import { updateOrganization } from "~/modules/organization/service.server";
-import { updateOrganizationConfiguration } from "~/modules/organization-configuration/service.server";
+import {
+  updateOrganization,
+  updateOrganizationPermissions,
+} from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -227,7 +229,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const {
           id,
-          configurationId,
           selfServiceCanSeeCustody,
           selfServiceCanSeeBookings,
           baseUserCanSeeCustody,
@@ -243,8 +244,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        await updateOrganizationConfiguration({
-          id: configurationId,
+        await updateOrganizationPermissions({
+          id,
           configuration: {
             selfServiceCanSeeCustody,
             selfServiceCanSeeBookings,

@@ -161,7 +161,6 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
 export const EditWorkspacePermissionsSettingsFormSchema = () =>
   z.object({
     id: z.string(),
-    configurationId: z.string(),
     selfServiceCanSeeCustody: z
       .string()
       .transform((val) => val === "on")
@@ -198,11 +197,6 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
           </p>
         </div>
         <input type="hidden" value={organization.id} name="id" />
-        <input
-          type="hidden"
-          value={organization.configurationId}
-          name="configurationId"
-        />
 
         <h4 className="mt-5 text-text-md">Self service users</h4>
         <FormRow

@@ -430,3 +430,54 @@ export function emailMatchesDomains(
   const domains = parseDomains(domainsString);
   return domains.includes(emailDomain.toLowerCase());
 }
+
+/** Permissions functions */
+
+/**
+ * Gets the permissions columns in the organization table
+ * Columns:
+ * - selfServiceCanSeeCustody
+ * - selfServiceCanSeeBookings
+ * - baseUserCanSeeCustody
+ * - baseUserCanSeeBookings
+ */
+export function getOrganizationPermissionColumns(id: string) {
+  return db.organization.findUnique({
+    where: { id },
+    select: {
+      selfServiceCanSeeCustody: true,
+      selfServiceCanSeeBookings: true,
+      baseUserCanSeeCustody: true,
+      baseUserCanSeeBookings: true,
+    },
+  });
+}
+
+/**
+ * Updates the permissions columns in the organization table
+ * Updated columns:
+ * - selfServiceCanSeeCustody
+ * - selfServiceCanSeeBookings
+ * - baseUserCanSeeCustody
+ * - baseUserCanSeeBookings
+ */
+export function updateOrganizationPermissions({
+  id,
+  configuration,
+}: {
+  id: string;
+  configuration: Pick<
+    Organization,
+    | "selfServiceCanSeeCustody"
+    | "selfServiceCanSeeBookings"
+    | "baseUserCanSeeCustody"
+    | "baseUserCanSeeBookings"
+  >;
+}) {
+  return db.organization.update({
+    where: { id },
+    data: {
+      ...configuration,
+    },
+  });
+}
