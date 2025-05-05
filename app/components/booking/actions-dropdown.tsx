@@ -18,9 +18,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { DeleteBooking } from "./delete-booking";
+
 import ExtendBookingDialog from "./extend-booking-dialog";
-import { GenerateBookingPdf } from "./generate-booking-pdf";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
@@ -147,7 +148,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
 
           <Divider className="my-2" />
-          <GenerateBookingPdf
+          <BookingOverviewPDF
             booking={booking}
             timeStamp={new Date().getTime()}
           />
