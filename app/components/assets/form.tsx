@@ -78,6 +78,7 @@ type Props = Partial<
     | "id"
     | "title"
     | "thumbnailImage"
+    | "mainImage"
     | "mainImageExpiration"
     | "categoryId"
     | "locationId"
@@ -93,6 +94,7 @@ export const AssetForm = ({
   id,
   title,
   thumbnailImage,
+  mainImage,
   mainImageExpiration,
   categoryId,
   locationId,
@@ -196,6 +198,7 @@ export const AssetForm = ({
                 asset={{
                   id,
                   thumbnailImage: thumbnailImage,
+                  mainImage: mainImage,
                   mainImageExpiration: new Date(mainImageExpiration),
                 }}
                 alt={`${title} main image`}

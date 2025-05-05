@@ -613,6 +613,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
               <AssetImage
                 asset={{
                   id: item.id,
+                  mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}

@@ -151,6 +151,7 @@ export default function DuplicateAsset() {
               <AssetImage
                 asset={{
                   id: asset.id,
+                  mainImage: asset.mainImage,
                   thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
                 }}
