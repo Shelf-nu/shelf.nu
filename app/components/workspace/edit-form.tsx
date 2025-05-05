@@ -166,7 +166,7 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
       .string()
       .transform((val) => val === "on")
       .default("false"),
-    selfServiceCanSeeBookingCustodian: z
+    selfServiceCanSeeBookings: z
       .string()
       .transform((value) => value === "on")
       .default("false"),
@@ -174,7 +174,7 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
       .string()
       .transform((value) => value === "on")
       .default("false"),
-    baseUserCanSeeBookingCustodian: z
+    baseUserCanSeeBookings: z
       .string()
       .transform((value) => value === "on")
       .default("false"),
@@ -247,7 +247,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.selfServiceCanSeeBookingCustodian()}
+              name={zo.fields.selfServiceCanSeeBookings()}
               id="selfServiceBookings"
               disabled={disabled}
               defaultChecked={false}
@@ -304,7 +304,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         >
           <div className="flex flex-col items-center gap-2">
             <Switch
-              name={zo.fields.baseUserCanSeeBookingCustodian()}
+              name={zo.fields.baseUserCanSeeBookings()}
               id="baseUserBookings"
               disabled={disabled}
               defaultChecked={false}

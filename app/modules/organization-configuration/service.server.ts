@@ -6,7 +6,13 @@ export function updateOrganizationConfiguration({
   configuration,
 }: {
   id: string;
-  configuration: OrganizationConfiguration;
+  configuration: Pick<
+    OrganizationConfiguration,
+    | "selfServiceCanSeeCustody"
+    | "selfServiceCanSeeBookings"
+    | "baseUserCanSeeCustody"
+    | "baseUserCanSeeBookings"
+  >;
 }) {
   return db.organizationConfiguration.update({
     where: { id },

@@ -27,6 +27,7 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
+import { updateOrganizationConfiguration } from "~/modules/organization-configuration/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -228,11 +229,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id,
           configurationId,
           selfServiceCanSeeCustody,
-          selfServiceCanSeeBookingCustodian,
+          selfServiceCanSeeBookings,
           baseUserCanSeeCustody,
-          baseUserCanSeeBookingCustodian,
+          baseUserCanSeeBookings,
         } = payload;
-        console.log(payload);
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -243,13 +243,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        // await updateOrganization({
-        //   id,
-        //   name,
-        //   image: file || null,
-        //   userId: authSession.userId,
-        //   currency,
-        // });
+        await updateOrganizationConfiguration({
+          id: configurationId,
+          configuration: {
+            selfServiceCanSeeCustody,
+            selfServiceCanSeeBookings,
+            baseUserCanSeeCustody,
+            baseUserCanSeeBookings,
+          },
+        });
 
         sendNotification({
           title: "Workspace updated",
