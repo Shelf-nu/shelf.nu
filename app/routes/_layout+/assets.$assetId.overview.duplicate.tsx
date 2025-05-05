@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
@@ -147,14 +147,15 @@ export default function DuplicateAsset() {
 
         <div className="flex flex-col items-center gap-3 ">
           <div className="flex w-full items-center gap-3 rounded-md border p-4">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: asset.id,
+                  id: asset.id,
                   mainImage: asset.mainImage,
+                  thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
-                  alt: asset.title,
                 }}
+                alt={asset.title}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
