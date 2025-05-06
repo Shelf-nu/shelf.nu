@@ -372,7 +372,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "save": {
         const payload = parseData(
           formData,
-          NewBookingFormSchema(false, false, getHints(request)),
+          NewBookingFormSchema(true, false, getHints(request)),
           {
             additionalData: { userId, id, organizationId, role },
           }
