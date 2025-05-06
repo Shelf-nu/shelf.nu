@@ -193,11 +193,10 @@ function ReceiptRow({
         <Badge color={signColor}>{formatEnum(item.signatureStatus)}</Badge>
       </Td>
       <Td>
-        {item.signatureStatus === CustodySignatureStatus.NOT_REQUIRED ||
-        item.signatureStatus === CustodySignatureStatus.SIGNED ? (
-          <Badge color={custodyColor}>{formatEnum(item.custodyStatus)}</Badge>
-        ) : (
+        {item.signatureStatus === CustodySignatureStatus.PENDING ? (
           "-"
+        ) : (
+          <Badge color={custodyColor}>{formatEnum(item.custodyStatus)}</Badge>
         )}
       </Td>
       <Td>{item.requestedOn}</Td>

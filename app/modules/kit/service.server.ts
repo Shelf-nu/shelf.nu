@@ -957,6 +957,10 @@ export async function bulkAssignKitCustody({
               status: true,
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
               custody: { select: { id: true } },
+              custodyReceipts: {
+                where: { custodyStatus: CustodyStatus.ACTIVE },
+                select: { id: true, signatureStatus: true },
+              },
             },
           },
         },
@@ -977,6 +981,9 @@ export async function bulkAssignKitCustody({
     }
 
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
+    const allAssetCustodyReceipts = allAssetsOfAllKits.flatMap(
+      (asset) => asset.custodyReceipts
+    );
 
     const someAssetsCheckedOut = allAssetsOfAllKits.some(
       (asset) => asset.status === AssetStatus.CHECKED_OUT
@@ -1055,15 +1062,22 @@ export async function bulkAssignKitCustody({
         await tx.custody.deleteMany({
           where: { id: { in: assetCustodies } },
         });
+      }
 
-        /** We also have to cancel all the receipts for these custodies */
-        await tx.custodyReceipt.updateMany({
-          where: {
-            assetId: { in: allAssetsOfAllKits.map((asset) => asset.id) },
-            custodyStatus: CustodyStatus.ACTIVE,
-          },
+      /* Update all the custody receipt status accordingly */
+      for (const receipt of allAssetCustodyReceipts) {
+        await tx.custodyReceipt.update({
+          where: { id: receipt.id },
           data: {
-            custodyStatus: CustodyStatus.CANCELLED,
+            custodyStatus:
+              receipt.signatureStatus === CustodySignatureStatus.SIGNED ||
+              receipt.signatureStatus === CustodySignatureStatus.NOT_REQUIRED
+                ? CustodyStatus.FINISHED
+                : CustodyStatus.CANCELLED,
+            signatureStatus:
+              receipt.signatureStatus === CustodySignatureStatus.PENDING
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
           },
         });
       }

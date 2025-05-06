@@ -244,6 +244,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               title: true,
               status: true,
               custody: { select: { id: true } },
+              custodyReceipts: {
+                where: { custodyStatus: CustodyStatus.ACTIVE },
+                select: {
+                  id: true,
+                  signatureStatus: true,
+                },
+              },
             },
           },
         },
@@ -272,6 +279,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const assetCustodies = kitFound.assets
       .map((asset) => asset.custody?.id)
       .filter(Boolean) as string[];
+
+    const assetCustodyReceipts = kitFound.assets.flatMap(
+      (asset) => asset.custodyReceipts
+    );
 
     const updatedKit = await db.$transaction(async (tx) => {
       const kit = await tx.kit.update({
@@ -307,47 +318,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await tx.custody.deleteMany({
           where: { id: { in: assetCustodies } },
         });
+      }
 
-        /** We also have to cancel all the receipts for these custodies */
-        await tx.custodyReceipt.updateMany({
-          where: {
-            assetId: { in: kitFound.assets.map((asset) => asset.id) },
-            custodyStatus: CustodyStatus.ACTIVE,
-          },
+      /* We also have to update all the asset active custody receipts */
+      for (const receipt of assetCustodyReceipts) {
+        await tx.custodyReceipt.update({
+          where: { id: receipt.id },
           data: {
-            custodyStatus: CustodyStatus.CANCELLED,
+            custodyStatus:
+              receipt.signatureStatus === CustodySignatureStatus.SIGNED ||
+              receipt.signatureStatus === CustodySignatureStatus.NOT_REQUIRED
+                ? CustodyStatus.FINISHED
+                : CustodyStatus.CANCELLED,
+            signatureStatus:
+              receipt.signatureStatus === CustodySignatureStatus.PENDING
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
           },
         });
       }
 
-      /* Assign custody to all assets of the kit */
-      await Promise.all(
-        kitFound.assets.map((asset) =>
-          tx.asset.update({
-            where: { id: asset.id },
-            data: {
-              status: agreementFound?.signatureRequired
-                ? AssetStatus.SIGNATURE_PENDING
-                : AssetStatus.IN_CUSTODY,
-              custody: {
-                create: {
-                  custodian: { connect: { id: custodian.id } },
-                  /**
-                   * If agreement requires a signature then signature status is PENDING
-                   * otherwise signature status is NOT_REQUIRED
-                   */
-                  signatureStatus: agreementFound?.signatureRequired
-                    ? CustodySignatureStatus.PENDING
-                    : CustodySignatureStatus.NOT_REQUIRED,
-                  agreement: agreementFound
-                    ? { connect: { id: agreementFound.id } }
-                    : undefined,
-                },
-              },
-            },
-          })
-        )
-      );
+      /** Creating custodies over assets */
+      await tx.custody.createMany({
+        data: kitFound.assets.map((asset) => ({
+          teamMemberId: custodian.id,
+          /**
+           * If agreement requires a signature then signature status is PENDING
+           * otherwise signature status is NOT_REQUIRED
+           */
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreement: agreementFound
+            ? { connect: { id: agreementFound.id } }
+            : undefined,
+          assetId: asset.id,
+        })),
+      });
+
+      /** Updating the status of assets */
+      await tx.asset.updateMany({
+        where: { id: { in: kitFound.assets.map((asset) => asset.id) } },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.SIGNATURE_PENDING
+            : AssetStatus.IN_CUSTODY,
+        },
+      });
 
       /** Create Receipt for custody */
       await tx.custodyReceipt.create({
