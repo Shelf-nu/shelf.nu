@@ -442,6 +442,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems } = useLoaderData<LoaderData>();
+  const kitAssetIds = kit.assets.map((asset) => asset.id);
+
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -470,7 +472,7 @@ export default function ManageAssetsInKit() {
       const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
       const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
 
-      if (isCheckedOut || isInCustody) {
+      if ((isCheckedOut || isInCustody) && !kitAssetIds.includes(asset.id)) {
         acc.push(asset);
       }
 
@@ -478,7 +480,7 @@ export default function ManageAssetsInKit() {
     }, []);
 
     setDisabledBulkItems(disabledBulkItems);
-  }, [items, setDisabledBulkItems]);
+  }, [items, kitAssetIds, setDisabledBulkItems]);
 
   function handleSubmit() {
     submit(formRef.current);
@@ -555,12 +557,19 @@ export default function ManageAssetsInKit() {
         <List
           ItemComponent={RowComponent}
           navigate={(_assetId, item) => {
-            if (item.status === AssetStatus.CHECKED_OUT) {
+            const isParkOfCurrentKit = kitAssetIds.includes(item.id);
+
+            if (
+              item.status === AssetStatus.CHECKED_OUT &&
+              !isParkOfCurrentKit
+            ) {
               return;
             }
-            if (item.status === AssetStatus.IN_CUSTODY) {
+
+            if (item.status === AssetStatus.IN_CUSTODY && !isParkOfCurrentKit) {
               return;
             }
+
             updateItem(item);
           }}
           customEmptyStateContent={{
@@ -580,6 +589,7 @@ export default function ManageAssetsInKit() {
             </>
           }
           disableSelectAllItems={true}
+          extraItemComponentProps={{ kitAssetIds }}
         />
       </div>
 
@@ -658,11 +668,23 @@ export default function ManageAssetsInKit() {
   );
 }
 
-const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
+const RowComponent = ({
+  item,
+  extraProps: { kitAssetIds },
+}: {
+  item: AssetsFromViewItem;
+  extraProps: { kitAssetIds: string[] };
+}) => {
   const { category, tags, location } = item;
   const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
   const isInCustody = item.status === AssetStatus.IN_CUSTODY;
-  const allowCursor = isInCustody || isCheckedOut ? "cursor-not-allowed" : "";
+  const isParkOfCurrentKit = kitAssetIds.includes(item.id);
+
+  const allowCursor =
+    (isInCustody || isCheckedOut) && !isParkOfCurrentKit
+      ? "cursor-not-allowed"
+      : "";
+
   return (
     <>
       {/* Name */}
