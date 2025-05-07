@@ -374,19 +374,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "save": {
+        const hints = getHints(request);
+
         const payload = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints: getHints(request),
+            hints,
           }),
           {
             additionalData: { userId, id, organizationId, role },
           }
         );
-
-        const hints = getHints(request);
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
