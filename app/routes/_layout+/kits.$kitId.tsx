@@ -141,6 +141,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         kitId,
+        disableStatusFilter: true,
       }),
       generateQrObj({
         kitId,

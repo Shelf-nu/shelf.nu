@@ -446,11 +446,18 @@ export async function getAssetsForKits({
   organizationId,
   extraWhere,
   kitId,
+  disableStatusFilter = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   kitId?: Kit["id"] | null;
   extraWhere?: Prisma.AssetWhereInput;
+  /*
+   * This flag is used to disable the status filter for views that share the same URL
+   * but shouldn't be affected by the global 'status' search param.
+   * Prevents unintended filtering when both views are rendered simultaneously.
+   * */
+  disableStatusFilter?: boolean;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
@@ -483,7 +490,7 @@ export async function getAssetsForKits({
       };
     }
 
-    if (status) {
+    if (status && !disableStatusFilter) {
       where.status = status;
     }
 
