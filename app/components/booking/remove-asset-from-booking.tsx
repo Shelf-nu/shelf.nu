@@ -20,7 +20,7 @@ import { TrashIcon } from "../icons/library";
 
 export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
+  const { isArchived, isCompleted } = useBookingStatusHelpers(booking.status);
   const disabled = useDisabled();
 
   return (

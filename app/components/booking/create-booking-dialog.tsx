@@ -46,7 +46,7 @@ export default function CreateBookingDialog({
 
       <DialogPortal>
         <Dialog
-          className={tw("overflow-auto md:h-screen md:w-[480px]", className)}
+          className={tw("overflow-auto lg:w-[600px]", className)}
           open={isDialogOpen}
           onClose={closeDialog}
           title={
@@ -66,10 +66,12 @@ export default function CreateBookingDialog({
             </div>
 
             <BookingForm
-              startDate={startDate}
-              endDate={endDate}
-              assetIds={assetIds.length ? assetIds : undefined}
-              custodianRef={custodianRef}
+              booking={{
+                startDate,
+                endDate,
+                assetIds: assetIds.length ? assetIds : undefined,
+                custodianRef,
+              }}
               action="/bookings/new"
             />
           </div>

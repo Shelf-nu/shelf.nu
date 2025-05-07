@@ -224,10 +224,12 @@ export default function NewBooking() {
       </header>
       <div>
         <BookingForm
-          startDate={startDate}
-          endDate={endDate}
-          assetIds={assetIds}
-          custodianRef={custodianRef}
+          booking={{
+            startDate,
+            endDate,
+            assetIds,
+            custodianRef,
+          }}
         />
       </div>
     </div>

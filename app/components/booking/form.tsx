@@ -11,7 +11,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
@@ -181,16 +181,17 @@ type BookingFlags = {
 };
 
 type BookingFormData = {
-  id?: string;
-  name?: string;
-  startDate?: string;
-  endDate?: string;
-  custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
-  bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
-  bookingFlags?: BookingFlags;
-  assetIds?: string[] | null;
-  description?: string | null;
-  status?: BookingStatus;
+  booking: {
+    id?: string;
+    name?: string;
+    startDate?: string;
+    endDate?: string;
+    custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
+    bookingFlags?: BookingFlags;
+    assetIds?: string[] | null;
+    description?: string | null;
+    status?: BookingStatus;
+  };
 
   /**
    * In case if the form is rendered outside of /edit or /new booking,
@@ -199,20 +200,21 @@ type BookingFormData = {
   action?: string;
 };
 
-export function BookingForm({
-  id,
-  name,
-  startDate,
-  endDate: incomingEndDate,
-  custodianRef,
-  bookingStatus,
-  bookingFlags,
-  assetIds,
-  description,
-  action,
-  status,
-}: BookingFormData) {
+export function BookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
+  const {
+    id,
+    name,
+    startDate,
+    endDate: incomingEndDate,
+    custodianRef,
+    bookingFlags,
+    assetIds,
+    description,
+    status,
+  } = booking;
+
+  const bookingStatus = useBookingStatusHelpers(status);
   const { teamMembers } = useLoaderData<typeof loader>();
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -238,7 +240,7 @@ export function BookingForm({
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      action: isNewBooking ? "new" : "save",
+      action: isNewBooking ? "new" : "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
     })
   );
