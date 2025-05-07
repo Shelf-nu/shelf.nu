@@ -329,7 +329,7 @@ export async function updateBasicBooking({
 
       /**
        * Custodian team member should always be passed.
-       * This is also validated by the schema `NewBookingFormSchema`.
+       * This is also validated by the schema `BookingFormSchema`.
        * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
        */
       if (custodianTeamMemberId) {
@@ -469,7 +469,7 @@ export async function reserveBooking({
 
     /**
      * Custodian team member should always be passed.
-     * This is also validated by the schema `NewBookingFormSchema`.
+     * This is also validated by the schema `BookingFormSchema`.
      * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
      */
     if (custodianTeamMemberId) {
