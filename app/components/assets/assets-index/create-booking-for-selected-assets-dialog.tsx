@@ -1,7 +1,7 @@
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { NewBookingFormSchema } from "~/components/booking/form";
+import { BookingFormSchema } from "~/components/booking/form";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import FormRow from "~/components/forms/form-row";
@@ -13,10 +13,8 @@ import { resolveTeamMemberName } from "~/utils/user";
 export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const zo = useZorm(
-    "CretaeBookingWithAssets",
-    NewBookingFormSchema({
-      isNewBooking: true,
-    })
+    "CreateBookingWithAssets",
+    BookingFormSchema({ action: "new" })
   );
 
   return (

@@ -6,7 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
+import { BookingForm, BookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -108,7 +108,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(
       formData,
-      NewBookingFormSchema({ isNewBooking: true, hints }),
+      BookingFormSchema({ hints, action: "new" }),
       {
         additionalData: { userId, organizationId },
       }

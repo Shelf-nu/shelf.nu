@@ -24,6 +24,7 @@ export function BookingPageContent() {
       <div>
         <BookingForm
           id={booking.id}
+          status={booking.status}
           name={booking.name}
           description={booking.description}
           bookingFlags={bookingFlags}
