@@ -749,7 +749,7 @@ const RowComponent = ({
                 </When>
 
                 {/* Asset is in checked out */}
-                <When truthy={isCheckedOut}>
+                <When truthy={isCheckedOut && !isParkOfCurrentKit}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -770,6 +770,31 @@ const RowComponent = ({
                           Asset is currently in checked out via a booking.{" "}
                           <br /> Make sure the asset has an Available status in
                           order to add it to this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
+                <When truthy={isCheckedOut && isParkOfCurrentKit}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-success-200 bg-success-50 px-1.5 py-0.5 text-center text-xs text-success-700">
+                          Part of kit
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset is already part of this kit
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Asset is currently in checked out via a booking and is
+                          already part of this kit.
                         </div>
                       </TooltipContent>
                     </Tooltip>
