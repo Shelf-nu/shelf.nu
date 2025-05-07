@@ -85,6 +85,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
+    const isManageAssetsUrl = request.url.includes("manage-assets");
+
     let [kit, assets, qrObj] = await Promise.all([
       getKit({
         id: kitId,
@@ -141,7 +143,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         kitId,
-        disableStatusFilter: true,
+        ignoreFilters: isManageAssetsUrl,
       }),
       generateQrObj({
         kitId,
