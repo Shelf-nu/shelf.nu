@@ -421,11 +421,14 @@ export async function getKit<T extends Prisma.KitInclude | undefined>({
         },
         label,
         status: 404,
+        shouldBeCaptured: false, // In this case we shouldnt be capturing the error
       });
     }
 
     return kit as KitWithInclude<T>;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
       title: "Kit not found",
@@ -433,10 +436,12 @@ export async function getKit<T extends Prisma.KitInclude | undefined>({
         "The kit you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         id,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

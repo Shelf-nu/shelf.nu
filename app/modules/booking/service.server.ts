@@ -1786,12 +1786,14 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
     return bookingFound;
   } catch (cause) {
-    const is404 = isNotFoundError(cause);
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
       title: "Booking not found",
@@ -1799,10 +1801,12 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         ...booking,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !is404,
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
