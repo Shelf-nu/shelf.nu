@@ -14,7 +14,9 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const zo = useZorm(
     "CretaeBookingWithAssets",
-    NewBookingFormSchema(false, true)
+    NewBookingFormSchema({
+      isNewBooking: true,
+    })
   );
 
   return (

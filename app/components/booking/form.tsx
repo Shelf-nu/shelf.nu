@@ -40,11 +40,15 @@ import When from "../when/when";
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */
-export const NewBookingFormSchema = (
+export const NewBookingFormSchema = ({
   inputFieldIsDisabled = false,
   isNewBooking = false,
-  hints?: ReturnType<typeof getHints>
-) =>
+  hints,
+}: {
+  inputFieldIsDisabled?: boolean;
+  isNewBooking?: boolean;
+  hints?: ReturnType<typeof getHints>;
+}) =>
   z
     .object({
       id:
@@ -162,15 +166,17 @@ export function BookingForm({
 
   const inputFieldIsDisabled =
     disabled ||
-    bookingStatus?.isReserved ||
-    bookingStatus?.isOngoing ||
-    bookingStatus?.isCompleted ||
-    bookingStatus?.isOverdue ||
-    bookingStatus?.isCancelled;
+    Boolean(
+      bookingStatus?.isReserved ||
+        bookingStatus?.isOngoing ||
+        bookingStatus?.isCompleted ||
+        bookingStatus?.isOverdue ||
+        bookingStatus?.isCancelled
+    );
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
-    NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
+    NewBookingFormSchema({ inputFieldIsDisabled, isNewBooking })
   );
 
   const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();

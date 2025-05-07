@@ -372,7 +372,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "save": {
         const payload = parseData(
           formData,
-          NewBookingFormSchema(true, false, getHints(request)),
+          NewBookingFormSchema({
+            inputFieldIsDisabled: true,
+            hints: getHints(request),
+          }),
           {
             additionalData: { userId, id, organizationId, role },
           }
@@ -418,15 +421,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
-        const payload = parseData(
-          formData,
-          NewBookingFormSchema(false, false, getHints(request)),
-          {
-            additionalData: { userId, id, organizationId, role },
-          }
-        );
-
         const hints = getHints(request);
+
+        const payload = parseData(formData, NewBookingFormSchema({ hints }), {
+          additionalData: { userId, id, organizationId, role },
+        });
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");

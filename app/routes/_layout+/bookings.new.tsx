@@ -104,17 +104,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
+    const hints = getHints(request);
 
     const payload = parseData(
       formData,
-      NewBookingFormSchema(false, true, getHints(request)),
+      NewBookingFormSchema({ isNewBooking: true, hints }),
       {
         additionalData: { userId, organizationId },
       }
     );
 
     const { name, custodian, assetIds, description } = payload;
-    const hints = getHints(request);
 
     /**
      * Validate if the user is self user and is assigning the booking to
