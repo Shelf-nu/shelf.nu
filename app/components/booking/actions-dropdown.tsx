@@ -34,7 +34,7 @@ interface Props {
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatusHelpers(booking);
+    useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();

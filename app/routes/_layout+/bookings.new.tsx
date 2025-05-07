@@ -6,7 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
+import { BookingForm, BookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -104,17 +104,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
+    const hints = getHints(request);
 
     const payload = parseData(
       formData,
-      NewBookingFormSchema(false, true, getHints(request)),
+      BookingFormSchema({ hints, action: "new" }),
       {
         additionalData: { userId, organizationId },
       }
     );
 
     const { name, custodian, assetIds, description } = payload;
-    const hints = getHints(request);
 
     /**
      * Validate if the user is self user and is assigning the booking to
@@ -224,10 +224,12 @@ export default function NewBooking() {
       </header>
       <div>
         <BookingForm
-          startDate={startDate}
-          endDate={endDate}
-          assetIds={assetIds}
-          custodianRef={custodianRef}
+          booking={{
+            startDate,
+            endDate,
+            assetIds,
+            custodianRef,
+          }}
         />
       </div>
     </div>
