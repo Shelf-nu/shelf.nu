@@ -643,15 +643,16 @@ export async function releaseCustody({
         data: { status: KitStatus.AVAILABLE, custody: { delete: true } },
       });
 
-      /** Make all the assets of the kit AVAILABLE */
-      await Promise.all(
-        kit.assets.map((asset) =>
-          tx.asset.update({
-            where: { id: asset.id },
-            data: { status: AssetStatus.AVAILABLE, custody: { delete: true } },
-          })
-        )
-      );
+      /** Make all the assets of the kit AVAILABLE in a single operation */
+      await tx.asset.updateMany({
+        where: { kitId: kit.id }, // Assuming assets have a kitId reference
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /** Update custody records separately - can't use nested writes with updateMany */
+      await tx.custody.deleteMany({
+        where: { assetId: { in: kit.assets.map((asset) => asset.id) } },
+      });
 
       /** Update the custody receipt */
       const custodyReceipt = await tx.custodyReceipt.findFirst({
