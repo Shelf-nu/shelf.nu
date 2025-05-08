@@ -10,7 +10,6 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocations } from "~/modules/location/service.server";
@@ -135,15 +134,17 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex size-12 items-center justify-center">
-            <Image
-              imageId={item.imageId}
-              alt="img"
-              className={tw(
-                "size-full rounded-[4px] border object-cover",
-                item.description ? "rounded-b-none border-b-0" : ""
-              )}
-              updatedAt={item.image?.updatedAt}
-            />
+            {item.imageUrl ? (
+              <img
+                src={item.imageUrl}
+                alt={item.name}
+                loading="lazy"
+                className={tw(
+                  "size-full rounded-[4px] border object-cover",
+                  item.description && "rounded-b-none border-b-0"
+                )}
+              />
+            ) : null}
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
             <div className="font-medium">{item.name}</div>

@@ -5,7 +5,6 @@ import { ChevronRight } from "~/components/icons/library";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 import When from "~/components/when/when";
 import {
   useClearValueFromParams,
@@ -124,14 +123,17 @@ export function AssetIndexFilters({
               }}
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
-                  />
+                  {metadata?.imageUrl ? (
+                    <img
+                      src={metadata?.imageUrl}
+                      alt={metadata.name}
+                      loading="lazy"
+                      className={tw(
+                        "size-6 rounded-[2px] border object-cover",
+                        metadata.description && "rounded-b-none border-b-0"
+                      )}
+                    />
+                  ) : null}
                   <div>{metadata.name}</div>
                 </div>
               )}

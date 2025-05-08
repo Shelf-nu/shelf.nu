@@ -25,7 +25,6 @@ import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
@@ -243,15 +242,18 @@ export default function LocationPage() {
         </div>
         {/* Right column - Location info */}
         <div className="w-full md:w-[360px] lg:ml-4">
-          <Image
-            imageId={location?.imageId}
-            alt={`${location.name}`}
-            className={tw(
-              "block h-auto w-full rounded border object-cover 2xl:h-auto",
-              location.description ? "rounded-b-none border-b-0" : ""
-            )}
-            updatedAt={location.image?.updatedAt}
-          />
+          {location.imageUrl ? (
+            <img
+              src={location.imageUrl}
+              alt={location.name}
+              loading="lazy"
+              className={tw(
+                "block h-auto w-full rounded border object-cover 2xl:h-auto",
+                location.description && "rounded-b-none border-b-0"
+              )}
+            />
+          ) : null}
+
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>

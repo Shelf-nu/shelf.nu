@@ -36,7 +36,6 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "../shared/hover-card";
-import { Image } from "../shared/image";
 import {
   Tooltip,
   TooltipContent,
@@ -369,14 +368,17 @@ export const AssetForm = ({
             }
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
-                <Image
-                  imageId={metadata.imageId}
-                  alt="img"
-                  className={tw(
-                    "size-6 rounded-[2px] object-cover",
-                    metadata.description ? "rounded-b-none border-b-0" : ""
-                  )}
-                />
+                {metadata?.imageUrl ? (
+                  <img
+                    src={metadata?.imageUrl}
+                    alt={metadata?.name}
+                    loading="lazy"
+                    className={tw(
+                      "size-6 rounded-[2px] object-cover",
+                      metadata.description && "rounded-b-none border-b-0"
+                    )}
+                  />
+                ) : null}
                 <div>{name}</div>
               </div>
             )}

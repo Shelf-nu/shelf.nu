@@ -344,6 +344,8 @@ model Location {
   description String?
   address     String?
 
+  imageUrl String?
+
   image   Image?  @relation(fields: [imageId], references: [id])
   imageId String? @unique
 
