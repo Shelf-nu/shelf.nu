@@ -56,14 +56,14 @@ export function CustodyCard({
   });
   /** We return null if user is selfService */
   if (!hasPermission || !custody) {
-    return null;
+    return <div className="my-3" />;
   }
   const fullName = resolveTeamMemberName(custody.custodian);
 
   /* If custody is present, we render the card showing custody */
   if (custody?.dateDisplay) {
     return (
-      <Card className="my-3">
+      <Card className="my-[14px]">
         <div className="flex items-center gap-3">
           <img
             src={

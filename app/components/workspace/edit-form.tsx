@@ -216,7 +216,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
               name={zo.fields.selfServiceCanSeeCustody()}
               id="selfServiceCustody"
               disabled={disabled}
-              defaultChecked={false}
+              defaultChecked={organization.selfServiceCanSeeCustody}
             />
             <label
               htmlFor={`selfServiceCustody`}
@@ -244,7 +244,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
               name={zo.fields.selfServiceCanSeeBookings()}
               id="selfServiceBookings"
               disabled={disabled}
-              defaultChecked={false}
+              defaultChecked={organization.selfServiceCanSeeBookings}
             />
             <label
               htmlFor={`selfServiceBookings`}
@@ -273,7 +273,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
               name={zo.fields.baseUserCanSeeCustody()}
               id="baseUserCustody"
               disabled={disabled}
-              defaultChecked={false}
+              defaultChecked={organization.baseUserCanSeeCustody}
             />
             <label
               htmlFor={`baseUserCustody`}
@@ -301,7 +301,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
               name={zo.fields.baseUserCanSeeBookings()}
               id="baseUserBookings"
               disabled={disabled}
-              defaultChecked={false}
+              defaultChecked={organization.baseUserCanSeeBookings}
             />
             <label
               htmlFor={`baseUserBookings`}
