@@ -9,9 +9,10 @@ export default function QR() {
     <div className="container h-full min-h-screen px-4 py-12">
       <div className="flex h-full flex-col justify-center text-center">
         <Link
-          to="/assets"
+          to="/"
           title="Home"
           className="logo mx-auto inline-block h-[32px]"
+          reloadDocument
         >
           <ShelfFullLogo className="h-full" />
         </Link>
