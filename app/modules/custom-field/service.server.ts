@@ -11,6 +11,7 @@ import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
+  isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -207,11 +208,13 @@ export async function getCustomField<
         },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
     return customField as CustomFieldWithInclude<T>;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
       title: "Custom field not found",
@@ -220,9 +223,12 @@ export async function getCustomField<
       additionalData: {
         id,
         organizationId,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

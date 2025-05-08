@@ -12,7 +12,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { NewBookingFormSchema } from "~/components/booking/form";
+import { BookingFormSchema } from "~/components/booking/form";
 import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -367,18 +367,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
     const formData = await request.formData();
+    const basicBookingInfo = await db.booking.findUniqueOrThrow({
+      where: { id },
+      select: { id: true, status: true },
+    });
 
     switch (intent) {
       case "save": {
+        const hints = getHints(request);
+
         const payload = parseData(
           formData,
-          NewBookingFormSchema(false, false, getHints(request)),
+          BookingFormSchema({
+            action: "save",
+            status: basicBookingInfo.status,
+            hints,
+          }),
           {
             additionalData: { userId, id, organizationId, role },
           }
         );
-
-        const hints = getHints(request);
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
@@ -418,15 +426,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
+        const hints = getHints(request);
+
         const payload = parseData(
           formData,
-          NewBookingFormSchema(false, false, getHints(request)),
+          BookingFormSchema({
+            hints,
+            action: "reserve",
+            status: basicBookingInfo.status,
+          }),
           {
             additionalData: { userId, id, organizationId, role },
           }
         );
-
-        const hints = getHints(request);
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
@@ -446,6 +458,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const booking = await reserveBooking({
           id,
           organizationId,
+          name: payload.name,
           description: payload.description,
           from: formattedFrom,
           to: formattedTo,

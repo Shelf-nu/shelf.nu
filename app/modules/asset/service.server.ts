@@ -174,11 +174,13 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
         },
         label,
         status: 404,
+        shouldBeCaptured: false, // In this case we shouldnt be capturing the error
       });
     }
 
     return asset as AssetWithInclude<T>;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
       title: "Asset not found",
@@ -187,10 +189,12 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       additionalData: {
         id,
         organizationId,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

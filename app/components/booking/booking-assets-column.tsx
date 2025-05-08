@@ -39,7 +39,7 @@ export function BookingAssetsColumn() {
   const hasItems = paginatedItems?.length > 0;
   const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved, isCompleted, isArchived, isCancelled } =
-    useBookingStatusHelpers(booking);
+    useBookingStatusHelpers(booking.status);
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -292,7 +292,7 @@ const ListAssetContent = ({
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isBase } = useUserRoleHelper();
   const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
-    useBookingStatusHelpers(booking);
+    useBookingStatusHelpers(booking.status);
 
   /** Weather the asset is checked out in a booking different than the current one */
   const isCheckedOut = useMemo(

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Booking, Category, Custody, Kit } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -63,7 +63,8 @@ import {
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getShareAgreementUrl } from "~/utils/asset";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -104,12 +105,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const {
       search,
@@ -140,6 +142,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+      });
+    }
+
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
@@ -186,7 +210,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -243,6 +267,41 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     const user = await getUserByID(authSession.userId);
+
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Booking",
+          message:
+            "Booking not found. Are you sure it exists in the current workspace.",
+        });
+      });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+      });
+    }
 
     /** We only update the booking if there are assets to add */
     if (assetIds.length > 0) {

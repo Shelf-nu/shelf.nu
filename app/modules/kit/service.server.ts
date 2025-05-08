@@ -429,11 +429,14 @@ export async function getKit<T extends Prisma.KitInclude | undefined>({
         },
         label,
         status: 404,
+        shouldBeCaptured: false, // In this case we shouldnt be capturing the error
       });
     }
 
     return kit as KitWithInclude<T>;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
       title: "Kit not found",
@@ -441,10 +444,12 @@ export async function getKit<T extends Prisma.KitInclude | undefined>({
         "The kit you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         id,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
@@ -454,27 +459,18 @@ export async function getAssetsForKits({
   organizationId,
   extraWhere,
   kitId,
+  ignoreFilters,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  kitId?: Kit["id"] | null;
+  kitId: Kit["id"];
   extraWhere?: Prisma.AssetWhereInput;
+  /** Set this to true if you don't want the search filters to be applied */
+  ignoreFilters?: boolean;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
-
-  const {
-    page,
-    perPageParam,
-    search,
-    hideUnavailable,
-    orderBy,
-    orderDirection,
-  } = paramsValues;
+  const { page, perPageParam, search, orderBy, orderDirection } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -483,27 +479,13 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    let where: Prisma.AssetWhereInput = { organizationId };
-    if (search) {
+    let where: Prisma.AssetWhereInput = { organizationId, kitId };
+
+    if (search && !ignoreFilters) {
       where.title = {
         contains: search.toLowerCase().trim(),
         mode: "insensitive",
       };
-    }
-
-    if (status) {
-      where.status = status;
-    }
-
-    if (hideUnavailable) {
-      //not disabled for booking
-      where.availableToBook = true;
-      //not assigned to team member
-      where.custody = null;
-    }
-
-    if (kitId) {
-      where.kitId = kitId;
     }
 
     const finalQuery = {

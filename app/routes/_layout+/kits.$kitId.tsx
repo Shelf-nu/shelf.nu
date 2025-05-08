@@ -1,9 +1,4 @@
-import {
-  AssetStatus,
-  BookingStatus,
-  CustodySignatureStatus,
-  KitStatus,
-} from "@prisma/client";
+import { AssetStatus, CustodySignatureStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -91,6 +86,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
+    const isManageAssetsUrl = request.url.includes("manage-assets");
+
     let [kit, assets, qrObj] = await Promise.all([
       getKit({
         id: kitId,
@@ -153,6 +150,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         kitId,
+        ignoreFilters: isManageAssetsUrl,
       }),
       generateQrObj({
         kitId,
@@ -338,49 +336,14 @@ export default function KitDetails() {
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
-  /**
-   * User can manage assets if
-   * 1. Kit has AVAILABLE status
-   * 2. Kit has a booking whose status is one of the following
-   *    DRAFT
-   *    RESERVED
-   *    ARCHIVED
-   *    CANCELLED
-   *    COMPLETE
-   * 3. User is not self service
-   */
-  const allowedBookingStatus: BookingStatus[] = [
-    BookingStatus.DRAFT,
-    BookingStatus.RESERVED,
-    BookingStatus.ARCHIVED,
-    BookingStatus.CANCELLED,
-    BookingStatus.COMPLETE,
-  ];
-  const kitIsAvailable = kit.assets.length
-    ? kit.assets[0]?.bookings.every((b) =>
-        allowedBookingStatus.includes(b.status)
-      )
-    : kit.status === KitStatus.AVAILABLE;
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
-
-  const kitBookings =
-    kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.manageAssets,
   });
-
-  const canManageAssets =
-    kitIsAvailable &&
-    userRoleCanManageAssets &&
-    !kitBookings.some((b) =>
-      (
-        [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
-      ).includes(b.status)
-    );
 
   return (
     <>
@@ -432,14 +395,6 @@ export default function KitDetails() {
                 to="manage-assets?status=AVAILABLE"
                 variant="primary"
                 width="full"
-                disabled={
-                  !canManageAssets
-                    ? {
-                        reason:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }
-                    : false
-                }
               >
                 Manage assets
               </Button>
@@ -469,14 +424,6 @@ export default function KitDetails() {
                       variant="primary"
                       width="full"
                       className="whitespace-nowrap"
-                      disabled={
-                        !canManageAssets
-                          ? {
-                              reason:
-                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                            }
-                          : false
-                      }
                     >
                       Manage assets
                     </Button>
@@ -497,14 +444,6 @@ export default function KitDetails() {
                 newButtonRoute: userRoleCanManageAssets
                   ? "manage-assets?status=AVAILABLE"
                   : undefined,
-                buttonProps: {
-                  disabled: !canManageAssets
-                    ? {
-                        reason:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }
-                    : false,
-                },
               }}
               headerChildren={
                 <>

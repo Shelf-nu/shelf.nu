@@ -51,7 +51,7 @@ export default function KitRowActionsDropdown({
 
 function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
+  const { isArchived, isCompleted } = useBookingStatusHelpers(booking.status);
   const disabled = useDisabled();
 
   return (

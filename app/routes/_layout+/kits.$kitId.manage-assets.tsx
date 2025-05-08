@@ -1,9 +1,10 @@
-import { useEffect } from "react";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { useEffect, useRef } from "react";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { AlertCircleIcon } from "lucide-react";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -27,6 +28,14 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
 import {
   Tooltip,
   TooltipContent,
@@ -99,7 +108,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       db.kit
         .findFirstOrThrow({
           where: { id: kitId },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            assets: { select: { id: true } },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -290,25 +304,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** User is not allowed to add asset to any of these booking status */
-    const disallowedBookingStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
     const kitBookings =
       kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
-
-    if (
-      kitBookings &&
-      kitBookings.some((b) => disallowedBookingStatus.includes(b.status))
-    ) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add asset to an unavailable kit.",
-        additionalData: { userId, kitId },
-        label: "Kit",
-      });
-    }
 
     await db.kit.update({
       where: { id: kit.id, organizationId },
@@ -399,11 +396,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /**
-     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
+     * If user is adding/removing an asset to a kit which is a part of DRAFT, RESERVED, ONGOING or OVERDUE booking,
      * then we have to add or remove these assets to booking also
      */
     const bookingsToUpdate = kitBookings.filter(
-      (b) => b.status === "DRAFT" || b.status === "RESERVED"
+      (b) =>
+        b.status === "DRAFT" ||
+        b.status === "RESERVED" ||
+        b.status === "ONGOING" ||
+        b.status === "OVERDUE"
     );
 
     if (bookingsToUpdate?.length) {
@@ -422,6 +423,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       );
     }
 
+    /**
+     * If the kit is part of an ONGOING booking, then we have to make all
+     * the assets CHECKED_OUT
+     */
+    if (kit.status === KitStatus.CHECKED_OUT) {
+      await db.asset.updateMany({
+        where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+    }
+
     return redirect(`/kits/${kitId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
@@ -431,8 +443,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems } = useLoaderData<LoaderData>();
+  const kitAssetIds = kit.assets.map((asset) => asset.id);
+
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const submit = useSubmit();
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
@@ -453,7 +470,14 @@ export default function ManageAssetsInKit() {
    */
   useEffect(() => {
     const disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
-      if (asset.status !== AssetStatus.AVAILABLE) {
+      const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
+      const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
+
+      /**
+       * If the asset is checked out or in custody and not part of the current kit,
+       * then we need to disable it
+       */
+      if ((isCheckedOut || isInCustody) && !kitAssetIds.includes(asset.id)) {
         acc.push(asset);
       }
 
@@ -461,7 +485,11 @@ export default function ManageAssetsInKit() {
     }, []);
 
     setDisabledBulkItems(disabledBulkItems);
-  }, [items, setDisabledBulkItems]);
+  }, [items, kitAssetIds, setDisabledBulkItems]);
+
+  function handleSubmit() {
+    submit(formRef.current);
+  }
 
   return (
     <div className="flex size-full flex-col overflow-y-hidden">
@@ -534,9 +562,19 @@ export default function ManageAssetsInKit() {
         <List
           ItemComponent={RowComponent}
           navigate={(_assetId, item) => {
-            if (item.status !== AssetStatus.AVAILABLE) {
+            const isParkOfCurrentKit = kitAssetIds.includes(item.id);
+
+            if (
+              item.status === AssetStatus.CHECKED_OUT &&
+              !isParkOfCurrentKit
+            ) {
               return;
             }
+
+            if (item.status === AssetStatus.IN_CUSTODY && !isParkOfCurrentKit) {
+              return;
+            }
+
             updateItem(item);
           }}
           customEmptyStateContent={{
@@ -556,6 +594,7 @@ export default function ManageAssetsInKit() {
             </>
           }
           disableSelectAllItems={true}
+          extraItemComponentProps={{ kitAssetIds }}
         />
       </div>
 
@@ -569,7 +608,7 @@ export default function ManageAssetsInKit() {
           <Button variant="secondary" to="..">
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {selectedBulkItems.map((asset, i) => (
               <input
                 key={asset.id}
@@ -578,14 +617,55 @@ export default function ManageAssetsInKit() {
                 value={asset.id}
               />
             ))}
-            <Button
-              type="submit"
-              name="intent"
-              value="addAssets"
-              disabled={isSearching}
-            >
-              Confirm
-            </Button>
+
+            {kit.status === KitStatus.IN_CUSTODY ||
+            kit.status === KitStatus.CHECKED_OUT ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button disabled={isSearching}>Confirm</Button>
+                </AlertDialogTrigger>
+
+                <AlertDialogContent>
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-red-200/20">
+                      <div className="flex size-10 items-center justify-center rounded-full bg-red-200/50">
+                        <AlertCircleIcon className="size-4 text-error-500" />
+                      </div>
+                    </div>
+
+                    <h3>Add Assets to kit?</h3>
+                  </div>
+
+                  <p>
+                    This kit is currently{" "}
+                    {kit.status === KitStatus.IN_CUSTODY
+                      ? "in custody"
+                      : "checked out"}
+                    . Any assets you add will automatically inherit the kit's
+                    status. Are you sure you want to continue?
+                  </p>
+
+                  <AlertDialogFooter>
+                    <AlertDialogCancel asChild>
+                      <Button variant="secondary">Cancel</Button>
+                    </AlertDialogCancel>
+
+                    <AlertDialogAction asChild>
+                      <Button onClick={handleSubmit}>Continue</Button>
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button
+                type="submit"
+                name="intent"
+                value="addAssets"
+                disabled={isSearching}
+              >
+                Confirm
+              </Button>
+            )}
           </Form>
         </div>
       </footer>
@@ -593,10 +673,23 @@ export default function ManageAssetsInKit() {
   );
 }
 
-const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
+const RowComponent = ({
+  item,
+  extraProps: { kitAssetIds },
+}: {
+  item: AssetsFromViewItem;
+  extraProps: { kitAssetIds: string[] };
+}) => {
   const { category, tags, location } = item;
+  const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
+  const isInCustody = item.status === AssetStatus.IN_CUSTODY;
+  const isParkOfCurrentKit = kitAssetIds.includes(item.id);
+
   const allowCursor =
-    item.status !== AssetStatus.AVAILABLE ? "cursor-not-allowed" : "";
+    (isInCustody || isCheckedOut) && !isParkOfCurrentKit
+      ? "cursor-not-allowed"
+      : "";
+
   return (
     <>
       {/* Name */}
@@ -692,7 +785,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                 </When>
 
                 {/* Asset is in checked out */}
-                <When truthy={item.status === AssetStatus.CHECKED_OUT}>
+                <When truthy={isCheckedOut && !isParkOfCurrentKit}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -713,6 +806,31 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                           Asset is currently in checked out via a booking.{" "}
                           <br /> Make sure the asset has an Available status in
                           order to add it to this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
+                <When truthy={isCheckedOut && isParkOfCurrentKit}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-success-200 bg-success-50 px-1.5 py-0.5 text-center text-xs text-success-700">
+                          Part of kit
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset is already part of this kit
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Asset is currently in checked out via a booking and is
+                          already part of this kit.
                         </div>
                       </TooltipContent>
                     </Tooltip>
