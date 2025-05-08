@@ -146,10 +146,14 @@ function PdfSwitchLabel({ hasAgreements }: { hasAgreements: boolean }) {
       </div>
       <p className="text-sm text-gray-500">
         {hasAgreements
-          ? "Custodian needs to read (and sign) a document before receiving custody."
+          ? "Custodian needs to read (and sign) a document before receiving custody. "
           : "You need to create an agreement before you can add them here. "}
         {hasAgreements ? (
-          <Link target="_blank" className="text-gray-700 underline" to="#">
+          <Link
+            target="_blank"
+            className="text-gray-700 underline"
+            to="https://www.shelf.nu/knowledge-base/understanding-and-using-pdf-agreements-for-asset-custody-in-shelf"
+          >
             Learn more
           </Link>
         ) : (
