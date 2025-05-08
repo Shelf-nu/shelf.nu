@@ -349,9 +349,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           signatureStatus: agreementFound?.signatureRequired
             ? CustodySignatureStatus.PENDING
             : CustodySignatureStatus.NOT_REQUIRED,
-          agreement: agreementFound
-            ? { connect: { id: agreementFound.id } }
-            : undefined,
+          agreementId: agreementFound ? agreementFound.id : undefined,
           assetId: asset.id,
         })),
       });
