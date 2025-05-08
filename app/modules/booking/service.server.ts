@@ -329,7 +329,7 @@ export async function updateBasicBooking({
 
       /**
        * Custodian team member should always be passed.
-       * This is also validated by the schema `NewBookingFormSchema`.
+       * This is also validated by the schema `BookingFormSchema`.
        * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
        */
       if (custodianTeamMemberId) {
@@ -469,7 +469,7 @@ export async function reserveBooking({
 
     /**
      * Custodian team member should always be passed.
-     * This is also validated by the schema `NewBookingFormSchema`.
+     * This is also validated by the schema `BookingFormSchema`.
      * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
      */
     if (custodianTeamMemberId) {
@@ -1786,12 +1786,14 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
     return bookingFound;
   } catch (cause) {
-    const is404 = isNotFoundError(cause);
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
       title: "Booking not found",
@@ -1799,10 +1801,12 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         ...booking,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !is404,
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

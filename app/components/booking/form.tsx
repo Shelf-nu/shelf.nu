@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -10,7 +11,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
@@ -38,76 +39,138 @@ import { Card } from "../shared/card";
 import When from "../when/when";
 
 /**
- * Important note is that the fields are only valudated when they are not disabled
+ * Returns a Zod validation schema for the booking form based on the action and booking status.
+ *
+ * Validation logic depends on two factors: the booking `status` and the `action` being performed.
+ *
+ * - Action: "new"
+ *   - All fields are updated.
+ *
+ * - Action: "save"
+ *   - If status is "DRAFT":
+ *     - All fields are updated.
+ *   - If status is "RESERVED", "ONGOING", or "OVERDUE":
+ *     - Only `name` and `description` are updated.
+ *
+ * - Action: "reserve"
+ *   - All fields are updated.
+ *
+ * - Other actions:
+ *   - No relevant fields are updated.
+ *   - Only base-level validation applies.
  */
-export const NewBookingFormSchema = (
-  inputFieldIsDisabled = false,
-  isNewBooking = false,
-  hints?: ReturnType<typeof getHints>
-) =>
-  z
-    .object({
-      id:
-        inputFieldIsDisabled || isNewBooking
-          ? z.string().optional()
-          : z.string().min(1),
-      name: inputFieldIsDisabled
-        ? z.string().optional()
-        : z.string().min(2, "Name is required"),
-      startDate: inputFieldIsDisabled
-        ? z.coerce.date().optional()
-        : z.coerce.date().refine(
-            (data) => {
-              let now;
-              if (hints?.timeZone) {
-                now = new Date(
-                  new Date().toLocaleString("en-US", {
-                    timeZone: hints.timeZone,
-                  })
-                );
-              } else {
-                now = new Date();
-              }
-              return data > now;
-            },
-            {
-              message: "Start date must be in the future",
-            }
-          ),
-      endDate: inputFieldIsDisabled
-        ? z.coerce.date().optional()
-        : z.coerce.date(),
-      assetIds: z.array(z.string()).optional(),
-      custodian: z
-        .string()
-        .transform((val, ctx) => {
-          if (!val && val === "") {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Please select a custodian",
-            });
-            return z.NEVER;
-          }
-          return JSON.parse(val);
+export function BookingFormSchema({
+  hints,
+  action,
+  status,
+}: {
+  hints?: ReturnType<typeof getHints>;
+  action: "new" | "save" | "reserve";
+  status?: BookingStatus;
+}) {
+  /* Base schema which is common in every case */
+  const baseSchema = z.object({
+    name: z.string().min(2, "Name is required"),
+    assetIds: z.array(z.string()).optional(),
+    description: z.string().optional(),
+    custodian: z
+      .string()
+      .transform((val, ctx) => {
+        if (!val && val === "") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Please select a custodian",
+          });
+          return z.NEVER;
+        }
+        return JSON.parse(val);
+      })
+      .pipe(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          userId: z.string().optional().nullable(),
         })
-        .pipe(
-          z.object({
-            id: z.string(),
-            name: z.string(),
-            userId: z.string().optional().nullable(),
+      ),
+    startDate: z.coerce.date().optional(),
+    endDate: z.coerce.date().optional(),
+  });
+
+  const startDateSchema = z.coerce.date().refine(
+    (data) => {
+      let now;
+      if (hints?.timeZone) {
+        now = new Date(
+          new Date().toLocaleString("en-US", {
+            timeZone: hints.timeZone,
           })
-        ),
-      description: z.string().optional(),
-    })
+        );
+      } else {
+        now = new Date();
+      }
+      return data > now;
+    },
+    {
+      message: "Start date must be in the future",
+    }
+  );
+
+  /* Complete schema with all fields */
+  const fullSchema = baseSchema.extend({
+    startDate: startDateSchema,
+    endDate: z.coerce.date(),
+  });
+
+  /** Complete schema with id field */
+  const fullSchemaWithId = fullSchema
+    .extend({ id: z.string() })
     .refine(
-      (data) =>
-        inputFieldIsDisabled ||
-        (data.endDate && data.startDate && data.endDate > data.startDate),
+      (data) => data.endDate && data.startDate && data.endDate > data.startDate,
       {
-        message: "End date cannot be earlier than start date.",
+        message: "End date cannot be earlier than start date",
         path: ["endDate"],
       }
     );
+
+  switch (action) {
+    case "new": {
+      return fullSchema.refine(
+        (data) =>
+          data.endDate && data.startDate && data.endDate > data.startDate,
+        {
+          message: "End date cannot be earlier than start date",
+          path: ["endDate"],
+        }
+      );
+    }
+
+    case "reserve": {
+      return fullSchemaWithId;
+    }
+
+    case "save": {
+      if (!status) {
+        throw new Error("Status is required for save action.");
+      }
+
+      switch (status) {
+        case BookingStatus.DRAFT: {
+          return fullSchemaWithId;
+        }
+
+        case BookingStatus.RESERVED:
+        case BookingStatus.ONGOING:
+        case BookingStatus.OVERDUE: {
+          return baseSchema;
+        }
+      }
+    }
+
+    default: {
+      return baseSchema;
+    }
+  }
+}
 
 type BookingFlags = {
   hasAssets: boolean;
@@ -118,15 +181,17 @@ type BookingFlags = {
 };
 
 type BookingFormData = {
-  id?: string;
-  name?: string;
-  startDate?: string;
-  endDate?: string;
-  custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
-  bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
-  bookingFlags?: BookingFlags;
-  assetIds?: string[] | null;
-  description?: string | null;
+  booking: {
+    id?: string;
+    name?: string;
+    startDate?: string;
+    endDate?: string;
+    custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
+    bookingFlags?: BookingFlags;
+    assetIds?: string[] | null;
+    description?: string | null;
+    status?: BookingStatus;
+  };
 
   /**
    * In case if the form is rendered outside of /edit or /new booking,
@@ -135,19 +200,21 @@ type BookingFormData = {
   action?: string;
 };
 
-export function BookingForm({
-  id,
-  name,
-  startDate,
-  endDate: incomingEndDate,
-  custodianRef,
-  bookingStatus,
-  bookingFlags,
-  assetIds,
-  description,
-  action,
-}: BookingFormData) {
+export function BookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
+  const {
+    id,
+    name,
+    startDate,
+    endDate: incomingEndDate,
+    custodianRef,
+    bookingFlags,
+    assetIds,
+    description,
+    status,
+  } = booking;
+
+  const bookingStatus = useBookingStatusHelpers(status);
   const { teamMembers } = useLoaderData<typeof loader>();
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -162,15 +229,20 @@ export function BookingForm({
 
   const inputFieldIsDisabled =
     disabled ||
-    bookingStatus?.isReserved ||
-    bookingStatus?.isOngoing ||
-    bookingStatus?.isCompleted ||
-    bookingStatus?.isOverdue ||
-    bookingStatus?.isCancelled;
+    Boolean(
+      bookingStatus?.isReserved ||
+        bookingStatus?.isOngoing ||
+        bookingStatus?.isCompleted ||
+        bookingStatus?.isOverdue ||
+        bookingStatus?.isCancelled
+    );
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
-    NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
+    BookingFormSchema({
+      action: isNewBooking ? "new" : "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
+      status,
+    })
   );
 
   const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();
