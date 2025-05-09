@@ -57,6 +57,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -78,12 +79,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.read,
+      });
 
     const isManageAssetsUrl = request.url.includes("manage-assets");
 
@@ -162,6 +164,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       custody = {
         ...kit.custody,
         dateDisplay,
+      } as {
+        // I need to specifically cast this. If I dont it doesn't recognize the id inside user
+        dateDisplay: string;
+        id: string;
+        createdAt: Date;
+        custodian: {
+          user: {
+            id: string; // Make sure this is included
+            email: string;
+            firstName: string | null;
+            lastName: string | null;
+            profilePicture: string | null;
+          } | null;
+          id: string;
+          name: string;
+        };
       };
     }
 
@@ -202,6 +220,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         qrObj,
         lastScan,
+        currentOrganization,
+        userId,
       })
     );
   } catch (cause) {
@@ -326,7 +346,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function KitDetails() {
   usePosition();
-  const { kit, currentBooking, qrObj, lastScan } =
+  const { kit, currentBooking, qrObj, lastScan, userId, currentOrganization } =
     useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
 
@@ -462,12 +482,14 @@ export default function KitDetails() {
           <CustodyCard
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
-            hasPermission={userHasPermission({
+            hasPermission={userHasCustodyViewPermission({
               roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
+              custody: kit?.custody,
+              organization: currentOrganization,
+              currentUserId: userId,
             })}
             custody={kit.custody}
+            className="mt-px"
           />
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />

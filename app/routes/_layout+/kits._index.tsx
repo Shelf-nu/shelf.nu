@@ -33,6 +33,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -211,6 +212,7 @@ export default function KitsIndexPage() {
 
 function ListContent({
   item,
+  bulkActions,
 }: {
   item: Prisma.KitGetPayload<{
     include: {
@@ -241,6 +243,7 @@ function ListContent({
       };
     };
   }>;
+  bulkActions?: React.ReactNode;
 }) {
   const { roles } = useUserRoleHelper();
   const canReadCustody = userHasPermission({
@@ -254,7 +257,10 @@ function ListContent({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
           to={`/kits/${item.id}`}
-          className="flex justify-between gap-3 p-4 md:justify-normal md:pl-0 md:pr-6"
+          className={tw(
+            "flex justify-between gap-3 py-4  md:justify-normal",
+            bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
+          )}
         >
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">

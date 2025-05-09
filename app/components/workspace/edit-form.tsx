@@ -204,8 +204,8 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
           subHeading={
             <div>
               Allow <b>self service</b> users to <b>see</b> custody of assets
-              which are not assigned to them. By default they can only see
-              custodian for assets that they are the custodian of.
+              and kits which are not assigned to them. By default they can only
+              see custodian for assets that they are the custodian of.
             </div>
           }
           className="border-b-0 pb-[10px]"
@@ -260,9 +260,9 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
           rowLabel={`View custody`}
           subHeading={
             <div>
-              Allow <b>base</b> users to <b>see</b> custody of assets which are
-              not assigned to them. By default they can only see custodian for
-              assets that they are the custodian of.
+              Allow <b>base</b> users to <b>see</b> custody of assets and kits
+              which are not assigned to them. By default they can only see
+              custodian for assets that they are the custodian of.
             </div>
           }
           className="border-b-0 pb-[10px]"
