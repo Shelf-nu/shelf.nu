@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -48,7 +48,7 @@ export default function KitsForm({
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
-  const [, validateFile] = useAtom(validateFileAtom);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
