@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
+
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -48,4 +49,11 @@ export const assetImageValidateFileAtom = createValidateFileAtom({
   maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
   sizeErrorMessage: "Max file size is 8MB",
   allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+});
+
+/* For agreement pdf file */
+export const agreementPdfValidateFileAtom = createValidateFileAtom({
+  maxSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  sizeErrorMessage: "Max file size is 4MB",
+  allowedTypesErrorMessage: "Allowed file type is pdf.",
 });
