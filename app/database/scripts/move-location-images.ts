@@ -2,6 +2,7 @@
 
 import { v4 as uuid } from "uuid";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { PUBLIC_BUCKET } from "~/utils/constants";
 import { db } from "../db.server";
 
 /**
@@ -15,8 +16,6 @@ import { db } from "../db.server";
  * files/organizationId/locations/locationId/imageId
  */
 (async function moveLocationImages() {
-  const BUCKET = "files";
-
   console.log("Moving location images to supabase storage...");
 
   const locationWithImages = await db.location.findMany({
@@ -46,7 +45,7 @@ import { db } from "../db.server";
 
       /** Uploading the image */
       const { data, error } = await supabase.storage
-        .from(BUCKET)
+        .from(PUBLIC_BUCKET)
         .upload(imagePath, location.image.blob);
 
       if (error) {
@@ -59,7 +58,7 @@ import { db } from "../db.server";
       /** Getting the public url that we can use to retrieve the image on frontend */
       const {
         data: { publicUrl },
-      } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
+      } = supabase.storage.from(PUBLIC_BUCKET).getPublicUrl(data.path);
 
       await db.location.update({
         where: { id: location.id },

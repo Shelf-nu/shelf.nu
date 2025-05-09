@@ -92,8 +92,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     const { name, description, address, addAnother } = payload;
-    /** This checks if tags are passed and build the  */
 
+    /** This checks if tags are passed and build the  */
     const formDataFile = await unstable_parseMultipartFormData(
       request,
       unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })

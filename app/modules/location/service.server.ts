@@ -16,6 +16,7 @@ import {
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { getFileUploadPath, uploadPublicFile } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Location";
@@ -222,44 +223,42 @@ export async function createLocation({
   image: File | null;
 }) {
   try {
-    const data = {
-      name,
-      description,
-      address,
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    };
-
-    if (image?.size && image?.size > 0) {
-      Object.assign(data, {
-        image: {
-          create: {
-            blob: Buffer.from(await image.arrayBuffer()),
-            contentType: image.type,
-            ownerOrg: {
-              connect: {
-                id: organizationId,
-              },
-            },
-            user: {
-              connect: {
-                id: userId,
-              },
-            },
+    let locationCreated = await db.location.create({
+      data: {
+        name,
+        description,
+        address,
+        user: {
+          connect: {
+            id: userId,
           },
         },
+        organization: {
+          connect: {
+            id: organizationId,
+          },
+        },
+      },
+    });
+
+    if (image?.size && image?.size > 0) {
+      const publicUrl = await uploadPublicFile({
+        fileData: await image.arrayBuffer(),
+        path: getFileUploadPath({
+          organizationId,
+          type: "locations",
+          typeId: locationCreated.id,
+          extension: image.type.split("/").at(-1) ?? "jpeg",
+        }),
+      });
+
+      locationCreated = await db.location.update({
+        where: { id: locationCreated.id },
+        data: { imageUrl: publicUrl },
       });
     }
 
-    return await db.location.create({ data });
+    return locationCreated;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
