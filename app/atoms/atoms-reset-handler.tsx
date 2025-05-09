@@ -16,17 +16,17 @@ export function AtomsResetHandler() {
   const location = useLocation();
   const resetDisabledItems = useSetAtom(setDisabledBulkItemsAtom);
   const resetSelectedItems = useSetAtom(setSelectedBulkItemsAtom);
-  const resetFileAttom = useSetAtom(fileErrorAtom);
+  const resetFileAtom = useSetAtom(fileErrorAtom);
 
   useEffect(() => {
     // Reset when the route changes
     resetDisabledItems([]);
     resetSelectedItems([]);
-    resetFileAttom(undefined);
+    resetFileAtom(undefined);
   }, [
     location.pathname,
     resetDisabledItems,
-    resetFileAttom,
+    resetFileAtom,
     resetSelectedItems,
   ]);
 
