@@ -19,21 +19,27 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
+import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import type { MergeInclude } from "~/utils/utils";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -140,12 +146,16 @@ export default function KitsIndexPage() {
     action: PermissionAction.create,
   });
 
-  const canReadCustody = userHasPermission({
-    roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
-  });
+  const organization = useCurrentOrganization();
+  const user = useUserData();
 
+  // @TODO - this needs to be resolved
+  // const canReadCustody = userHasCustodyViewPermission({
+  //   roles,
+  //   custodianUser: teamMember?.user,
+  //   organization,
+  //   currentUserId: user?.id,
+  // });
   return (
     <>
       <Header>
@@ -169,26 +179,26 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          {canReadCustody && (
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Custodian{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-              label="Filter by custodian"
-              placeholder="Search team members"
-              countKey="totalTeamMembers"
-              initialDataKey="teamMembers"
-              transformItem={(item) => ({
-                ...item,
-                id: item.metadata?.userId ? item.metadata.userId : item.id,
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-            />
-          )}
+          {/* {canReadCustody && ( */}
+          <DynamicDropdown
+            trigger={
+              <div className="flex cursor-pointer items-center gap-2">
+                Custodian{" "}
+                <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+            label="Filter by custodian"
+            placeholder="Search team members"
+            countKey="totalTeamMembers"
+            initialDataKey="teamMembers"
+            transformItem={(item) => ({
+              ...item,
+              id: item.metadata?.userId ? item.metadata.userId : item.id,
+            })}
+            renderItem={(item) => resolveTeamMemberName(item, true)}
+          />
+          {/* )} */}
         </Filters>
 
         <List
@@ -199,7 +209,7 @@ export default function KitsIndexPage() {
             <>
               <Th>Description</Th>
               <Th>Assets</Th>
-              {canReadCustody && <Th>Custodian</Th>}
+              <Th>Custodian</Th>
               <Th>Actions</Th>
             </>
           }
@@ -211,50 +221,30 @@ export default function KitsIndexPage() {
 
 function ListContent({
   item,
+  bulkActions,
 }: {
   item: Prisma.KitGetPayload<{
-    include: {
-      _count: { select: { assets: true } };
-      qrCodes: { select: { id: true } };
-      custody: {
-        select: {
-          custodian: {
-            select: {
-              name: true;
-              user: {
-                select: {
-                  firstName: true;
-                  lastName: true;
-                  email: true;
-                  profilePicture: true;
-                };
-              };
-            };
-          };
+    include: MergeInclude<
+      typeof KITS_INCLUDE_FIELDS,
+      {
+        qrCodes: { select: { id: true } };
+        assets: {
+          select: { id: true; availableToBook: true; status: true };
         };
-      };
-      assets: {
-        select: {
-          id: true;
-          availableToBook: true;
-        };
-      };
-    };
+      }
+    >;
   }>;
+  bulkActions?: React.ReactNode;
 }) {
-  const { roles } = useUserRoleHelper();
-  const canReadCustody = userHasPermission({
-    roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
-  });
-
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
           to={`/kits/${item.id}`}
-          className="flex justify-between gap-3 p-4 md:justify-normal md:pl-0 md:pr-6"
+          className={tw(
+            "flex justify-between gap-3 py-4  md:justify-normal",
+            bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
+          )}
         >
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
@@ -293,11 +283,9 @@ function ListContent({
         ) : null}
       </Td>
       <Td>{item._count.assets}</Td>
-      {canReadCustody && (
-        <Td>
-          <TeamMemberBadge teamMember={item?.custody?.custodian} />
-        </Td>
-      )}
+      <Td>
+        <TeamMemberBadge teamMember={item?.custody?.custodian} />
+      </Td>
 
       <Td>
         <KitQuickActions

@@ -27,6 +27,7 @@ export const GET_KIT_STATIC_INCLUDES = {
           name: true,
           user: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               profilePicture: true,
@@ -52,6 +53,7 @@ export const KITS_INCLUDE_FIELDS = {
           name: true,
           user: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               profilePicture: true,

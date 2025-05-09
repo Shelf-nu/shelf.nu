@@ -217,10 +217,11 @@ export async function updateOrganization({
   userId,
   currency,
   ssoDetails,
-}: Pick<Organization, "id" | "currency"> & {
+}: Pick<Organization, "id"> & {
+  currency?: Organization["currency"];
   name?: string;
   userId: User["id"];
-  image: File | null;
+  image?: File | null;
   ssoDetails?: {
     selfServiceGroupId: string;
     adminGroupId: string;
@@ -230,7 +231,7 @@ export async function updateOrganization({
   try {
     const data = {
       name,
-      currency,
+      ...(currency && { currency }),
       ...(ssoDetails && {
         ssoDetails: {
           update: ssoDetails,
@@ -279,6 +280,33 @@ export async function updateOrganization({
   }
 }
 
+const ORGANIZATION_SELECT_FIELDS = {
+  id: true,
+  type: true,
+  name: true,
+  imageId: true,
+  userId: true,
+  updatedAt: true,
+  currency: true,
+  enabledSso: true,
+  owner: {
+    select: {
+      id: true,
+      email: true,
+    },
+  },
+  ssoDetails: true,
+  workspaceDisabled: true,
+  selfServiceCanSeeCustody: true,
+  selfServiceCanSeeBookings: true,
+  baseUserCanSeeCustody: true,
+  baseUserCanSeeBookings: true,
+};
+
+export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
+  select: typeof ORGANIZATION_SELECT_FIELDS;
+}>;
+
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
     return await db.userOrganization.findMany({
@@ -287,24 +315,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
         organizationId: true,
         roles: true,
         organization: {
-          select: {
-            id: true,
-            type: true,
-            name: true,
-            imageId: true,
-            userId: true,
-            updatedAt: true,
-            currency: true,
-            enabledSso: true,
-            owner: {
-              select: {
-                id: true,
-                email: true,
-              },
-            },
-            ssoDetails: true,
-            workspaceDisabled: true,
-          },
+          select: ORGANIZATION_SELECT_FIELDS,
         },
       },
     });
@@ -428,4 +439,55 @@ export function emailMatchesDomains(
   if (!emailDomain || !domainsString) return false;
   const domains = parseDomains(domainsString);
   return domains.includes(emailDomain.toLowerCase());
+}
+
+/** Permissions functions */
+
+/**
+ * Gets the permissions columns in the organization table
+ * Columns:
+ * - selfServiceCanSeeCustody
+ * - selfServiceCanSeeBookings
+ * - baseUserCanSeeCustody
+ * - baseUserCanSeeBookings
+ */
+export function getOrganizationPermissionColumns(id: string) {
+  return db.organization.findUnique({
+    where: { id },
+    select: {
+      selfServiceCanSeeCustody: true,
+      selfServiceCanSeeBookings: true,
+      baseUserCanSeeCustody: true,
+      baseUserCanSeeBookings: true,
+    },
+  });
+}
+
+/**
+ * Updates the permissions columns in the organization table
+ * Updated columns:
+ * - selfServiceCanSeeCustody
+ * - selfServiceCanSeeBookings
+ * - baseUserCanSeeCustody
+ * - baseUserCanSeeBookings
+ */
+export function updateOrganizationPermissions({
+  id,
+  configuration,
+}: {
+  id: string;
+  configuration: Pick<
+    Organization,
+    | "selfServiceCanSeeCustody"
+    | "selfServiceCanSeeBookings"
+    | "baseUserCanSeeCustody"
+    | "baseUserCanSeeBookings"
+  >;
+}) {
+  return db.organization.update({
+    where: { id },
+    data: {
+      ...configuration,
+    },
+  });
 }

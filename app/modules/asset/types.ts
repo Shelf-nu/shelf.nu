@@ -131,6 +131,7 @@ export type AdvancedIndexAsset = Pick<
     custodian: {
       name: string;
       user: {
+        id: string;
         firstName: string | null;
         lastName: string | null;
         profilePicture: string | null;
