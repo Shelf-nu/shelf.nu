@@ -475,6 +475,23 @@ export async function deleteAssetImage({
 }
 
 /**
+ * This function constructs the path for the file to be uploaded to Supabase storage.
+ */
+export function getFileUploadPath({
+  organizationId,
+  type,
+  typeId,
+  extension,
+}: {
+  organizationId: string;
+  type: "locations";
+  typeId: string;
+  extension: string;
+}) {
+  return `${organizationId}/${type}/${typeId}/${uuid()}.${extension}`;
+}
+
+/**
  * This function uploads the file to `files` bucket in Supabase.
  * `files` bucket is public and can be accessed by anyone.
  * After uploading the file, it returns the public URL of the file.
@@ -515,18 +532,37 @@ export async function uploadPublicFile({
 }
 
 /**
- * This function constructs the path for the file to be uploaded to Supabase storage.
+ * This function remove the public file from `files` bucket in Supabase using a public URL.
  */
-export function getFileUploadPath({
-  organizationId,
-  type,
-  typeId,
-  extension,
-}: {
-  organizationId: string;
-  type: "locations";
-  typeId: string;
-  extension: string;
-}) {
-  return `${organizationId}/${type}/${typeId}/${uuid()}.${extension}`;
+export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
+  try {
+    if (
+      !publicUrl.startsWith(
+        `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/`
+      )
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid file URL",
+        additionalData: { publicUrl },
+        label,
+      });
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .remove([publicUrl.split(`${PUBLIC_BUCKET}/`)[1]]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      label,
+    });
+  }
 }

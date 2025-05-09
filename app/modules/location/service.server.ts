@@ -16,7 +16,11 @@ import {
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { getFileUploadPath, uploadPublicFile } from "~/utils/storage.server";
+import {
+  getFileUploadPath,
+  removePublicFile,
+  uploadPublicFile,
+} from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Location";
@@ -305,39 +309,42 @@ export async function updateLocation(payload: {
     payload;
 
   try {
-    const data = {
+    const location = await db.location
+      .findFirstOrThrow({
+        where: { id, organizationId },
+        select: { id: true, imageUrl: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found.",
+          label,
+        });
+      });
+
+    const data: Prisma.LocationUpdateInput = {
       name,
       description,
       address,
     };
 
     if (image?.size && image?.size > 0) {
-      const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
-        ownerOrg: {
-          connect: {
-            id: organizationId,
-          },
-        },
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      };
+      /** If there was an image for the location, then we remove old one and upload new one */
+      if (location.imageUrl) {
+        await removePublicFile({ publicUrl: location.imageUrl });
+      }
 
-      /** We do an upsert, because if a user creates a location without an image,
-       * we need to create an Image when the location is updated,
-       * else we need to update the Image */
-      Object.assign(data, {
-        image: {
-          upsert: {
-            create: imageData,
-            update: imageData,
-          },
-        },
+      const publicUrl = await uploadPublicFile({
+        fileData: await image.arrayBuffer(),
+        path: getFileUploadPath({
+          organizationId,
+          type: "locations",
+          typeId: id,
+          extension: image.type.split("/").at(-1) ?? "jpeg",
+        }),
       });
+
+      data.imageUrl = publicUrl;
     }
 
     return await db.location.update({
