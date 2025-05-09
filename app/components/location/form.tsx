@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
@@ -48,7 +48,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(validateFileAtom);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const actionData = useActionData<
     typeof newLocationAction | typeof editLocationAction

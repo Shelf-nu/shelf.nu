@@ -21,7 +21,7 @@ import {
 
 import { createLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -96,7 +96,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
+      unstable_createMemoryUploadHandler({
+        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      })
     );
 
     const file = formDataFile.get("image") as File | null;

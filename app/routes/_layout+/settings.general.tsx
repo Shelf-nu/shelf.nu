@@ -6,6 +6,7 @@ import type {
 } from "@remix-run/node";
 import {
   json,
+  MaxPartSizeExceededError,
   redirect,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
@@ -32,6 +33,7 @@ import {
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -42,7 +44,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
-import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -198,7 +199,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const formDataFile = await unstable_parseMultipartFormData(
           request,
-          unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+          unstable_createMemoryUploadHandler({
+            maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+          })
         );
 
         const file = formDataFile.get("image") as File | null;
@@ -320,8 +323,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
+    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return json(
+      error({
+        ...reason,
+        ...(isMaxPartSizeExceeded && {
+          title: "File too large",
+          message: "Max file size is 4MB.",
+        }),
+      }),
+      { status: reason.status }
+    );
   }
 }
 

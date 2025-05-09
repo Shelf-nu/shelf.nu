@@ -1019,9 +1019,12 @@ export async function updateAssetMainImage({
       });
     }
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating asset main image",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while updating asset main image",
       additionalData: { assetId, userId },
       label,
     });
