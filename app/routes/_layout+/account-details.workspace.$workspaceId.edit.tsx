@@ -1,6 +1,7 @@
 import { Currency, OrganizationType } from "@prisma/client";
 import {
   json,
+  MaxPartSizeExceededError,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
@@ -25,6 +26,7 @@ import {
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -40,7 +42,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -191,7 +192,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({
+        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      })
     );
 
     const file = formDataFile.get("image") as File | null;
@@ -222,8 +225,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return json({ success: true });
     // return redirect("/account-details/workspace");
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
+    const reason = makeShelfError(cause, { userId });
+    return json(
+      error({
+        ...reason,
+        ...(isMaxPartSizeExceeded && {
+          title: "File too large",
+          message: "Max file size is 4MB.",
+        }),
+      }),
+      { status: reason.status }
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import { Currency } from "@prisma/client";
 import {
   json,
+  MaxPartSizeExceededError,
   redirect,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
@@ -22,6 +23,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -57,8 +59,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
-export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
-
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -87,7 +87,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+      unstable_createMemoryUploadHandler({
+        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      })
     );
 
     const file = formDataFile.get("image") as File | null;
@@ -112,8 +114,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
     });
   } catch (cause) {
+    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return json(
+      error({
+        ...reason,
+        ...(isMaxPartSizeExceeded && {
+          title: "File too large",
+          message: "Max file size is 4MB.",
+        }),
+      }),
+      { status: reason.status }
+    );
   }
 }
 

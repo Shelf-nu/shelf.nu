@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
+import { fileErrorAtom } from "./file";
 import { setDisabledBulkItemsAtom, setSelectedBulkItemsAtom } from "./list";
 
 /**
@@ -15,12 +16,19 @@ export function AtomsResetHandler() {
   const location = useLocation();
   const resetDisabledItems = useSetAtom(setDisabledBulkItemsAtom);
   const resetSelectedItems = useSetAtom(setSelectedBulkItemsAtom);
+  const resetFileAtom = useSetAtom(fileErrorAtom);
 
   useEffect(() => {
     // Reset when the route changes
     resetDisabledItems([]);
     resetSelectedItems([]);
-  }, [location.pathname, resetDisabledItems, resetSelectedItems]);
+    resetFileAtom(undefined);
+  }, [
+    location.pathname,
+    resetDisabledItems,
+    resetFileAtom,
+    resetSelectedItems,
+  ]);
 
   return null;
 }
