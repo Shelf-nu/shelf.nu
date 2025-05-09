@@ -7,7 +7,7 @@ import { FileTypeIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { validateFileAtom } from "~/atoms/file";
+import { agreementPdfValidateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils/form";
 import { formatBytes } from "~/utils/format-bytes";
 import { tw } from "~/utils/tw";
@@ -96,7 +96,7 @@ export const AgreementForm = ({
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewAgreementFormSchema);
   const disabled = isFormProcessing(navigation.state);
-  const [, validateFile] = useAtom(validateFileAtom);
+  const [, validateFile] = useAtom(agreementPdfValidateFileAtom);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
   const [pdf, setPdf] = useState<File | null>(null);

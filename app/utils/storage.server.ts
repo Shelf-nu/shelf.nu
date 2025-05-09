@@ -6,7 +6,7 @@ import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { MAX_IMAGE_UPLOAD_SIZE } from "./constants";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import {
@@ -211,6 +211,20 @@ export async function parseFileFormData({
           return undefined;
         }
 
+        const fileSize = await calculateAsyncIterableSize(data);
+        if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
+          throw new ShelfError({
+            cause: null,
+            title: "File too large",
+            message: `Image file size exceeds maximum allowed size of ${
+              ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+            }MB`,
+            additionalData: { filename, contentType, bucketName },
+            label,
+            shouldBeCaptured: false,
+          });
+        }
+
         if (!contentType?.includes("image") && !contentType.includes("pdf")) {
           return undefined;
         }
@@ -253,8 +267,9 @@ export async function parseFileFormData({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while uploading the file. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
       label,
     });
   }
@@ -356,11 +371,11 @@ export async function uploadImageFromUrl(
     }
 
     const imageBlob = await response.blob();
-    if (imageBlob.size > MAX_IMAGE_UPLOAD_SIZE) {
+    if (imageBlob.size > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
       throw new ShelfError({
         cause: null,
         message: `Image file size exceeds maximum allowed size of ${
-          MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
         }MB`,
         additionalData: { imageUrl, size: imageBlob.size },
         label,
@@ -499,4 +514,15 @@ export async function deleteAssetImage({
       })
     );
   }
+}
+
+// Utility function to get size from AsyncIterable<Uint8Array>
+export async function calculateAsyncIterableSize(
+  data: AsyncIterable<Uint8Array>
+): Promise<number> {
+  let totalSize = 0;
+  for await (const chunk of data) {
+    totalSize += chunk.byteLength;
+  }
+  return totalSize;
 }

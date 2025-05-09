@@ -1,40 +1,59 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
 
-import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+} from "~/utils/constants";
 import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
-fileErrorAtom.onMount = (setAtom) => {
-  setAtom("");
-};
-export const MAX_SIZE = 4_000_000; // 4MB
 
-/** Validates the file atom */
-export const validateFileAtom = atom(
-  null,
-  (_get, set, event: ChangeEvent<HTMLInputElement>) => {
+export const createValidateFileAtom = (options: {
+  maxSize: number;
+  sizeErrorMessage: string;
+  allowedTypesErrorMessage: string;
+}) =>
+  atom(null, (_get, set, event: ChangeEvent<HTMLInputElement>) => {
     set(fileErrorAtom, () => {
       const file = event?.target?.files?.[0];
       if (file) {
         const allowedType = verifyAccept(file.type, event.target.accept);
-        const allowedSize = file.size < MAX_IMAGE_UPLOAD_SIZE;
+        const allowedSize = file.size < options.maxSize;
 
         if (!allowedType) {
           event.target.value = "";
-          return `Allowed file types are: ${
-            event.target.accept === "pdf" ? "PDF" : "PNG, JPG or JPEG"
-          }`;
+          return options.allowedTypesErrorMessage;
         }
 
         if (!allowedSize) {
           /** Clean the field */
           event.target.value = "";
-          return "Max file size is 8MB";
+          return options.sizeErrorMessage;
         }
 
         return undefined;
       }
     });
-  }
-);
+  });
+
+// Default instance with 4MB limit
+export const defaultValidateFileAtom = createValidateFileAtom({
+  maxSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE, // 4MB
+  sizeErrorMessage: "Max file size is 4MB",
+  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+});
+
+// For asset image uploads we allow 8MB
+export const assetImageValidateFileAtom = createValidateFileAtom({
+  maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
+  sizeErrorMessage: "Max file size is 8MB",
+  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+});
+
+/* For agreement pdf file */
+export const agreementPdfValidateFileAtom = createValidateFileAtom({
+  maxSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  sizeErrorMessage: "Max file size is 4MB",
+  allowedTypesErrorMessage: "Allowed file type is pdf.",
+});
