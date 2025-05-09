@@ -6,7 +6,7 @@ import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
@@ -349,7 +349,7 @@ export default function UserPage() {
     getValidationErrors<typeof UpdateFormSchema>(data?.error)?.username
       ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(validateFileAtom);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
