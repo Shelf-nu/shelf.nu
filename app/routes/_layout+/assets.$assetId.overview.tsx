@@ -524,7 +524,7 @@ export default function AssetOverview() {
             custody={asset?.custody || null}
             hasPermission={userHasCustodyViewPermission({
               roles,
-              custody: asset?.custody,
+              custodianUser: asset?.custody?.custodian?.user,
               organization: currentOrganization,
               currentUserId: userId,
             })}

@@ -1,4 +1,4 @@
-import type { Organization } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
@@ -14,17 +14,6 @@ type OrganizationPermissionSettings = Pick<
   | "baseUserCanSeeBookings"
 >;
 
-/**
- * Type for custody information
- */
-type CustodyInfo = {
-  custodian?: {
-    user?: {
-      id?: string;
-    } | null;
-  } | null;
-};
-
 type UserCustodyViewPermissionsArgs = {
   /** Role of the user for which we have to check for permission */
   roles: OrganizationRoles[] | undefined;
@@ -36,7 +25,7 @@ type UserCustodyViewPermissionsArgs = {
   currentUserId?: string;
 
   /** Custody information - can be null if no custody exists */
-  custody?: CustodyInfo | null;
+  custodianUser?: Pick<User, "id"> | null;
 };
 
 /**
@@ -49,10 +38,10 @@ export function userHasCustodyViewPermission({
   roles,
   organization,
   currentUserId,
-  custody,
+  custodianUser,
 }: UserCustodyViewPermissionsArgs): boolean {
   // If there's no custody, we can return based on standard permissions only
-  if (!custody) {
+  if (!custodianUser) {
     return userHasPermission({
       roles,
       entity: PermissionEntity.custody,
@@ -61,7 +50,7 @@ export function userHasCustodyViewPermission({
   }
 
   // Check if the current user is the custodian
-  if (currentUserId && custody.custodian?.user?.id === currentUserId) {
+  if (currentUserId && custodianUser?.id === currentUserId) {
     return true;
   }
 

@@ -280,6 +280,33 @@ export async function updateOrganization({
   }
 }
 
+const ORGANIZATION_SELECT_FIELDS = {
+  id: true,
+  type: true,
+  name: true,
+  imageId: true,
+  userId: true,
+  updatedAt: true,
+  currency: true,
+  enabledSso: true,
+  owner: {
+    select: {
+      id: true,
+      email: true,
+    },
+  },
+  ssoDetails: true,
+  workspaceDisabled: true,
+  selfServiceCanSeeCustody: true,
+  selfServiceCanSeeBookings: true,
+  baseUserCanSeeCustody: true,
+  baseUserCanSeeBookings: true,
+};
+
+export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
+  select: typeof ORGANIZATION_SELECT_FIELDS;
+}>;
+
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
     return await db.userOrganization.findMany({
@@ -288,28 +315,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
         organizationId: true,
         roles: true,
         organization: {
-          select: {
-            id: true,
-            type: true,
-            name: true,
-            imageId: true,
-            userId: true,
-            updatedAt: true,
-            currency: true,
-            enabledSso: true,
-            owner: {
-              select: {
-                id: true,
-                email: true,
-              },
-            },
-            ssoDetails: true,
-            workspaceDisabled: true,
-            selfServiceCanSeeCustody: true,
-            selfServiceCanSeeBookings: true,
-            baseUserCanSeeCustody: true,
-            baseUserCanSeeBookings: true,
-          },
+          select: ORGANIZATION_SELECT_FIELDS,
         },
       },
     });

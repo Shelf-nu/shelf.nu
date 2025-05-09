@@ -294,7 +294,7 @@ export const AssetsList = ({
   const isSwappingMode = modeFetcher?.formData;
 
   const columns = useAssetIndexColumns();
-  const { roles, isBase } = useUserRoleHelper();
+  const { isBase } = useUserRoleHelper();
 
   const searchParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
@@ -305,15 +305,7 @@ export const AssetsList = ({
     <>
       <Th>Category</Th>
       <Th>Tags</Th>
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.custody,
-          action: PermissionAction.read,
-        })}
-      >
-        <Th>Custodian</Th>
-      </When>
+      <Th>Custodian</Th>
       <Th>Location</Th>
       <Th>Actions</Th>
     </>
@@ -374,7 +366,6 @@ const ListAssetContent = ({
   bulkActions?: React.ReactNode;
 }) => {
   const { category, tags, custody, location, kit } = item;
-  const { roles } = useUserRoleHelper();
   return (
     <>
       {/* Item */}
@@ -456,17 +447,10 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.custody,
-          action: PermissionAction.read,
-        })}
-      >
-        <Td>
-          <TeamMemberBadge teamMember={custody?.custodian} />
-        </Td>
-      </When>
+
+      <Td>
+        <TeamMemberBadge teamMember={custody?.custodian} />
+      </Td>
 
       {/* Location */}
       <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>

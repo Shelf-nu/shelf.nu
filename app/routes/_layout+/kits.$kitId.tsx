@@ -484,7 +484,7 @@ export default function KitDetails() {
             booking={currentBooking || undefined}
             hasPermission={userHasCustodyViewPermission({
               roles,
-              custody: kit?.custody,
+              custodianUser: kit?.custody?.custodian?.user,
               organization: currentOrganization,
               currentUserId: userId,
             })}
