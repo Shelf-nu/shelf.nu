@@ -23,7 +23,6 @@ import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
@@ -422,14 +421,16 @@ export default function AddAssetsToLocation() {
           countKey="totalLocations"
           renderItem={({ metadata }) => (
             <div className="flex items-center gap-2">
-              <Image
-                imageId={metadata.imageId}
-                alt="img"
-                className={tw(
-                  "size-6 rounded-[2px] object-cover",
-                  metadata.description ? "rounded-b-none border-b-0" : ""
-                )}
-              />
+              {metadata?.imageUrl ? (
+                <img
+                  src={metadata.imageUrl}
+                  alt={metadata.name}
+                  className={tw(
+                    "size-6 rounded-[2px] object-cover",
+                    metadata.description && "rounded-b-none border-b-0"
+                  )}
+                />
+              ) : null}
               <div>{metadata.name}</div>
             </div>
           )}

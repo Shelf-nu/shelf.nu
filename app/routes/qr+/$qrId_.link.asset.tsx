@@ -17,7 +17,6 @@ import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -281,14 +280,16 @@ export default function QrLinkExisting() {
               countKey="totalLocations"
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
-                  />
+                  {metadata?.imageUrl ? (
+                    <img
+                      src={metadata.imageUrl}
+                      alt={metadata.name}
+                      className={tw(
+                        "size-6 rounded-[2px] object-cover",
+                        metadata.description && "rounded-b-none border-b-0"
+                      )}
+                    />
+                  ) : null}
                   <div>{metadata.name}</div>
                 </div>
               )}

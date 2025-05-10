@@ -5,8 +5,9 @@ import {
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
+import { v4 as uuid } from "uuid";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "./constants";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
@@ -485,6 +486,99 @@ export async function deleteAssetImage({
         label,
       })
     );
+  }
+}
+
+/**
+ * This function constructs the path for the file to be uploaded to Supabase storage.
+ */
+export function getFileUploadPath({
+  organizationId,
+  type,
+  typeId,
+  extension,
+}: {
+  organizationId: string;
+  type: "locations";
+  typeId: string;
+  extension: string;
+}) {
+  return `${organizationId}/${type}/${typeId}/${uuid()}.${extension}`;
+}
+
+/**
+ * This function uploads the file to `files` bucket in Supabase.
+ * `files` bucket is public and can be accessed by anyone.
+ * After uploading the file, it returns the public URL of the file.
+ */
+export async function uploadPublicFile({
+  fileData,
+  path,
+}: {
+  fileData: ArrayBuffer;
+  /*
+   * The path to upload file
+   * Format: `organizationId/type/typeId/fileName`
+   */
+  path: string;
+}) {
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .upload(path, fileData);
+
+    if (error) {
+      throw error;
+    }
+
+    const {
+      data: { publicUrl },
+    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(data.path);
+
+    return publicUrl;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while uploading the file. Please try again.",
+      label,
+    });
+  }
+}
+
+/**
+ * This function remove the public file from `files` bucket in Supabase using a public URL.
+ */
+export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
+  try {
+    if (
+      !publicUrl.startsWith(
+        `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/`
+      )
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid file URL",
+        additionalData: { publicUrl },
+        label,
+      });
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .remove([publicUrl.split(`${PUBLIC_BUCKET}/`)[1]]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      label,
+    });
   }
 }
 
