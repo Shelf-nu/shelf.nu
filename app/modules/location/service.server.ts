@@ -7,6 +7,8 @@ import type {
 } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { PUBLIC_BUCKET } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -18,8 +20,8 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   getFileUploadPath,
+  parseFileFormData,
   removePublicFile,
-  uploadPublicFile,
 } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -220,14 +222,12 @@ export async function createLocation({
   address,
   userId,
   organizationId,
-  image,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
   organizationId: Organization["id"];
-  image: File | null;
 }) {
   try {
-    let locationCreated = await db.location.create({
+    return await db.location.create({
       data: {
         name,
         description,
@@ -244,25 +244,6 @@ export async function createLocation({
         },
       },
     });
-
-    if (image?.size && image?.size > 0) {
-      const publicUrl = await uploadPublicFile({
-        fileData: await image.arrayBuffer(),
-        path: getFileUploadPath({
-          organizationId,
-          type: "locations",
-          typeId: locationCreated.id,
-          extension: image.type.split("/").at(-1) ?? "jpeg",
-        }),
-      });
-
-      locationCreated = await db.location.update({
-        where: { id: locationCreated.id },
-        data: { imageUrl: publicUrl },
-      });
-    }
-
-    return locationCreated;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
@@ -301,55 +282,19 @@ export async function updateLocation(payload: {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
-  image: File | null;
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
-  const { id, name, address, description, image, userId, organizationId } =
-    payload;
+  const { id, name, address, description, userId, organizationId } = payload;
 
   try {
-    const location = await db.location
-      .findFirstOrThrow({
-        where: { id, organizationId },
-        select: { id: true, imageUrl: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found.",
-          label,
-        });
-      });
-
-    const data: Prisma.LocationUpdateInput = {
-      name,
-      description,
-      address,
-    };
-
-    if (image?.size && image?.size > 0) {
-      /** If there was an image for the location, then we remove old one and upload new one */
-      if (location.imageUrl) {
-        await removePublicFile({ publicUrl: location.imageUrl });
-      }
-
-      const publicUrl = await uploadPublicFile({
-        fileData: await image.arrayBuffer(),
-        path: getFileUploadPath({
-          organizationId,
-          type: "locations",
-          typeId: id,
-          extension: image.type.split("/").at(-1) ?? "jpeg",
-        }),
-      });
-
-      data.imageUrl = publicUrl;
-    }
-
     return await db.location.update({
       where: { id, organizationId },
-      data,
+      data: {
+        name,
+        description,
+        address,
+      },
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
@@ -473,6 +418,97 @@ export async function bulkDeleteLocations({
       cause,
       message: "Something went wrong while bulk deleting locations.",
       additionalData: { locationIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function updateLocationImage({
+  organizationId,
+  request,
+  locationId,
+  prevImageUrl,
+  prevThumbnailUrl,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  locationId: Location["id"];
+  prevImageUrl?: string | null;
+  prevThumbnailUrl?: string | null;
+}) {
+  try {
+    const fileData = await parseFileFormData({
+      request,
+      bucketName: PUBLIC_BUCKET,
+      newFileName: getFileUploadPath({
+        organizationId,
+        type: "locations",
+        typeId: locationId,
+      }),
+      resizeOptions: {
+        width: 1200,
+        withoutEnlargement: true,
+      },
+      generateThumbnail: true,
+      thumbnailSize: 108,
+    });
+
+    const image = fileData.get("image") as string | null;
+    if (!image) {
+      return;
+    }
+
+    let imagePath: string;
+    let thumbnailPath: string | null = null;
+
+    try {
+      const parsedImage = JSON.parse(image);
+      if (parsedImage.originalPath) {
+        imagePath = parsedImage.originalPath;
+        thumbnailPath = parsedImage.thumbnailPath;
+      } else {
+        imagePath = image;
+      }
+    } catch (error) {
+      imagePath = image;
+    }
+
+    const {
+      data: { publicUrl: imagePublicUrl },
+    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(imagePath);
+
+    let thumbnailPublicUrl: string | undefined;
+    if (thumbnailPath) {
+      const {
+        data: { publicUrl },
+      } = getSupabaseAdmin()
+        .storage.from(PUBLIC_BUCKET)
+        .getPublicUrl(thumbnailPath);
+      thumbnailPublicUrl = publicUrl;
+    }
+
+    await db.location.update({
+      where: { id: locationId, organizationId },
+      data: {
+        imageUrl: imagePublicUrl,
+        thumbnailUrl: thumbnailPublicUrl ? thumbnailPublicUrl : undefined,
+      },
+    });
+
+    if (prevImageUrl) {
+      await removePublicFile({ publicUrl: prevImageUrl });
+    }
+
+    if (prevThumbnailUrl) {
+      await removePublicFile({ publicUrl: prevThumbnailUrl });
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the location image.",
+      additionalData: { locationId },
       label,
     });
   }
