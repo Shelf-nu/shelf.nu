@@ -211,19 +211,19 @@ export async function parseFileFormData({
           return undefined;
         }
 
-        const fileSize = await calculateAsyncIterableSize(data);
-        if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-          throw new ShelfError({
-            cause: null,
-            title: "File too large",
-            message: `Image file size exceeds maximum allowed size of ${
-              ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-            }MB`,
-            additionalData: { filename, contentType, bucketName },
-            label,
-            shouldBeCaptured: false,
-          });
-        }
+        // const fileSize = await calculateAsyncIterableSize(data);
+        // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
+        //   throw new ShelfError({
+        //     cause: null,
+        //     title: "File too large",
+        //     message: `Image file size exceeds maximum allowed size of ${
+        //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+        //     }MB`,
+        //     additionalData: { filename, contentType, bucketName },
+        //     label,
+        //     shouldBeCaptured: false,
+        //   });
+        // }
 
         if (!contentType?.includes("image") && !contentType.includes("pdf")) {
           return undefined;
