@@ -63,7 +63,6 @@ import { db } from "../db.server";
       await db.location.update({
         where: { id: location.id },
         data: {
-          image: { delete: true },
           imageUrl: publicUrl,
         },
       });
@@ -72,6 +71,15 @@ import { db } from "../db.server";
         `Uploaded image [${movedImages + 1}/${locationWithImages.length}]`
       );
     }
+
+    await Promise.all(
+      locationWithImages.map((location) =>
+        db.location.update({
+          where: { id: location.id },
+          data: { image: { disconnect: true } },
+        })
+      )
+    );
   } catch (error) {
     console.error("Error moving location images:", error);
   }
