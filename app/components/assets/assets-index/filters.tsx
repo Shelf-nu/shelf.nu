@@ -136,6 +136,7 @@ export function AssetIndexFilters({
                 </div>
               )}
             />
+            {/* @TODO - this needs to be resolved */}
             <When
               truthy={
                 userHasPermission({

@@ -156,6 +156,7 @@ export default function KitsIndexPage() {
   //   organization,
   //   currentUserId: user?.id,
   // });
+
   return (
     <>
       <Header>

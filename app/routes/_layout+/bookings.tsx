@@ -263,6 +263,7 @@ export default function BookingsIndexPage({
             ),
           }}
         >
+          {/* @TODO - how do we handle that */}
           <When
             truthy={
               userHasPermission({

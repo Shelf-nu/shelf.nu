@@ -409,9 +409,27 @@ async function getAssets(params: {
         },
         { custody: { custodian: { userId: { in: teamMemberIds } } } },
         {
-          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              /** We only get them if the booking is ongoing */
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
         },
-        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              /** We only get them if the booking is ongoing */
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
         ...(teamMemberIds.includes("without-custody")
           ? [{ custody: null }]
           : []),
@@ -1394,6 +1412,8 @@ export async function getPaginatedAndFilterableAssets({
     locationIds,
     teamMemberIds,
   } = paramsValues;
+
+  console.log("teamMemberIds", teamMemberIds);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -2808,7 +2828,7 @@ export async function relinkQrCode({
   ]);
 }
 
-export async function getAssetsTabLoaderData({
+export async function getUserAssetsTabLoaderData({
   userId,
   request,
   organizationId,

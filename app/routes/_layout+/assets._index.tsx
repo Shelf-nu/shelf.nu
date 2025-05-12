@@ -29,6 +29,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {
@@ -45,6 +46,7 @@ import { db } from "~/database/db.server";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useIsUserPage } from "~/hooks/use-is-user-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -276,10 +278,12 @@ export const AssetsList = ({
   customEmptyState,
   disableTeamMemberFilter,
   disableBulkActions,
+  wrapperClassName,
 }: {
   customEmptyState?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
+  wrapperClassName?: string;
 }) => {
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
@@ -289,6 +293,8 @@ export const AssetsList = ({
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
   );
+
+  const isUserPage = useIsUserPage();
 
   // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
@@ -305,7 +311,25 @@ export const AssetsList = ({
     <>
       <Th>Category</Th>
       <Th>Tags</Th>
-      <Th>Custodian</Th>
+      <When truthy={!isUserPage}>
+        <Th>
+          Custodian{" "}
+          <InfoTooltip
+            iconClassName="size-4"
+            content={
+              <>
+                <h6>Asset custody</h6>
+                <p>
+                  This column shows if a user has custody of the asset either
+                  via direct assignment or via a booking. If you see{" "}
+                  <GrayBadge>private</GrayBadge> that means you don't have the
+                  permissions to see who has custody of the asset.
+                </p>
+              </>
+            }
+          />
+        </Th>
+      </When>
       <Th>Location</Th>
       <Th>Actions</Th>
     </>
@@ -317,7 +341,8 @@ export const AssetsList = ({
     <div
       className={tw(
         "flex flex-col",
-        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2"
+        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
+        wrapperClassName
       )}
     >
       <When truthy={!!isSwappingMode}>
@@ -361,9 +386,11 @@ export const AssetsList = ({
 const ListAssetContent = ({
   item,
   bulkActions,
+  isUserPage,
 }: {
   item: AssetsFromViewItem;
   bulkActions?: React.ReactNode;
+  isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;
   return (
@@ -447,10 +474,11 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-
-      <Td>
-        <TeamMemberBadge teamMember={custody?.custodian} />
-      </Td>
+      <When truthy={!isUserPage}>
+        <Td>
+          <TeamMemberBadge teamMember={custody?.custodian} />
+        </Td>
+      </When>
 
       {/* Location */}
       <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
