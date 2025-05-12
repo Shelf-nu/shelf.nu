@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Booking, Category, Custody } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -23,7 +23,7 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
@@ -58,12 +58,11 @@ import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { getClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -103,12 +102,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const {
       search,
@@ -139,6 +139,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+      });
+    }
+
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
@@ -185,7 +207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -243,16 +265,49 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const user = await getUserByID(authSession.userId);
 
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Booking",
+          message:
+            "Booking not found. Are you sure it exists in the current workspace.",
+        });
+      });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+      });
+    }
+
     /** We only update the booking if there are assets to add */
     if (assetIds.length > 0) {
       /** We update the booking with the new assets */
-      const b = await upsertBooking(
-        {
-          id: bookingId,
-          assetIds,
-        },
-        getClientHint(request)
-      );
+      const b = await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds,
+      });
 
       /** We create notes for the assets that were added */
       await createNotes({
@@ -310,18 +365,24 @@ export default function AddAssetsToNewBooking() {
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
+  /** Assets with kits has to be handled from manage-kits */
+  const bookingAssets = useMemo(
+    () => booking.assets.filter((asset) => !asset.kitId),
+    [booking.assets]
+  );
+
   const removedAssets = useMemo(
     () =>
-      booking.assets.filter(
+      bookingAssets.filter(
         (asset) =>
           !selectedBulkItems.some(
             (selectedItem) => selectedItem.id === asset.id
           )
       ),
-    [booking.assets, selectedBulkItems]
+    [bookingAssets, selectedBulkItems]
   );
 
-  const hasUnsavedChanges = selectedBulkItemsCount !== booking.assets.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -339,9 +400,17 @@ export default function AddAssetsToNewBooking() {
   /**
    * Set selected items for kit based on the route data
    */
-  useEffect(() => {
-    setSelectedBulkItems(booking.assets);
-  }, [booking.assets, setSelectedBulkItems]);
+  useEffect(function updateDefaultSelectedItems() {
+    /**
+     * We are setting the default items here, so we do not have to
+     * set the assets again if there are any items already present
+     */
+    if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingAssets);
+    }
+    // We only need to run this when component mounts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Set disabled items for kit
@@ -460,6 +529,7 @@ export default function AddAssetsToNewBooking() {
             if (disabledBulkItems.some((item) => item.id === asset.id)) {
               return;
             }
+
             updateItem(asset);
           }}
           emptyStateClassName="py-10"
@@ -555,14 +625,15 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>

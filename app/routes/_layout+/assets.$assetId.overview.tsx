@@ -41,6 +41,7 @@ import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -354,11 +355,10 @@ export default function AssetOverview() {
                   </span>
                   <div className="-ml-2 md:w-3/5">
                     <div className="ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                      {asset.valuation.toLocaleString(locale, {
+                      {formatCurrency({
+                        value: asset.valuation,
+                        locale,
                         currency: asset.organization.currency,
-                        style: "currency",
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
                       })}{" "}
                     </div>
                   </div>
@@ -399,7 +399,7 @@ export default function AssetOverview() {
                           className={tw(
                             "mt-1 text-gray-600 md:mt-0 md:w-3/5",
                             field.customField.type !==
-                              CustomFieldType.MULTILINE_TEXT && "max-w-[250px]"
+                              CustomFieldType.MULTILINE_TEXT && "max-w-[350px]"
                           )}
                         >
                           {field.customField.type ===
@@ -413,12 +413,19 @@ export default function AssetOverview() {
                             <Button
                               role="link"
                               variant="link"
-                              className="text-gray text-end font-normal underline hover:text-gray-600"
+                              className="text-gray text-start font-normal underline hover:text-gray-600"
                               target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
                               {customFieldDisplayValue as string}
                             </Button>
+                          ) : field.customField.type ===
+                            CustomFieldType.AMOUNT ? (
+                            formatCurrency({
+                              value: fieldValue.raw as number,
+                              locale,
+                              currency: asset.organization.currency,
+                            })
                           ) : (
                             (customFieldDisplayValue as string)
                           )}

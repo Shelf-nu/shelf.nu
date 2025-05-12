@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -51,13 +51,12 @@ import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { getClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -91,23 +90,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const modelName = {
       singular: "kit",
       plural: "kits",
     };
+
     const booking = await getBooking({
       id: bookingId,
       organizationId,
       userOrganizations,
       request,
     });
+
+    /** Self service can only manage kits for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing kits is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of kits is not allowed for current status of booking.",
+      });
+    }
+
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     const { page, perPage, kits, search, totalKits, totalPages } =
@@ -186,7 +209,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -203,6 +226,41 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, bookingId } }
     );
 
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Booking",
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
+      });
+
+    /** Self service can only manage kits for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing kits is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of kits is not allowed for current status of booking.",
+      });
+    }
+
     const user = await getUserByID(userId);
 
     const selectedKits = await db.kit.findMany({
@@ -215,13 +273,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** We only update the booking if any new kit is added */
     if (allSelectedAssetIds.length > 0) {
-      const b = await upsertBooking(
-        {
-          id: bookingId,
-          assetIds: allSelectedAssetIds,
-        },
-        getClientHint(request)
-      );
+      const b = await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds: allSelectedAssetIds,
+      });
 
       /** We create notes for the assets that were added */
       await createNotes({

@@ -38,6 +38,7 @@ import {
   ListItemTagsColumn,
   type AssetIndexLoaderData,
 } from "~/routes/_layout+/assets._index";
+import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isLink } from "~/utils/misc";
 import {
@@ -47,7 +48,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { freezeColumnClassNames } from "./freeze-column-classes";
-import { AssetImage } from "../asset-image";
+import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
@@ -114,6 +115,12 @@ export function AdvancedIndexColumn({
           >
             {customFieldDisplayValue as string}
           </Button>
+        ) : field.customField.type === CustomFieldType.AMOUNT ? (
+          formatCurrency({
+            value: fieldValue.raw as number,
+            locale,
+            currency: currentOrganization.currency,
+          })
         ) : (
           (customFieldDisplayValue as string)
         )}
@@ -133,13 +140,14 @@ export function AdvancedIndexColumn({
               {showAssetImage ? (
                 <AssetImage
                   asset={{
-                    assetId: item.id,
+                    id: item.id,
                     mainImage: item.mainImage,
+                    thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
-                    alt: item.title,
                   }}
+                  alt={item.title}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
-                  withPreview={!!item.mainImage}
+                  withPreview={true}
                 />
               ) : null}
 

@@ -3,10 +3,8 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import {
-  formatBookingsDates,
-  getBookings,
-} from "~/modules/booking/service.server";
+import { getBookings } from "~/modules/booking/service.server";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import {

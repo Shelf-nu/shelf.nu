@@ -1,5 +1,4 @@
-import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -10,7 +9,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
@@ -31,7 +30,6 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
-import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
@@ -45,6 +43,7 @@ import {
   getKit,
   getKitCurrentBooking,
 } from "~/modules/kit/service.server";
+import type { ListItemForKitPage } from "~/modules/kit/types";
 import { createNote } from "~/modules/note/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -85,6 +84,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
+
+    const isManageAssetsUrl = request.url.includes("manage-assets");
 
     let [kit, assets, qrObj] = await Promise.all([
       getKit({
@@ -142,6 +143,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         kitId,
+        ignoreFilters: isManageAssetsUrl,
       }),
       generateQrObj({
         kitId,
@@ -327,49 +329,14 @@ export default function KitDetails() {
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
-  /**
-   * User can manage assets if
-   * 1. Kit has AVAILABLE status
-   * 2. Kit has a booking whose status is one of the following
-   *    DRAFT
-   *    RESERVED
-   *    ARCHIVED
-   *    CANCELLED
-   *    COMPLETE
-   * 3. User is not self service
-   */
-  const allowedBookingStatus: BookingStatus[] = [
-    BookingStatus.DRAFT,
-    BookingStatus.RESERVED,
-    BookingStatus.ARCHIVED,
-    BookingStatus.CANCELLED,
-    BookingStatus.COMPLETE,
-  ];
-  const kitIsAvailable = kit.assets.length
-    ? kit.assets[0]?.bookings.every((b) =>
-        allowedBookingStatus.includes(b.status)
-      )
-    : kit.status === "AVAILABLE";
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
-
-  const kitBookings =
-    kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.manageAssets,
   });
-
-  const canManageAssets =
-    kitIsAvailable &&
-    userRoleCanManageAssets &&
-    !kitBookings.some((b) =>
-      (
-        [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
-      ).includes(b.status)
-    );
 
   return (
     <>
@@ -389,7 +356,7 @@ export default function KitDetails() {
                 imageExpiration: kit.imageExpiration,
                 alt: kit.name,
               }}
-              className={tw("mr-4 size-[56px] rounded border object-cover")}
+              className={tw("mr-4 size-14 rounded border object-cover")}
               withPreview
             />
           ),
@@ -420,14 +387,6 @@ export default function KitDetails() {
                 to="manage-assets?status=AVAILABLE"
                 variant="primary"
                 width="full"
-                disabled={
-                  !canManageAssets
-                    ? {
-                        reason:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }
-                    : false
-                }
               >
                 Manage assets
               </Button>
@@ -457,14 +416,6 @@ export default function KitDetails() {
                       variant="primary"
                       width="full"
                       className="whitespace-nowrap"
-                      disabled={
-                        !canManageAssets
-                          ? {
-                              reason:
-                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                            }
-                          : false
-                      }
                     >
                       Manage assets
                     </Button>
@@ -485,14 +436,6 @@ export default function KitDetails() {
                 newButtonRoute: userRoleCanManageAssets
                   ? "manage-assets?status=AVAILABLE"
                   : undefined,
-                buttonProps: {
-                  disabled: !canManageAssets
-                    ? {
-                        reason:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }
-                    : false,
-                },
               }}
               headerChildren={
                 <>
@@ -528,7 +471,7 @@ export default function KitDetails() {
           />
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card className="my-3 flex justify-between">
+          <Card className="mb-3 mt-0 flex justify-between">
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
@@ -552,19 +495,7 @@ export default function KitDetails() {
   );
 }
 
-function ListContent({
-  item,
-}: {
-  item: Prisma.AssetGetPayload<{
-    include: {
-      location: {
-        include: { image: { select: { id: true; updatedAt: true } } };
-      };
-      category: true;
-      tags: true;
-    };
-  }>;
-}) {
+function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
   const { roles } = useUserRoleHelper();
@@ -573,23 +504,25 @@ function ListContent({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="relative flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
+                withPreview
               />
             </div>
             <div className="min-w-[180px]">
-              <span className="word-break mb-1 block font-medium">
+              <span className="word-break mb-1 block">
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover
                 >
@@ -616,14 +549,6 @@ function ListContent({
       <Td>
         {location ? (
           <GrayBadge>
-            {location.image ? (
-              <Image
-                imageId={location.image.id}
-                alt="img"
-                className="mr-1 size-4 rounded-full object-cover"
-                updatedAt={location.image?.updatedAt}
-              />
-            ) : null}
             <span>{location.name}</span>
           </GrayBadge>
         ) : null}

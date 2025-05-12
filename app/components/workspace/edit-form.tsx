@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
@@ -65,7 +65,7 @@ export const WorkspaceEditForm = ({
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(validateFileAtom);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   return (
