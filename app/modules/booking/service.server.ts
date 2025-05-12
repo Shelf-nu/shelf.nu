@@ -1291,14 +1291,17 @@ export async function extendBooking({
 
 export async function getBookingsFilterData({
   request,
-  isSelfServiceOrBase,
   userId,
-  organizationId,
+  canSeeAllBookings,
+  currentOrganization,
 }: {
   request: Request;
-  isSelfServiceOrBase: boolean;
   userId: string;
-  organizationId: string;
+  canSeeAllBookings: boolean;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "selfServiceCanSeeBookings" | "baseUserCanSeeBookings"
+  >;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status, teamMemberIds } =
@@ -1320,13 +1323,17 @@ export async function getBookingsFilterData({
    * @TODO this can safely be remove 3-6 months after this commit
    */
   let selfServiceData = null;
-  if (isSelfServiceOrBase) {
+
+  // Only fetch team member data if the user doesn't have permission to see all bookings
+  if (!canSeeAllBookings) {
+    // Get the team member for the current user
     const teamMember = await db.teamMember.findFirst({
       where: {
         userId,
-        organizationId,
+        organizationId: currentOrganization.id,
       },
     });
+
     if (!teamMember) {
       throw new ShelfError({
         cause: null,
@@ -1337,8 +1344,9 @@ export async function getBookingsFilterData({
         shouldBeCaptured: false,
       });
     }
+
     selfServiceData = {
-      // If the user is self service, we only show bookings that belong to that user)
+      // If the user is self service/base without override, we only show bookings that belong to that user
       custodianUserId: userId,
       custodianTeamMemberId: teamMember.id,
     };

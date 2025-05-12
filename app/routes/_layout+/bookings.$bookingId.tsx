@@ -78,13 +78,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { perPage } = cookie;
 
   try {
-    const { organizationId, isSelfServiceOrBase, userOrganizations } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      });
+    const {
+      organizationId,
+      isSelfServiceOrBase,
+      userOrganizations,
+      canSeeAllBookings,
+    } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
     /**
      * If the org id in the params is different than the current organization id,
@@ -107,7 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /** For self service & base users, we only allow them to read their own bookings */
-    if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {
+    if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",

@@ -24,6 +24,7 @@ import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -53,13 +54,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase, currentOrganization } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      currentOrganization,
+      isSelfServiceOrBase,
+      canSeeAllBookings,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -84,9 +89,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       cookie,
     } = await getBookingsFilterData({
       request,
-      isSelfServiceOrBase,
+      canSeeAllBookings,
+      currentOrganization,
       userId,
-      organizationId,
     });
 
     const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
@@ -304,7 +309,7 @@ export default function BookingsIndexPage({
               <BulkActionsDropdown />
             )
           }
-          ItemComponent={ListAssetContent}
+          ItemComponent={ListBookingsContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           headerChildren={
             <>
@@ -331,7 +336,7 @@ export default function BookingsIndexPage({
   );
 }
 
-const ListAssetContent = ({
+const ListBookingsContent = ({
   item,
 }: {
   item: Prisma.BookingGetPayload<{
@@ -365,6 +370,7 @@ const ListAssetContent = ({
     item.assets.some(
       (asset) => !asset.availableToBook || asset.custody !== null
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
+
   return (
     <>
       {/* Item */}
@@ -430,20 +436,24 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
+
       <Td>
-        {item?.custodianUser ? (
-          <UserBadge
-            img={
-              item?.custodianUser?.profilePicture ||
-              "/static/images/default_pfp.jpg"
-            }
-            name={`${item?.custodianUser?.firstName || ""} ${
-              item?.custodianUser?.lastName || ""
-            }`}
-          />
-        ) : item?.custodianTeamMember ? (
-          <UserBadge name={item.custodianTeamMember.name} />
-        ) : null}
+        <TeamMemberBadge
+          teamMember={{
+            name: item.custodianTeamMember
+              ? item.custodianTeamMember.name
+              : `${item.custodianUser?.firstName} ${item.custodianUser?.lastName}`,
+            user: item?.custodianUser
+              ? {
+                  id: item?.custodianUser?.id,
+                  firstName: item?.custodianUser?.firstName,
+                  lastName: item?.custodianUser?.lastName,
+                  email: item?.custodianUser?.email,
+                  profilePicture: item?.custodianUser?.profilePicture,
+                }
+              : null,
+          }}
+        />
       </Td>
 
       {/* Created by */}

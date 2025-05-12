@@ -19,13 +19,12 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.export,
-      });
+    const { currentOrganization, canSeeAllBookings } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.export,
+    });
 
     assertCanUseBookings(currentOrganization);
 
@@ -43,10 +42,10 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     /** Join the rows with a new line */
     const csvString = await exportBookingsFromIndexToCsv({
       request,
-      organizationId,
       bookingsIds: bookingsIds.split(","),
       userId,
-      isSelfServiceOrBase,
+      canSeeAllBookings,
+      currentOrganization,
     });
 
     return new Response(csvString, {

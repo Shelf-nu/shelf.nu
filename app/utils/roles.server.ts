@@ -82,6 +82,16 @@ export async function requirePermission({
 
   const role = roles ? roles[0] : OrganizationRoles.BASE;
 
+  /**
+   * This checks the organization settings permissions overrides for BASE and SELF_SERVICE roles
+   * If the user is in a BASE or SELF_SERVICE role, we check if they can see all bookings
+   */
+  const canSeeAllBookings =
+    (role === OrganizationRoles.SELF_SERVICE &&
+      currentOrganization.selfServiceCanSeeBookings) ||
+    (role === OrganizationRoles.BASE &&
+      currentOrganization.baseUserCanSeeBookings);
+
   return {
     organizations,
     organizationId,
@@ -91,6 +101,7 @@ export async function requirePermission({
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE,
     userOrganizations,
+    canSeeAllBookings,
   };
 }
 
