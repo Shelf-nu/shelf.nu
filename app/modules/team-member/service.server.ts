@@ -251,6 +251,7 @@ export async function getTeamMemberForCustodianFilter({
           include: {
             user: {
               select: {
+                id: true,
                 firstName: true,
                 lastName: true,
                 email: true,
@@ -264,6 +265,7 @@ export async function getTeamMemberForCustodianFilter({
           include: {
             user: {
               select: {
+                id: true,
                 firstName: true,
                 lastName: true,
                 email: true,

@@ -273,6 +273,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        userId,
         header,
         booking,
         modelName,

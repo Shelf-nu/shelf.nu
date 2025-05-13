@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isPersonalOrg } from "~/utils/organization";
 import { Button } from "../shared/button";

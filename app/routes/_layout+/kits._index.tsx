@@ -19,7 +19,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {

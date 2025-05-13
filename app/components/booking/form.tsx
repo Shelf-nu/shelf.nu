@@ -12,12 +12,14 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -215,9 +217,9 @@ export function BookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers } = useLoaderData<typeof loader>();
+  const { teamMembers, userId } = useLoaderData<typeof loader>();
   const [endDate, setEndDate] = useState(incomingEndDate);
-
+  const currentOrganization = useCurrentOrganization();
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
 
@@ -262,6 +264,13 @@ export function BookingForm({ booking, action }: BookingFormData) {
   const defaultTeamMember = teamMembers?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
+
+  const userCanSeeCustodian = userHasCustodyViewPermission({
+    roles,
+    custodianUser: defaultTeamMember?.user,
+    organization: currentOrganization,
+    currentUserId: userId,
+  });
 
   useEffect(
     function updateEndDate() {
@@ -517,7 +526,11 @@ export function BookingForm({ booking, action }: BookingFormData) {
                       userId: item?.userId,
                     }),
                   })}
-                  renderItem={(item) => resolveTeamMemberName(item, true)}
+                  renderItem={(item) =>
+                    userCanSeeCustodian
+                      ? resolveTeamMemberName(item, true)
+                      : "Private"
+                  }
                 />
 
                 {zo.errors.custodian()?.message ? (

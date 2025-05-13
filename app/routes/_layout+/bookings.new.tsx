@@ -73,6 +73,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     return json(
       data({
+        userId,
         showModal: true,
         isSelfServiceOrBase,
         ...teamMembersData,

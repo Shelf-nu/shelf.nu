@@ -1,4 +1,4 @@
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
