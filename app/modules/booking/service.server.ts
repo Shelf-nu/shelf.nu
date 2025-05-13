@@ -2495,7 +2495,6 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
  * @param params - Parameters required for loading bookings
  * @returns Formatted booking data response
  */
-// @TODO - resolve this
 export async function loadBookingsData({
   request,
   organizationId,
@@ -2522,6 +2521,7 @@ export async function loadBookingsData({
     search,
     userId,
     statuses: ["DRAFT", "RESERVED"],
+    // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
     ...(isSelfServiceOrBase && {
       custodianUserId: userId,
     }),
