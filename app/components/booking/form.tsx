@@ -12,7 +12,6 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.new";
@@ -217,9 +216,9 @@ export function BookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, userId } = useLoaderData<typeof loader>();
+  const { teamMembers, userId, currentOrganization } =
+    useLoaderData<typeof loader>();
   const [endDate, setEndDate] = useState(incomingEndDate);
-  const currentOrganization = useCurrentOrganization();
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
 

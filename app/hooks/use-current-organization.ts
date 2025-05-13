@@ -12,5 +12,5 @@ export function useCurrentOrganization() {
   );
 
   /** We make sure that currentOrganization exists within the loader, so layoutData cannot be null in this case */
-  return layoutData!.currentOrganization;
+  return layoutData?.currentOrganization;
 }

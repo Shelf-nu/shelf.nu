@@ -6,7 +6,7 @@ import { userHasPermission } from "./permission.validator.client";
 /**
  * Type for organization permission settings
  */
-type OrganizationPermissionSettings = Pick<
+export type OrganizationPermissionSettings = Pick<
   Organization, // Replace 'any' with your Organization type if available
   | "selfServiceCanSeeCustody"
   | "selfServiceCanSeeBookings"
