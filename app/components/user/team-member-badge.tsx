@@ -3,10 +3,11 @@ import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { GrayBadge } from "../shared/gray-badge";
 
-interface TeamMemberForBadge {
+export interface TeamMemberForBadge {
   name: string;
   user: {
     id: string;
@@ -23,8 +24,11 @@ interface TeamMemberForBadge {
  */
 export function TeamMemberBadge({
   teamMember,
+  /** Hide the "private" badge in case the user cannot see custodian */
+  hidePrivate = false,
 }: {
   teamMember: TeamMemberForBadge | undefined | null;
+  hidePrivate?: boolean;
 }) {
   const { roles } = useUserRoleHelper();
   const organization = useCurrentOrganization();
@@ -38,7 +42,7 @@ export function TeamMemberBadge({
   });
 
   return teamMember ? (
-    <GrayBadge>
+    <GrayBadge className={tw(!userCanViewBadge && hidePrivate && "hidden")}>
       {userCanViewBadge ? (
         <>
           {teamMember?.user ? (
@@ -64,9 +68,9 @@ export function TeamMemberBadge({
             })}
           </span>
         </>
-      ) : (
+      ) : !hidePrivate ? (
         "private"
-      )}
+      ) : null}
     </GrayBadge>
   ) : null;
 }

@@ -280,11 +280,24 @@ export function BookingForm({ booking, action }: BookingFormData) {
     [incomingEndDate]
   );
 
+  /**
+   * Check whether the user can see actions
+   * 1. Admin/Owner always can see all
+   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
+   * 3. BASE can see actions if they are the custodian of the booking
+   */
+
+  const canSeeActions =
+    !isBaseOrSelfService ||
+    (isBaseOrSelfService &&
+      (defaultTeamMember?.userId === userId ||
+        defaultTeamMember?.id === userId));
+
   return (
     <div>
       <Form ref={zo.ref} method="post" action={action}>
         {/* Render the actions on top only when the form is in edit mode */}
-        {!isNewBooking ? (
+        {!isNewBooking && canSeeActions ? (
           <AbsolutePositionedHeaderActions>
             <When truthy={isBase}>
               <BookingProcessSidebar />
@@ -526,7 +539,7 @@ export function BookingForm({ booking, action }: BookingFormData) {
                     }),
                   })}
                   renderItem={(item) =>
-                    userCanSeeCustodian
+                    userCanSeeCustodian || isNewBooking
                       ? resolveTeamMemberName(item, true)
                       : "Private"
                   }

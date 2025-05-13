@@ -503,19 +503,15 @@ export async function exportBookingsFromIndexToCsv({
   userId,
   bookingsIds,
   canSeeAllBookings,
-  currentOrganization,
+  organizationId,
 }: {
   request: Request;
   userId: string;
   bookingsIds: string[];
   canSeeAllBookings: boolean;
-  currentOrganization: Pick<
-    Organization,
-    "id" | "selfServiceCanSeeBookings" | "baseUserCanSeeBookings"
-  >;
+  organizationId: string;
 }) {
   try {
-    const organizationId = currentOrganization.id;
     const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
 
     /** If all are selected in the list, then we have to consider filter to get the entries */
@@ -533,7 +529,7 @@ export async function exportBookingsFromIndexToCsv({
       } = await getBookingsFilterData({
         request,
         canSeeAllBookings,
-        currentOrganization,
+        organizationId,
         userId,
       });
 
@@ -585,7 +581,7 @@ export async function exportBookingsFromIndexToCsv({
     throw new ShelfError({
       cause,
       message,
-      additionalData: { bookingsIds, currentOrganization },
+      additionalData: { bookingsIds, organizationId },
       label: "Booking",
     });
   }

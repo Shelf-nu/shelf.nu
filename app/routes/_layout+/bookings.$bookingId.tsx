@@ -81,6 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const {
       organizationId,
       isSelfServiceOrBase,
+      currentOrganization,
       userOrganizations,
       canSeeAllBookings,
     } = await requirePermission({
@@ -274,6 +275,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         userId,
+        currentOrganization,
         header,
         booking,
         modelName,

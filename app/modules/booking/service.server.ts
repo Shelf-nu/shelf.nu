@@ -1293,15 +1293,12 @@ export async function getBookingsFilterData({
   request,
   userId,
   canSeeAllBookings,
-  currentOrganization,
+  organizationId,
 }: {
   request: Request;
   userId: string;
   canSeeAllBookings: boolean;
-  currentOrganization: Pick<
-    Organization,
-    "id" | "selfServiceCanSeeBookings" | "baseUserCanSeeBookings"
-  >;
+  organizationId: Organization["id"];
 }) {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status, teamMemberIds } =
@@ -1330,7 +1327,7 @@ export async function getBookingsFilterData({
     const teamMember = await db.teamMember.findFirst({
       where: {
         userId,
-        organizationId: currentOrganization.id,
+        organizationId,
       },
     });
 
@@ -1823,13 +1820,15 @@ export async function getBookingsForCalendar(params: {
   request: Request;
   organizationId: Organization["id"];
   userId: string;
-  isSelfServiceOrBase: boolean;
+  canSeeAllBookings: boolean;
+  canSeeAllCustody: boolean;
 }) {
   const {
     request,
     organizationId,
     userId,
-    isSelfServiceOrBase = false,
+    canSeeAllBookings,
+    canSeeAllCustody,
   } = params;
   const searchParams = getCurrentSearchParams(request);
 
@@ -1844,7 +1843,7 @@ export async function getBookingsForCalendar(params: {
       userId,
       bookingFrom: new Date(start),
       bookingTo: new Date(end),
-      ...(isSelfServiceOrBase && {
+      ...(!canSeeAllBookings && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: userId,
       }),
@@ -1862,8 +1861,12 @@ export async function getBookingsForCalendar(params: {
           ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
           : booking.custodianTeamMember?.name;
 
+        let title = booking.name;
+        if (canSeeAllCustody) {
+          title += ` | ${custodianName}`;
+        }
         return {
-          title: `${booking.name} | ${custodianName}`,
+          title,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
           url: `/bookings/${booking.id}`,
@@ -1883,9 +1886,12 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
-              image: booking.custodianUser
-                ? booking.custodianUser.profilePicture
-                : undefined,
+              user: {
+                id: booking.custodianUserId,
+                firstName: booking.custodianUser?.firstName,
+                lastName: booking.custodianUser?.lastName,
+                profilePicture: booking.custodianUser?.profilePicture,
+              },
             },
           },
         };
@@ -2489,6 +2495,7 @@ export async function processBooking(bookingId: string, assetIds: string[]) {
  * @param params - Parameters required for loading bookings
  * @returns Formatted booking data response
  */
+// @TODO - resolve this
 export async function loadBookingsData({
   request,
   organizationId,

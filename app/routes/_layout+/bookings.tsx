@@ -90,7 +90,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings,
-      currentOrganization,
+      organizationId,
       userId,
     });
 
@@ -139,6 +139,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         header,
+        currentOrganization,
         items,
         search,
         page,

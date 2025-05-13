@@ -75,6 +75,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        currentOrganization,
+        userId,
         showModal: true,
         isSelfServiceOrBase,
         selfServiceOrBaseUser,
