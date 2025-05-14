@@ -1154,6 +1154,8 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
+          assets: { select: { id: true } },
+          from: true,
         },
       })
       .catch((cause) => {
@@ -1164,6 +1166,32 @@ export async function extendBooking({
             "Booking not found. Are you sure it exists in the current workspace?",
         });
       });
+
+    /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+    const clashingBookings = await db.booking.count({
+      where: {
+        id: { not: booking.id },
+        organizationId,
+        status: {
+          in: [
+            BookingStatus.RESERVED,
+            BookingStatus.ONGOING,
+            BookingStatus.OVERDUE,
+          ],
+        },
+        assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+        from: { gte: booking.from! },
+        to: { lte: newEndDate },
+      },
+    });
+
+    if (clashingBookings > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Booking period is clashing with other booking.",
+      });
+    }
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -1185,11 +1213,11 @@ export async function extendBooking({
         /**
          * If booking is currently OVERDUE we have to make it ONGOING
          */
-        status:
-          booking.status === BookingStatus.OVERDUE
-            ? BookingStatus.ONGOING
-            : undefined,
-        to: newEndDate,
+        // status:
+        //   booking.status === BookingStatus.OVERDUE
+        //     ? BookingStatus.ONGOING
+        //     : undefined,
+        // to: newEndDate,
       },
       include: BOOKING_INCLUDE_FOR_EMAIL,
     });
