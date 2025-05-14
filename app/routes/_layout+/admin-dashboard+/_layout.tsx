@@ -39,6 +39,7 @@ const items = [
   { to: "qrs", content: "QR codes" },
   { to: "announcements", content: "Announcements" },
   { to: "move-location-images", content: "Move location images" },
+  { to: "generate-locations", content: "Generate locations" },
 ];
 
 export default function Area51Page() {

@@ -6,6 +6,7 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import invariant from "tiny-invariant";
+import { v4 as uuid } from "uuid";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { PUBLIC_BUCKET } from "~/utils/constants";
@@ -509,6 +510,70 @@ export async function updateLocationImage({
         ? cause.message
         : "Something went wrong while updating the location image.",
       additionalData: { locationId },
+      label,
+    });
+  }
+}
+
+export async function generateLocationWithImages({
+  organizationId,
+  numberOfLocations,
+  image,
+  userId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  numberOfLocations: number;
+  image: File;
+}) {
+  try {
+    for (let i = 1; i <= numberOfLocations; i++) {
+      const imageCreated = await db.image.create({
+        data: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          ownerOrg: { connect: { id: organizationId } },
+          user: { connect: { id: userId } },
+        },
+      });
+
+      await db.location.create({
+        data: {
+          /**
+           * We are using uuid for names because location names are unique.
+           * This location is going to be created for testing purposes only so the name in this case
+           * doesn't matter.
+           */
+          name: uuid(),
+          image: { connect: { id: imageCreated.id } },
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+        },
+      });
+    }
+
+    await db.location.createMany({
+      data: Array.from({ length: numberOfLocations }, (_, index) => ({
+        name: `Location ${index + 1}`,
+        organizationId,
+        userId,
+      })),
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while generating locations.",
+      additionalData: { organizationId, numberOfLocations },
       label,
     });
   }

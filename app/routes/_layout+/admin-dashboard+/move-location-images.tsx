@@ -4,6 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { v4 as uuid } from "uuid";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
@@ -160,6 +161,7 @@ export async function action({ context }: ActionFunctionArgs) {
 
 export default function MoveLocationImages() {
   const { numberOfLocationWithImages } = useLoaderData<typeof loader>();
+  const disabled = useDisabled();
 
   return (
     <div className="rounded-md border bg-white p-4">
@@ -170,7 +172,7 @@ export default function MoveLocationImages() {
       </p>
 
       <form method="POST">
-        <Button disabled={numberOfLocationWithImages === 0}>
+        <Button disabled={numberOfLocationWithImages === 0 || disabled}>
           Move{" "}
           {numberOfLocationWithImages < 100
             ? numberOfLocationWithImages
