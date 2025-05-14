@@ -134,9 +134,9 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex size-12 items-center justify-center">
-            {item.imageUrl ? (
+            {item.thumbnailUrl ? (
               <img
-                src={item.imageUrl}
+                src={item.thumbnailUrl}
                 alt={item.name}
                 loading="lazy"
                 className={tw(

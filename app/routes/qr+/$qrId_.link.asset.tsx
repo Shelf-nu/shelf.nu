@@ -280,9 +280,9 @@ export default function QrLinkExisting() {
               countKey="totalLocations"
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
-                  {metadata?.imageUrl ? (
+                  {metadata?.thumbnailUrl ? (
                     <img
-                      src={metadata.imageUrl}
+                      src={metadata.thumbnailUrl}
                       alt={metadata.name}
                       className={tw(
                         "size-6 rounded-[2px] object-cover",

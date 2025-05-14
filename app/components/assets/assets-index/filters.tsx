@@ -123,9 +123,9 @@ export function AssetIndexFilters({
               }}
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
-                  {metadata?.imageUrl ? (
+                  {metadata?.thumbnailUrl ? (
                     <img
-                      src={metadata?.imageUrl}
+                      src={metadata?.thumbnailUrl}
                       alt={metadata.name}
                       loading="lazy"
                       className={tw(
