@@ -18,7 +18,7 @@ import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -264,9 +264,9 @@ export function BookingForm({ booking, action }: BookingFormData) {
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
-  const userCanSeeCustodian = userHasCustodyViewPermission({
+  const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
-    custodianUser: defaultTeamMember?.user,
+    custodianUserId: defaultTeamMember?.user?.id,
     organization: currentOrganization,
     currentUserId: userId,
   });

@@ -57,7 +57,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -482,9 +482,9 @@ export default function KitDetails() {
           <CustodyCard
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
-            hasPermission={userHasCustodyViewPermission({
+            hasPermission={userCanViewSpecificCustody({
               roles,
-              custodianUser: kit?.custody?.custodian?.user,
+              custodianUserId: kit?.custody?.custodian?.user?.id,
               organization: currentOrganization,
               currentUserId: userId,
             })}

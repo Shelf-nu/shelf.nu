@@ -1,12 +1,11 @@
 import React, { useMemo, useState } from "react";
-import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
@@ -22,21 +21,14 @@ import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
 import { BookingPagination } from "./booking-pagination";
+import When from "../when/when";
 
 export function BookingAssetsColumn() {
-  const { booking, paginatedItems, totalPaginationItems } = useLoaderData<{
-    booking: BookingWithCustodians;
-    paginatedItems: Array<{
-      type: "kit" | "asset";
-      id: string;
-      assets: any[];
-      kit: SerializeFrom<Kit> | null;
-    }>;
-    totalPaginationItems: number;
-  }>();
+  const { userId, booking, paginatedItems, totalPaginationItems } =
+    useLoaderData<BookingPageLoaderData>();
 
   const hasItems = paginatedItems?.length > 0;
-  const { isBase } = useUserRoleHelper();
+  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
   const { isDraft, isReserved, isCompleted, isArchived, isCancelled } =
     useBookingStatusHelpers(booking.status);
 
@@ -55,7 +47,7 @@ export function BookingAssetsColumn() {
 
   // Self service can only manage assets for bookings that are DRAFT
   const cantManageAssetsAsBase =
-    isBase && booking.status !== BookingStatus.DRAFT;
+    (isBase || isSelfService) && booking.status !== BookingStatus.DRAFT;
 
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
 
@@ -107,6 +99,17 @@ export function BookingAssetsColumn() {
     ]
   );
 
+  /**
+   * Check whether the user can see actions
+   * 1. Admin/Owner always can see all
+   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
+   * 3. BASE can see actions if they are the custodian of the booking
+   */
+
+  const canSeeActions =
+    !isBaseOrSelfService ||
+    (isBaseOrSelfService && booking?.custodianUser?.id === userId);
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -124,23 +127,25 @@ export function BookingAssetsColumn() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button
-                icon="scan"
-                variant="secondary"
-                to="scan-assets"
-                disabled={manageAssetsButtonDisabled}
-              >
-                Scan
-              </Button>
-              <Button
-                to={manageAssetsUrl}
-                className="whitespace-nowrap"
-                disabled={manageAssetsButtonDisabled}
-              >
-                Manage assets
-              </Button>
-            </div>
+            <When truthy={canSeeActions}>
+              <div className="flex items-center gap-2">
+                <Button
+                  icon="scan"
+                  variant="secondary"
+                  to="scan-assets"
+                  disabled={manageAssetsButtonDisabled}
+                >
+                  Scan
+                </Button>
+                <Button
+                  to={manageAssetsUrl}
+                  className="whitespace-nowrap"
+                  disabled={manageAssetsButtonDisabled}
+                >
+                  Manage assets
+                </Button>
+              </div>
+            </When>
           </div>
 
           <div className="-mx-4 overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">

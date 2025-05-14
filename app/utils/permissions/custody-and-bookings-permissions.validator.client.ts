@@ -1,4 +1,4 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
@@ -25,35 +25,27 @@ type UserCustodyViewPermissionsArgs = {
   currentUserId?: string;
 
   /** Custody information - can be null if no custody exists */
-  custodianUser?: Pick<User, "id"> | null;
+  custodianUserId?: string | null;
 };
 
 /**
- * Checks if a user has permission to view custody information based on their roles,
- * organization-specific settings, and whether they are the custodian.
+ * Checks if a user has permission to view custody information in general,
+ * based on their roles and organization settings.
  *
- * @returns boolean indicating if the user has permission to view custody
+ * Use this function for UI elements like showing/hiding custody filters.
+ *
+ * @returns boolean indicating if the user has permission to view custody in general
  */
 export function userHasCustodyViewPermission({
   roles,
   organization,
-  currentUserId,
-  custodianUser,
-}: UserCustodyViewPermissionsArgs): boolean {
-  // If there's no custody, we can return based on standard permissions only
-  if (!custodianUser) {
-    return userHasPermission({
-      roles,
-      entity: PermissionEntity.custody,
-      action: PermissionAction.read,
-    });
-  }
-
-  // Check if the current user is the custodian
-  if (currentUserId && custodianUser?.id === currentUserId) {
-    return true;
-  }
-
+}: {
+  roles: OrganizationRoles[] | undefined;
+  organization: Pick<
+    Organization,
+    "selfServiceCanSeeCustody" | "baseUserCanSeeCustody"
+  >;
+}): boolean {
   // First check if the user has the standard permission
   const hasStandardPermission = userHasPermission({
     roles,
@@ -85,4 +77,27 @@ export function userHasCustodyViewPermission({
   }
 
   return false;
+}
+
+/**
+ * Checks if a user has permission to view a specific custody record,
+ * taking into account if they are the custodian.
+ *
+ * Use this function when checking if a user can see a specific custody record.
+ *
+ * @returns boolean indicating if the user has permission to view the specific custody
+ */
+export function userCanViewSpecificCustody({
+  roles,
+  organization,
+  currentUserId,
+  custodianUserId,
+}: UserCustodyViewPermissionsArgs): boolean {
+  // If the current user is the custodian, they can always see it
+  if (currentUserId && custodianUserId && currentUserId === custodianUserId) {
+    return true;
+  }
+
+  // Otherwise, check general custody view permission
+  return userHasCustodyViewPermission({ roles, organization });
 }

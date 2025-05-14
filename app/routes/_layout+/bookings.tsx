@@ -26,6 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -41,11 +42,12 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -59,6 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       currentOrganization,
       isSelfServiceOrBase,
       canSeeAllBookings,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -118,7 +121,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
         userId,
       }),
     ]);
@@ -201,6 +204,7 @@ export default function BookingsIndexPage({
   const matches = useMatches();
 
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -232,6 +236,18 @@ export default function BookingsIndexPage({
 
   const isBookingUpdateExisting =
     currentRoute?.handle?.name === "bookings.update-existing";
+
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
+  });
+
+  const shouldRenderCustodianFilter =
+    canSeeAllCustody &&
+    !["$userId.bookings", "me.bookings"].includes(
+      // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
+      currentRoute?.handle?.name
+    );
 
   return shouldRenderIndex ? (
     //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
@@ -269,21 +285,7 @@ export default function BookingsIndexPage({
             ),
           }}
         >
-          {/* @TODO - how do we handle that */}
-          <When
-            truthy={
-              userHasPermission({
-                roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
-              }) &&
-              !isBaseOrSelfService &&
-              !["$userId.bookings", "me.bookings"].includes(
-                // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
-                currentRoute?.handle?.name
-              )
-            }
-          >
+          <When truthy={shouldRenderCustodianFilter}>
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">

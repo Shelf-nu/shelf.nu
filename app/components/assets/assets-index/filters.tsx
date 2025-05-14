@@ -12,12 +12,11 @@ import {
   useSearchParamHasValue,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
@@ -44,6 +43,12 @@ export function AssetIndexFilters({
   const { roles } = useUserRoleHelper();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
+
+  const organization = useCurrentOrganization();
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
+  });
 
   if (modeIsSimple) {
     return (
@@ -136,16 +141,7 @@ export function AssetIndexFilters({
                 </div>
               )}
             />
-            {/* @TODO - this needs to be resolved */}
-            <When
-              truthy={
-                userHasPermission({
-                  roles,
-                  entity: PermissionEntity.custody,
-                  action: PermissionAction.read,
-                }) && !disableTeamMemberFilter
-              }
-            >
+            <When truthy={canSeeAllCustody && !disableTeamMemberFilter}>
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">

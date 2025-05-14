@@ -48,7 +48,7 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -522,9 +522,9 @@ export default function AssetOverview() {
           <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
-            hasPermission={userHasCustodyViewPermission({
+            hasPermission={userCanViewSpecificCustody({
               roles,
-              custodianUser: asset?.custody?.custodian?.user,
+              custodianUserId: asset?.custody?.custodian?.user?.id,
               organization: currentOrganization,
               currentUserId: userId,
             })}

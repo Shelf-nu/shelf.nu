@@ -2,7 +2,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { GrayBadge } from "../shared/gray-badge";
@@ -34,9 +34,9 @@ export function TeamMemberBadge({
   const organization = useCurrentOrganization();
   const user = useUserData();
 
-  const userCanViewBadge = userHasCustodyViewPermission({
+  const userCanViewBadge = userCanViewSpecificCustody({
     roles,
-    custodianUser: teamMember?.user,
+    custodianUserId: teamMember?.user?.id,
     organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
     currentUserId: user?.id,
   });

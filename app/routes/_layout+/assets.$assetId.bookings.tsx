@@ -47,7 +47,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, canSeeAllBookings, isSelfServiceOrBase } =
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
       await requirePermission({
         userId,
         request,
@@ -98,7 +98,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
         userId,
       }),
     ]);

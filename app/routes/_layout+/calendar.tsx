@@ -119,11 +119,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
       userId,
     });
 
-    return json(data({ header, title, ...teamMembersData }));
+    return json(
+      data({ header, title, ...teamMembersData, currentOrganization })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

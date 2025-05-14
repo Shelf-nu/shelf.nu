@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
@@ -20,7 +20,6 @@ import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
@@ -30,6 +29,7 @@ import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
@@ -46,7 +46,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -75,8 +75,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           where: {
             deletedAt: null,
             organizationId,
-            userId:
-              role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+            userId: !canSeeAllCustody ? userId : undefined,
           },
           include: { user: true },
           orderBy: { userId: "asc" },
@@ -147,15 +146,11 @@ export default function KitsIndexPage() {
   });
 
   const organization = useCurrentOrganization();
-  const user = useUserData();
 
-  // @TODO - this needs to be resolved
-  // const canReadCustody = userHasCustodyViewPermission({
-  //   roles,
-  //   custodianUser: teamMember?.user,
-  //   organization,
-  //   currentUserId: user?.id,
-  // });
+  const canReadCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings,
+  });
 
   return (
     <>
@@ -180,26 +175,26 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          {/* {canReadCustody && ( */}
-          <DynamicDropdown
-            trigger={
-              <div className="flex cursor-pointer items-center gap-2">
-                Custodian{" "}
-                <ChevronRight className="hidden rotate-90 md:inline" />
-              </div>
-            }
-            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-            label="Filter by custodian"
-            placeholder="Search team members"
-            countKey="totalTeamMembers"
-            initialDataKey="teamMembers"
-            transformItem={(item) => ({
-              ...item,
-              id: item.metadata?.userId ? item.metadata.userId : item.id,
-            })}
-            renderItem={(item) => resolveTeamMemberName(item, true)}
-          />
-          {/* )} */}
+          {canReadCustody && (
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              countKey="totalTeamMembers"
+              initialDataKey="teamMembers"
+              transformItem={(item) => ({
+                ...item,
+                id: item.metadata?.userId ? item.metadata.userId : item.id,
+              })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
+            />
+          )}
         </Filters>
 
         <List

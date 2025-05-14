@@ -1436,7 +1436,7 @@ export async function getPaginatedAndFilterableAssets({
       organizationId,
       selectedTeamMembers: teamMemberIds,
       getAll: getAllEntries.includes("teamMember"),
-      isSelfService,
+      filterByUserId: isSelfService,
       userId,
     });
 

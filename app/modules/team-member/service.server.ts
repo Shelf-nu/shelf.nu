@@ -229,13 +229,17 @@ export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
   getAll,
-  isSelfService,
+  filterByUserId,
   userId,
 }: {
   organizationId: Organization["id"];
   selectedTeamMembers?: TeamMember["id"][];
   getAll?: boolean;
-  isSelfService?: boolean;
+  /**
+   * IF set to true and userId is set, it will only return the teamMembers where the userId is equal to the one passed
+   * This is used for self service users to only show their own team members
+   */
+  filterByUserId?: boolean;
   userId?: string;
 }) {
   try {
@@ -246,7 +250,7 @@ export async function getTeamMemberForCustodianFilter({
             organizationId,
             id: { notIn: selectedTeamMembers },
             deletedAt: null,
-            userId: isSelfService && userId ? userId : undefined,
+            userId: filterByUserId && userId ? userId : undefined,
           },
           include: {
             user: {
