@@ -26,7 +26,6 @@ export function InvitationEmailTemplate({
   extraMessage,
 }: Props) {
   const { emailPrimaryColor } = config;
-
   return (
     <Html>
       <Head>

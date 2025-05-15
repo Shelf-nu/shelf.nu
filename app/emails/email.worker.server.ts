@@ -29,7 +29,7 @@ export const triggerEmail = async ({
   try {
     // send mail with defined transport object
     await transporter.sendMail({
-      from: from || SMTP_FROM || `"Shelf" <updates@emails.shelf.nu>`, // sender address
+      from: from || SMTP_FROM || `"Shelf" <hello@example.com>`, // sender address
       replyTo: replyTo || SUPPORT_EMAIL, // reply to
       to, // list of receivers
       subject, // Subject line

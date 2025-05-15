@@ -145,7 +145,7 @@ function WelcomeToTrialEmailTemplate() {
           <br />
           <Text style={{ marginBottom: "24px", ...styles.p }}>
             Need help? Our support team is ready to assist you. Check out our
-            Knowledge Base for quick answers, or reach out directly at
+            Knowledge Base for quick answers, or reach out directly at{" "}
             {SUPPORT_EMAIL}.
             <br />
             Remember, your trial gives you full access to all our premium

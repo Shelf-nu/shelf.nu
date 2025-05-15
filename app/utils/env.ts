@@ -189,7 +189,6 @@ export const GEOCODE_API_KEY = getEnv("GEOCODE_API_KEY", {
 
 export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
-  isRequired: false,
 });
 
 export const MAINTENANCE_MODE =
