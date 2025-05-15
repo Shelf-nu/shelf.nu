@@ -334,7 +334,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
       ? z.string().min(1, "Self service group id is required")
       : z.string().optional(),
     baseUserGroupId: sso
-      ? z.string().min(1, "Self service group id is required")
+      ? z.string().min(1, "Base user group id is required")
       : z.string().optional(),
     adminGroupId: sso
       ? z.string().min(1, "Administrator group id is required")
