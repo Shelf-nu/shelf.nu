@@ -1,5 +1,10 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
-import { CalendarCheck, MousePointerClick, QrCode } from "lucide-react";
+import {
+  CalendarCheck,
+  StarIcon,
+  MousePointerClick,
+  QrCode,
+} from "lucide-react";
 import { Spinner } from "./spinner";
 
 import {
@@ -28,6 +33,8 @@ import {
   LogoutIcon,
   HelpIcon,
   Profile,
+  CopyIcon,
+  SignIcon,
   UserIcon,
   GpsMarkerIcon,
   DuplicateIcon,
@@ -90,10 +97,14 @@ export type IconType =
   | "download"
   | "print"
   | "settings"
+  | "send"
+  | "deactivate"
   | "logout"
   | "help"
   | "profile"
   | "send"
+  | "copy"
+  | "sign"
   | "user"
   | "calendar"
   | "graph"
@@ -122,6 +133,8 @@ export type IconType =
   | "change"
   | "booking-exist"
   | "download-qr"
+  | "deactivate"
+  | "star"
   | "qr-code"
   | "mouse-pointer-click";
 
@@ -163,6 +176,8 @@ export const iconsMap: IconsMap = {
   profile: <Profile />,
   logout: <LogoutIcon />,
   send: <SendIcon />,
+  copy: <CopyIcon />,
+  sign: <SignIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
   bookings: <BookingsIcon />,
@@ -191,6 +206,7 @@ export const iconsMap: IconsMap = {
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
   "download-qr": <DownloadIcon />,
+  star: <StarIcon />,
   "qr-code": <QrCode />,
   "mouse-pointer-click": <MousePointerClick />,
 };

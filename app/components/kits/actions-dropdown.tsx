@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
@@ -57,7 +57,11 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   }>;
 
   const someAssetIsNotAvailable = kit.assets.some(
-    (asset) => asset.status !== "AVAILABLE"
+    (asset) => asset.status !== AssetStatus.AVAILABLE
+  );
+
+  const someAssetsCheckedOut = kit.assets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
   );
 
   const { roles, isSelfService } = useUserRoleHelper();
@@ -173,8 +177,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={someAssetIsNotAvailable}
                     aria-label="Assign/Take Custody"
+                    disabled={someAssetsCheckedOut}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}

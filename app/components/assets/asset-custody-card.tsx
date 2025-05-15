@@ -16,10 +16,12 @@ import { Card } from "../shared/card";
  * It can be either a card showing custody via a booking or custody via a long term checkout
  */
 export function CustodyCard({
+  className,
   booking,
   hasPermission,
   custody,
 }: {
+  className?: string;
   booking:
     | {
         id: string;
@@ -63,7 +65,7 @@ export function CustodyCard({
   /* If custody is present, we render the card showing custody */
   if (custody?.dateDisplay) {
     return (
-      <Card className="my-3">
+      <Card className={tw("my-3", className)}>
         <div className="flex items-center gap-3">
           <img
             src={
@@ -120,7 +122,7 @@ export function CustodyCard({
     }
 
     return (
-      <Card className="my-3">
+      <Card className={tw("my-3", className)}>
         <div className="flex items-center gap-3">
           <img
             src={
