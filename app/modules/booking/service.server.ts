@@ -1213,11 +1213,11 @@ export async function extendBooking({
         /**
          * If booking is currently OVERDUE we have to make it ONGOING
          */
-        // status:
-        //   booking.status === BookingStatus.OVERDUE
-        //     ? BookingStatus.ONGOING
-        //     : undefined,
-        // to: newEndDate,
+        status:
+          booking.status === BookingStatus.OVERDUE
+            ? BookingStatus.ONGOING
+            : undefined,
+        to: newEndDate,
       },
       include: BOOKING_INCLUDE_FOR_EMAIL,
     });
