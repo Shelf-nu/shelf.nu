@@ -15,7 +15,7 @@ import {
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
-import { INVITE_TOKEN_SECRET } from "~/utils/env";
+import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
   data,
@@ -210,7 +210,7 @@ export default function AcceptInvite() {
       <div className=" mx-[-200px] mt-20 flex flex-col items-center text-center text-gray-600">
         <p>
           If you have any questions or need assistance, please don't hesitate to
-          contact our support team at support@shelf.nu.
+          contact our support team at {SUPPORT_EMAIL}.
         </p>
       </div>
     </>

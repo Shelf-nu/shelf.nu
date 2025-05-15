@@ -16,6 +16,7 @@ declare global {
       CHROME_EXECUTABLE_PATH: string;
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
+      SUPPORT_EMAIL: string;
     };
   }
 }
@@ -53,6 +54,7 @@ declare global {
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
+      SUPPORT_EMAIL: string;
     }
   }
 }
@@ -185,6 +187,11 @@ export const GEOCODE_API_KEY = getEnv("GEOCODE_API_KEY", {
   isRequired: false,
 });
 
+export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
+  isSecret: false,
+  isRequired: false,
+});
+
 export const MAINTENANCE_MODE =
   getEnv("MAINTENANCE_MODE", {
     isSecret: false,
@@ -239,5 +246,6 @@ export function getBrowserEnv() {
     CHROME_EXECUTABLE_PATH,
     URL_SHORTENER,
     FREE_TRIAL_DAYS,
+    SUPPORT_EMAIL,
   };
 }

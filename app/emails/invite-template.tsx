@@ -10,7 +10,7 @@ import {
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
-import { SERVER_URL } from "~/utils/env";
+import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 
@@ -95,7 +95,7 @@ export function InvitationEmailTemplate({
             the workspace and start exploring features like Asset Explorer,
             Location Tracking, Collaboration, Custom fields and more. If you
             have any questions or need assistance, please don't hesitate to
-            contact our support team at support@shelf.nu.
+            contact our support team at {SUPPORT_EMAIL}.
           </Text>
 
           <Text style={{ marginBottom: "32px", ...styles.p }}>
