@@ -164,22 +164,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       custody = {
         ...kit.custody,
         dateDisplay,
-      } as {
-        // I need to specifically cast this. If I dont it doesn't recognize the id inside user
-        dateDisplay: string;
-        id: string;
-        createdAt: Date;
-        custodian: {
-          user: {
-            id: string; // Make sure this is included
-            email: string;
-            firstName: string | null;
-            lastName: string | null;
-            profilePicture: string | null;
-          } | null;
-          id: string;
-          name: string;
-        };
       };
     }
 

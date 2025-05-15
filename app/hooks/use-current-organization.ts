@@ -2,8 +2,7 @@ import { useRouteLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/_layout";
 
 /**
- * This base hook is used to access the organization from within the _layout route
- * Can only be used within the children of the _layout route
+ * This base hook is used to access the current organization
  * @returns The organization data or undefined if not found
  */
 export function useCurrentOrganization() {

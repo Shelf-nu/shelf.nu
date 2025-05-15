@@ -239,7 +239,7 @@ export default function BookingsIndexPage({
 
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
-    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
+    organization: organization as OrganizationPermissionSettings,
   });
 
   const shouldRenderCustodianFilter =

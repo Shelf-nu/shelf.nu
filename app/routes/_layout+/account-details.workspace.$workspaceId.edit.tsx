@@ -189,7 +189,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "general": {
-        // const { enabledSso } = currentOrganization;
         const schema = EditGeneralWorkspaceSettingsFormSchema(
           organization.type === "PERSONAL"
         );
@@ -215,13 +214,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
-          // ...(enabledSso && {
-          //   ssoDetails: {
-          //     selfServiceGroupId: selfServiceGroupId as string,
-          //     adminGroupId: adminGroupId as string,
-          //     baseUserGroupId: baseUserGroupId as string,
-          //   },
-          // }),
         });
 
         sendNotification({
