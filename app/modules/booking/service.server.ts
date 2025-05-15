@@ -1154,6 +1154,8 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
+          assets: { select: { id: true } },
+          from: true,
         },
       })
       .catch((cause) => {
@@ -1164,6 +1166,37 @@ export async function extendBooking({
             "Booking not found. Are you sure it exists in the current workspace?",
         });
       });
+
+    /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+    const clashingBookings = await db.booking.findMany({
+      where: {
+        id: { not: booking.id },
+        organizationId,
+        status: {
+          in: [BookingStatus.RESERVED],
+        },
+        assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+        // Check for bookings that start within the extension period
+        from: {
+          gt: booking.to!,
+          lte: newEndDate,
+        },
+      },
+      select: { id: true, name: true },
+    });
+
+    if (clashingBookings?.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Cannot extend booking because the extended period is overlapping with the following bookings:",
+        additionalData: {
+          clashingBookings: [...clashingBookings],
+        },
+        shouldBeCaptured: false,
+      });
+    }
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -1278,13 +1311,16 @@ export async function extendBooking({
 
     return updatedBooking;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
       label,
       title: "Error",
-      message: isLikeShelfError(cause)
+      message: isShelfError
         ? cause.message
         : "Something went wrong while extending the booking.",
+      additionalData: isShelfError ? cause.additionalData : undefined,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
     });
   }
 }
