@@ -27,6 +27,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -369,14 +370,10 @@ export const AssetForm = ({
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
                 {metadata?.thumbnailUrl ? (
-                  <img
-                    src={metadata?.thumbnailUrl}
-                    alt={metadata?.name}
-                    loading="lazy"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description && "rounded-b-none border-b-0"
-                    )}
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
+                    alt={metadata.name}
+                    className="size-6 rounded-[2px]"
                   />
                 ) : null}
                 <div>{name}</div>

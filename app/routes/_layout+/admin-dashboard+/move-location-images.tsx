@@ -1,7 +1,6 @@
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { v4 as uuid } from "uuid";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -10,6 +9,7 @@ import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { id } from "~/utils/id/id.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
@@ -80,7 +80,7 @@ export async function action({ context }: ActionFunctionArgs) {
       const extension = location.image.contentType.split("/").at(-1);
       const baseFileName = `${location.organizationId}/locations/${
         location.id
-      }/${uuid()}`;
+      }/${id()}`;
 
       const imagePath = `${baseFileName}.${extension}`;
       const thumbnailPath = `${baseFileName}-thumbnail.${extension}`;

@@ -9,12 +9,12 @@ import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
-import { createValidateFileAtom } from "~/atoms/file";
+import { defaultValidateFileAtom } from "~/atoms/file";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { generateLocationWithImages } from "~/modules/location/service.server";
-import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -64,7 +64,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formDataFile = await unstable_parseMultipartFormData(
       request,
       unstable_createMemoryUploadHandler({
-        maxPartSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
+        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
       })
     );
 
@@ -92,16 +92,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-const imageFileValidator = createValidateFileAtom({
-  maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
-  sizeErrorMessage: "Max file size is 8MB",
-  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
-});
-
 export default function GenerateLocations() {
   const zo = useZorm("GenerateLocations", GenerateLocationSchema);
   const disabled = useDisabled();
-  const [, validateFile] = useAtom(imageFileValidator);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   return (
     <div className="rounded-md border bg-white p-4">

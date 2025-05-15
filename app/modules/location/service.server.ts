@@ -6,7 +6,6 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import invariant from "tiny-invariant";
-import { v4 as uuid } from "uuid";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { PUBLIC_BUCKET } from "~/utils/constants";
@@ -18,6 +17,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   getFileUploadPath,
@@ -540,11 +540,15 @@ export async function generateLocationWithImages({
       await db.location.create({
         data: {
           /**
-           * We are using uuid for names because location names are unique.
+           * We are using id() for names because location names are unique.
            * This location is going to be created for testing purposes only so the name in this case
            * doesn't matter.
            */
-          name: uuid(),
+          name: id(),
+          /**
+           * This approach is @deprecated and will not be used in the future.
+           * Instead, we will store images in supabase storage and use the public URL.
+           */
           image: { connect: { id: imageCreated.id } },
           user: {
             connect: {

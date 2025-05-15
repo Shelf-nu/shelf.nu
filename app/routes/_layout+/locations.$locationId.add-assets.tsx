@@ -18,6 +18,7 @@ import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
@@ -47,7 +48,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -422,13 +422,10 @@ export default function AddAssetsToLocation() {
           renderItem={({ metadata }) => (
             <div className="flex items-center gap-2">
               {metadata?.thumbnailUrl ? (
-                <img
-                  src={metadata.thumbnailUrl}
+                <ImageWithPreview
+                  thumbnailUrl={metadata.thumbnailUrl}
                   alt={metadata.name}
-                  className={tw(
-                    "size-6 rounded-[2px] object-cover",
-                    metadata.description && "rounded-b-none border-b-0"
-                  )}
+                  className="size-6 rounded-[2px]"
                 />
               ) : null}
               <div>{metadata.name}</div>

@@ -2,6 +2,7 @@ import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -27,7 +28,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -135,14 +135,10 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
         <div className="flex items-center gap-3">
           <div className="flex size-12 items-center justify-center">
             {item.thumbnailUrl ? (
-              <img
-                src={item.thumbnailUrl}
+              <ImageWithPreview
+                thumbnailUrl={item.thumbnailUrl}
                 alt={item.name}
-                loading="lazy"
-                className={tw(
-                  "size-full rounded-[4px] border object-cover",
-                  item.description && "rounded-b-none border-b-0"
-                )}
+                className="size-full"
               />
             ) : null}
           </div>

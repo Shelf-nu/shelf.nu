@@ -5,7 +5,6 @@ import {
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
-import { v4 as uuid } from "uuid";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "./constants";
 import { cropImage } from "./crop-image";
@@ -13,6 +12,7 @@ import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { id } from "./id/id.server";
 import {
   cacheOptimizedImage,
   type CachedImage,
@@ -501,47 +501,7 @@ export function getFileUploadPath({
   type: "locations";
   typeId: string;
 }) {
-  return `${organizationId}/${type}/${typeId}/${uuid()}`;
-}
-
-/**
- * This function uploads the file to `files` bucket in Supabase.
- * `files` bucket is public and can be accessed by anyone.
- * After uploading the file, it returns the public URL of the file.
- */
-export async function uploadPublicFile({
-  fileData,
-  path,
-}: {
-  fileData: ArrayBuffer;
-  /*
-   * The path to upload file
-   * Format: `organizationId/type/typeId/fileName`
-   */
-  path: string;
-}) {
-  try {
-    const { data, error } = await getSupabaseAdmin()
-      .storage.from(PUBLIC_BUCKET)
-      .upload(path, fileData);
-
-    if (error) {
-      throw error;
-    }
-
-    const {
-      data: { publicUrl },
-    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(data.path);
-
-    return publicUrl;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while uploading the file. Please try again.",
-      label,
-    });
-  }
+  return `${organizationId}/${type}/${typeId}/${id()}`;
 }
 
 /**

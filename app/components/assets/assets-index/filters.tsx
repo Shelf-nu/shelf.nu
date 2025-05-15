@@ -2,6 +2,7 @@ import { AssetStatus } from "@prisma/client";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
@@ -17,7 +18,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
-import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
@@ -124,14 +124,10 @@ export function AssetIndexFilters({
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
                   {metadata?.thumbnailUrl ? (
-                    <img
-                      src={metadata?.thumbnailUrl}
+                    <ImageWithPreview
+                      thumbnailUrl={metadata.thumbnailUrl}
                       alt={metadata.name}
-                      loading="lazy"
-                      className={tw(
-                        "size-6 rounded-[2px] border object-cover",
-                        metadata.description && "rounded-b-none border-b-0"
-                      )}
+                      className="size-6 rounded-[2px]"
                     />
                   ) : null}
                   <div>{metadata.name}</div>
