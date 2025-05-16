@@ -7,7 +7,7 @@ import {
   Container,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
-import { SERVER_URL } from "~/utils/env";
+import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { LogoForEmail } from "../logo";
@@ -64,7 +64,7 @@ Custom Fields: Tailor Shelf to your specific needs - https://www.shelf.nu/knowle
 Bookings: Efficiently manage equipment reservations - https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature
 Kits: Group related assets for easier management - https://www.shelf.nu/features/kits
 
-Need help? Our support team is ready to assist you. Check out our Knowledge Base for quick answers, or reach out directly at support@shelf.nu.
+Need help? Our support team is ready to assist you. Check out our Knowledge Base for quick answers, or reach out directly at ${SUPPORT_EMAIL}.
 
 Remember, your trial gives you full access to all our premium features. Make the most of it!
 
@@ -145,8 +145,8 @@ function WelcomeToTrialEmailTemplate() {
           <br />
           <Text style={{ marginBottom: "24px", ...styles.p }}>
             Need help? Our support team is ready to assist you. Check out our
-            Knowledge Base for quick answers, or reach out directly at
-            support@shelf.nu.
+            Knowledge Base for quick answers, or reach out directly at{" "}
+            {SUPPORT_EMAIL}.
             <br />
             Remember, your trial gives you full access to all our premium
             features. Make the most of it!
