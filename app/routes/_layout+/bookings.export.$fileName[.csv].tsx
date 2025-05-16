@@ -19,7 +19,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+    const { organizationId, currentOrganization, canSeeAllBookings } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -43,10 +43,10 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     /** Join the rows with a new line */
     const csvString = await exportBookingsFromIndexToCsv({
       request,
-      organizationId,
       bookingsIds: bookingsIds.split(","),
       userId,
-      isSelfServiceOrBase,
+      canSeeAllBookings,
+      organizationId,
     });
 
     return new Response(csvString, {

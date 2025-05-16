@@ -56,7 +56,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       search,
       userId: authSession?.userId,
-      custodianUserId: selectedUserId,
+      custodianUserId: selectedUserId, // Here we just hardcode the userId because user profiles cannot be seen by other selfService or Base users
       ...(status && {
         // If status is in the params, we filter based on it
         statuses: [status],

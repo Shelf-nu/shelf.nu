@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { getAssetsTabLoaderData } from "~/modules/asset/service.server";
+import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -8,6 +8,13 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { AssetsList } from "./assets._index";
+
+/**
+ * Handle is used for properly displaying columns in AssetsList
+ */
+export const handle = {
+  name: "me.assets",
+};
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -21,7 +28,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { headers, ...loaderData } = await getAssetsTabLoaderData({
+    const { headers, ...loaderData } = await getUserAssetsTabLoaderData({
       userId,
       request,
       organizationId,
