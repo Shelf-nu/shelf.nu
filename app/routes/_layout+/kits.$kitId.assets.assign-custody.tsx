@@ -247,7 +247,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return redirect(`/kits/${kitId}`);
+    return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });

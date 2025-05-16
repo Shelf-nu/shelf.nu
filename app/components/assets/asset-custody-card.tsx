@@ -123,7 +123,7 @@ export function CustodyCard({
     }
 
     return (
-      <Card className="my-3">
+      <Card className={tw("my-3", className)}>
         <div className="flex items-center gap-3">
           <img
             src={

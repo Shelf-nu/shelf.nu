@@ -255,7 +255,7 @@ function ListContent({
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          to={`/kits/${item.id}`}
+          to={`/kits/${item.id}/assets`}
           className={tw(
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
