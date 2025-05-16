@@ -4,7 +4,7 @@ import { useMatches } from "@remix-run/react";
 /**
  * @description This hook checks if the current page is a user page.
  */
-export function useIsUserPage(): boolean {
+export function useIsUserAssetsPage(): boolean {
   const matches = useMatches() as UIMatch<any, any>[];
   const currentRoute = matches.at(-1);
 

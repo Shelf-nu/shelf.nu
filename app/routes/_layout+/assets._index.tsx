@@ -46,7 +46,7 @@ import { db } from "~/database/db.server";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useIsUserPage } from "~/hooks/use-is-user-page";
+import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -294,7 +294,7 @@ export const AssetsList = ({
     (fetcher) => fetcher.key === "asset-index-settings-mode"
   );
 
-  const isUserPage = useIsUserPage();
+  const isUserPage = useIsUserAssetsPage();
 
   // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
