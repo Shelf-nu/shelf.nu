@@ -3,11 +3,10 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/assets.$assetId.overview.update-location";
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 
 import { XIcon } from "../icons/library";
-import { Image } from "../shared/image";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 
 export const LocationSelect = ({
   isBulk = false,
@@ -58,14 +57,13 @@ export const LocationSelect = ({
           }
           renderItem={({ name, metadata }) => (
             <div className="flex items-center gap-2">
-              <Image
-                imageId={metadata.imageId}
-                alt="img"
-                className={tw(
-                  "size-6 rounded-[2px] object-cover",
-                  metadata.description ? "rounded-b-none border-b-0" : ""
-                )}
-              />
+              {metadata?.thumbnailUrl ? (
+                <ImageWithPreview
+                  thumbnailUrl={metadata.thumbnailUrl}
+                  alt={metadata.name}
+                  className="size-6 rounded-[2px]"
+                />
+              ) : null}
               <div>{name}</div>
             </div>
           )}
