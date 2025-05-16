@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import type { BookLink } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
 import { GenericBookActionsDropdown } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { isPersonalOrg } from "~/utils/organization";
 

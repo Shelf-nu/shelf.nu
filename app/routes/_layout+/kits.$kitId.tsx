@@ -43,6 +43,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -63,12 +64,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.read,
+      });
 
     let [kit, qrObj] = await Promise.all([
       getKit({
@@ -178,6 +180,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         qrObj,
         lastScan,
+        currentOrganization,
+        userId,
       })
     );
   } catch (cause) {
@@ -302,7 +306,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function KitDetails() {
   usePosition();
-  const { kit, currentBooking, qrObj, lastScan } =
+  const { kit, currentBooking, qrObj, lastScan, userId, currentOrganization } =
     useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
 
@@ -372,10 +376,11 @@ export default function KitDetails() {
             className="mt-0"
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
-            hasPermission={userHasPermission({
+            hasPermission={userCanViewSpecificCustody({
               roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
+              custodianUserId: kit?.custody?.custodian?.user?.id,
+              organization: currentOrganization,
+              currentUserId: userId,
             })}
             custody={kit.custody}
           />

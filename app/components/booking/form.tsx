@@ -18,6 +18,7 @@ import type { loader } from "~/routes/_layout+/bookings.new";
 import { type getHints } from "~/utils/client-hints";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -215,9 +216,9 @@ export function BookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers } = useLoaderData<typeof loader>();
+  const { teamMembers, userId, currentOrganization } =
+    useLoaderData<typeof loader>();
   const [endDate, setEndDate] = useState(incomingEndDate);
-
   /** If there is noId, that means we are creating a new booking */
   const isNewBooking = !id;
 
@@ -263,6 +264,13 @@ export function BookingForm({ booking, action }: BookingFormData) {
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
+  const userCanSeeCustodian = userCanViewSpecificCustody({
+    roles,
+    custodianUserId: defaultTeamMember?.user?.id,
+    organization: currentOrganization,
+    currentUserId: userId,
+  });
+
   useEffect(
     function updateEndDate() {
       if (incomingEndDate) {
@@ -272,11 +280,24 @@ export function BookingForm({ booking, action }: BookingFormData) {
     [incomingEndDate]
   );
 
+  /**
+   * Check whether the user can see actions
+   * 1. Admin/Owner always can see all
+   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
+   * 3. BASE can see actions if they are the custodian of the booking
+   */
+
+  const canSeeActions =
+    !isBaseOrSelfService ||
+    (isBaseOrSelfService &&
+      (defaultTeamMember?.userId === userId ||
+        defaultTeamMember?.id === userId));
+
   return (
     <div>
       <Form ref={zo.ref} method="post" action={action}>
         {/* Render the actions on top only when the form is in edit mode */}
-        {!isNewBooking ? (
+        {!isNewBooking && canSeeActions ? (
           <AbsolutePositionedHeaderActions>
             <When truthy={isBase}>
               <BookingProcessSidebar />
@@ -517,7 +538,11 @@ export function BookingForm({ booking, action }: BookingFormData) {
                       userId: item?.userId,
                     }),
                   })}
-                  renderItem={(item) => resolveTeamMemberName(item, true)}
+                  renderItem={(item) =>
+                    userCanSeeCustodian || isNewBooking
+                      ? resolveTeamMemberName(item, true)
+                      : "Private"
+                  }
                 />
 
                 {zo.errors.custodian()?.message ? (

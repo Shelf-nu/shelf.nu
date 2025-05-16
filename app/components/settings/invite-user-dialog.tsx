@@ -3,7 +3,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { UserIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";

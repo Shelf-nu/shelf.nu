@@ -96,7 +96,7 @@ export const useVideoDevices = () => {
                 your device's camera to scan QR codes.
               </p>
               <Button variant="secondary" onClick={getDevices} className="mt-4">
-                {/* @TODO this doesnt work in chrome or firefox on the web, only on mobile. Only tested on iPhone */}
+                {/* NOTE: this doesnt work in chrome or firefox on the web, only on mobile. Only tested on iPhone */}
                 Request permissions again
               </Button>
             </>

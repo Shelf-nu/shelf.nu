@@ -38,7 +38,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       perPage,
       search,
       userId,
-      custodianUserId: userId,
+      custodianUserId: userId, // Here we just hardcode the userId because only current user can see their own bookings
       ...(status && {
         // If status is in the params, we filter based on it
         statuses: [status],

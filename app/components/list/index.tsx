@@ -9,6 +9,7 @@ import {
 } from "~/atoms/list";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -133,6 +134,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     setSelectedBulkItems([...items, { id: ALL_SELECTED_KEY }]);
   }
 
+  const isUserPage = useIsUserAssetsPage();
+
   return (
     <div
       ref={ref}
@@ -247,6 +250,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                     item={item}
                     extraProps={extraItemComponentProps}
                     bulkActions={bulkActions}
+                    isUserPage={isUserPage}
                   />
                 </ListItem>
               ))}

@@ -70,7 +70,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        isSelfService: isSelfServiceOrBase,
         userId,
       }),
     ]);

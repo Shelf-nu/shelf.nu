@@ -13,7 +13,7 @@ import {
 } from "~/components/shared/dropdown";
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";

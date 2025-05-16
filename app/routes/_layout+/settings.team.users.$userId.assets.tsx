@@ -1,7 +1,7 @@
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { getAssetsTabLoaderData } from "~/modules/asset/service.server";
+import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
 import {
@@ -31,7 +31,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       }
     );
 
-    const { headers, ...loaderData } = await getAssetsTabLoaderData({
+    const { headers, ...loaderData } = await getUserAssetsTabLoaderData({
       userId: selectedUserId,
       request,
       organizationId,
@@ -53,6 +53,7 @@ export default function UserAssetsPage() {
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}
+      wrapperClassName="pt-0 [&>div]:md:mt-0"
     />
   );
 }
