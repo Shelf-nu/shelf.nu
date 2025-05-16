@@ -312,7 +312,7 @@ export const AssetsList = ({
       <Th>Category</Th>
       <Th>Tags</Th>
       <When truthy={!isUserPage}>
-        <Th>
+        <Th className="flex items-center gap-1 whitespace-nowrap">
           Custodian{" "}
           <InfoTooltip
             iconClassName="size-4"
