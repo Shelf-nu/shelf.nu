@@ -16,6 +16,8 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -205,7 +207,24 @@ export default function KitsIndexPage() {
             <>
               <Th>Description</Th>
               <Th>Assets</Th>
-              <Th>Custodian</Th>
+              <Th className="flex items-center gap-1 whitespace-nowrap">
+                Custodian{" "}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <>
+                      <h6>Asset custody</h6>
+                      <p>
+                        This column shows if a user has custody of the asset
+                        either via direct assignment or via a booking. If you
+                        see <GrayBadge>private</GrayBadge> that means you don't
+                        have the permissions to see who has custody of the
+                        asset.
+                      </p>
+                    </>
+                  }
+                />
+              </Th>
               <Th>Actions</Th>
             </>
           }
