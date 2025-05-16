@@ -1,6 +1,6 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit, Prisma } from "@prisma/client";
+import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -32,36 +32,17 @@ import {
 import { getAllSelectedValuesFromFilters } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
+import type { OrganizationFromUser } from "../organization/service.server";
 import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
-
-type Org = Prisma.OrganizationGetPayload<{
-  select: {
-    id: true;
-    type: true;
-    name: true;
-    imageId: true;
-    userId: true;
-    updatedAt: true;
-    currency: true;
-    enabledSso: true;
-    owner: {
-      select: {
-        id: true;
-        email: true;
-      };
-    };
-    ssoDetails: true;
-  };
-}>;
 
 interface Props {
   request: Request;
   userId: string;
   organizationId: string;
-  organizations: Org[];
+  organizations: OrganizationFromUser[];
   role: OrganizationRoles;
-  currentOrganization: Org;
+  currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
   settings: AssetIndexSettings;
 }
@@ -78,7 +59,6 @@ export async function simpleModeLoader({
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
   /** Parse filters */
   const {
     filters,
@@ -120,8 +100,6 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
-      isSelfService,
-      userId,
     }),
   ]);
 
@@ -293,7 +271,6 @@ export async function advancedModeLoader({
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: false, // we can assume this is false because this view is not allowed for
       userId,
     }),
 

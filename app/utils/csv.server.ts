@@ -502,14 +502,14 @@ export async function exportBookingsFromIndexToCsv({
   request,
   userId,
   bookingsIds,
+  canSeeAllBookings,
   organizationId,
-  isSelfServiceOrBase,
 }: {
   request: Request;
   userId: string;
   bookingsIds: string[];
+  canSeeAllBookings: boolean;
   organizationId: string;
-  isSelfServiceOrBase: boolean;
 }) {
   try {
     const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
@@ -528,9 +528,9 @@ export async function exportBookingsFromIndexToCsv({
         selfServiceData,
       } = await getBookingsFilterData({
         request,
-        isSelfServiceOrBase,
-        userId,
+        canSeeAllBookings,
         organizationId,
+        userId,
       });
 
       const bookingsData = await getBookings({

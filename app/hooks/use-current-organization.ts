@@ -2,7 +2,7 @@ import { useRouteLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/_layout";
 
 /**
- * This base hook is used to access the organization from within the _layout route
+ * This base hook is used to access the current organization
  * @returns The organization data or undefined if not found
  */
 export function useCurrentOrganization() {
@@ -10,11 +10,6 @@ export function useCurrentOrganization() {
     "routes/_layout+/_layout"
   );
 
-  if (!layoutData || !layoutData.organizations) {
-    return undefined;
-  }
-
-  return layoutData.organizations.find(
-    (organization) => organization.id === layoutData.currentOrganizationId
-  );
+  /** We make sure that currentOrganization exists within the loader, so layoutData cannot be null in this case */
+  return layoutData?.currentOrganization;
 }

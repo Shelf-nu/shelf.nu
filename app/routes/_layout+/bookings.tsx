@@ -24,7 +24,9 @@ import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -40,11 +42,12 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -53,13 +56,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase, currentOrganization } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      currentOrganization,
+      isSelfServiceOrBase,
+      canSeeAllBookings,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -84,9 +92,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       cookie,
     } = await getBookingsFilterData({
       request,
-      isSelfServiceOrBase,
-      userId,
+      canSeeAllBookings,
       organizationId,
+      userId,
     });
 
     const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
@@ -113,7 +121,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
         userId,
       }),
     ]);
@@ -134,6 +142,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         header,
+        currentOrganization,
         items,
         search,
         page,
@@ -195,6 +204,7 @@ export default function BookingsIndexPage({
   const matches = useMatches();
 
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -226,6 +236,18 @@ export default function BookingsIndexPage({
 
   const isBookingUpdateExisting =
     currentRoute?.handle?.name === "bookings.update-existing";
+
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings,
+  });
+
+  const shouldRenderCustodianFilter =
+    canSeeAllCustody &&
+    !["$userId.bookings", "me.bookings"].includes(
+      // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
+      currentRoute?.handle?.name
+    );
 
   return shouldRenderIndex ? (
     //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
@@ -263,20 +285,7 @@ export default function BookingsIndexPage({
             ),
           }}
         >
-          <When
-            truthy={
-              userHasPermission({
-                roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
-              }) &&
-              !isBaseOrSelfService &&
-              !["$userId.bookings", "me.bookings"].includes(
-                // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
-                currentRoute?.handle?.name
-              )
-            }
-          >
+          <When truthy={shouldRenderCustodianFilter}>
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
@@ -303,7 +312,7 @@ export default function BookingsIndexPage({
               <BulkActionsDropdown />
             )
           }
-          ItemComponent={ListAssetContent}
+          ItemComponent={ListBookingsContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           headerChildren={
             <>
@@ -330,7 +339,7 @@ export default function BookingsIndexPage({
   );
 }
 
-const ListAssetContent = ({
+const ListBookingsContent = ({
   item,
 }: {
   item: Prisma.BookingGetPayload<{
@@ -364,6 +373,7 @@ const ListAssetContent = ({
     item.assets.some(
       (asset) => !asset.availableToBook || asset.custody !== null
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
+
   return (
     <>
       {/* Item */}
@@ -429,20 +439,24 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
+
       <Td>
-        {item?.custodianUser ? (
-          <UserBadge
-            img={
-              item?.custodianUser?.profilePicture ||
-              "/static/images/default_pfp.jpg"
-            }
-            name={`${item?.custodianUser?.firstName || ""} ${
-              item?.custodianUser?.lastName || ""
-            }`}
-          />
-        ) : item?.custodianTeamMember ? (
-          <UserBadge name={item.custodianTeamMember.name} />
-        ) : null}
+        <TeamMemberBadge
+          teamMember={{
+            name: item.custodianTeamMember
+              ? item.custodianTeamMember.name
+              : `${item.custodianUser?.firstName} ${item.custodianUser?.lastName}`,
+            user: item?.custodianUser
+              ? {
+                  id: item?.custodianUser?.id,
+                  firstName: item?.custodianUser?.firstName,
+                  lastName: item?.custodianUser?.lastName,
+                  email: item?.custodianUser?.email,
+                  profilePicture: item?.custodianUser?.profilePicture,
+                }
+              : null,
+          }}
+        />
       </Td>
 
       {/* Created by */}

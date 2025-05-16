@@ -8,6 +8,7 @@ import { NODE_ENV, SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
+import type { OrganizationFromUser } from "./service.server";
 import { getUserOrganizations } from "./service.server";
 
 const label: ErrorLabel = "Organization";
@@ -87,10 +88,12 @@ export async function getSelectedOrganisation({
     });
   }
 
+  const nonNullCurrentOrganization: OrganizationFromUser = currentOrganization;
+
   return {
     organizationId,
     organizations,
     userOrganizations,
-    currentOrganization,
+    currentOrganization: nonNullCurrentOrganization,
   };
 }

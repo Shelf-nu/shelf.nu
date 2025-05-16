@@ -40,6 +40,7 @@ export const links: LinksFunction = () => [
 
 export type ScannerLoader = typeof loader;
 
+// @TODO - to improve this we should place the action in the URL params and only fetch certain data depending on the action
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -62,8 +63,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
 
-    // @TODO - to improve this we should place the action in the params and only fetch certain data depending on the action
-
     /** Get team members for form teamMember select */
     const { teamMemberIds } = paramsValues;
     const teamMemberData = await getTeamMemberForCustodianFilter({
@@ -72,7 +71,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: role === OrganizationRoles.SELF_SERVICE, // we can assume this is false because this view is not allowed for
+      filterByUserId: role === OrganizationRoles.SELF_SERVICE, // SElf service can only assign themselves and base users cant assign at all
       userId,
     });
     /** End team members */

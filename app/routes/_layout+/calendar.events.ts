@@ -16,18 +16,20 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     const calendarEvents = await getBookingsForCalendar({
       request,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      canSeeAllBookings,
+      canSeeAllCustody,
     });
 
     return new Response(JSON.stringify(calendarEvents), {
