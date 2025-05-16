@@ -253,7 +253,7 @@ function ListContent({
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          to={`/kits/${item.id}`}
+          to={`/kits/${item.id}/assets`}
           className="flex justify-between gap-3 p-4 md:justify-normal md:pl-0 md:pr-6"
         >
           <div className="flex items-center gap-3">

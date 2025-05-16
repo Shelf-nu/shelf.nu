@@ -19,6 +19,7 @@ export function CustodyCard({
   booking,
   hasPermission,
   custody,
+  className,
 }: {
   booking:
     | {
@@ -47,6 +48,7 @@ export function CustodyCard({
       > | null;
     };
   } | null;
+  className?: string;
 }) {
   const { roles } = useUserRoleHelper();
   const canViewTeamMemberUsers = userHasPermission({
@@ -63,7 +65,7 @@ export function CustodyCard({
   /* If custody is present, we render the card showing custody */
   if (custody?.dateDisplay) {
     return (
-      <Card className="my-3">
+      <Card className={tw("my-3", className)}>
         <div className="flex items-center gap-3">
           <img
             src={
@@ -120,7 +122,7 @@ export function CustodyCard({
     }
 
     return (
-      <Card className="my-3">
+      <Card className={tw("my-3", className)}>
         <div className="flex items-center gap-3">
           <img
             src={
