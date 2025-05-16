@@ -35,7 +35,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -56,7 +56,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         search,
         userId,
         statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-        ...(isSelfServiceOrBase && {
+        ...(!canSeeAllBookings && {
           // If the user is self service, we only show bookings that belong to that user)
           custodianUserId: userId,
         }),
