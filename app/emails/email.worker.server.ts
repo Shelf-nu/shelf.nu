@@ -1,7 +1,7 @@
 import { transporter } from "~/emails/transporter.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { EmailPayloadType } from "./types";
-import { SMTP_FROM } from "../utils/env";
+import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
 import { ShelfError } from "../utils/error";
 
 // every node will execute 5 jobs(teamSize) every 3 minutes(newJobCheckIntervalSeconds),
@@ -29,8 +29,8 @@ export const triggerEmail = async ({
   try {
     // send mail with defined transport object
     await transporter.sendMail({
-      from: from || SMTP_FROM || `"Shelf" <updates@emails.shelf.nu>`, // sender address
-      replyTo: replyTo || "support@shelf.nu", // reply to
+      from: from || SMTP_FROM || `"Shelf" <hello@example.com>`, // sender address
+      replyTo: replyTo || SUPPORT_EMAIL, // reply to
       to, // list of receivers
       subject, // Subject line
       text, // plain text body
