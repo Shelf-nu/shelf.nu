@@ -27,7 +27,24 @@ export const ListItem = ({
       if (navigate) {
         // Check if Ctrl or Cmd key is pressed
         if (window && (event.ctrlKey || event.metaKey)) {
-          window.open(window.location.href + "/" + item.id);
+          // Convert the navigate function to a string
+          const navigateStr = String(navigate);
+
+          // Use regex to extract the path pattern
+          const pathMatch = navigateStr.match(/navigate\(`([^`]+)`\)/);
+
+          if (pathMatch && pathMatch[1]) {
+            // Replace any ${id} in the path with the actual item.id
+            const pathTemplate = pathMatch[1];
+            // eslint-disable-next-line no-template-curly-in-string
+            const path = pathTemplate.replace("${id}", item.id);
+
+            // Use origin to get the base URL without path components
+            window.open(window.location.origin + path);
+          } else {
+            // Fallback to the original approach if regex fails
+            window.open(window.location.href + "/" + item.id);
+          }
           return;
         }
 

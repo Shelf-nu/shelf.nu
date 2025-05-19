@@ -11,7 +11,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -216,7 +216,7 @@ export default function LocationPage() {
               slots={{
                 "right-of-search": (
                   <SortBy
-                    sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                    sortingOptions={ASSET_SORTING_OPTIONS}
                     defaultSortingBy="createdAt"
                   />
                 ),

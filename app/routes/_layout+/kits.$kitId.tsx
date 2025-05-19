@@ -6,32 +6,20 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import { AssetImage } from "~/components/assets/asset-image/component";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
-import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
-import ContextualModal from "~/components/layout/contextual-modal";
-import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { List } from "~/components/list";
-import { Filters } from "~/components/list/filters";
-import { SortBy } from "~/components/list/filters/sort-by";
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 import { QrPreview } from "~/components/qr/qr-preview";
-import { Badge } from "~/components/shared/badge";
-import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import TextualDivider from "~/components/shared/textual-divider";
-import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
@@ -39,11 +27,9 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteKit,
   deleteKitImage,
-  getAssetsForKits,
   getKit,
   getKitCurrentBooking,
 } from "~/modules/kit/service.server";
-import type { ListItemForKitPage } from "~/modules/kit/types";
 import { createNote } from "~/modules/note/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -65,7 +51,6 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -87,9 +72,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const isManageAssetsUrl = request.url.includes("manage-assets");
-
-    let [kit, assets, qrObj] = await Promise.all([
+    let [kit, qrObj] = await Promise.all([
       getKit({
         id: kitId,
         organizationId,
@@ -140,12 +123,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         userOrganizations,
         request,
-      }),
-      getAssetsForKits({
-        request,
-        organizationId,
-        kitId,
-        ignoreFilters: isManageAssetsUrl,
       }),
       generateQrObj({
         kitId,
@@ -200,7 +177,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         currentBooking,
         header,
-        ...assets,
         modelName,
         qrObj,
         lastScan,
@@ -336,11 +312,10 @@ export default function KitDetails() {
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
 
-  const userRoleCanManageAssets = userHasPermission({
-    roles,
-    entity: PermissionEntity.kit,
-    action: PermissionAction.manageAssets,
-  });
+  const items = [
+    { to: "assets", content: "Assets" },
+    { to: "bookings", content: "Bookings" },
+  ];
 
   return (
     <>
@@ -378,78 +353,12 @@ export default function KitDetails() {
         <BookingActionsDropdown />
       </Header>
 
-      <ContextualSidebar />
-      <ContextualModal />
+      <HorizontalTabs items={items} />
 
       <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
-        {/* Left column - assets list */}
+        {/* Left column */}
         <div className="flex-1 overflow-hidden">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            {userRoleCanManageAssets ? (
-              <Button
-                to="manage-assets?status=AVAILABLE"
-                variant="primary"
-                width="full"
-              >
-                Manage assets
-              </Button>
-            ) : null}
-            <div className="w-full">
-              <ActionsDropdown fullWidth />
-            </div>
-          </div>
-
-          <div className="flex flex-col md:gap-2">
-            <Filters
-              className="responsive-filters mb-2 lg:mb-0"
-              slots={{
-                "right-of-search": (
-                  <SortBy
-                    sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
-                    defaultSortingBy="createdAt"
-                  />
-                ),
-              }}
-            >
-              {userRoleCanManageAssets ? (
-                <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                  <div className="hidden lg:block">
-                    <Button
-                      to="manage-assets?status=AVAILABLE"
-                      variant="primary"
-                      width="full"
-                      className="whitespace-nowrap"
-                    >
-                      Manage assets
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </Filters>
-            <List
-              ItemComponent={ListContent}
-              customEmptyStateContent={{
-                title: "Not assets in kit",
-                text: userRoleCanManageAssets
-                  ? "Start by adding your first asset."
-                  : "",
-                newButtonContent: userRoleCanManageAssets
-                  ? "Manage assets"
-                  : undefined,
-                newButtonRoute: userRoleCanManageAssets
-                  ? "manage-assets?status=AVAILABLE"
-                  : undefined,
-              }}
-              headerChildren={
-                <>
-                  <Th>Category</Th>
-                  <Th>Location</Th>
-                  <Th>Tags</Th>
-                </>
-              }
-            />
-          </div>
+          <Outlet />
         </div>
 
         {/* Right column */}
@@ -464,6 +373,7 @@ export default function KitDetails() {
 
           {/* Kit Custody */}
           <CustodyCard
+            className="mt-0"
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
             hasPermission={userCanViewSpecificCustody({
@@ -473,7 +383,6 @@ export default function KitDetails() {
               currentUserId: userId,
             })}
             custody={kit.custody}
-            className="mt-px"
           />
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
@@ -497,84 +406,6 @@ export default function KitDetails() {
           ) : null}
         </div>
       </div>
-    </>
-  );
-}
-
-function ListContent({ item }: { item: ListItemForKitPage }) {
-  const { location, category, tags } = item;
-
-  const { roles } = useUserRoleHelper();
-  return (
-    <>
-      <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="relative flex size-14 shrink-0 items-center justify-center">
-              <AssetImage
-                asset={{
-                  id: item.id,
-                  mainImage: item.mainImage,
-                  thumbnailImage: item.thumbnailImage,
-                  mainImageExpiration: item.mainImageExpiration,
-                }}
-                alt={item.title}
-                className="size-full rounded-[4px] border object-cover"
-                withPreview
-              />
-            </div>
-            <div className="min-w-[180px]">
-              <span className="word-break mb-1 block">
-                <Button
-                  to={`/assets/${item.id}`}
-                  variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
-                  target={"_blank"}
-                  onlyNewTabIconOnHover
-                >
-                  {item.title}
-                </Button>
-              </span>
-              <AssetStatusBadge
-                status={item.status}
-                availableToBook={item.availableToBook}
-              />
-            </div>
-          </div>
-        </div>
-      </Td>
-
-      <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : null}
-      </Td>
-
-      <Td>
-        {location ? (
-          <GrayBadge>
-            <span>{location.name}</span>
-          </GrayBadge>
-        ) : null}
-      </Td>
-      {/* Tags */}
-      <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
-      </Td>
-
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.manageAssets,
-        })}
-      >
-        <Td className="pr-4 text-right">
-          <AssetRowActionsDropdown asset={item} />
-        </Td>
-      </When>
     </>
   );
 }

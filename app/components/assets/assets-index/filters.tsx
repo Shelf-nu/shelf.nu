@@ -16,12 +16,11 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
-export const ASSET_INDEX_SORTING_OPTIONS = {
+export const ASSET_SORTING_OPTIONS = {
   title: "Name",
   createdAt: "Date created",
   updatedAt: "Date updated",
@@ -56,7 +55,7 @@ export function AssetIndexFilters({
           "left-of-search": <StatusFilter statusItems={AssetStatus} />,
           "right-of-search": (
             <SortBy
-              sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+              sortingOptions={ASSET_SORTING_OPTIONS}
               defaultSortingBy="createdAt"
             />
           ),
