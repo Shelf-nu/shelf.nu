@@ -387,7 +387,10 @@ const ListBookingsContent = ({
                 {item.name}
               </span>
               <div className="">
-                <BookingStatusBadge status={item.status} />
+                <BookingStatusBadge
+                  status={item.status}
+                  custodianUserId={item.custodianUserId || undefined}
+                />
               </div>
             </div>
           </div>
