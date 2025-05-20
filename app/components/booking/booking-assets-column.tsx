@@ -23,6 +23,7 @@ import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
 import { BookingPagination } from "./booking-pagination";
 import When from "../when/when";
+import KitImage from "../kits/kit-image";
 
 export function BookingAssetsColumn() {
   const { userId, booking, paginatedItems, totalPaginationItems } =
@@ -186,21 +187,36 @@ export function BookingAssetsColumn() {
                               className="pseudo-border-bottom bg-gray-50"
                             >
                               <Td className="max-w-full">
-                                <Button
-                                  to={`/kits/${kit.id}`}
-                                  variant="link"
-                                  className="text-gray-900 hover:text-gray-700"
-                                  target={"_blank"}
-                                  onlyNewTabIconOnHover={true}
-                                  aria-label="Go to kit"
-                                >
-                                  <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
-                                    {kit.name}
+                                <div className="flex items-center gap-3">
+                                  <KitImage
+                                    kit={{
+                                      image: kit.image,
+                                      imageExpiration: kit.imageExpiration,
+                                      alt: kit.name,
+                                      kitId: kit.id,
+                                    }}
+                                    className={tw(
+                                      "size-12 rounded-[4px] border object-cover"
+                                    )}
+                                  />
+                                  <div>
+                                    <Button
+                                      to={`/kits/${kit.id}`}
+                                      variant="link"
+                                      className="text-gray-900 hover:text-gray-700"
+                                      target={"_blank"}
+                                      onlyNewTabIconOnHover={true}
+                                      aria-label="Go to kit"
+                                    >
+                                      <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
+                                        {kit.name}
+                                      </div>
+                                    </Button>
+                                    <p className="text-sm text-gray-600">
+                                      {item.assets.length} assets
+                                    </p>
                                   </div>
-                                </Button>
-                                <p className="text-sm text-gray-600">
-                                  {item.assets.length} assets
-                                </p>
+                                </div>
                               </Td>
 
                               <Td> </Td>

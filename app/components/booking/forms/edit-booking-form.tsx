@@ -149,7 +149,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         defaultTeamMember?.id === userId));
 
   return (
-    <div>
+    <div className="flex-1">
       <Form ref={zo.ref} method="post" action={action}>
         {/* Render the actions on top only when the form is in edit mode */}
         {canSeeActions ? (
@@ -297,8 +297,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     />
                   </div>
                 </div>
-                <div>
-                  <div className="m-0 h-full [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:h-full">
+                <div className="flex-1">
+                  <div className="m-0 h-full [&_.form-row-children-wrapper]:w-full [&_.form-row-children-wrapper]:min-w-[512px] [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full">
                     <DescriptionField
                       description={description || undefined}
                       fieldName={zo.fields.description()}

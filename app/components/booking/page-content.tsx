@@ -17,15 +17,14 @@ export function BookingPageContent() {
     totalKits,
     totalValue,
     currentOrganization,
+    allCategories,
   } = useLoaderData<BookingPageLoaderData>();
   const hints = useHints();
-
   const custodian = teamMembers.find((member) =>
     booking.custodianUserId
       ? booking.custodianUserId === member?.userId
       : booking.custodianTeamMemberId === member.id
   );
-
   return (
     <div
       id="NewBookingFormWrapper"
@@ -54,6 +53,7 @@ export function BookingPageContent() {
             locale: hints.locale,
             currency: currentOrganization.currency,
           })}
+          allCategories={allCategories}
         />
       </div>
       <div className="flex-1">

@@ -78,11 +78,11 @@ export function DatesFields({
             setEndDate(event.target.value);
           }}
         />
+        <p className="text-[14px] text-gray-600">
+          Within this period the assets in this booking will be in custody and
+          unavailable for other bookings.
+        </p>
       </FormRow>
-      <p className="text-[14px] text-gray-600">
-        Within this period the assets in this booking will be in custody and
-        unavailable for other bookings.
-      </p>
     </>
   );
 }

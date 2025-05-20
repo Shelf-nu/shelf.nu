@@ -17,6 +17,8 @@ export default function CreateBookingForSelectedAssetsDialog() {
     BookingFormSchema({ action: "new" })
   );
 
+  // @TODO: the fields here need to be updated to match the new ones
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
@@ -83,7 +85,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
                 required
               />
             </FormRow>
-            <p className="text-gray-600">
+            <p className="max-w-[512px] text-gray-600">
               Within this period the assets in this booking will be in custody
               and unavailable for other bookings.
             </p>

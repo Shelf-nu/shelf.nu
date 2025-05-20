@@ -276,6 +276,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
+    const allCategories = booking.assets
+      .map((asset) => asset.category)
+      .filter((category) => category !== null && category !== undefined)
+      .filter(
+        (category, index, self) =>
+          // Find the index of the first occurrence of this category ID
+          index === self.findIndex((c) => c.id === category.id)
+      );
+
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -304,6 +313,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           (acc, asset) => acc + (asset.valuation || 0),
           0
         ),
+        allCategories,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -807,7 +817,7 @@ const AddToCalendar = () => {
   const { booking } = useLoaderData<typeof loader>();
   const isArchived = booking.status === BookingStatus.ARCHIVED;
   return (
-    <div className="ml-auto">
+    <div className="mb-auto ml-auto">
       <TooltipProvider delayDuration={100}>
         <Tooltip>
           <TooltipTrigger asChild>
