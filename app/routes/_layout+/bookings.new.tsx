@@ -6,7 +6,8 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { BookingForm, BookingFormSchema } from "~/components/booking/form";
+import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
+import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -32,6 +33,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export type NewBookingLoaderReturnType = typeof loader;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
@@ -225,7 +228,7 @@ export default function NewBooking() {
         </p>
       </header>
       <div>
-        <BookingForm
+        <NewBookingForm
           booking={{
             startDate,
             endDate,
