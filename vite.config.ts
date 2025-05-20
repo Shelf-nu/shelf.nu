@@ -55,57 +55,57 @@ export default defineConfig({
     },
   },
   plugins: [paraglideVitePlugin({ project: './project.inlang', outdir: './paraglide' }),
-    cjsInterop({
-      // List of CJS dependencies that require interop
-      dependencies: [
-        "react-microsoft-clarity",
-        "@markdoc/markdoc",
-        "react-to-print",
-      ],
-    }),
-    devServer(),
+  cjsInterop({
+    // List of CJS dependencies that require interop
+    dependencies: [
+      "react-microsoft-clarity",
+      "@markdoc/markdoc",
+      "react-to-print",
+    ],
+  }),
+  devServer(),
 
-    remix({
-      ignoredRouteFiles: ["**/.*"],
-      future: {
-        // unstable_optimizeDeps: true,
-      },
-      routes: async (defineRoutes) => {
-        return flatRoutes("routes", defineRoutes);
-      },
+  remix({
+    ignoredRouteFiles: ["**/.*"],
+    future: {
+      // unstable_optimizeDeps: true,
+    },
+    routes: async (defineRoutes) => {
+      return flatRoutes("routes", defineRoutes);
+    },
 
-      buildEnd: async ({ remixConfig }) => {
-        const sentryInstrument = `instrument.server`;
-        await esbuild
-          .build({
-            alias: {
-              "~": `./app`,
-            },
-            outdir: `${remixConfig.buildDirectory}/server`,
-            entryPoints: [`./server/${sentryInstrument}.ts`],
-            platform: "node",
-            format: "esm",
-            // Don't include node_modules in the bundle
-            packages: "external",
-            bundle: true,
-            logLevel: "info",
-          })
-          .then(() => {
-            const serverBuildPath = `${remixConfig.buildDirectory}/server/${remixConfig.serverBuildFile}`;
-            fs.writeFileSync(
-              serverBuildPath,
-              Buffer.concat([
-                Buffer.from(`import "./${sentryInstrument}.js"\n`),
-                Buffer.from(fs.readFileSync(serverBuildPath)),
-              ])
-            );
-          })
-          .catch((error: unknown) => {
-            console.error(error);
-            process.exit(1);
-          });
-      },
-    }),
-    tsconfigPaths(),
+    buildEnd: async ({ remixConfig }) => {
+      const sentryInstrument = `instrument.server`;
+      await esbuild
+        .build({
+          alias: {
+            "~": `./app`,
+          },
+          outdir: `${remixConfig.buildDirectory}/server`,
+          entryPoints: [`./server/${sentryInstrument}.ts`],
+          platform: "node",
+          format: "esm",
+          // Don't include node_modules in the bundle
+          packages: "external",
+          bundle: true,
+          logLevel: "info",
+        })
+        .then(() => {
+          const serverBuildPath = `${remixConfig.buildDirectory}/server/${remixConfig.serverBuildFile}`;
+          fs.writeFileSync(
+            serverBuildPath,
+            Buffer.concat([
+              Buffer.from(`import "./${sentryInstrument}.js"\n`),
+              Buffer.from(fs.readFileSync(serverBuildPath)),
+            ])
+          );
+        })
+        .catch((error: unknown) => {
+          console.error(error);
+          process.exit(1);
+        });
+    },
+  }),
+  tsconfigPaths(),
   ],
 });

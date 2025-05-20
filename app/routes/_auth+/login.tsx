@@ -39,7 +39,7 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-
+import {m} from "./paraglide/messages.js"
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";

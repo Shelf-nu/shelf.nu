@@ -1,7 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
-import { paraglideMiddleware } from "~/paraglide/server";
 
 import {
   refreshAccessToken,
@@ -13,7 +12,6 @@ import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
-import type { Route } from "../+types/route";
 
 /**
  * Protected routes middleware
@@ -183,19 +181,3 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     return c.redirect(safeRedirect(serverUrl), 301);
   });
 }
-
-/**
- * Locale middleware for language management
- */
-export const localeMiddleware: Route.unstable_MiddlewareFunction = async (
-  { request },
-  next
-) => {
-  return await paraglideMiddleware(request, () => {
-    return next();
-  }, {
-    onRedirect: (response) => {
-      throw response;
-    }
-  });
-};

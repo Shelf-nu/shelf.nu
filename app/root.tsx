@@ -42,7 +42,7 @@ export interface RootData {
 export const handle = {
   breadcrumb: () => <SidebarTrigger />,
 };
-export const unstable_middleware = [localeMiddleware];
+
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
