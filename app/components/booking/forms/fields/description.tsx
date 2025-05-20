@@ -15,7 +15,7 @@ export function DescriptionField({
   return (
     <FormRow
       rowLabel="Description"
-      className="mobile-styling-only border-b-0 p-0 h-full"
+      className="mobile-styling-only h-full border-b-0 p-0"
     >
       <Input
         label="Description"

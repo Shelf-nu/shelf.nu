@@ -252,7 +252,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         ) : null}
         <div className="-mx-4 mb-4 md:mx-0">
           <div className={tw("mb-8 w-full lg:mb-0")}>
-            <Card className="flex w-full flex-col gap-3 mt-0">
+            <Card className="mt-0 flex w-full flex-col gap-3">
               {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
               <h3>Booking details</h3>
               <div className="flex gap-3">
@@ -295,7 +295,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   </div>
                 </div>
                 <div>
-                  <div className="m-0 h-full [&_label]:h-full [&_.input-wrapper]:h-full [&_textarea]:h-full">
+                  <div className="m-0 h-full [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:h-full">
                     <DescriptionField
                       description={description || undefined}
                       fieldName={zo.fields.description()}
