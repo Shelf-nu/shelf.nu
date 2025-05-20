@@ -460,7 +460,10 @@ const RenderEventCard = (args: EventContentArg) => {
           <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
 
           <div className="mb-3 flex items-center gap-2">
-            <BookingStatusBadge status={booking.status} />
+            <BookingStatusBadge
+              status={booking.status}
+              custodianUserId={booking.custodian.user?.id}
+            />
             <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
 

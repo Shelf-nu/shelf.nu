@@ -3,6 +3,7 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
@@ -294,9 +295,10 @@ const ListAssetContent = ({
 }) => {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isBase } = useUserRoleHelper();
-  const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
+  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isCompleted, isArchived, isReserved, isDraft } =
     useBookingStatusHelpers(booking.status);
+  const user = useUserData();
 
   /** Weather the asset is checked out in a booking different than the current one */
   const isCheckedOut = useMemo(
@@ -308,6 +310,36 @@ const ListAssetContent = ({
   );
 
   const isPartOfKit = !!item.kitId;
+
+  // New logic for determining if actions dropdown should be shown
+  const canSeeActions = useMemo(() => {
+    // Never show actions if asset is part of a kit
+    if (isPartOfKit) return false;
+
+    // Admins and owners can always see actions
+    if (!isBaseOrSelfService) return true;
+
+    // Check if user is the custodian of the item
+    const isUserCustodian = booking?.custodianUser?.id === user?.id;
+
+    // Base role: can see actions if booking is Draft AND user is custodian
+    if (isBase && isDraft && isUserCustodian) return true;
+
+    // SelfService role: can see actions if (Draft OR Reserved) AND user is custodian
+    if (isSelfService && (isDraft || isReserved) && isUserCustodian)
+      return true;
+
+    return false;
+  }, [
+    isPartOfKit,
+    booking?.custodianUser?.id,
+    user?.id,
+    isBase,
+    isDraft,
+    isSelfService,
+    isReserved,
+    isBaseOrSelfService,
+  ]);
 
   return (
     <>
@@ -388,11 +420,9 @@ const ListAssetContent = ({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {/* Base users can only remove assets if the booking is not started already */}
-        {(isBase && (isOngoing || isOverdue || isReserved)) ||
-        isPartOfKit ? null : (
+        <When truthy={canSeeActions}>
           <AssetRowActionsDropdown asset={item} />
-        )}
+        </When>
       </Td>
     </>
   );
