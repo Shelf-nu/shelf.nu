@@ -15,7 +15,7 @@ export function BookingStatusBadge({
   custodianUserId,
 }: {
   status: BookingStatus;
-  /** Id of the custodian if its a user */
+  /** Id of the custodian if it's a user */
   custodianUserId: string | undefined;
 }) {
   const { isBase } = useUserRoleHelper();
