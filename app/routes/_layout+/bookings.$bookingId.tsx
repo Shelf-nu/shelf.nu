@@ -284,7 +284,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
-
     return json(
       data({
         userId,
@@ -300,6 +299,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         ...teamMembersData,
         bookingFlags,
+        totalKits: Object.keys(assetsByKit).length,
+        totalValue: booking.assets.reduce(
+          (acc, asset) => acc + (asset.valuation || 0),
+          0
+        ),
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -773,14 +777,14 @@ export default function BookingPage() {
         title={hasName ? name : booking.name}
         subHeading={
           <div key={booking.status} className="flex items-center gap-2">
-            <BookingStatusBadge status={booking.status}
+            <BookingStatusBadge
+              status={booking.status}
               custodianUserId={booking.custodianUserId || undefined}
-              />
+            />
             <TimeRemaining
               from={booking.from!}
               to={booking.to!}
               status={booking.status}
-
             />
           </div>
         }

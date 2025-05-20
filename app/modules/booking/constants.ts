@@ -30,6 +30,7 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       availableToBook: true,
       status: true,
       kitId: true,
+      valuation: true,
     },
   },
 } satisfies Prisma.BookingInclude;

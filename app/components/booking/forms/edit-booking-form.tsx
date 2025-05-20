@@ -251,59 +251,66 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
           </AbsolutePositionedHeaderActions>
         ) : null}
         <div className="-mx-4 mb-4 md:mx-0">
-          <div className={tw("mb-8 w-full lg:mb-0 ", "lg:w-[328px]")}>
-            <div className="flex w-full flex-col gap-3">
+          <div className={tw("mb-8 w-full lg:mb-0")}>
+            <Card className="flex w-full flex-col gap-3 mt-0">
               {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
-              <Card className="m-0">
-                <NameField
-                  name={name || undefined}
-                  fieldName={zo.fields.name()}
-                  disabled={
-                    disabled ||
-                    bookingStatus?.isCompleted ||
-                    bookingStatus?.isCancelled ||
-                    bookingStatus?.isArchived
-                  }
-                  error={zo.errors.name()?.message}
-                  onChange={updateName}
-                />
-              </Card>
-              <Card className="m-0">
-                <DatesFields
-                  startDate={startDate}
-                  startDateName={zo.fields.startDate()}
-                  startDateError={zo.errors.startDate()?.message}
-                  endDate={endDate}
-                  endDateName={zo.fields.endDate()}
-                  endDateError={zo.errors.endDate()?.message}
-                  setEndDate={setEndDate}
-                  disabled={inputFieldIsDisabled}
-                />
-              </Card>
-              <Card className="m-0">
-                <CustodianField
-                  defaultTeamMember={defaultTeamMember}
-                  disabled={
-                    disabled || isBaseOrSelfService || inputFieldIsDisabled
-                  }
-                  userCanSeeCustodian={userCanSeeCustodian}
-                  error={zo.errors.custodian()?.message}
-                />
-              </Card>
-              <Card className="m-0">
-                <DescriptionField
-                  description={description || undefined}
-                  fieldName={zo.fields.description()}
-                  disabled={
-                    disabled ||
-                    bookingStatus?.isCompleted ||
-                    bookingStatus?.isCancelled ||
-                    bookingStatus?.isArchived
-                  }
-                  error={zo.errors.description()?.message}
-                />
-              </Card>
-            </div>
+              <h3>Booking details</h3>
+              <div className="flex gap-3">
+                <div>
+                  <div>
+                    <NameField
+                      name={name || undefined}
+                      fieldName={zo.fields.name()}
+                      disabled={
+                        disabled ||
+                        bookingStatus?.isCompleted ||
+                        bookingStatus?.isCancelled ||
+                        bookingStatus?.isArchived
+                      }
+                      error={zo.errors.name()?.message}
+                      onChange={updateName}
+                    />
+                  </div>
+                  <div className="mt-[10px]">
+                    <DatesFields
+                      startDate={startDate}
+                      startDateName={zo.fields.startDate()}
+                      startDateError={zo.errors.startDate()?.message}
+                      endDate={endDate}
+                      endDateName={zo.fields.endDate()}
+                      endDateError={zo.errors.endDate()?.message}
+                      setEndDate={setEndDate}
+                      disabled={inputFieldIsDisabled}
+                    />
+                  </div>
+                  <div className="mt-[10px]">
+                    <CustodianField
+                      defaultTeamMember={defaultTeamMember}
+                      disabled={
+                        disabled || isBaseOrSelfService || inputFieldIsDisabled
+                      }
+                      userCanSeeCustodian={userCanSeeCustodian}
+                      error={zo.errors.custodian()?.message}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="m-0 h-full [&_label]:h-full [&_.input-wrapper]:h-full [&_textarea]:h-full">
+                    <DescriptionField
+                      description={description || undefined}
+                      fieldName={zo.fields.description()}
+                      disabled={
+                        disabled ||
+                        bookingStatus?.isCompleted ||
+                        bookingStatus?.isCancelled ||
+                        bookingStatus?.isArchived
+                      }
+                      error={zo.errors.description()?.message}
+                    />
+                  </div>
+                </div>
+              </div>
+            </Card>
           </div>
         </div>
       </Form>
