@@ -285,8 +285,9 @@ export function BookingForm({ booking, action }: BookingFormData) {
    * 1. Admin/Owner always can see all
    * 2. SELF_SERVICE can see actions if they are the custodian of the booking
    * 3. BASE can see actions if they are the custodian of the booking
+   *
+   * This is also used to disabled the name & description fields
    */
-
   const canSeeActions =
     !isBaseOrSelfService ||
     (isBaseOrSelfService &&
@@ -420,7 +421,8 @@ export function BookingForm({ booking, action }: BookingFormData) {
                       disabled ||
                       bookingStatus?.isCompleted ||
                       bookingStatus?.isCancelled ||
-                      bookingStatus?.isArchived
+                      bookingStatus?.isArchived ||
+                      !canSeeActions
                     }
                     error={zo.errors.name()?.message}
                     autoFocus
@@ -569,7 +571,8 @@ export function BookingForm({ booking, action }: BookingFormData) {
                       disabled ||
                       bookingStatus?.isCompleted ||
                       bookingStatus?.isCancelled ||
-                      bookingStatus?.isArchived
+                      bookingStatus?.isArchived ||
+                      !canSeeActions
                     }
                     error={zo.errors.description()?.message}
                     className="mobile-styling-only w-full p-0"
