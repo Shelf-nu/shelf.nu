@@ -1,3 +1,4 @@
+import { paraglideVitePlugin } from '@inlang/paraglide-js'
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -53,7 +54,7 @@ export default defineConfig({
         "./node_modules/.prisma/client/index-browser.js",
     },
   },
-  plugins: [
+  plugins: [paraglideVitePlugin({ project: './project.inlang', outdir: './paraglide' }),
     cjsInterop({
       // List of CJS dependencies that require interop
       dependencies: [
