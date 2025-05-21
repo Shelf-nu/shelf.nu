@@ -54,7 +54,7 @@ export default defineConfig({
         "./node_modules/.prisma/client/index-browser.js",
     },
   },
-  plugins: [paraglideVitePlugin({ project: './project.inlang', outdir: './paraglide' }),
+  plugins: [paraglideVitePlugin({ project: './project.inlang', outdir: './app/paraglide', strategy: ["preferredLanguage", "cookie", "baseLocale"] }),
   cjsInterop({
     // List of CJS dependencies that require interop
     dependencies: [
