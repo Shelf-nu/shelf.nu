@@ -221,6 +221,12 @@ For File storage we use the S3 buckets service provided by supabase. We do this 
 1. Create a bucket called `kits`
 2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'kits'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
 
+### Locations
+
+1. Create a bucket called `files`
+2. Make it a public bucket
+3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. Then policy expression is: `((bucket_id = 'profile-pictures'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+
 ## GitHub Actions
 
 > DISCLAIMER : Github actions ==> I'm not an expert about that. Read carefully before using it

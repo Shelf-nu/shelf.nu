@@ -1,12 +1,13 @@
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
@@ -73,7 +74,7 @@ export async function action({ context }: ActionFunctionArgs) {
     const movedLocationIds: string[] = [];
 
     for (const location of locationWithImages) {
-      if (!location.image) {
+      if (!location.image?.blob) {
         continue;
       }
 
@@ -153,6 +154,15 @@ export async function action({ context }: ActionFunctionArgs) {
         })
       )
     );
+
+    sendNotification({
+      title: "Locations images moved",
+      message: `${movedLocationIds.length} location images have been moved successfully`,
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return json(data(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -171,7 +181,7 @@ export default function MoveLocationImages() {
         update the image URLs for each location accordingly.
       </p>
 
-      <form method="POST">
+      <Form method="POST">
         <Button disabled={numberOfLocationWithImages === 0 || disabled}>
           Move{" "}
           {numberOfLocationWithImages < 100
@@ -179,7 +189,7 @@ export default function MoveLocationImages() {
             : "first 100"}{" "}
           images
         </Button>
-      </form>
+      </Form>
     </div>
   );
 }

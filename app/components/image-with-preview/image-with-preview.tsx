@@ -2,11 +2,12 @@ import { useState } from "react";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 type ImageWithPreviewProps = {
   className?: string;
   imageUrl?: string;
-  thumbnailUrl?: string;
+  thumbnailUrl: string | null | undefined;
   withPreview?: boolean;
   alt: string;
   editImageUrl?: string;
@@ -14,13 +15,16 @@ type ImageWithPreviewProps = {
 
 export default function ImageWithPreview({
   className,
-  imageUrl = "/static/images/asset-placeholder.jpg",
-  thumbnailUrl = "/static/images/asset-placeholder.jpg",
+  imageUrl,
+  thumbnailUrl,
   withPreview = false,
   alt,
   editImageUrl,
   ...restProps
 }: ImageWithPreviewProps) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [isImageError, setIsImageError] = useState(false);
+
   const [open, setOpen] = useState(false);
 
   function handleOpenDialog() {
@@ -35,20 +39,54 @@ export default function ImageWithPreview({
     setOpen(false);
   }
 
+  function handleImageLoad() {
+    setIsLoading(false);
+    if (isImageError) {
+      setIsImageError(false);
+    }
+  }
+
+  function handleImageError() {
+    setIsLoading(false);
+
+    if (!isImageError) {
+      setIsImageError(true);
+    }
+  }
+
   return (
     <>
-      <img
-        onClick={withPreview ? handleOpenDialog : undefined}
-        src={thumbnailUrl}
+      <div
         className={tw(
-          "size-14 rounded border object-cover",
-          withPreview && "cursor-pointer",
+          "relative size-14 overflow-hidden rounded border",
           className
         )}
-        alt={alt}
-        loading="lazy"
-        {...restProps}
-      />
+      >
+        {isLoading ? (
+          <div
+            className={tw(
+              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "z-10 transition-opacity"
+            )}
+          >
+            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+          </div>
+        ) : null}
+
+        <img
+          onClick={withPreview ? handleOpenDialog : undefined}
+          src={thumbnailUrl ?? "/static/images/asset-placeholder.jpg"}
+          className={tw(
+            "size-full object-cover",
+            withPreview && "cursor-pointer"
+          )}
+          alt={alt}
+          loading="lazy"
+          onLoad={handleImageLoad}
+          onError={handleImageError}
+          {...restProps}
+        />
+      </div>
 
       {withPreview && (
         <DialogPortal>

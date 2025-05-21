@@ -134,13 +134,11 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex size-12 items-center justify-center">
-            {item.thumbnailUrl ? (
-              <ImageWithPreview
-                thumbnailUrl={item.thumbnailUrl}
-                alt={item.name}
-                className="size-full"
-              />
-            ) : null}
+            <ImageWithPreview
+              thumbnailUrl={item.thumbnailUrl}
+              alt={item.name}
+              className="size-full"
+            />
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
             <div className="font-medium">{item.name}</div>

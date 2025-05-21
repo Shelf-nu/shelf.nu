@@ -563,14 +563,6 @@ export async function generateLocationWithImages({
         },
       });
     }
-
-    await db.location.createMany({
-      data: Array.from({ length: numberOfLocations }, (_, index) => ({
-        name: `Location ${index + 1}`,
-        organizationId,
-        userId,
-      })),
-    });
   } catch (cause) {
     throw new ShelfError({
       cause,

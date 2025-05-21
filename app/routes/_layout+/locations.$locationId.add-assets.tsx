@@ -421,13 +421,11 @@ export default function AddAssetsToLocation() {
           countKey="totalLocations"
           renderItem={({ metadata }) => (
             <div className="flex items-center gap-2">
-              {metadata?.thumbnailUrl ? (
-                <ImageWithPreview
-                  thumbnailUrl={metadata.thumbnailUrl}
-                  alt={metadata.name}
-                  className="size-6 rounded-[2px]"
-                />
-              ) : null}
+              <ImageWithPreview
+                thumbnailUrl={metadata.thumbnailUrl}
+                alt={metadata.name}
+                className="size-6 rounded-[2px]"
+              />
               <div>{metadata.name}</div>
             </div>
           )}

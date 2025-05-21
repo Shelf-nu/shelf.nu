@@ -16,7 +16,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { generateLocationWithImages } from "~/modules/location/service.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -70,6 +70,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const image = formDataFile.get("image") as File | null;
     invariant(image instanceof File, "file not the right type");
+
+    if (image.size === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Image is required",
+        status: 400,
+        label: "Admin dashboard",
+      });
+    }
 
     await generateLocationWithImages({
       organizationId,
