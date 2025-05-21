@@ -1,4 +1,5 @@
 import { BookingStatus } from "@prisma/client";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { bookingStatusColorMap } from "~/utils/bookings";
 import { Badge } from "../shared/badge";
@@ -9,9 +10,27 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 
-export function BookingStatusBadge({ status }: { status: BookingStatus }) {
+export function BookingStatusBadge({
+  status,
+  custodianUserId,
+}: {
+  status: BookingStatus;
+  /** Id of the custodian if it's a user */
+  custodianUserId: string | undefined;
+}) {
   const { isBase } = useUserRoleHelper();
-  const shouldShowExtraInfo = isBase && status === BookingStatus.RESERVED;
+  const user = useUserData();
+
+  /**
+   * This is used to show the extra info tooltip when the booking is
+   * reserved and the user is the custodian of the booking.
+   * This is only shown for base users.
+   */
+  const shouldShowExtraInfo =
+    isBase &&
+    status === BookingStatus.RESERVED &&
+    custodianUserId &&
+    custodianUserId === user?.id;
 
   return (
     <Badge color={bookingStatusColorMap[status]}>
