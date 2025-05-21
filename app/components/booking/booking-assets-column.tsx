@@ -14,6 +14,7 @@ import { AvailabilityLabel } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
+import KitImage from "../kits/kit-image";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
@@ -23,7 +24,6 @@ import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
 import { BookingPagination } from "./booking-pagination";
 import When from "../when/when";
-import KitImage from "../kits/kit-image";
 
 export function BookingAssetsColumn() {
   const { userId, booking, paginatedItems, totalPaginationItems } =

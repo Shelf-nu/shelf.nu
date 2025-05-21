@@ -1,6 +1,5 @@
 import type { Category } from "@prisma/client";
 import { Badge } from "../shared/badge";
-import { Card } from "../shared/card";
 import { GrayBadge } from "../shared/gray-badge";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Separator } from "../shared/separator";
@@ -25,13 +24,13 @@ export function BookingStatistics({
   allCategories: { id: string; name: string; color: string }[];
 }) {
   return (
-    <Card className="mt-0 w-1/3 min-w-[420px]">
+    <div className="m-0">
       <h3>Booking statistics</h3>
       <div className="mt-4 flex flex-col gap-4">
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Booking duration</span>
-          <span className="font-medium">{duration}</span>
+          <span className="text-right font-medium">{duration}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
@@ -49,22 +48,22 @@ export function BookingStatistics({
               }
             />
           </span>
-          <span className="font-medium">{totalAssets}</span>
+          <span className="text-right font-medium">{totalAssets}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Total kits</span>
-          <span className="font-medium">{totalKits}</span>
+          <span className="text-right font-medium">{totalKits}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Total value</span>
-          <span className="font-medium">{totalValue}</span>
+          <span className="text-right font-medium">{totalValue}</span>
         </div>
         <Separator />
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Categories</span>
-          <div className="">
+          <div className="text-right">
             {allCategories.length === 0 ? (
               "No categories"
             ) : (
@@ -73,7 +72,7 @@ export function BookingStatistics({
           </div>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
 

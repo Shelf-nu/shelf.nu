@@ -4,6 +4,7 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
+  LinksFunction,
 } from "@remix-run/node";
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -49,6 +50,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
+import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -327,6 +329,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export const links: LinksFunction = () => [
+  {
+    rel: "stylesheet",
+    href: bookingPageCss,
+  },
 ];
 
 export const handle = {
@@ -786,7 +795,10 @@ export default function BookingPage() {
       <Header
         title={hasName ? name : booking.name}
         subHeading={
-          <div key={booking.status} className="flex items-center gap-2">
+          <div
+            key={booking.status}
+            className="flex flex-col items-start gap-2 md:flex-row md:items-center"
+          >
             <BookingStatusBadge
               status={booking.status}
               custodianUserId={booking.custodianUserId || undefined}
@@ -817,7 +829,7 @@ const AddToCalendar = () => {
   const { booking } = useLoaderData<typeof loader>();
   const isArchived = booking.status === BookingStatus.ARCHIVED;
   return (
-    <div className="mb-auto ml-auto">
+    <div className="absolute right-4 top-3">
       <TooltipProvider delayDuration={100}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -828,6 +840,7 @@ const AddToCalendar = () => {
               disabled={disabled || isArchived}
               variant="secondary"
               icon="calendar"
+              className={"whitespace-nowrap"}
             >
               Add to calendar
             </Button>

@@ -22,7 +22,6 @@ import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
 import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-positioned-header-actions";
 import { Button } from "../../shared/button";
-import { Card } from "../../shared/card";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
@@ -149,175 +148,186 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         defaultTeamMember?.id === userId));
 
   return (
-    <div className="flex-1">
-      <Form ref={zo.ref} method="post" action={action}>
-        {/* Render the actions on top only when the form is in edit mode */}
-        {canSeeActions ? (
-          <AbsolutePositionedHeaderActions>
-            <When truthy={isBase}>
-              <BookingProcessSidebar />
-            </When>
+    <Form
+      ref={zo.ref}
+      method="post"
+      action={action}
+      className="edit-booking-form"
+    >
+      {/* Render the actions on top only when the form is in edit mode */}
+      {canSeeActions ? (
+        <AbsolutePositionedHeaderActions>
+          <When truthy={isBase}>
+            <BookingProcessSidebar />
+          </When>
 
-            {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
-            <ActionsDropdown />
+          {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
+          <ActionsDropdown />
 
-            {/*  We show the button in all cases, unless the booking is in a final state */}
-            {!(
-              bookingStatus?.isCompleted ||
-              bookingStatus?.isCancelled ||
-              bookingStatus?.isArchived
-            ) ? (
-              <>
-                <input
-                  type="hidden"
-                  name="nameChangeOnly"
-                  value={bookingStatus?.isDraft ? "no" : "yes"}
-                />
-                <Button
-                  type="submit"
-                  disabled={disabled}
-                  variant="secondary"
-                  name="intent"
-                  value="save"
-                  className="grow"
-                  size="sm"
-                >
-                  Save
-                </Button>
-              </>
-            ) : null}
-
-            {/* When booking is draft, we show the reserve button */}
-            {bookingStatus?.isDraft ? (
+          {/*  We show the button in all cases, unless the booking is in a final state */}
+          {!(
+            bookingStatus?.isCompleted ||
+            bookingStatus?.isCancelled ||
+            bookingStatus?.isArchived
+          ) ? (
+            <>
+              <input
+                type="hidden"
+                name="nameChangeOnly"
+                value={bookingStatus?.isDraft ? "no" : "yes"}
+              />
               <Button
-                disabled={
-                  disabled ||
-                  !bookingFlags?.hasAssets ||
-                  bookingFlags?.hasAlreadyBookedAssets ||
-                  bookingFlags?.hasUnavailableAssets
-                    ? {
-                        reason: bookingFlags?.hasUnavailableAssets
-                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                          : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                          : isProcessing
-                          ? undefined
-                          : "You need to add assets to your booking before you can reserve it",
-                      }
-                    : false
-                }
                 type="submit"
+                disabled={disabled}
+                variant="secondary"
                 name="intent"
-                value="reserve"
+                value="save"
                 className="grow"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                Save
               </Button>
-            ) : null}
+            </>
+          ) : null}
 
-            {/* When booking is reserved, we show the check-out button */}
-            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-              <CheckoutDialog
-                portalContainer={zo.form}
-                booking={{ id, name: name!, from: startDate! }}
-                disabled={
-                  disabled ||
-                  bookingFlags?.hasUnavailableAssets ||
-                  bookingFlags?.hasCheckedOutAssets ||
-                  bookingFlags?.hasAssetsInCustody
-                    ? {
-                        reason: bookingFlags?.hasAssetsInCustody
-                          ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
-                          : isProcessing
-                          ? undefined
-                          : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
-                      }
-                    : false
-                }
-              />
-            </When>
-
-            <When
-              truthy={
-                (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
-                canCheckInBooking
+          {/* When booking is draft, we show the reserve button */}
+          {bookingStatus?.isDraft ? (
+            <Button
+              disabled={
+                disabled ||
+                !bookingFlags?.hasAssets ||
+                bookingFlags?.hasAlreadyBookedAssets ||
+                bookingFlags?.hasUnavailableAssets
+                  ? {
+                      reason: bookingFlags?.hasUnavailableAssets
+                        ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                        : bookingFlags?.hasAlreadyBookedAssets
+                        ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                        : isProcessing
+                        ? undefined
+                        : "You need to add assets to your booking before you can reserve it",
+                    }
+                  : false
               }
+              type="submit"
+              name="intent"
+              value="reserve"
+              className="grow"
+              size="sm"
             >
-              <CheckinDialog
-                portalContainer={zo.form}
-                booking={{ id, name: name!, to: endDate! }}
-                disabled={disabled}
-              />
-            </When>
-          </AbsolutePositionedHeaderActions>
-        ) : null}
-        <div className="-mx-4 mb-4 md:mx-0">
-          <div className={tw("mb-8 w-full lg:mb-0")}>
-            <Card className="mt-0 flex w-full flex-col gap-3">
-              {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
-              <h3>Booking details</h3>
-              <div className="flex gap-3">
-                <div>
-                  <div>
-                    <NameField
-                      name={name || undefined}
-                      fieldName={zo.fields.name()}
-                      disabled={
-                        disabled ||
-                        bookingStatus?.isCompleted ||
-                        bookingStatus?.isCancelled ||
-                        bookingStatus?.isArchived ||
-                        !canSeeActions
-                      }
-                      error={zo.errors.name()?.message}
-                      onChange={updateName}
-                    />
-                  </div>
-                  <div className="mt-[10px]">
-                    <DatesFields
-                      startDate={startDate}
-                      startDateName={zo.fields.startDate()}
-                      startDateError={zo.errors.startDate()?.message}
-                      endDate={endDate}
-                      endDateName={zo.fields.endDate()}
-                      endDateError={zo.errors.endDate()?.message}
-                      setEndDate={setEndDate}
-                      disabled={inputFieldIsDisabled}
-                    />
-                  </div>
-                  <div className="mt-[10px]">
-                    <CustodianField
-                      defaultTeamMember={defaultTeamMember}
-                      disabled={
-                        disabled || isBaseOrSelfService || inputFieldIsDisabled
-                      }
-                      userCanSeeCustodian={userCanSeeCustodian}
-                      error={zo.errors.custodian()?.message}
-                    />
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <div className="m-0 h-full [&_.form-row-children-wrapper]:w-full [&_.form-row-children-wrapper]:min-w-[512px] [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full">
-                    <DescriptionField
-                      description={description || undefined}
-                      fieldName={zo.fields.description()}
-                      disabled={
-                        disabled ||
-                        bookingStatus?.isCompleted ||
-                        bookingStatus?.isCancelled ||
-                        bookingStatus?.isArchived ||
-                        !canSeeActions
-                      }
-                      error={zo.errors.description()?.message}
-                    />
-                  </div>
-                </div>
+              {isBase ? "Request reservation" : "Reserve"}
+            </Button>
+          ) : null}
+
+          {/* When booking is reserved, we show the check-out button */}
+          <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
+            <CheckoutDialog
+              portalContainer={zo.form}
+              booking={{ id, name: name!, from: startDate! }}
+              disabled={
+                disabled ||
+                bookingFlags?.hasUnavailableAssets ||
+                bookingFlags?.hasCheckedOutAssets ||
+                bookingFlags?.hasAssetsInCustody
+                  ? {
+                      reason: bookingFlags?.hasAssetsInCustody
+                        ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                        : isProcessing
+                        ? undefined
+                        : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
+                    }
+                  : false
+              }
+            />
+          </When>
+
+          <When
+            truthy={
+              (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+              canCheckInBooking
+            }
+          >
+            <CheckinDialog
+              portalContainer={zo.form}
+              booking={{ id, name: name!, to: endDate! }}
+              disabled={disabled}
+            />
+          </When>
+        </AbsolutePositionedHeaderActions>
+      ) : null}
+      <div className="mb-4">
+        <div className="m-0 flex w-full flex-col gap-3">
+          {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
+          <h3>Booking details</h3>
+          <div
+            className={tw(
+              "flex flex-col gap-3 lg:flex-row",
+              "[&_.form-row-children-wrapper]:w-full"
+            )}
+          >
+            <div className="w-full lg:w-2/5">
+              <div>
+                <NameField
+                  name={name || undefined}
+                  fieldName={zo.fields.name()}
+                  disabled={
+                    disabled ||
+                    bookingStatus?.isCompleted ||
+                    bookingStatus?.isCancelled ||
+                    bookingStatus?.isArchived ||
+                    !canSeeActions
+                  }
+                  error={zo.errors.name()?.message}
+                  onChange={updateName}
+                />
               </div>
-            </Card>
+              <div className="mt-[10px]">
+                <DatesFields
+                  startDate={startDate}
+                  startDateName={zo.fields.startDate()}
+                  startDateError={zo.errors.startDate()?.message}
+                  endDate={endDate}
+                  endDateName={zo.fields.endDate()}
+                  endDateError={zo.errors.endDate()?.message}
+                  setEndDate={setEndDate}
+                  disabled={inputFieldIsDisabled}
+                />
+              </div>
+              <div className="mt-[10px]">
+                <CustodianField
+                  defaultTeamMember={defaultTeamMember}
+                  disabled={
+                    disabled || isBaseOrSelfService || inputFieldIsDisabled
+                  }
+                  userCanSeeCustodian={userCanSeeCustodian}
+                  error={zo.errors.custodian()?.message}
+                />
+              </div>
+            </div>
+            <div className="w-full lg:w-3/5">
+              <div
+                className={tw(
+                  "m-0 h-full",
+                  "[&_.form-row-children-wrapper]:lg:min-w-[512px] [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full"
+                )}
+              >
+                <DescriptionField
+                  description={description || undefined}
+                  fieldName={zo.fields.description()}
+                  disabled={
+                    disabled ||
+                    bookingStatus?.isCompleted ||
+                    bookingStatus?.isCancelled ||
+                    bookingStatus?.isArchived ||
+                    !canSeeActions
+                  }
+                  error={zo.errors.description()?.message}
+                />
+              </div>
+            </div>
           </div>
         </div>
-      </Form>
-    </div>
+      </div>
+    </Form>
   );
 }

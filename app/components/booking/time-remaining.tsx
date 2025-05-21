@@ -43,7 +43,7 @@ export function TimeRemaining({
       );
 
       return (
-        <div className="ml-4 flex items-center text-sm text-gray-600">
+        <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
           <Clock className="mr-1 size-4 text-gray-400" />
           <span className="font-medium text-gray-900">
             Overdue by {overdueDays} days
@@ -79,7 +79,7 @@ export function TimeRemaining({
   // For upcoming bookings (DRAFT, RESERVED)
   if (isUpcoming) {
     return (
-      <div className="ml-4 flex items-center text-sm text-gray-600">
+      <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
         <Clock className="mr-1 size-4 text-gray-400" />
         <span className="font-medium text-gray-900">
           Starts in: {remainingDays} days
@@ -102,7 +102,7 @@ export function TimeRemaining({
 
   // For ONGOING status
   return (
-    <div className="ml-4 flex items-center text-sm text-gray-600">
+    <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
       <Clock className="mr-1 size-4 text-gray-400" />
       <span className="font-medium text-gray-900">{remainingDays} days</span>
       {remainingHours > 0 && (
