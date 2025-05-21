@@ -27,11 +27,7 @@ export function BookingPageContent() {
       : booking.custodianTeamMemberId === member.id
   );
   return (
-    <div
-      id="NewBookingFormWrapper"
-      // className="md:mt-5 lg:flex lg:items-start lg:gap-4"
-      className="md:mt-5"
-    >
+    <div id="NewBookingFormWrapper" className="md:mt-5">
       <div className=" mb-8 flex h-full flex-col items-stretch gap-3 lg:mb-4 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm

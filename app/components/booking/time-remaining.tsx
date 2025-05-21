@@ -1,5 +1,6 @@
 import { BookingStatus } from "@prisma/client";
 import { Clock } from "lucide-react";
+import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
 export function TimeRemaining({
   to,
@@ -34,13 +35,9 @@ export function TimeRemaining({
     // For OVERDUE status, show how long it's been overdue
     if (status === BookingStatus.OVERDUE) {
       const overdueMs = Math.abs(remainingMs);
-      const overdueDays = Math.floor(overdueMs / (1000 * 60 * 60 * 24));
-      const overdueHours = Math.floor(
-        (overdueMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-      );
-      const overdueMinutes = Math.floor(
-        (overdueMs % (1000 * 60 * 60)) / (1000 * 60)
-      );
+      const overdueDays = Math.floor(overdueMs / ONE_DAY);
+      const overdueHours = Math.floor((overdueMs % ONE_DAY) / ONE_HOUR);
+      const overdueMinutes = Math.floor((overdueMs % ONE_HOUR) / (1000 * 60));
 
       return (
         <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
@@ -68,13 +65,9 @@ export function TimeRemaining({
   }
 
   // Calculate time units
-  const remainingDays = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
-  const remainingHours = Math.floor(
-    (remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-  );
-  const remainingMinutes = Math.floor(
-    (remainingMs % (1000 * 60 * 60)) / (1000 * 60)
-  );
+  const remainingDays = Math.floor(remainingMs / ONE_DAY);
+  const remainingHours = Math.floor((remainingMs % ONE_DAY) / ONE_HOUR);
+  const remainingMinutes = Math.floor((remainingMs % ONE_HOUR) / (1000 * 60));
 
   // For upcoming bookings (DRAFT, RESERVED)
   if (isUpcoming) {

@@ -31,59 +31,57 @@ export function CustodianField({
   error?: string;
 }) {
   return (
-    <>
-      <FormRow
-        rowLabel="Description"
-        className="mobile-styling-only border-b-0 p-0"
-      >
-        <label className="mb-2.5 block font-medium text-gray-700">
-          <span className="required-input-label">Custodian</span>
-        </label>
-        <DynamicSelect
-          defaultValue={
-            defaultTeamMember
-              ? JSON.stringify({
-                  id: defaultTeamMember?.id,
-                  name: resolveTeamMemberName(defaultTeamMember),
-                  userId: defaultTeamMember?.userId,
-                })
-              : undefined
-          }
-          disabled={disabled}
-          model={{
-            name: "teamMember",
-            queryKey: "name",
-            deletedAt: null,
-          }}
-          fieldName="custodian"
-          contentLabel="Team members"
-          initialDataKey="teamMembers"
-          countKey="totalTeamMembers"
-          placeholder="Select a team member"
-          allowClear
-          closeOnSelect
-          transformItem={(item: ModelFilterItem & { userId?: string }) => ({
-            ...item,
-            id: JSON.stringify({
-              id: item.id,
-              //If there is a user, we use its name, otherwise we use the name of the team member
-              name: resolveTeamMemberName(item),
-              userId: item?.userId,
-            }),
-          })}
-          renderItem={(item) =>
-            userCanSeeCustodian || isNewBooking
-              ? resolveTeamMemberName(item, true)
-              : "Private"
-          }
-        />
+    <FormRow
+      rowLabel="Description"
+      className="mobile-styling-only border-b-0 p-0"
+    >
+      <label className="mb-2.5 block font-medium text-gray-700">
+        <span className="required-input-label">Custodian</span>
+      </label>
+      <DynamicSelect
+        defaultValue={
+          defaultTeamMember
+            ? JSON.stringify({
+                id: defaultTeamMember?.id,
+                name: resolveTeamMemberName(defaultTeamMember),
+                userId: defaultTeamMember?.userId,
+              })
+            : undefined
+        }
+        disabled={disabled}
+        model={{
+          name: "teamMember",
+          queryKey: "name",
+          deletedAt: null,
+        }}
+        fieldName="custodian"
+        contentLabel="Team members"
+        initialDataKey="teamMembers"
+        countKey="totalTeamMembers"
+        placeholder="Select a team member"
+        allowClear
+        closeOnSelect
+        transformItem={(item: ModelFilterItem & { userId?: string }) => ({
+          ...item,
+          id: JSON.stringify({
+            id: item.id,
+            //If there is a user, we use its name, otherwise we use the name of the team member
+            name: resolveTeamMemberName(item),
+            userId: item?.userId,
+          }),
+        })}
+        renderItem={(item) =>
+          userCanSeeCustodian || isNewBooking
+            ? resolveTeamMemberName(item, true)
+            : "Private"
+        }
+      />
 
-        {error ? <div className="text-sm text-error-500">{error}</div> : null}
-        <p className="mt-2 text-[14px] text-gray-600">
-          The person that will be in custody of or responsible for the assets
-          during the duration of the booking period.
-        </p>
-      </FormRow>
-    </>
+      {error ? <div className="text-sm text-error-500">{error}</div> : null}
+      <p className="mt-2 text-[14px] text-gray-600">
+        The person that will be in custody of or responsible for the assets
+        during the duration of the booking period.
+      </p>
+    </FormRow>
   );
 }

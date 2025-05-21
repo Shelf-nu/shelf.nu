@@ -1,4 +1,5 @@
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
+import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
 /**
  * This function checks if the booking is being early checkout.
@@ -28,11 +29,9 @@ export function formatBookingDuration(from: string, to: string): string {
   const durationMs = end.getTime() - start.getTime();
 
   // Convert to days, hours, minutes
-  const days = Math.floor(durationMs / (1000 * 60 * 60 * 24));
-  const hours = Math.floor(
-    (durationMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-  );
-  const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+  const days = Math.floor(durationMs / ONE_DAY);
+  const hours = Math.floor((durationMs % ONE_DAY) / ONE_HOUR);
+  const minutes = Math.floor((durationMs % ONE_HOUR) / (1000 * 60));
 
   // Format the duration string
   let durationStr = "";

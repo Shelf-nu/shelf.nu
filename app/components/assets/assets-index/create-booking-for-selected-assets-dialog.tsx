@@ -23,8 +23,9 @@ export default function CreateBookingForSelectedAssetsDialog() {
     "CreateBookingWithAssets",
     BookingFormSchema({ action: "new" })
   );
-  const { startDate, endDate: ed } = getBookingDefaultStartEndTimes();
-  const [endDate, setEndDate] = useState(ed);
+  const { startDate, endDate: defaultEndDate } =
+    getBookingDefaultStartEndTimes();
+  const [endDate, setEndDate] = useState(defaultEndDate);
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
   const { currentOrganization, teamMembers } =
     useLoaderData<AssetIndexLoaderData>();
@@ -69,7 +70,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               endDateError={zo.errors.endDate()?.message}
               setEndDate={setEndDate}
               disabled={disabled}
-              isNewBooking={true}
+              isNewBooking
             />
           </Card>
           <Card className="m-0 mb-2">
@@ -77,7 +78,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               defaultTeamMember={defaultTeamMember}
               disabled={disabled || isBaseOrSelfService}
               userCanSeeCustodian={userCanSeeCustodian}
-              isNewBooking={true}
+              isNewBooking
               error={zo.errors.custodian()?.message}
             />
           </Card>

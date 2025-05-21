@@ -19,7 +19,7 @@ export function NameField({
     <FormRow
       rowLabel={"Name"}
       className="mobile-styling-only border-b-0 p-0"
-      required={true}
+      required
     >
       <Input
         label="Name"

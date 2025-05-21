@@ -114,8 +114,8 @@ export function BookingAssetsColumn() {
 
   return (
     <div className="flex-1">
-      <div className=" w-full">
-        <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+      <div className="w-full">
+        <TextualDivider text="Assets & Kits" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* This is a fake table header */}

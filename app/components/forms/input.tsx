@@ -133,7 +133,7 @@ const Input = forwardRef(function Input(
         {label}
       </InnerLabel>
 
-      <div className={`input-wrapper relative flex flex-wrap items-stretch`}>
+      <div className="input-wrapper relative flex flex-wrap items-stretch">
         {/* IconType */}
         {icon && <div className={iconClasses}>{iconsMap[icon]}</div>}
         {/* Addon */}

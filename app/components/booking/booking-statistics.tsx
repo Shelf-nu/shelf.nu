@@ -39,12 +39,10 @@ export function BookingStatistics({
             <InfoTooltip
               iconClassName="size-4"
               content={
-                <>
-                  <p>
-                    The total number of assets in this booking including assets
-                    inside kits.
-                  </p>
-                </>
+                <p>
+                  The total number of assets in this booking including assets
+                  inside kits.
+                </p>
               }
             />
           </span>
