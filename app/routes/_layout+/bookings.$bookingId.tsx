@@ -797,7 +797,7 @@ export default function BookingPage() {
         subHeading={
           <div
             key={booking.status}
-            className="flex flex-col items-start gap-2 md:flex-row md:items-center"
+            className="mt-2 flex flex-col items-start gap-2 md:flex-row md:items-center"
           >
             <BookingStatusBadge
               status={booking.status}
