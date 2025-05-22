@@ -194,8 +194,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           selectedTeamMembers: booking.custodianTeamMemberId
             ? [booking.custodianTeamMemberId]
             : [],
-          filterByUserId:
-            isSelfServiceOrBase || booking.status !== BookingStatus.DRAFT, // If the user is self service or base, they can only see their own. Also if the booking status is not draft, we dont need to load teammembers as the select is disabled. An improvement can be done that if the booking is not draft, we dont need to loading any other teamMember than the currently assigned one
+          filterByUserId: isSelfServiceOrBase, // If the user is self service or base, they can only see their own. Also if the booking status is not draft, we dont need to load teammembers as the select is disabled. An improvement can be done that if the booking is not draft, we dont need to loading any other teamMember than the currently assigned one
           userId,
         }),
 
