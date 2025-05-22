@@ -13,13 +13,15 @@ import {
 export function BookingStatistics({
   duration,
   totalAssets,
-  totalKits,
+  kitsCount,
+  assetsCount,
   totalValue,
   allCategories,
 }: {
   duration: string;
   totalAssets: number;
-  totalKits: number;
+  kitsCount: number;
+  assetsCount: number;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
 }) {
@@ -31,6 +33,17 @@ export function BookingStatistics({
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Booking duration</span>
           <span className="text-right font-medium">{duration}</span>
+        </div>
+
+        <Separator />
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">Assets</span>
+          <span className="text-right font-medium">{assetsCount}</span>
+        </div>
+        <Separator />
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">Kits</span>
+          <span className="text-right font-medium">{kitsCount}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
@@ -47,11 +60,6 @@ export function BookingStatistics({
             />
           </span>
           <span className="text-right font-medium">{totalAssets}</span>
-        </div>
-        <Separator />
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Total kits</span>
-          <span className="text-right font-medium">{totalKits}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">

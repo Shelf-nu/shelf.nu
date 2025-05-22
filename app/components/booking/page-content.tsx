@@ -19,6 +19,7 @@ export function BookingPageContent() {
     totalValue,
     currentOrganization,
     allCategories,
+    assetsCount,
   } = useLoaderData<BookingPageLoaderData>();
   const hints = useHints();
   const custodian = teamMembers.find((member) =>
@@ -27,8 +28,8 @@ export function BookingPageContent() {
       : booking.custodianTeamMemberId === member.id
   );
   return (
-    <div id="NewBookingFormWrapper" className="md:mt-5">
-      <div className=" mb-8 flex h-full flex-col items-stretch gap-3 lg:mb-4 lg:flex-row">
+    <div className="md:mt-5">
+      <div className="mb-8 flex h-full flex-col items-stretch gap-3 lg:mb-4 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm
             booking={{
@@ -47,7 +48,8 @@ export function BookingPageContent() {
           <BookingStatistics
             duration={formatBookingDuration(booking.from!, booking.to!)}
             totalAssets={totalAssets}
-            totalKits={totalKits}
+            kitsCount={totalKits}
+            assetsCount={assetsCount}
             totalValue={formatCurrency({
               value: totalValue,
               locale: hints.locale,

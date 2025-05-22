@@ -308,7 +308,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               <div
                 className={tw(
                   "m-0 h-full",
-                  "[&_.form-row-children-wrapper]:lg:min-w-[512px] [&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full"
+                  "[&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full"
                 )}
               >
                 <DescriptionField

@@ -315,6 +315,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           (acc, asset) => acc + (asset.valuation || 0),
           0
         ),
+        /** Assets inside the booking without kits */
+        assetsCount: individualAssets.length,
         allCategories,
       }),
       {
@@ -797,7 +799,7 @@ export default function BookingPage() {
         subHeading={
           <div
             key={booking.status}
-            className="mt-2 flex flex-col items-start gap-2 md:flex-row md:items-center"
+            className="mt-1 flex flex-col items-start gap-2 md:flex-row md:items-center"
           >
             <BookingStatusBadge
               status={booking.status}
