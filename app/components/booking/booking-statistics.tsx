@@ -82,6 +82,8 @@ export function BookingStatistics({
   );
 }
 
+const SHOW_CATEGORIES_COUNT = 2;
+
 export const ListItemCategoriesColumn = ({
   categories,
 }: {
@@ -91,8 +93,8 @@ export const ListItemCategoriesColumn = ({
   const filteredCategories = categories?.filter(Boolean) || [];
 
   // Show only the first 3 categories
-  const visibleCategories = filteredCategories.slice(0, 2);
-  const remainingCategories = filteredCategories.slice(2);
+  const visibleCategories = filteredCategories.slice(0, SHOW_CATEGORIES_COUNT);
+  const remainingCategories = filteredCategories.slice(SHOW_CATEGORIES_COUNT);
 
   return filteredCategories.length > 0 ? (
     <div className="text-right">
@@ -111,7 +113,7 @@ export const ListItemCategoriesColumn = ({
           <Tooltip>
             <TooltipTrigger>
               <GrayBadge className="ml-2">{`+${
-                filteredCategories.length - 3
+                filteredCategories.length - SHOW_CATEGORIES_COUNT
               }`}</GrayBadge>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-72">

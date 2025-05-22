@@ -11,6 +11,7 @@ import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useUserData } from "~/hooks/use-user-data";
 
 import { createBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -214,8 +215,12 @@ export default function NewBooking() {
   const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
+  const user = useUserData();
+
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianRef = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
+  const custodianRef = isSelfServiceOrBase
+    ? teamMembers.find((tm) => tm.userId === user!.id)?.id
+    : undefined;
 
   return (
     <div className="booking-inner-wrapper">

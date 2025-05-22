@@ -30,11 +30,13 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const { currentOrganization, teamMembers } =
     useLoaderData<AssetIndexLoaderData>();
   const user = useUserData();
-  const defaultTeamMember = isBaseOrSelfService ? teamMembers[0] : undefined;
+  const defaultTeamMember = isBaseOrSelfService
+    ? teamMembers.find((tm) => tm.userId === user!.id)
+    : undefined;
 
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
-    custodianUserId: defaultTeamMember?.user?.id,
+    custodianUserId: defaultTeamMember?.userId || null,
     organization: currentOrganization,
     currentUserId: user?.id,
   });
