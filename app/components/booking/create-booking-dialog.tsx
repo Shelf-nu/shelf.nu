@@ -5,7 +5,7 @@ import { CalendarRangeIcon } from "lucide-react";
 import { useSearchParams } from "~/hooks/search-params";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
-import { BookingForm } from "./form";
+import { NewBookingForm } from "./forms/new-booking-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
 type CreateBookingDialogProps = {
@@ -68,7 +68,7 @@ export default function CreateBookingDialog({
               </p>
             </div>
 
-            <BookingForm
+            <NewBookingForm
               booking={{
                 startDate,
                 endDate,
