@@ -107,20 +107,21 @@ export default function KitAssets() {
             ),
           }}
         >
-          {userRoleCanManageAssets ? (
-            <div className="flex items-center justify-normal gap-6 xl:justify-end">
-              <div className="hidden lg:block">
-                <Button
-                  to="manage-assets?status=AVAILABLE"
-                  variant="primary"
-                  width="full"
-                  className="whitespace-nowrap"
-                >
-                  Manage assets
-                </Button>
-              </div>
+          <When truthy={userRoleCanManageAssets}>
+            <div className="flex items-center gap-2">
+              <Button icon="scan" variant="secondary" to="../scan-assets">
+                Scan
+              </Button>
+              <Button
+                to="manage-assets?status=AVAILABLE"
+                variant="primary"
+                width="full"
+                className="whitespace-nowrap"
+              >
+                Manage assets
+              </Button>
             </div>
-          ) : null}
+          </When>
         </Filters>
 
         <List
