@@ -4,6 +4,7 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
+  LinksFunction,
 } from "@remix-run/node";
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -13,13 +14,22 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { BookingFormSchema } from "~/components/booking/form";
+import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
+import { TimeRemaining } from "~/components/booking/time-remaining";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   archiveBooking,
@@ -40,6 +50,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
+import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -267,6 +278,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
+    const allCategories = booking.assets
+      .map((asset) => asset.category)
+      .filter((category) => category !== null && category !== undefined)
+      .filter(
+        (category, index, self) =>
+          // Find the index of the first occurrence of this category ID
+          index === self.findIndex((c) => c.id === category.id)
+      );
+
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -275,7 +295,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
-
     return json(
       data({
         userId,
@@ -291,6 +310,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         ...teamMembersData,
         bookingFlags,
+        totalKits: Object.keys(assetsByKit).length,
+        totalValue: booking.assets.reduce(
+          (acc, asset) => acc + (asset.valuation || 0),
+          0
+        ),
+        /** Assets inside the booking without kits */
+        assetsCount: individualAssets.length,
+        allCategories,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -304,6 +331,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export const links: LinksFunction = () => [
+  {
+    rel: "stylesheet",
+    href: bookingPageCss,
+  },
 ];
 
 export const handle = {
@@ -763,13 +797,24 @@ export default function BookingPage() {
       <Header
         title={hasName ? name : booking.name}
         subHeading={
-          <div key={booking.status} className="flex items-center gap-2">
+          <div
+            key={booking.status}
+            className="mt-1 flex flex-col items-start gap-2 md:flex-row md:items-center"
+          >
             <BookingStatusBadge
               status={booking.status}
               custodianUserId={booking.custodianUserId || undefined}
             />
+            <TimeRemaining
+              from={booking.from!}
+              to={booking.to!}
+              status={booking.status}
+            />
           </div>
         }
+        slots={{
+          "right-of-title": <AddToCalendar />,
+        }}
       />
 
       <div>
@@ -780,3 +825,37 @@ export default function BookingPage() {
     </div>
   );
 }
+
+const AddToCalendar = () => {
+  const disabled = useDisabled();
+  const { booking } = useLoaderData<typeof loader>();
+  const isArchived = booking.status === BookingStatus.ARCHIVED;
+  return (
+    <div className="absolute right-4 top-3">
+      <TooltipProvider delayDuration={100}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              to={`cal.ics`}
+              download={true}
+              reloadDocument={true}
+              disabled={disabled || isArchived}
+              variant="secondary"
+              icon="calendar"
+              className={"whitespace-nowrap"}
+            >
+              Add to calendar
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p className="text-xs">
+              {disabled
+                ? "Not possible to add to calendar due to booking status"
+                : "Download this booking as a calendar event"}
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+};

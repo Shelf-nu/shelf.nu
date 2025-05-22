@@ -100,6 +100,8 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
+      isSelfService,
+      userId,
     }),
   ]);
 

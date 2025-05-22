@@ -50,7 +50,6 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-
   assets            Asset[]
   categories        Category[]
   notes             Note[]

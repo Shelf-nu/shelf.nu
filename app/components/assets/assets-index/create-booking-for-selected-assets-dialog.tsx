@@ -1,14 +1,21 @@
+import { useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { BookingFormSchema } from "~/components/booking/form";
+import { CustodianField } from "~/components/booking/forms/fields/custodian";
+import { DatesFields } from "~/components/booking/forms/fields/dates";
+import { DescriptionField } from "~/components/booking/forms/fields/description";
+import { NameField } from "~/components/booking/forms/fields/name";
+import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
-import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import FormRow from "~/components/forms/form-row";
-import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { resolveTeamMemberName } from "~/utils/user";
+import { useUserData } from "~/hooks/use-user-data";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
@@ -16,6 +23,21 @@ export default function CreateBookingForSelectedAssetsDialog() {
     "CreateBookingWithAssets",
     BookingFormSchema({ action: "new" })
   );
+  const { startDate, endDate: defaultEndDate } =
+    getBookingDefaultStartEndTimes();
+  const [endDate, setEndDate] = useState(defaultEndDate);
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { currentOrganization, teamMembers } =
+    useLoaderData<AssetIndexLoaderData>();
+  const user = useUserData();
+  const defaultTeamMember = isBaseOrSelfService ? teamMembers[0] : undefined;
+
+  const userCanSeeCustodian = userCanViewSpecificCustody({
+    roles,
+    custodianUserId: defaultTeamMember?.user?.id,
+    organization: currentOrganization,
+    currentUserId: user?.id,
+  });
 
   return (
     <BulkUpdateDialogContent
@@ -30,119 +52,43 @@ export default function CreateBookingForSelectedAssetsDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
           <Card className="m-0 mb-2">
-            <FormRow
-              rowLabel="Name"
-              className="mobile-styling-only border-b-0 p-0"
-              required
-            >
-              <Input
-                label="Name"
-                hideLabel
-                name={zo.fields.name()}
-                error={zo.errors.name()?.message}
-                autoFocus
-                className="mobile-styling-only w-full p-0"
-                placeholder="Booking"
-                required
-                disabled={disabled}
-              />
-            </FormRow>
-          </Card>
-          <Card className="m-0 mb-2">
-            <FormRow
-              rowLabel="Start Date"
-              className="mobile-styling-only border-b-0 pb-2.5 pt-0"
-              required
-            >
-              <Input
-                label="Start Date"
-                type="datetime-local"
-                hideLabel
-                name={zo.fields.startDate()}
-                disabled={disabled}
-                error={zo.errors.startDate()?.message}
-                className="w-full"
-                placeholder="Booking"
-                required
-              />
-            </FormRow>
-            <FormRow
-              rowLabel="End Date"
-              className="mobile-styling-only mb-2.5 border-b-0 p-0"
-              required
-            >
-              <Input
-                label="End Date"
-                type="datetime-local"
-                hideLabel
-                name={zo.fields.endDate()}
-                disabled={disabled}
-                error={zo.errors.endDate()?.message}
-                className="w-full"
-                placeholder="Booking"
-                required
-              />
-            </FormRow>
-            <p className="text-gray-600">
-              Within this period the assets in this booking will be in custody
-              and unavailable for other bookings.
-            </p>
-          </Card>
-          <Card className="m-0 mb-2">
-            <label className="mb-2.5 block font-medium text-gray-700">
-              <span className="required-input-label">Custodian</span>
-            </label>
-            <DynamicSelect
+            <NameField
+              name={undefined}
+              fieldName={zo.fields.name()}
+              error={zo.errors.name()?.message}
               disabled={disabled}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Select a team member"
-              allowClear
-              closeOnSelect
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  //If there is a user, we use its name, otherwise we use the name of the team member
-                  name: resolveTeamMemberName(item),
-                }),
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
+              onChange={() => {}}
             />
-
-            {zo.errors.custodian()?.message ? (
-              <div className="text-sm text-error-500">
-                {zo.errors.custodian()?.message}
-              </div>
-            ) : null}
-            <p className="mt-2 text-[14px] text-gray-600">
-              The person that will be in custody of or responsible for the
-              assets during the duration of the booking period.
-            </p>
           </Card>
           <Card className="m-0 mb-2">
-            <FormRow
-              rowLabel="Description"
-              className="mobile-styling-only border-b-0 p-0"
-            >
-              <Input
-                label="Description"
-                inputType="textarea"
-                hideLabel
-                name={zo.fields.description()}
-                disabled={disabled}
-                error={zo.errors.description()?.message}
-                className="mobile-styling-only w-full p-0"
-                placeholder="Add a description..."
-              />
-            </FormRow>
+            <DatesFields
+              startDate={startDate}
+              startDateName={zo.fields.startDate()}
+              startDateError={zo.errors.startDate()?.message}
+              endDate={endDate}
+              endDateName={zo.fields.endDate()}
+              endDateError={zo.errors.endDate()?.message}
+              setEndDate={setEndDate}
+              disabled={disabled}
+              isNewBooking
+            />
+          </Card>
+          <Card className="m-0 mb-2">
+            <CustodianField
+              defaultTeamMember={defaultTeamMember}
+              disabled={disabled || isBaseOrSelfService}
+              userCanSeeCustodian={userCanSeeCustodian}
+              isNewBooking
+              error={zo.errors.custodian()?.message}
+            />
+          </Card>
+          <Card className="m-0 mb-2">
+            <DescriptionField
+              description={undefined}
+              fieldName={zo.fields.description()}
+              disabled={disabled}
+              error={zo.errors.description()?.message}
+            />
           </Card>
 
           {fetcherError ? (
