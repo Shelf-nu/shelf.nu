@@ -1,7 +1,10 @@
-import type { Prisma } from "@prisma/client";
+import { useState } from "react";
+import type { CustodyAgreement, Prisma } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
   KitStatus,
   OrganizationRoles,
 } from "@prisma/client";
@@ -12,17 +15,33 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useSubmit,
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import CustodyAgreementSelector from "~/components/custody/custody-agreement-selector";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
-import { UserIcon } from "~/components/icons/library";
+import { AlertIcon, UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
 import { WarningBox } from "~/components/shared/warning-box";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { kitCustodyAssignedWithAgreementEmailText } from "~/modules/kit/emais";
 import { getKit } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -87,25 +106,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    if (kit.custody) {
-      return redirect(`/kits/${kitId}`);
+    const someAssetsCheckedOut = kit.assets.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+    if (someAssetsCheckedOut) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message:
+          "Cannot assign custody to kit because some of it's assets are checked out.",
+      });
     }
 
-    /**
-     * If any asset is not available in a kit,
-     * then a kit cannot be assigned a custody
-     */
-    const someUnavailableAsset = kit.assets.some(
-      (asset) => asset.status !== "AVAILABLE"
-    );
-    if (someUnavailableAsset) {
-      sendNotification({
-        title: "Cannot assign custody at this time.",
-        message: "One of the asset in kit is not available",
-        icon: { name: "trash", variant: "error" },
-        senderId: userId,
-      });
-
+    if (kit.custody) {
       return redirect(`/kits/${kitId}`);
     }
 
@@ -160,7 +173,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -168,7 +181,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const { custodian } = parseData(
+    const { custodian, agreement } = parseData(
       await request.formData(),
       AssignCustodySchema,
       {
@@ -198,54 +211,224 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    const kit = await db.kit.update({
-      where: { id: kitId },
-      data: {
-        status: KitStatus.IN_CUSTODY,
-        custody: { create: { custodian: { connect: { id: custodianId } } } },
-      },
-      include: {
-        assets: true,
-      },
-    });
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired"
+    > | null = null;
 
-    await Promise.all([
-      /**
-       * Assign custody to all assets of kit
-       */
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: { custodian: { connect: { id: custodianId } } },
+    /** Find and validate the agreement if it is provided by user */
+    if (agreement) {
+      agreementFound = await db.custodyAgreement
+        .findUniqueOrThrow({
+          where: { id: agreement, organizationId },
+          select: { id: true, name: true, signatureRequired: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Could not find find the agreement, are you sure it exists in the current workspace.",
+            label: "Kit",
+          });
+        });
+    }
+
+    const kitFound = await db.kit
+      .findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              custody: { select: { id: true } },
+              custodyReceipts: {
+                where: { custodyStatus: CustodyStatus.ACTIVE },
+                select: {
+                  id: true,
+                  signatureStatus: true,
+                },
+              },
             },
           },
-        })
-      ),
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Kit",
+          message:
+            "Kit not found, are you sure it exists in the current workspace?",
+        });
+      });
+
+    const someAssetsCheckedOut = kitFound.assets.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+    if (someAssetsCheckedOut) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message:
+          "Cannot assign custody to kit because some of it's assets are checked out",
+      });
+    }
+
+    const assetCustodies = kitFound.assets
+      .map((asset) => asset.custody?.id)
+      .filter(Boolean) as string[];
+
+    const assetCustodyReceipts = kitFound.assets.flatMap(
+      (asset) => asset.custodyReceipts
+    );
+
+    const updatedKit = await db.$transaction(async (tx) => {
+      const kit = await tx.kit.update({
+        where: { id: kitId },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? KitStatus.SIGNATURE_PENDING
+            : KitStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: custodian.id } },
+              /**
+               * If agreement requires a signature then signature status is PENDING
+               * otherwise signature status is NOT_REQUIRED
+               */
+              signatureStatus: agreementFound?.signatureRequired
+                ? CustodySignatureStatus.PENDING
+                : CustodySignatureStatus.NOT_REQUIRED,
+              agreement: agreementFound
+                ? { connect: { id: agreementFound.id } }
+                : undefined,
+            },
+          },
+        },
+        include: { custody: { select: { id: true } } },
+      });
+
       /**
-       * Create note for each asset
+       * If there are some custodies over assets, then we have to remove them
+       * then we can create the new custodies over them.
        */
-      db.note.createMany({
-        data: kit.assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
+      if (assetCustodies.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: assetCustodies } },
+        });
+      }
+
+      /* We also have to update all the asset active custody receipts */
+      for (const receipt of assetCustodyReceipts) {
+        await tx.custodyReceipt.update({
+          where: { id: receipt.id },
+          data: {
+            custodyStatus:
+              receipt.signatureStatus === CustodySignatureStatus.SIGNED ||
+              receipt.signatureStatus === CustodySignatureStatus.NOT_REQUIRED
+                ? CustodyStatus.FINISHED
+                : CustodyStatus.CANCELLED,
+            signatureStatus:
+              receipt.signatureStatus === CustodySignatureStatus.PENDING
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+          },
+        });
+      }
+
+      /** Creating custodies over assets */
+      await tx.custody.createMany({
+        data: kitFound.assets.map((asset) => ({
+          teamMemberId: custodian.id,
+          /**
+           * If agreement requires a signature then signature status is PENDING
+           * otherwise signature status is NOT_REQUIRED
+           */
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreementId: agreementFound ? agreementFound.id : undefined,
+          assetId: asset.id,
+        })),
+      });
+
+      /** Updating the status of assets */
+      await tx.asset.updateMany({
+        where: { id: { in: kitFound.assets.map((asset) => asset.id) } },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.SIGNATURE_PENDING
+            : AssetStatus.IN_CUSTODY,
+        },
+      });
+
+      /** Create Receipt for custody */
+      await tx.custodyReceipt.create({
+        data: {
+          kitId: kit.id,
+          custodianId,
+          organizationId,
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+        },
+      });
+
+      /* Create notes for all assets in kit */
+      await tx.note.createMany({
+        data: kitFound.assets.map((asset) => ({
+          content: agreementFound?.signatureRequired
+            ? `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
+                isSelfService ? "taken" : `given **${custodianName.trim()}**`
+              } custody over **${asset.title.trim()}**. **${custodianName?.trim()}** needs to sign the **${agreementFound.name?.trim()}** agreement before receiving custody.`
+            : `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
+                kit.name
+              }](/kits/${kit.id})**`,
+          type: "UPDATE" as const,
           userId,
           assetId: asset.id,
         })),
-      }),
-    ]);
+      });
 
-    sendNotification({
-      title: `‘${kit.name}’ is now in custody of ${custodianName}`,
-      message:
-        "Remember, this kit will be unavailable until it is manually checked in.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
+      return kit;
     });
+
+    if (agreementFound) {
+      if (custodian.email) {
+        sendEmail({
+          to: custodian.email,
+          subject: `You have been assigned custody over ${updatedKit.name}.`,
+          text: kitCustodyAssignedWithAgreementEmailText({
+            kitName: updatedKit.name,
+            assignerName: resolveTeamMemberName(custodian),
+            kitId,
+            custodyId: updatedKit?.custody?.id ?? "",
+            signatureRequired: agreementFound.signatureRequired,
+          }),
+        });
+      }
+
+      if (agreementFound.signatureRequired) {
+        sendNotification({
+          title: `'${updatedKit.name}' would go in custody of ${custodianName}`,
+          message:
+            "This kit will stay available until the custodian signs the PDF agreement. After that, the asset will be unavailable until custody is manually released.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+      }
+    } else {
+      sendNotification({
+        title: `‘${updatedKit.name}’ is now in custody of ${custodianName}`,
+        message:
+          "Remember, this kit will be unavailable until it is manually checked in.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    }
 
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
@@ -263,12 +446,35 @@ export default function GiveKitCustody() {
   const disabled = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
   const { kit, teamMembers } = useLoaderData<typeof loader>();
+  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const submit = useSubmit();
+
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
 
   const { isSelfService } = useUserRoleHelper();
 
   const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
+
+  const someAssetsUnavailable = kit.assets.some(
+    (asset) => asset.status !== "AVAILABLE"
+  );
+
+  function showAlert() {
+    setIsAlertOpen(true);
+  }
+
+  function hideAlert() {
+    setIsAlertOpen(false);
+  }
+
+  function handleSubmit() {
+    if (zo.form) {
+      submit(zo.form);
+      hideAlert();
+    }
+  }
 
   return (
     <Form method="post" ref={zo.ref}>
@@ -315,13 +521,23 @@ export default function GiveKitCustody() {
               id: JSON.stringify({
                 id: item.id,
                 name: resolveTeamMemberName(item),
+                email: item.user?.email,
               }),
             })}
             renderItem={(item) => resolveTeamMemberName(item, true)}
+            onChange={(value) => {
+              setHasCustodianSelected(!!value);
+            }}
           />
         </div>
+
+        <CustodyAgreementSelector
+          className="my-5"
+          hasCustodianSelected={hasCustodianSelected}
+        />
+
         {error ? (
-          <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
+          <div className="mb-8 text-sm text-error-500">{error}</div>
         ) : null}
 
         {hasBookings ? (
@@ -341,18 +557,85 @@ export default function GiveKitCustody() {
           </WarningBox>
         ) : null}
 
+        <When truthy={someAssetsUnavailable}>
+          <WarningBox className="mb-4">
+            The kit already has some assets in custody. By assigning custody to
+            the kit, the asset custody will be synchronized with the kit. All
+            current custody or pending custody of the assets will be released
+            and they will get assigned custody via the kit.
+          </WarningBox>
+        </When>
+
         <div className="flex gap-3">
           <Button to=".." variant="secondary" width="full" disabled={disabled}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            width="full"
-            type="submit"
-            disabled={disabled}
-          >
-            Confirm
-          </Button>
+
+          {someAssetsUnavailable ? (
+            <AlertDialog open={isAlertOpen}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="primary"
+                  width="full"
+                  disabled={disabled}
+                  onClick={() => {
+                    const validation = zo.validate();
+                    if (validation.success) {
+                      showAlert();
+                    }
+                  }}
+                >
+                  Confirm
+                </Button>
+              </AlertDialogTrigger>
+
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <div className="mx-auto md:m-0">
+                    <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+                      <AlertIcon />
+                    </span>
+                  </div>
+                  <AlertDialogTitle>
+                    Confirm custody assignment
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Some of the assets in this kit already have custody. By
+                    assigning custody to the kit, the asset custody will be
+                    synchronized with the kit.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+
+                <AlertDialogFooter>
+                  <AlertDialogCancel asChild>
+                    <Button
+                      onClick={hideAlert}
+                      variant="secondary"
+                      disabled={disabled}
+                    >
+                      Cancel
+                    </Button>
+                  </AlertDialogCancel>
+
+                  <AlertDialogAction asChild>
+                    <Button onClick={handleSubmit} disabled={disabled}>
+                      Confirm
+                    </Button>
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : (
+            <Button
+              variant="primary"
+              width="full"
+              type="submit"
+              disabled={disabled}
+            >
+              Confirm
+            </Button>
+          )}
         </div>
       </div>
     </Form>

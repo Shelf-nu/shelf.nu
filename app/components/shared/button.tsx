@@ -265,7 +265,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           {...props}
-          className={finalStyles}
+          className={tw(finalStyles)}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}

@@ -1,4 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { useRouteLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -27,6 +28,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { ListItemTagsColumn } from "./assets._index";
+import type { KitPageLoaderData } from "./kits.$kitId";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -153,7 +155,12 @@ export default function KitAssets() {
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
+  // @TODO: this needs to be tested and types need tobe fixed
+  const data = useRouteLoaderData<KitPageLoaderData>(
+    "routes/_layout+kits.$kitId"
+  );
   const { roles } = useUserRoleHelper();
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -185,6 +192,8 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 </Button>
               </span>
               <AssetStatusBadge
+                kit={data?.kit}
+                shareAgreementUrl={`/kits/${item.kitId}/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

@@ -1213,6 +1213,7 @@ export const assetQueryFragment = Prisma.sql`
         WHEN cu.id IS NOT NULL THEN
           jsonb_build_object(
             'name', tm.name,
+            'signatureStatus', cu."signatureStatus",
             'custodian', jsonb_build_object(
               'name', tm.name,
               'user', CASE 
