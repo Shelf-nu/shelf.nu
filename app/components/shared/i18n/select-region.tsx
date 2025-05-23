@@ -10,7 +10,7 @@ const SelectRegion = () => {
     { code: "fr", name: "Français" },
   ];
 
-  const handleChangeLocale = (event: { target: { value: any; }; }) => {
+  const handleChangeLocale = (event: { target: { value: any } }) => {
     const newLocale = event.target.value;
 
     console.log("Selected locale:", newLocale);
