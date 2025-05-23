@@ -13,11 +13,11 @@ import { AssetImage } from "~/components/assets/asset-image/component";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -281,13 +281,10 @@ export default function QrLinkExisting() {
               countKey="totalLocations"
               renderItem={({ metadata }) => (
                 <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
+                    alt={metadata.name}
+                    className="size-6 rounded-[2px]"
                   />
                   <div>{metadata.name}</div>
                 </div>

@@ -3,14 +3,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import {
-  json,
-  redirect,
-  redirectDocument,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
-import { invariant } from "framer-motion";
+import { json, redirect, redirectDocument } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -19,9 +12,11 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 
-import { createLocation } from "~/modules/location/service.server";
+import {
+  createLocation,
+  updateLocationImage,
+} from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -92,17 +87,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     const { name, description, address, addAnother } = payload;
-    /** This checks if tags are passed and build the  */
-
-    const formDataFile = await unstable_parseMultipartFormData(
-      request,
-      unstable_createMemoryUploadHandler({
-        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-      })
-    );
-
-    const file = formDataFile.get("image") as File | null;
-    invariant(file instanceof File, "file not the right type");
 
     const location = await createLocation({
       name,
@@ -110,7 +94,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       address,
       userId: authSession.userId,
       organizationId,
-      image: file || null,
+    });
+
+    await updateLocationImage({
+      request,
+      locationId: location.id,
+      organizationId,
     });
 
     sendNotification({

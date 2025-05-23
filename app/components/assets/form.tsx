@@ -27,6 +27,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -36,7 +37,6 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "../shared/hover-card";
-import { Image } from "../shared/image";
 import {
   Tooltip,
   TooltipContent,
@@ -369,14 +369,13 @@ export const AssetForm = ({
             }
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
-                <Image
-                  imageId={metadata.imageId}
-                  alt="img"
-                  className={tw(
-                    "size-6 rounded-[2px] object-cover",
-                    metadata.description ? "rounded-b-none border-b-0" : ""
-                  )}
-                />
+                {metadata?.thumbnailUrl ? (
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
+                    alt={metadata.name}
+                    className="size-6 rounded-[2px]"
+                  />
+                ) : null}
                 <div>{name}</div>
               </div>
             )}

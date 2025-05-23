@@ -6,12 +6,13 @@ import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "./constants";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { id } from "./id/id.server";
 import {
   cacheOptimizedImage,
   type CachedImage,
@@ -97,7 +98,7 @@ export async function uploadFile(
     // Upload original file
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
-      .upload(filename, file, { contentType, upsert: true });
+      .upload(filename, file, { contentType });
 
     if (error) {
       throw error;
@@ -485,6 +486,57 @@ export async function deleteAssetImage({
         label,
       })
     );
+  }
+}
+
+/**
+ * This function constructs the path for the file to be uploaded to Supabase storage.
+ */
+export function getFileUploadPath({
+  organizationId,
+  type,
+  typeId,
+}: {
+  organizationId: string;
+  type: "locations";
+  typeId: string;
+}) {
+  return `${organizationId}/${type}/${typeId}/${id()}`;
+}
+
+/**
+ * This function remove the public file from `files` bucket in Supabase using a public URL.
+ */
+export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
+  try {
+    if (
+      !publicUrl.startsWith(
+        `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/`
+      )
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid file URL",
+        additionalData: { publicUrl },
+        label,
+      });
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .remove([publicUrl.split(`${PUBLIC_BUCKET}/`)[1]]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      label,
+    });
   }
 }
 
