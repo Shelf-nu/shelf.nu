@@ -1,3 +1,4 @@
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -54,6 +55,11 @@ export default defineConfig({
     },
   },
   plugins: [
+    paraglideVitePlugin({
+      project: "./project.inlang",
+      outdir: "./app/paraglide",
+      strategy: ["url", "preferredLanguage", "baseLocale"],
+    }),
     cjsInterop({
       // List of CJS dependencies that require interop
       dependencies: [

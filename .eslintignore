@@ -4,3 +4,6 @@
 /test/
 /desktop-app/shelf-installer/*
 /desktop-app/portable/*
+/app/paraglide/messages/*.js
+/app/paraglide/*.js
+/messages/*.js
