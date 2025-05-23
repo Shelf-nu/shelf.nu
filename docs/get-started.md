@@ -203,23 +203,23 @@ Now that everything is set up you can commit and push your changes to your repo.
 
 ## File Storage
 
-For File storage we use the S3 buckets service provided by supabase. We do this as it makes it easier to manage permissions in relation to our users which are also stored on supabase. To set it up you need to do the following steps:
+For File storage we use the storage buckets service provided by supabase. We don't ever interact with supabase via the client(browser) so we implement policies to reflect that. The policies created for DELETE, INSERT, and UPDATE are primarily designed to control access to those actions from the client side (e.g., browser) and prevent bad actors from being able to modify our public buckets. To set it up you need to do the following steps:
 
 ### Profile pictures
 
 1. Create a bucket called `profile-pictures`
 2. Make it a public bucket
-3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'profile-pictures'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `(bucket_id = 'profile-pictures'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
 
 ### Assets
 
 1. Create a bucket called `assets`
-2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'assets'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `(bucket_id = 'assets'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
 
 ### Kits
 
 1. Create a bucket called `kits`
-2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'kits'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `(bucket_id = 'kits'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
 
 ### Locations
 
