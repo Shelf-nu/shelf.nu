@@ -12,7 +12,7 @@ import {
   useAssetIndexViewState,
   useIsAssetIndexPage,
 } from "../use-asset-index-view-state";
-import { useCurrentOrganization } from "../use-current-organization-id";
+import { useCurrentOrganization } from "../use-current-organization";
 
 export const SEARCH_PARAMS_KEYS_TO_EXCLUDE = [
   "page",

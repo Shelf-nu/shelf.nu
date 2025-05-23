@@ -190,7 +190,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/kits/${params.kitId}`);
+    return redirect(`/kits/${params.kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

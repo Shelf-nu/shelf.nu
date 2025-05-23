@@ -121,6 +121,7 @@ export const assetIndexFields = ({
             userId: true,
             user: {
               select: {
+                id: true,
                 email: true,
                 firstName: true,
                 lastName: true,

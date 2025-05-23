@@ -50,7 +50,6 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-
   assets            Asset[]
   custodyAgreements CustodyAgreement[]
   categories        Category[]
@@ -458,6 +457,13 @@ model Organization {
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
 
+  // Permissions configuration
+  // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
+  selfServiceCanSeeCustody Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
+  baseUserCanSeeCustody   Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings  Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
@@ -476,8 +482,11 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+
+
   custodyReceipts    CustodyReceipt[]
 }
+
 
 model UserOrganization {
   id String @id @unique @default(cuid())

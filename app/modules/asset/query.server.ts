@@ -1219,6 +1219,7 @@ export const assetQueryFragment = Prisma.sql`
               'user', CASE 
                 WHEN u.id IS NOT NULL THEN
                   jsonb_build_object(
+                    'id', u.id,
                     'firstName', u."firstName",
                     'lastName', u."lastName",
                     'profilePicture', u."profilePicture",
@@ -1236,6 +1237,7 @@ export const assetQueryFragment = Prisma.sql`
               'user', CASE 
                 WHEN bu.id IS NOT NULL THEN
                   jsonb_build_object(
+                    'id', u.id,
                     'firstName', bu."firstName",
                     'lastName', bu."lastName",
                     'profilePicture', bu."profilePicture",

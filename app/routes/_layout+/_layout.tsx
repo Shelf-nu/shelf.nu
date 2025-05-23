@@ -36,7 +36,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { isLikeShelfError, makeShelfError } from "~/utils/error";
+import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
@@ -113,11 +113,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getSelectedOrganisation({ userId: authSession.userId, request });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
+    if (!organizations.length || !currentOrganization) {
+      throw new ShelfError({
+        cause: null,
+        title: "No organization",
+        message:
+          "You are not part of any organization. Please contact support.",
+        status: 403,
+        label: "Organization",
+      });
+    }
+
     return json(
       data({
         user,
         organizations,
         currentOrganizationId: organizationId,
+        currentOrganization,
         currentOrganizationUserRoles: user?.userOrganizations.find(
           (userOrg) => userOrg.organization.id === organizationId
         )?.roles,

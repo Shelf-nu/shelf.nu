@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import type { BookLink } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
 import { GenericBookActionsDropdown } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { isPersonalOrg } from "~/utils/organization";
 
@@ -37,7 +37,7 @@ export default function BookingActionsDropdown() {
       disabled,
       label: "Create new booking",
       icon: "bookings",
-      to: "create-new-booking",
+      to: "assets/create-new-booking",
     },
     {
       indexType: "kit",
@@ -45,7 +45,7 @@ export default function BookingActionsDropdown() {
       label: "Add to existing booking",
       icon: "booking-exist",
       disabled,
-      to: `/kits/${kit.id}/add-to-existing-booking`,
+      to: `/kits/${kit.id}/assets/add-to-existing-booking`,
     },
   ] as BookLink[];
 

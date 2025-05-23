@@ -54,6 +54,7 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -78,12 +79,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
 
     const { locale, timeZone } = getClientHint(request);
 
@@ -173,6 +175,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody,
           customFields,
         },
+        currentOrganization,
+        userId,
         lastScan,
         header,
         locale,
@@ -246,8 +250,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetOverview() {
-  const { asset, locale, timeZone, qrObj, lastScan } =
-    useLoaderData<typeof loader>();
+  const {
+    asset,
+    locale,
+    timeZone,
+    qrObj,
+    lastScan,
+    currentOrganization,
+    userId,
+  } = useLoaderData<typeof loader>();
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -541,10 +552,11 @@ export default function AssetOverview() {
             <CustodyCard
               booking={booking}
               custody={asset?.custody || null}
-              hasPermission={userHasPermission({
+              hasPermission={userCanViewSpecificCustody({
                 roles,
-                entity: PermissionEntity.custody,
-                action: PermissionAction.read,
+                custodianUserId: asset?.custody?.custodian?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
               })}
             />
           </When>

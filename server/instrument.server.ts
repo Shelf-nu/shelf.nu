@@ -57,11 +57,6 @@ function handleBeforeSend<E extends Event>(event: E, hint: EventHint) {
     event.request.cookies["__authSession"] = "hidden";
   }
 
-  /**
-   * @TODO potential improvement here is to filter out errors from urls with SERVER_URL/file-assets/${buildHash}
-   * The reason to do this is because we dont want to log errors caused by files not being found due to the hash changing - versioning
-   */
-
   return {
     ...event,
     ...makeSentryContext(exception),

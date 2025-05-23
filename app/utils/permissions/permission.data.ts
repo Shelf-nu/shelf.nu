@@ -102,7 +102,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
-    [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.custodyAgreement]: [PermissionAction.read],
     [PermissionEntity.receipts]: [PermissionAction.read],

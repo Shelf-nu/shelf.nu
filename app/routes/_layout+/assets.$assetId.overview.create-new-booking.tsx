@@ -54,7 +54,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
       userId,
     });
 
@@ -75,6 +75,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        currentOrganization,
+        userId,
         showModal: true,
         isSelfServiceOrBase,
         selfServiceOrBaseUser,

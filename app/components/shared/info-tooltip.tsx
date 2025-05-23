@@ -1,24 +1,27 @@
 import type { ReactNode } from "react";
-import { InfoIcon } from "~/components/icons/library";
+import { Info } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { tw } from "~/utils/tw";
 
 export const InfoTooltip = ({
   icon,
+  iconClassName,
   content,
 }: {
   icon?: ReactNode;
+  iconClassName?: string;
   content: ReactNode;
 }) => (
   <TooltipProvider delayDuration={100}>
     <Tooltip>
       <TooltipTrigger asChild>
         <i className="inline-block cursor-pointer align-middle text-gray-400 hover:text-gray-700">
-          {icon ? icon : <InfoIcon />}
+          {icon ? icon : <Info className={tw("size-5", iconClassName)} />}
         </i>
       </TooltipTrigger>
       <TooltipContent side="bottom">

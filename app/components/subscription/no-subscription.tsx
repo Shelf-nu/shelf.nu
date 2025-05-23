@@ -1,4 +1,4 @@
-import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { CustomerPortalForm } from "./customer-portal-form";
 import { plansIconsMap } from "./price-box";

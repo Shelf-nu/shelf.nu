@@ -115,7 +115,7 @@ export const server = await createHonoServer({
 
           return {
             ...sessionStorage,
-            // If a user doesn't come back to the app within 30 days, their session will be deleted.
+            // If a user doesn't come back to the app within 3 days, their session will be deleted.
             async commitSession(session) {
               return sessionStorage.commitSession(session, {
                 maxAge: 60 * 60 * 24 * 3, // 3 days

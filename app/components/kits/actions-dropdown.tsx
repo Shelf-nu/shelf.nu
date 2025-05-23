@@ -156,7 +156,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               <DropdownMenuItem className="border-b  px-4 py-1 md:p-0">
                 {kitCanBeReleased ? (
                   <Button
-                    to="release-custody"
+                    to="assets/release-custody"
                     role="link"
                     variant="link"
                     className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
@@ -171,7 +171,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   </Button>
                 ) : (
                   <Button
-                    to="assign-custody"
+                    to="assets/assign-custody"
                     role="link"
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"

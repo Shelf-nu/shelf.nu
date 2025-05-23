@@ -15,7 +15,7 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ASSET_INDEX_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -434,7 +434,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    return redirect(`/kits/${kitId}`);
+    return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });
@@ -500,14 +500,13 @@ export default function ManageAssetsInKit() {
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
             "right-of-search": (
               <SortBy
-                sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+                sortingOptions={ASSET_SORTING_OPTIONS}
                 defaultSortingBy="createdAt"
               />
             ),
           }}
         ></Filters>
       </div>
-
       <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
@@ -556,7 +555,6 @@ export default function ManageAssetsInKit() {
           )}
         />
       </div>
-
       {/* Body of the modal - this is the scrollable area */}
       <div className="flex-1 overflow-y-auto px-5 md:px-0">
         <List
@@ -597,7 +595,6 @@ export default function ManageAssetsInKit() {
           extraItemComponentProps={{ kitAssetIds }}
         />
       </div>
-
       {/* Footer of the modal - fixed at the bottom */}
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>

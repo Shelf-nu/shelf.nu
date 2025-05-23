@@ -28,7 +28,12 @@ export default function ExtendBookingDialog({
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
   const fetcher = useFetcherWithReset<{
-    error?: { message: string };
+    error?: {
+      message: string;
+      additionalData?: {
+        clashingBookings?: { id: string; name: string }[];
+      };
+    };
     success: boolean;
   }>();
 
@@ -78,7 +83,7 @@ export default function ExtendBookingDialog({
           }
         >
           <div className="px-6 pb-4">
-            <h3 className="mb-1">Extend booking date</h3>
+            <h3 className="mb-1">Extend booking</h3>
             <p className="mb-4">
               Change the end date of your booking to a date in the future.
             </p>
@@ -102,9 +107,27 @@ export default function ExtendBookingDialog({
               />
 
               <When truthy={!!fetcher?.data?.error}>
-                <p className="mb-4 text-sm text-error-500">
+                <p className="text-sm text-error-500">
                   {fetcher.data?.error?.message}
                 </p>
+                {fetcher.data?.error?.additionalData?.clashingBookings && (
+                  <ul className="mb-4 mt-1 list-inside list-disc pl-4">
+                    {fetcher.data.error.additionalData.clashingBookings.map(
+                      (booking) => (
+                        <li key={booking.id}>
+                          <Button
+                            variant="link-gray"
+                            className={"text-error-500 no-underline"}
+                            target="_blank"
+                            to={`/bookings/${booking.id}`}
+                          >
+                            {booking.name}
+                          </Button>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                )}
               </When>
 
               <input type="hidden" name="intent" value="extend-booking" />

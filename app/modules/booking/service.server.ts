@@ -1154,6 +1154,8 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
+          assets: { select: { id: true } },
+          from: true,
         },
       })
       .catch((cause) => {
@@ -1164,6 +1166,37 @@ export async function extendBooking({
             "Booking not found. Are you sure it exists in the current workspace?",
         });
       });
+
+    /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+    const clashingBookings = await db.booking.findMany({
+      where: {
+        id: { not: booking.id },
+        organizationId,
+        status: {
+          in: [BookingStatus.RESERVED],
+        },
+        assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+        // Check for bookings that start within the extension period
+        from: {
+          gt: booking.to!,
+          lte: newEndDate,
+        },
+      },
+      select: { id: true, name: true },
+    });
+
+    if (clashingBookings?.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Cannot extend booking because the extended period is overlapping with the following bookings:",
+        additionalData: {
+          clashingBookings: [...clashingBookings],
+        },
+        shouldBeCaptured: false,
+      });
+    }
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -1278,27 +1311,30 @@ export async function extendBooking({
 
     return updatedBooking;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
       label,
       title: "Error",
-      message: isLikeShelfError(cause)
+      message: isShelfError
         ? cause.message
         : "Something went wrong while extending the booking.",
+      additionalData: isShelfError ? cause.additionalData : undefined,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
     });
   }
 }
 
 export async function getBookingsFilterData({
   request,
-  isSelfServiceOrBase,
   userId,
+  canSeeAllBookings,
   organizationId,
 }: {
   request: Request;
-  isSelfServiceOrBase: boolean;
   userId: string;
-  organizationId: string;
+  canSeeAllBookings: boolean;
+  organizationId: Organization["id"];
 }) {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status, teamMemberIds } =
@@ -1320,13 +1356,17 @@ export async function getBookingsFilterData({
    * @TODO this can safely be remove 3-6 months after this commit
    */
   let selfServiceData = null;
-  if (isSelfServiceOrBase) {
+
+  // Only fetch team member data if the user doesn't have permission to see all bookings
+  if (!canSeeAllBookings) {
+    // Get the team member for the current user
     const teamMember = await db.teamMember.findFirst({
       where: {
         userId,
         organizationId,
       },
     });
+
     if (!teamMember) {
       throw new ShelfError({
         cause: null,
@@ -1337,8 +1377,9 @@ export async function getBookingsFilterData({
         shouldBeCaptured: false,
       });
     }
+
     selfServiceData = {
-      // If the user is self service, we only show bookings that belong to that user)
+      // If the user is self service/base without override, we only show bookings that belong to that user
       custodianUserId: userId,
       custodianTeamMemberId: teamMember.id,
     };
@@ -1815,13 +1856,15 @@ export async function getBookingsForCalendar(params: {
   request: Request;
   organizationId: Organization["id"];
   userId: string;
-  isSelfServiceOrBase: boolean;
+  canSeeAllBookings: boolean;
+  canSeeAllCustody: boolean;
 }) {
   const {
     request,
     organizationId,
     userId,
-    isSelfServiceOrBase = false,
+    canSeeAllBookings,
+    canSeeAllCustody,
   } = params;
   const searchParams = getCurrentSearchParams(request);
 
@@ -1836,7 +1879,7 @@ export async function getBookingsForCalendar(params: {
       userId,
       bookingFrom: new Date(start),
       bookingTo: new Date(end),
-      ...(isSelfServiceOrBase && {
+      ...(!canSeeAllBookings && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: userId,
       }),
@@ -1854,8 +1897,12 @@ export async function getBookingsForCalendar(params: {
           ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
           : booking.custodianTeamMember?.name;
 
+        let title = booking.name;
+        if (canSeeAllCustody) {
+          title += ` | ${custodianName}`;
+        }
         return {
-          title: `${booking.name} | ${custodianName}`,
+          title,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
           url: `/bookings/${booking.id}`,
@@ -1875,9 +1922,12 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
-              image: booking.custodianUser
-                ? booking.custodianUser.profilePicture
-                : undefined,
+              user: {
+                id: booking.custodianUserId,
+                firstName: booking.custodianUser?.firstName,
+                lastName: booking.custodianUser?.lastName,
+                profilePicture: booking.custodianUser?.profilePicture,
+              },
             },
           },
         };
@@ -2512,6 +2562,7 @@ export async function loadBookingsData({
     search,
     userId,
     statuses: ["DRAFT", "RESERVED"],
+    // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
     ...(isSelfServiceOrBase && {
       custodianUserId: userId,
     }),

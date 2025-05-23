@@ -68,7 +68,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
       userId,
     });
 
@@ -89,6 +89,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        currentOrganization,
+        userId,
         showModal: true,
         isSelfServiceOrBase,
         selfServiceOrBaseUser,
