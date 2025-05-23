@@ -5,7 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-
+import { get } from "lodash";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -13,15 +13,17 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import SelectRegion from "~/components/shared/i18n/select-region";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
-
 import {
   getSelectedOrganisation,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { m } from "~/paraglide/messages.js";
+import { setLocale, getLocale } from "~/paraglide/runtime";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import {
@@ -39,10 +41,11 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-import {m} from "./paraglide/messages.js"
+
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
-  const subHeading = "Welcome back! Enter your details below to log in.";
+  const subHeading = m.test();
+
   const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
@@ -130,7 +133,6 @@ export default function IndexLoginForm() {
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-
   return (
     <div className="w-full max-w-md">
       {acceptedInvite ? (
@@ -161,6 +163,7 @@ export default function IndexLoginForm() {
             inputClassName="w-full"
             error={zo.errors.email()?.message || data?.error.message}
           />
+          <SelectRegion />
         </div>
         <PasswordInput
           label="Password"
@@ -181,6 +184,7 @@ export default function IndexLoginForm() {
         >
           Log In
         </Button>
+
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">
             Don't remember your password?{" "}

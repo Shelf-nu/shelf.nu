@@ -1,12 +1,17 @@
 /* eslint-disable no-console */
 import { PassThrough } from "stream";
 
-import { createReadableStreamFromReadable } from "@remix-run/node";
+import {
+  createReadableStreamFromReadable,
+  createCookie,
+} from "@remix-run/node";
 import type { AppLoadContext, EntryContext } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { setLangServerCookie, getContextLang } from "remix-paraglidejs/server";
+import { setLocale, locales } from "~/paraglide/runtime";
 import { registerEmailWorkers } from "./emails/email.worker.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
@@ -14,7 +19,6 @@ import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 export * from "../server";
-
 // === start: register scheduler and workers ===
 schedulerService
   .init()
@@ -71,7 +75,7 @@ schedulerService
  *
  */
 export const handleError = Sentry.wrapHandleErrorWithSentry;
-
+export const setLangCookie = createCookie("language-tag", {});
 const ABORT_DELAY = 5000;
 
 export default function handleRequest(
@@ -157,6 +161,14 @@ function handleBrowserRequest(
 ) {
   return new Promise((resolve, reject) => {
     let shellRendered = false;
+    const lang = getContextLang(remixContext, {
+      defaultValue: locales[0],
+      availableLanguages: locales,
+      // The URL parameter to look for when determining the language
+      // for example ($lang)._index.tsx
+      urlParam: "lang",
+    });
+    setLocale(lang);
     const { pipe, abort } = renderToPipeableStream(
       <RemixServer
         context={remixContext}

@@ -46,6 +46,7 @@
     "@fullcalendar/list": "^6.1.11",
     "@fullcalendar/react": "^6.1.11",
     "@fullcalendar/timegrid": "^6.1.15",
+    "@inlang/paraglide-vite": "^1.4.0",
     "@markdoc/markdoc": "^0.4.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "@prisma/client": "^6.2.1",
@@ -114,6 +115,7 @@
     "react-to-print": "^2.15.1",
     "react-webcam": "^7.2.0",
     "react-zorm": "^0.9.0",
+    "remix-paraglidejs": "^1.0.1",
     "remix-utils": "^7.5.0",
     "sharp": "^0.33.2",
     "stripe": "^14.16.0",
@@ -127,6 +129,7 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",
+    "@inlang/paraglide-js": "2.0.12",
     "@playwright/test": "^1.41.2",
     "@remix-run/dev": "2.16.4",
     "@remix-run/eslint-config": "2.16.4",
@@ -172,8 +175,7 @@
     "vite": "^5.4.19",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
-    "vitest": "^2.1.9",
-    "@inlang/paraglide-js": "2.0.12"
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=20"

@@ -23,6 +23,7 @@ import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
+import { getLocale } from "./paraglide/runtime";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
@@ -33,7 +34,6 @@ import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
-
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -66,6 +66,7 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
     data({
       env: getBrowserEnv(),
       maintenanceMode: false,
+      locale: getLocale(),
       requestInfo: {
         hints: getClientHint(request),
       },
@@ -78,13 +79,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
-
   useEffect(() => {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
   return (
-    <html lang="en" className="overflow-hidden">
+    <html lang={data?.locale ?? getLocale()} className="overflow-hidden">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -128,7 +128,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 function App() {
   useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
-
   return maintenanceMode ? (
     <BlockInteractions
       title={"Maintenance is being performed"}

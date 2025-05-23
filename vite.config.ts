@@ -58,7 +58,7 @@ export default defineConfig({
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./app/paraglide",
-      strategy: ["preferredLanguage", "cookie", "baseLocale"],
+      strategy: ["url", "preferredLanguage", "baseLocale"],
     }),
     cjsInterop({
       // List of CJS dependencies that require interop
