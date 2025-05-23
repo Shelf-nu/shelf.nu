@@ -225,7 +225,7 @@ For File storage we use the storage buckets service provided by supabase. We don
 
 1. Create a bucket called `files`
 2. Make it a public bucket
-3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. Then policy expression is: `((bucket_id = 'profile-pictures'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. Then policy expression is: `(bucket_id = 'files'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
 
 ## GitHub Actions
 
