@@ -10,6 +10,7 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { Button } from "~/components/shared/button";
 import type { LoaderData } from "~/routes/_layout+/kits.$kitId.scan-assets";
 import type {
   AssetFromQr,
@@ -184,6 +185,14 @@ export default function AddAssetsToBookingDrawer({
           return <KitRow kit={data as KitFromQr} />;
         }
         return null;
+      }}
+      assetExtraInclude={{
+        kit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       }}
     />
   );

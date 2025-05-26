@@ -4,7 +4,13 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,6 +85,7 @@ export type AssetFromQr = Prisma.AssetGetPayload<{
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const searchParams = getCurrentSearchParams(request);
 
   try {
     const { organizationId } = await requirePermission({
@@ -93,6 +100,17 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         userId,
       },
     });
+
+    const { assetExtraInclude, kitExtraInclude } = parseData(
+      searchParams,
+      z.object({
+        assetExtraInclude: z.string().optional(),
+        kitExtraInclude: z.string().optional(),
+      })
+    );
+
+    console.log("assetExtraInclude", assetExtraInclude);
+    console.log("kitExtraInclude", kitExtraInclude);
 
     const qr = await getQr({
       id: qrId,
