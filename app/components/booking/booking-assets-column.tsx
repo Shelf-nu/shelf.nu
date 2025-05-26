@@ -3,6 +3,7 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
@@ -13,6 +14,7 @@ import { AvailabilityLabel } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
+import KitImage from "../kits/kit-image";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
@@ -112,8 +114,8 @@ export function BookingAssetsColumn() {
 
   return (
     <div className="flex-1">
-      <div className=" w-full">
-        <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+      <div className="w-full">
+        <TextualDivider text="Assets & Kits" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* This is a fake table header */}
@@ -185,21 +187,36 @@ export function BookingAssetsColumn() {
                               className="pseudo-border-bottom bg-gray-50"
                             >
                               <Td className="max-w-full">
-                                <Button
-                                  to={`/kits/${kit.id}`}
-                                  variant="link"
-                                  className="text-gray-900 hover:text-gray-700"
-                                  target={"_blank"}
-                                  onlyNewTabIconOnHover={true}
-                                  aria-label="Go to kit"
-                                >
-                                  <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
-                                    {kit.name}
+                                <div className="flex items-center gap-3">
+                                  <KitImage
+                                    kit={{
+                                      image: kit.image,
+                                      imageExpiration: kit.imageExpiration,
+                                      alt: kit.name,
+                                      kitId: kit.id,
+                                    }}
+                                    className={tw(
+                                      "size-12 rounded-[4px] border object-cover"
+                                    )}
+                                  />
+                                  <div>
+                                    <Button
+                                      to={`/kits/${kit.id}`}
+                                      variant="link"
+                                      className="text-gray-900 hover:text-gray-700"
+                                      target={"_blank"}
+                                      onlyNewTabIconOnHover={true}
+                                      aria-label="Go to kit"
+                                    >
+                                      <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
+                                        {kit.name}
+                                      </div>
+                                    </Button>
+                                    <p className="text-sm text-gray-600">
+                                      {item.assets.length} assets
+                                    </p>
                                   </div>
-                                </Button>
-                                <p className="text-sm text-gray-600">
-                                  {item.assets.length} assets
-                                </p>
+                                </div>
                               </Td>
 
                               <Td> </Td>
@@ -294,9 +311,10 @@ const ListAssetContent = ({
 }) => {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isBase } = useUserRoleHelper();
-  const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
+  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isCompleted, isArchived, isReserved, isDraft } =
     useBookingStatusHelpers(booking.status);
+  const user = useUserData();
 
   /** Weather the asset is checked out in a booking different than the current one */
   const isCheckedOut = useMemo(
@@ -308,6 +326,36 @@ const ListAssetContent = ({
   );
 
   const isPartOfKit = !!item.kitId;
+
+  // New logic for determining if actions dropdown should be shown
+  const canSeeActions = useMemo(() => {
+    // Never show actions if asset is part of a kit
+    if (isPartOfKit) return false;
+
+    // Admins and owners can always see actions
+    if (!isBaseOrSelfService) return true;
+
+    // Check if user is the custodian of the item
+    const isUserCustodian = booking?.custodianUser?.id === user?.id;
+
+    // Base role: can see actions if booking is Draft AND user is custodian
+    if (isBase && isDraft && isUserCustodian) return true;
+
+    // SelfService role: can see actions if (Draft OR Reserved) AND user is custodian
+    if (isSelfService && (isDraft || isReserved) && isUserCustodian)
+      return true;
+
+    return false;
+  }, [
+    isPartOfKit,
+    booking?.custodianUser?.id,
+    user?.id,
+    isBase,
+    isDraft,
+    isSelfService,
+    isReserved,
+    isBaseOrSelfService,
+  ]);
 
   return (
     <>
@@ -388,11 +436,9 @@ const ListAssetContent = ({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {/* Base users can only remove assets if the booking is not started already */}
-        {(isBase && (isOngoing || isOverdue || isReserved)) ||
-        isPartOfKit ? null : (
+        <When truthy={canSeeActions}>
           <AssetRowActionsDropdown asset={item} />
-        )}
+        </When>
       </Td>
     </>
   );
