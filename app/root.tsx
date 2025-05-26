@@ -17,6 +17,9 @@ import {
 } from "@remix-run/react";
 import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
+import { useTranslation } from "react-i18next";
+import { useChangeLanguage } from "remix-i18next/react";
+import i18next from "~/i18next.server";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
@@ -34,6 +37,7 @@ import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 
+
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -41,6 +45,7 @@ export interface RootData {
 
 export const handle = {
   breadcrumb: () => <SidebarTrigger />,
+  i18n: "common",
 };
 
 export const links: LinksFunction = () => [
@@ -61,11 +66,12 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export const loader = ({ request }: LoaderFunctionArgs) =>
+export const loader = async ({ request }: LoaderFunctionArgs) =>
   json(
     data({
       env: getBrowserEnv(),
       maintenanceMode: false,
+      locale: await i18next.getLocale(request),
       requestInfo: {
         hints: getClientHint(request),
       },
@@ -78,13 +84,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
+  let { locale } = useLoaderData<typeof loader>(); 
+  
+  let { i18n } = useTranslation()
 
+  useChangeLanguage(locale);
   useEffect(() => {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
   return (
-    <html lang="en" className="overflow-hidden">
+    <html lang={locale} dir={i18n.dir()} className="overflow-hidden">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -128,6 +138,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 function App() {
   useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
+
 
   return maintenanceMode ? (
     <BlockInteractions
