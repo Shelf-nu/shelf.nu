@@ -1,6 +1,6 @@
 export const en = {
   login: {
     login: "Log in",
-    subHeading: "Welcome back! Enter your details below to log in."
-  }
+    subHeading: "Welcome back! Enter your details below to log in.",
+  },
 };

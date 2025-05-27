@@ -19,8 +19,8 @@ import { getLng } from "./utils/cookies.server"; // your cookie utility to get t
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
-import {en} from "../public/locales/en/common";
-import {fr} from "../public/locales/fr/common";
+import { en } from "../public/locales/en/common";
+import { fr } from "../public/locales/fr/common";
 export * from "../server";
 // === start: register scheduler and workers ===
 schedulerService
@@ -172,7 +172,7 @@ async function handleBrowserRequest(
       ...i18n, // spread the configuration
       ns, // The namespaces the routes about to render wants to use
       lng, // The language to use
-      resources: {en : {common: en}, fr:{common: fr}},
+      resources: { en: { common: en }, fr: { common: fr } },
     });
   return new Promise((resolve, reject) => {
     // Initialize i18n instance
