@@ -1,4 +1,4 @@
-import { AssetStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
@@ -10,38 +10,34 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
-import type { LoaderData } from "~/routes/_layout+/kits.$kitId.scan-assets";
+import type { LoaderData } from "~/routes/_layout+/locations.$locationId.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
-import {
-  assetLabelPresets,
-  createAvailabilityLabels,
-  kitLabelPresets,
-} from "../availability-label-factory";
+import { createAvailabilityLabels } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
 // Export the schema so it can be reused
-export const addScannedAssetsToKitSchema = z.object({
+export const addScannedAssetsToLocationSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
 /** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
-type AssetFromQrWithKit = AssetFromQr & {
-  kit: {
+type AssetFromQrWithLocation = AssetFromQr & {
+  location: {
     id: string;
     name: string;
   };
 };
 
 /**
- * Drawer component for managing scanned assets to be added to kits
+ * Drawer component for managing scanned assets to be added to bookings
  */
-export default function AddAssetsToKitDrawer({
+export default function AddAssetsToLocationDrawer({
   className,
   style,
   isLoading,
@@ -52,8 +48,7 @@ export default function AddAssetsToKitDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { kit } = useLoaderData<LoaderData>();
-  const kitAssetsIds = kit.assets.map((a) => a.id) || [];
+  const { location } = useLoaderData<LoaderData>();
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -67,7 +62,7 @@ export default function AddAssetsToKitDrawer({
     .map((item) => item?.data as AssetFromQr);
 
   // List of asset IDs for the form
-  const assetIdsForKit = Array.from(new Set([...assets.map((a) => a.id)]));
+  const assetIdsForLocation = Array.from(new Set([...assets.map((a) => a.id)]));
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
@@ -75,20 +70,10 @@ export default function AddAssetsToKitDrawer({
   // Asset blockers
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => kit.assets.some((a) => a?.id === asset.id))
+    .filter((asset) => location.assets.some((a) => a?.id === asset.id))
     .map((a) => !!a && a.id);
 
-  // Asset is in custody
-  const assetsInCustodyIds = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.IN_CUSTODY)
-    .map((asset) => asset.id);
-
-  // Asset is checked out
-  const assetsCheckedOutIds = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
-    .map((asset) => asset.id);
-
-  // Get QR IDs for kits to block them from being added to other kits
+  // Get QR IDs for kits to block them from being added to location
   const kitQrIds = Object.entries(items)
     .filter(([, item]) => !!item && item.type === "kit")
     .map(([qrId]) => qrId);
@@ -101,36 +86,10 @@ export default function AddAssetsToKitDrawer({
       message: (count: number) => (
         <>
           <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already added to this kit.
+          already added to this location.
         </>
       ),
       onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
-    },
-    {
-      condition: assetsInCustodyIds.length > 0,
-      count: assetsInCustodyIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> in
-          custody.
-        </>
-      ),
-      description:
-        "Assets in custody cannot be added to kits. Please release custody first.",
-      onResolve: () => removeAssetsFromList(assetsInCustodyIds),
-    },
-    {
-      condition: assetsCheckedOutIds.length > 0,
-      count: assetsCheckedOutIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          checked out.
-        </>
-      ),
-      description:
-        "Checked out assets cannot be added to kits. Please check them in first.",
-      onResolve: () => removeAssetsFromList(assetsCheckedOutIds),
     },
     {
       condition: kitQrIds.length > 0,
@@ -138,10 +97,10 @@ export default function AddAssetsToKitDrawer({
       message: (count: number) => (
         <>
           <strong>{`${count} kit${count > 1 ? "s" : ""}`}</strong> detected.
-          Kits cannot be added to other kits.
+          Kits cannot be added to locations.
         </>
       ),
-      description: "Note: Only individual assets can be added to kits.",
+      description: "Note: Only individual assets can be added to locations.",
       onResolve: () => removeItemsFromList(kitQrIds),
     },
     {
@@ -161,11 +120,7 @@ export default function AddAssetsToKitDrawer({
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
     onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsInCustodyIds,
-        ...assetsCheckedOutIds,
-      ]);
+      removeAssetsFromList([...assetsAlreadyAddedIds]);
       removeItemsFromList([...errors.map(([qrId]) => qrId), ...kitQrIds]);
     },
   });
@@ -182,14 +137,19 @@ export default function AddAssetsToKitDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetFromQrWithKit} kit={kit} />;
+          return (
+            <AssetRow
+              asset={data as AssetFromQrWithLocation}
+              location={location}
+            />
+          );
         } else if (item?.type === "kit") {
           return <KitRow kit={data as KitFromQr} />;
         }
         return null;
       }}
       assetExtraInclude={{
-        kit: {
+        location: {
           select: {
             id: true,
             name: true,
@@ -201,11 +161,11 @@ export default function AddAssetsToKitDrawer({
 
   return (
     <ConfigurableDrawer
-      schema={addScannedAssetsToKitSchema}
+      schema={addScannedAssetsToLocationSchema}
       /**
        * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
        * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
-      formData={{ assetIds: [...kitAssetsIds, ...assetIdsForKit] }}
+      formData={{ assetIds: assetIdsForLocation }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -216,7 +176,7 @@ export default function AddAssetsToKitDrawer({
       defaultExpanded={defaultExpanded}
       className={className}
       style={style}
-      formName="AddScannedAssetsToKit"
+      formName="AddScannedAssetsToLocation"
     />
   );
 }
@@ -224,45 +184,55 @@ export default function AddAssetsToKitDrawer({
 // Implement item renderers
 export function AssetRow({
   asset,
-  kit,
+  location,
 }: {
-  asset: AssetFromQrWithKit;
-  kit: any;
+  asset: AssetFromQrWithLocation;
+  location: Pick<
+    Prisma.LocationGetPayload<{
+      include: {
+        assets: {
+          select: {
+            id: true;
+          };
+        };
+      };
+    }>,
+    "id" | "assets"
+  >;
 }) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
-    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
     // Custom preset for "already in this kit"
     {
-      condition: kit.assets.some((a: any) => a?.id === asset.id),
-      badgeText: "Already added to this kit",
-      tooltipTitle: "Asset is part of kit",
-      tooltipContent: "This asset is already added to the current kit.",
+      condition: location.assets.some((a: any) => a?.id === asset.id),
+      badgeText: "Already added to this location",
+      tooltipTitle: "Asset is part of location",
+      tooltipContent: "This asset is already added to the current location.",
       priority: 70,
     },
     {
-      condition: !!asset.kitId && asset.kitId !== kit.id,
-      badgeText: "Part of another kit",
-      tooltipTitle: "Asset is part of another kit",
+      condition: !!asset.locationId && asset.locationId !== location.id,
+      badgeText: "Part of another location",
+      tooltipTitle: "Asset is part of another location",
       tooltipContent: (
         <>
           This asset is currently part of another kit
-          {asset?.kit ? (
+          {asset?.location ? (
             <>
               :{" "}
               <Button
-                to={`/kits/${asset.kit.id}`}
+                to={`/locations/${asset.location.id}`}
                 target="_blank"
                 variant="link-gray"
                 className={"text-xs"}
               >
-                {asset.kit.name}
+                {asset.location.name}
               </Button>
               <br />
             </>
           ) : undefined}
-          You will still be able to add this asset to replace it's current kit.
+          You will still be able to add this asset to replace it's current
+          location.
         </>
       ),
       priority: 70,
@@ -302,13 +272,11 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const availabilityConfigs = [
     {
       condition: true, // Always show this label for kits
-      badgeText: "Cannot add to kit",
-      tooltipTitle: "Kits cannot be added to other kits",
-      tooltipContent: "Only individual assets can be added to kits.",
+      badgeText: "Cannot add to location",
+      tooltipTitle: "Kits cannot be added to locations",
+      tooltipContent: "Only individual assets can be added to locations.",
       priority: 100,
     },
-    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
-    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
   ];
 
   // Create the availability labels component with default options

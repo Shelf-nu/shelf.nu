@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -28,7 +28,10 @@ import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -50,6 +53,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { ListItemTagsColumn } from "./assets._index";
@@ -178,8 +182,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationPage() {
   const { location, mapData } = useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+  const userRoleCanManageAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.manageAssets,
+  });
 
-  return (
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
+  /**When we are on the kit.scan-assets route, we render an outlet on the whole layout.
+   * On the .assets and .bookings routes, we render the outlet only on the left column
+   */
+  const shouldRenderFullOutlet =
+    currentRoute?.handle?.name === "location.scan-assets";
+
+  return shouldRenderFullOutlet ? (
+    <Outlet />
+  ) : (
     <div>
       <Header>
         <ActionsDropdown location={location} />
@@ -213,14 +234,21 @@ export default function LocationPage() {
             >
               <div className="flex items-center justify-normal gap-6 xl:justify-end">
                 <div className="hidden lg:block">
-                  <Button
-                    as="button"
-                    to="add-assets"
-                    variant="primary"
-                    className="whitespace-nowrap"
-                  >
-                    Manage assets
-                  </Button>
+                  <When truthy={userRoleCanManageAssets}>
+                    <div className="flex items-center gap-2">
+                      <Button icon="scan" variant="secondary" to="scan-assets">
+                        Scan
+                      </Button>
+                      <Button
+                        to="manage-assets"
+                        variant="primary"
+                        width="full"
+                        className="whitespace-nowrap"
+                      >
+                        Manage assets
+                      </Button>
+                    </div>
+                  </When>
                 </div>
               </div>
             </Filters>

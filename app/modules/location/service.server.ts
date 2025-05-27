@@ -28,10 +28,11 @@ export async function getLocation(
     /** Assets to be loaded per page with the location */
     perPage?: number;
     search?: string | null;
-    orderBy: string;
+    orderBy?: string;
     orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
+    include?: Prisma.LocationInclude;
   }
 ) {
   const {
@@ -42,8 +43,9 @@ export async function getLocation(
     search,
     userOrganizations,
     request,
-    orderBy,
+    orderBy = "createdAt",
     orderDirection,
+    include,
   } = params;
 
   try {
@@ -75,23 +77,25 @@ export async function getLocation(
               : []),
           ],
         },
-        include: {
-          image: {
-            select: {
-              updatedAt: true,
+        include: include
+          ? include
+          : {
+              image: {
+                select: {
+                  updatedAt: true,
+                },
+              },
+              assets: {
+                include: {
+                  category: true,
+                  tags: true,
+                },
+                skip,
+                take,
+                where: assetsWhere,
+                orderBy: { [orderBy]: orderDirection },
+              },
             },
-          },
-          assets: {
-            include: {
-              category: true,
-              tags: true,
-            },
-            skip,
-            take,
-            where: assetsWhere,
-            orderBy: { [orderBy]: orderDirection },
-          },
-        },
       }),
 
       /** Count them */

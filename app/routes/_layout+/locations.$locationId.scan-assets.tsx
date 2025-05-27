@@ -12,13 +12,13 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
-import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to-kit-drawer";
-import { db } from "~/database/db.server";
+import AddAssetsToLocationDrawer from "~/components/scanner/drawer/uses/add-assets-to-location-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams } from "~/utils/http.server";
 import {
@@ -27,7 +27,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { action as manageAssetsAction } from "./kits.$kitId.assets.manage-assets";
+import { action as manageAssetsAction } from "./locations.$locationId.add-assets";
 
 export type LoaderData = typeof loader;
 
@@ -35,70 +35,60 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { kitId } = getParams(params, z.object({ kitId: z.string() }), {
-    additionalData: { userId },
-  });
+  const { locationId } = getParams(
+    params,
+    z.object({ locationId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.kit,
+      entity: PermissionEntity.location,
       action: PermissionAction.update,
     });
 
-    const kit = await db.kit
-      .findFirstOrThrow({
-        where: { id: kitId, organizationId },
-        select: {
-          id: true,
-          name: true,
-          qrCodes: {
-            select: { id: true },
-          },
-          assets: { select: { id: true } },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Kit not found!",
-          message:
-            "The kit you are trying to access does not exists or you do not have permission to asset it.",
-          status: 404,
-          label: "Kit",
-        });
-      });
+    const { location } = await getLocation({
+      organizationId,
+      id: locationId,
+      userOrganizations,
+      request,
+      include: {},
+    });
 
     /** We get the userPrefs cookie so we can see if there is already a default camera */
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
-    const title = `Scan assets for kit | ${kit.name}`;
+    const title = `Scan assets for location | ${location.name}`;
     const header: HeaderData = {
       title,
     };
 
     return json(
-      data({ title, header, kit, scannerCameraId: cookie.scannerCameraId })
+      data({ title, header, location, scannerCameraId: cookie.scannerCameraId })
     );
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, kitId });
+    const reason = makeShelfError(cause, { userId, locationId });
     throw json(error(reason), { status: reason.status });
   }
 }
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
 export const handle = {
-  name: "kit.scan-assets",
+  name: "location.scan-assets",
 };
 
 export async function action(args: ActionFunctionArgs) {
   return manageAssetsAction(args);
 }
 
-export default function ScanAssetsForKit() {
+export default function ScanAssetsForLocation() {
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -117,13 +107,13 @@ export default function ScanAssetsForKit() {
     <>
       <Header hidePageDescription />
 
-      <AddAssetsToKitDrawer isLoading={isLoading} />
+      <AddAssetsToLocationDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner
           isLoading={isLoading}
           onQrDetectionSuccess={handleQrDetectionSuccess}
-          backButtonText="Kit"
+          backButtonText="Location"
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
