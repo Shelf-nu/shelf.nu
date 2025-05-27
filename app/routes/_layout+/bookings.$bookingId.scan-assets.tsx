@@ -84,12 +84,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
+    const title = `Scan assets for booking | ${booking.name}`;
     const header: HeaderData = {
-      title: `Scan assets for booking | ${booking.name}`,
+      title,
     };
 
-    return json(data({ header, booking }));
+    return json(data({ title, header, booking }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });
