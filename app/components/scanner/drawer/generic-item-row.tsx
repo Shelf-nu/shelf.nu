@@ -7,6 +7,10 @@ import { updateScannedItemAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import useApiQuery from "~/hooks/use-api-query";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 
 // Type for the API response
@@ -14,8 +18,12 @@ type ApiResponse = {
   error?: { message: string };
   qr?: {
     type: "asset" | "kit";
-    asset?: any;
-    kit?: any;
+    asset?: AssetFromQr & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
+    kit?: KitFromQr & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
   };
 };
 
