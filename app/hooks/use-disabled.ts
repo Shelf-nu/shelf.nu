@@ -6,7 +6,7 @@ import { isFormProcessing } from "~/utils/form";
  * By default it works with navigation state
  * Optionally it can receive a fetcher to use as state
  */
-export function useDisabled(fetcher?: Fetcher) {
+export function useDisabled(fetcher?: Pick<Fetcher, "state">) {
   const navigation = useNavigation();
   const state = fetcher ? fetcher.state : navigation.state;
   return isFormProcessing(state);

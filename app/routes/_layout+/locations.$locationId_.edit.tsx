@@ -19,9 +19,10 @@ import {
   LocationForm,
   NewLocationFormSchema,
 } from "~/components/location/form";
+import { Button } from "~/components/shared/button";
 import { getLocation, updateLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -55,10 +56,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       userOrganizations,
       request,
+      orderBy: "createdAt",
     });
 
     const header: HeaderData = {
       title: `Edit | ${location.name}`,
+      subHeading: location.id,
     };
 
     return json(
@@ -109,7 +112,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formDataFile = await unstable_parseMultipartFormData(
       clonedRequest,
-      unstable_createMemoryUploadHandler({ maxPartSize: MAX_IMAGE_UPLOAD_SIZE })
+      unstable_createMemoryUploadHandler({
+        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      })
     );
 
     const file = formDataFile.get("image") as File | null;
@@ -141,12 +146,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
-  const hasName = name !== "";
   const { location } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
-      <Header title={hasName ? name : location.name} />
+      <Header
+        title={
+          <Button to={`/locations/${location.id}`} variant={"inherit"}>
+            {name !== "" ? name : location.name}
+          </Button>
+        }
+      />
       <div className="items-top flex justify-between">
         <LocationForm
           name={location.name}

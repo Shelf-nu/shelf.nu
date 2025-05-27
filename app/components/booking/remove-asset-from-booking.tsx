@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -12,17 +12,16 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const { isArchived, isCompleted } = useBookingStatusHelpers(booking.status);
+  const disabled = useDisabled();
 
   return (
     <AlertDialog>
@@ -63,12 +62,14 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button variant="secondary" disabled={disabled}>
+                Cancel
+              </Button>
             </AlertDialogCancel>
 
             <Form method="post">
               <input type="hidden" name="assetId" value={asset.id} />
-              <Button name="intent" value="removeAsset">
+              <Button name="intent" value="removeAsset" disabled={disabled}>
                 Remove
               </Button>
             </Form>

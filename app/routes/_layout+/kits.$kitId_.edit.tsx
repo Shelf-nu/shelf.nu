@@ -11,6 +11,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 import {
   getKit,
   updateKit,
@@ -130,7 +131,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/kits/${kitId}`);
+    return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });
@@ -143,7 +144,13 @@ export default function KitEdit() {
 
   return (
     <>
-      <Header title={title ?? kit.name} />
+      <Header
+        title={
+          <Button to={`/kits/${kit.id}`} variant={"inherit"}>
+            {title !== "" ? title : kit.name}
+          </Button>
+        }
+      />
 
       <div className="items-top flex justify-between">
         <KitsForm

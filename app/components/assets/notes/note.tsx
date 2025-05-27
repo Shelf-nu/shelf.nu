@@ -35,6 +35,7 @@ export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => (
   <>
     <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
       <div>
+        <Tag>{note.dateDisplay}</Tag>{" "}
         <span className="commentator font-medium text-gray-900">
           {note.user
             ? `${note.user?.firstName} ${note.user?.lastName}`

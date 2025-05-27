@@ -169,11 +169,13 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
         },
         label,
         status: 404,
+        shouldBeCaptured: false, // In this case we shouldnt be capturing the error
       });
     }
 
     return asset as AssetWithInclude<T>;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
       title: "Asset not found",
@@ -182,10 +184,12 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       additionalData: {
         id,
         organizationId,
-        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+        ...(isShelfError ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
@@ -221,6 +225,13 @@ async function getAssets(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
+  /**
+   * Hide all assets that cannot currently be added to kit.
+   * This includes:
+   * - assets in custody
+   * - assets that are checkedout
+   * */
+  hideUnavailableToAddToKit?: boolean;
 }) {
   let {
     organizationId,
@@ -398,9 +409,27 @@ async function getAssets(params: {
         },
         { custody: { custodian: { userId: { in: teamMemberIds } } } },
         {
-          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              /** We only get them if the booking is ongoing */
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
         },
-        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              /** We only get them if the booking is ongoing */
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
         ...(teamMemberIds.includes("without-custody")
           ? [{ custody: null }]
           : []),
@@ -729,6 +758,7 @@ export async function updateAsset({
   description,
   mainImage,
   mainImageExpiration,
+  thumbnailImage,
   categoryId,
   tags,
   id,
@@ -747,6 +777,7 @@ export async function updateAsset({
       valuation,
       mainImage,
       mainImageExpiration,
+      thumbnailImage,
     };
 
     /** If uncategorized is passed, disconnect the category */
@@ -949,19 +980,46 @@ export async function updateAssetMainImage({
         width: 1200,
         withoutEnlargement: true,
       },
+      generateThumbnail: true, // Enable thumbnail generation
+      thumbnailSize: 108, // Size matches what we use in AssetImage component
     });
 
-    const image = fileData.get("mainImage") as string;
+    const image = fileData.get("mainImage") as string | null;
 
     if (!image) {
       return;
     }
 
-    const signedUrl = await createSignedUrl({ filename: image });
+    // Handle both the old string response and new stringified object response
+    let mainImagePath: string;
+    let thumbnailPath: string | null = null;
+
+    // Try parsing as JSON first (for new thumbnail format)
+    try {
+      const parsedImage = JSON.parse(image);
+      if (parsedImage.originalPath) {
+        mainImagePath = parsedImage.originalPath;
+        thumbnailPath = parsedImage.thumbnailPath;
+      } else {
+        // Fallback to string if parsing succeeds but no originalPath
+        mainImagePath = image;
+      }
+    } catch {
+      // If parsing fails, it's just a regular path string
+      mainImagePath = image;
+    }
+
+    const signedUrl = await createSignedUrl({ filename: mainImagePath });
+    let thumbnailSignedUrl: string | null = null;
+
+    if (thumbnailPath) {
+      thumbnailSignedUrl = await createSignedUrl({ filename: thumbnailPath });
+    }
 
     await updateAsset({
       id: assetId,
       mainImage: signedUrl,
+      thumbnailImage: thumbnailSignedUrl,
       mainImageExpiration: oneDayFromNow(),
       userId,
       organizationId,
@@ -969,15 +1027,22 @@ export async function updateAssetMainImage({
 
     /**
      * If updateAssetMainImage is called from new asset route, then we don't have to delete other images
-     * bcause no others images for this assets exists yet.
+     * because no others images for this assets exists yet.
      */
     if (!isNewAsset) {
-      await deleteOtherImages({ userId, assetId, data: { path: image } });
+      await deleteOtherImages({
+        userId,
+        assetId,
+        data: { path: mainImagePath },
+      });
     }
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating asset main image",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while updating asset main image",
       additionalData: { assetId, userId },
       label,
     });
@@ -1006,27 +1071,43 @@ export async function deleteOtherImages({
 }): Promise<void> {
   try {
     if (!data?.path) {
-      // asset image stroage failure. do nothing
+      // asset image storage failure. do nothing
       return;
     }
+
     const currentImage = extractMainImageName(data.path);
     if (!currentImage) {
-      //do nothing
+      // do nothing
       return;
     }
+
+    // Derive thumbnail name from current image
+    const currentThumbnail = currentImage.includes(".")
+      ? currentImage.replace(/(\.[^.]+)$/, "-thumbnail$1")
+      : `${currentImage}-thumbnail`;
+
     const { data: deletedImagesData, error: deletedImagesError } =
       await getSupabaseAdmin()
         .storage.from("assets")
         .list(`${userId}/${assetId}`);
 
     if (deletedImagesError) {
-      throw new Error(`Error fetching images: ${deletedImagesError.message}`);
+      throw new ShelfError({
+        cause: deletedImagesError,
+        message: "Failed to fetch images",
+        additionalData: { userId, assetId, currentImage, data },
+        label,
+      });
     }
 
-    // Extract the image names and filter out the one to keep
+    // Extract the image names and filter out the ones to keep
     const imagesToDelete = (
       deletedImagesData?.map((image) => image.name) || []
-    ).filter((image) => image !== currentImage);
+    ).filter(
+      (image) =>
+        // Keep the current main image and its thumbnail
+        image !== currentImage && image !== currentThumbnail
+    );
 
     // Delete the images
     await Promise.all(
@@ -1074,8 +1155,8 @@ async function uploadDuplicateAssetMainImage(
     if (error) {
       throw error;
     }
-    /** Getting the signed url from supabase to we can view image  */
     await deleteOtherImages({ userId, assetId, data });
+    /** Getting the signed url from supabase to we can view image  */
     return await createSignedUrl({ filename: data.path });
   } catch (cause) {
     throw new ShelfError({
@@ -1355,7 +1436,7 @@ export async function getPaginatedAndFilterableAssets({
       organizationId,
       selectedTeamMembers: teamMemberIds,
       getAll: getAllEntries.includes("teamMember"),
-      isSelfService,
+      filterByUserId: isSelfService,
       userId,
     });
 
@@ -2745,7 +2826,7 @@ export async function relinkQrCode({
   ]);
 }
 
-export async function getAssetsTabLoaderData({
+export async function getUserAssetsTabLoaderData({
   userId,
   request,
   organizationId,

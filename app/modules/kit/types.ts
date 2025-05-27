@@ -27,6 +27,7 @@ export const GET_KIT_STATIC_INCLUDES = {
           name: true,
           user: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               profilePicture: true,
@@ -52,6 +53,7 @@ export const KITS_INCLUDE_FIELDS = {
           name: true,
           user: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               profilePicture: true,
@@ -63,3 +65,38 @@ export const KITS_INCLUDE_FIELDS = {
     },
   },
 } satisfies Prisma.KitInclude;
+
+/** Select used on the kit page for fetching the assets with minimal data */
+export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
+  id: true,
+  title: true,
+  mainImage: true,
+  thumbnailImage: true,
+  mainImageExpiration: true,
+  status: true,
+  availableToBook: true,
+  category: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  },
+  location: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  tags: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+};
+
+/** Type used for the list item component */
+export type ListItemForKitPage = Prisma.AssetGetPayload<{
+  select: typeof KIT_SELECT_FIELDS_FOR_LIST_ITEMS;
+}>;

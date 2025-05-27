@@ -14,8 +14,9 @@ import {
 } from "~/components/shared/dropdown";
 
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
+import { useUserData } from "~/hooks/use-user-data";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
-import { isFormProcessing } from "~/utils/form";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
@@ -39,8 +40,10 @@ export function TeamUsersActionsDropdown({
   role: UserFriendlyRoles;
 }) {
   const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled(fetcher);
   const { ref, open, setOpen } = useControlledDropdownMenu();
+  const currentUser = useUserData();
+  const isCurrentUser = currentUser?.id === userId;
 
   /** Most users will have an invite, however we have to handle SSO case:
    *
@@ -130,7 +133,13 @@ export function TeamUsersActionsDropdown({
                   width="full"
                   name="intent"
                   value="revokeAccess"
-                  disabled={disabled}
+                  disabled={
+                    isCurrentUser
+                      ? {
+                          reason: "You cannot revoke your own access",
+                        }
+                      : disabled
+                  }
                 >
                   <span className="flex items-center gap-2">
                     <RemoveUserIcon /> Revoke access

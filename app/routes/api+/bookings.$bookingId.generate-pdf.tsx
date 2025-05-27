@@ -42,17 +42,24 @@ export const loader = async ({
       userId,
       role
     );
-    const { from, to } = pdfMeta.booking;
-    if (from && to) {
-      pdfMeta.from = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(new Date(from));
 
-      pdfMeta.to = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(new Date(to));
+    const dateTimeFormat = getDateTimeFormat(request, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+
+    const { from, to, originalFrom, originalTo } = pdfMeta.booking;
+    if (from && to) {
+      pdfMeta.from = dateTimeFormat.format(new Date(from));
+      pdfMeta.to = dateTimeFormat.format(new Date(to));
+    }
+
+    if (originalFrom) {
+      pdfMeta.originalFrom = dateTimeFormat.format(new Date(originalFrom));
+    }
+
+    if (originalTo) {
+      pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
 
     return json(data({ pdfMeta }));

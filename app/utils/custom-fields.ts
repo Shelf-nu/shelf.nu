@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/modules/booking/types";
+import type { ClientHint } from "~/utils/client-hints";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
@@ -67,13 +67,23 @@ const getSchema = ({
       }
       return v;
     }),
+    amount: required
+      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
+      : z.coerce.number(params).optional().nullable(),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
 export type CustomFieldZodSchema = {
   id: string;
   name: string;
-  type: "text" | "number" | "date" | "boolean" | "option" | "multiline_text";
+  type:
+    | "text"
+    | "number"
+    | "date"
+    | "boolean"
+    | "option"
+    | "multiline_text"
+    | "amount";
   helpText: string;
   required: boolean;
   options?: CustomField["options"];
@@ -270,4 +280,5 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   OPTION: "Option",
   BOOLEAN: "Boolean",
   DATE: "Date",
+  AMOUNT: "Amount",
 };

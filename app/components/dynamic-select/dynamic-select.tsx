@@ -55,6 +55,9 @@ type Props = ModelFilterProps & {
    */;
   allowClear?: boolean;
   hidden?: boolean;
+
+  /** Allows you to hide the show all button */
+  hideShowAll?: boolean;
 };
 
 export default function DynamicSelect({
@@ -80,6 +83,7 @@ export default function DynamicSelect({
   allowClear,
   selectionMode = "none",
   hidden = false,
+  hideShowAll = false,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -302,23 +306,25 @@ export default function DynamicSelect({
                     </div>
                   );
                 })}
-                {items.length < totalItems && searchQuery === "" && (
-                  <button
-                    type="button"
-                    disabled={isSearching}
-                    onClick={getAllEntries}
-                    className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
-                  >
-                    Show all
-                    <span>
-                      {isSearching ? (
-                        <Spinner className="size-4" />
-                      ) : (
-                        <ChevronDownIcon className="size-4" />
-                      )}
-                    </span>
-                  </button>
-                )}
+                {items.length < totalItems &&
+                  searchQuery === "" &&
+                  !hideShowAll && (
+                    <button
+                      type="button"
+                      disabled={isSearching}
+                      onClick={getAllEntries}
+                      className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                    >
+                      Show all
+                      <span>
+                        {isSearching ? (
+                          <Spinner className="size-4" />
+                        ) : (
+                          <ChevronDownIcon className="size-4" />
+                        )}
+                      </span>
+                    </button>
+                  )}
               </div>
 
               <When truthy={totalItems > 6}>

@@ -9,6 +9,7 @@ import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
+import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
@@ -35,7 +36,8 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
+import { isRouteError } from "~/utils/http";
 import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
@@ -108,11 +110,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getSelectedOrganisation({ userId: authSession.userId, request });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
+    if (!organizations.length || !currentOrganization) {
+      throw new ShelfError({
+        cause: null,
+        title: "No organization",
+        message:
+          "You are not part of any organization. Please contact support.",
+        status: 403,
+        label: "Organization",
+      });
+    }
+
     return json(
       data({
         user,
         organizations,
         currentOrganizationId: organizationId,
+        currentOrganization,
         currentOrganizationUserRoles: user?.userOrganizations.find(
           (userOrg) => userOrg.organization.id === organizationId
         )?.roles,
@@ -120,7 +134,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
-        scannerCameraId: userPrefsCookie.scannerCameraId,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
@@ -144,11 +157,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
-export const meta: MetaFunction<typeof loader> = ({ error }) => [
-  /** This will make sure that if we have an error its visible in the title of the browser tab */
-  // @ts-expect-error
-  { title: error ? appendToMetaTitle(error.data.error.title) : "" },
-];
+export const meta: MetaFunction<typeof loader> = ({ error }) => {
+  if (!error) {
+    return [{ title: "" }];
+  }
+
+  let title = "Something went wrong";
+
+  if (isRouteError(error)) {
+    title = error.data.error?.title ?? "";
+  } else if (isLikeShelfError(error)) {
+    title = error?.title ?? "";
+  } else if (error instanceof Error) {
+    title = error.name;
+  }
+
+  return [
+    /** This will make sure that if we have an error its visible in the title of the browser tab */
+    { title: appendToMetaTitle(title) },
+  ];
+};
 
 export default function App() {
   useCrisp();
@@ -164,6 +192,7 @@ export default function App() {
 
   return (
     <SidebarProvider defaultOpen={!minimizedSidebar}>
+      <AtomsResetHandler />
       <AppSidebar />
       <SidebarInset>
         {disabledTeamOrg ? (

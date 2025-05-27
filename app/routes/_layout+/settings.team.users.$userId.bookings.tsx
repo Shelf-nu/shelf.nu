@@ -1,10 +1,8 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
-import {
-  formatBookingsDates,
-  getBookings,
-} from "~/modules/booking/service.server";
+import { getBookings } from "~/modules/booking/service.server";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -58,7 +56,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       search,
       userId: authSession?.userId,
-      custodianUserId: selectedUserId,
+      custodianUserId: selectedUserId, // Here we just hardcode the userId because user profiles cannot be seen by other selfService or Base users
       ...(status && {
         // If status is in the params, we filter based on it
         statuses: [status],

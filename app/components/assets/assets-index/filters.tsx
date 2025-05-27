@@ -12,18 +12,17 @@ import {
   useSearchParamHasValue,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 
-const ASSET_INDEX_SORTING_OPTIONS = {
+export const ASSET_SORTING_OPTIONS = {
   title: "Name",
   createdAt: "Date created",
   updatedAt: "Date updated",
@@ -45,6 +44,12 @@ export function AssetIndexFilters({
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 
+  const organization = useCurrentOrganization();
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
+  });
+
   if (modeIsSimple) {
     return (
       <Filters
@@ -52,7 +57,7 @@ export function AssetIndexFilters({
           "left-of-search": <StatusFilter statusItems={AssetStatus} />,
           "right-of-search": (
             <SortBy
-              sortingOptions={ASSET_INDEX_SORTING_OPTIONS}
+              sortingOptions={ASSET_SORTING_OPTIONS}
               defaultSortingBy="createdAt"
             />
           ),
@@ -136,15 +141,7 @@ export function AssetIndexFilters({
                 </div>
               )}
             />
-            <When
-              truthy={
-                userHasPermission({
-                  roles,
-                  entity: PermissionEntity.custody,
-                  action: PermissionAction.read,
-                }) && !disableTeamMemberFilter
-              }
-            >
+            <When truthy={canSeeAllCustody && !disableTeamMemberFilter}>
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">

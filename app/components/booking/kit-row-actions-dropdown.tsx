@@ -1,6 +1,7 @@
 import type { Kit } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { tw } from "~/utils/tw";
 import { TrashIcon, VerticalDotsIcon } from "../icons/library";
@@ -25,7 +26,7 @@ export default function KitRowActionsDropdown({
   kit,
   fullWidth,
 }: {
-  kit: Kit;
+  kit: Pick<Kit, "id" | "name">;
   fullWidth?: boolean;
 }) {
   return (
@@ -48,9 +49,10 @@ export default function KitRowActionsDropdown({
   );
 }
 
-function RemoveKitFromBooking({ kit }: { kit: Kit }) {
+function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
+  const { isArchived, isCompleted } = useBookingStatusHelpers(booking.status);
+  const disabled = useDisabled();
 
   return (
     <AlertDialog>
@@ -88,12 +90,14 @@ function RemoveKitFromBooking({ kit }: { kit: Kit }) {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button variant="secondary" disabled={disabled}>
+                Cancel
+              </Button>
             </AlertDialogCancel>
 
             <Form method="post">
               <input type="hidden" name="kitId" value={kit.id} />
-              <Button name="intent" value="removeKit">
+              <Button name="intent" value="removeKit" disabled={disabled}>
                 Remove
               </Button>
             </Form>

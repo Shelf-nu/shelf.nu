@@ -6,14 +6,18 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
+import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
+import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
 import styles from "~/components/booking/styles.new.css?url";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useUserData } from "~/hooks/use-user-data";
 
-import { upsertBooking } from "~/modules/booking/service.server";
+import { createBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -30,6 +34,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export type NewBookingLoaderReturnType = typeof loader;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
@@ -65,12 +71,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      filterByUserId: isSelfServiceOrBase, // Self service or base users can only create bookings for themselves so we always filter by userId
       userId,
     });
 
     return json(
       data({
+        userId,
+        currentOrganization,
         showModal: true,
         isSelfServiceOrBase,
         ...teamMembersData,
@@ -102,48 +110,67 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
+    const hints = getHints(request);
 
     const payload = parseData(
       formData,
-      NewBookingFormSchema(false, true, getHints(request)),
+      BookingFormSchema({ hints, action: "new" }),
       {
         additionalData: { userId, organizationId },
       }
     );
 
     const { name, custodian, assetIds, description } = payload;
-    const hints = getHints(request);
 
-    const fmt = "yyyy-MM-dd'T'HH:mm";
+    /**
+     * Validate if the user is self user and is assigning the booking to
+     * him/herself only.
+     */
+    if (isSelfServiceOrBase) {
+      const custodianFromDb = await db.teamMember.findFirst({
+        where: { id: custodian.id },
+        select: { id: true, userId: true },
+      });
+
+      if (custodianFromDb?.userId !== userId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Self user can assign booking to themselves only.",
+          label: "Booking",
+        });
+      }
+    }
 
     const from = DateTime.fromFormat(
       formData.get("startDate")!.toString()!,
-      fmt,
+      DATE_TIME_FORMAT,
       {
         zone: hints.timeZone,
       }
     ).toJSDate();
 
-    const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
-      zone: hints.timeZone,
-    }).toJSDate();
-    const booking = await upsertBooking(
+    const to = DateTime.fromFormat(
+      formData.get("endDate")!.toString()!,
+      DATE_TIME_FORMAT,
       {
-        custodianUserId: custodian?.userId,
-        custodianTeamMemberId: custodian?.id,
-        name,
-        description,
-        organizationId,
+        zone: hints.timeZone,
+      }
+    ).toJSDate();
+
+    const booking = await createBooking({
+      booking: {
         from,
         to,
-        assetIds,
+        custodianTeamMemberId: custodian.id,
+        custodianUserId: custodian?.userId ?? null,
+        name: name!,
+        description: description ?? null,
+        organizationId,
         creatorId: authSession.userId,
-        ...(isSelfServiceOrBase && {
-          custodianUserId: authSession.userId,
-        }),
       },
-      getClientHint(request)
-    );
+      assetIds: assetIds?.length ? assetIds : [],
+      hints: getClientHint(request),
+    });
 
     sendNotification({
       title: "Booking saved",
@@ -188,8 +215,12 @@ export default function NewBooking() {
   const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
+  const user = useUserData();
+
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianRef = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
+  const custodianRef = isSelfServiceOrBase
+    ? teamMembers.find((tm) => tm.userId === user!.id)?.id
+    : undefined;
 
   return (
     <div className="booking-inner-wrapper">
@@ -202,11 +233,13 @@ export default function NewBooking() {
         </p>
       </header>
       <div>
-        <BookingForm
-          startDate={startDate}
-          endDate={endDate}
-          assetIds={assetIds}
-          custodianRef={custodianRef}
+        <NewBookingForm
+          booking={{
+            startDate,
+            endDate,
+            assetIds,
+            custodianRef,
+          }}
         />
       </div>
     </div>

@@ -8,23 +8,23 @@ import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { bookingSchedulerEventsEnum } from "./constants";
+import {
+  BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_SCHEDULER_EVENTS_ENUM,
+} from "./constants";
 import {
   checkoutReminderEmailContent,
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import {
-  bookingIncludeForEmails,
-  scheduleNextBookingJob,
-} from "./service.server";
+import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
       where: { id: data.id },
-      include: bookingIncludeForEmails,
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -63,26 +63,13 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       }),
     });
   }
-
-  //schedule the next job
-  if (booking.to) {
-    const when = new Date(booking.to);
-    when.setHours(when.getHours() - 1);
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: bookingSchedulerEventsEnum.checkinReminder,
-      },
-      when,
-    });
-  }
 };
 
 const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
       where: { id: data.id },
-      include: bookingIncludeForEmails,
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -108,10 +95,15 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   }
 
   //schedule the next job
-  if (booking.to) {
+  // if the booking is ongoing and has a to date, we schedule the overdue handler
+  // this is to make sure we dont schedule the overdue handler if the booking is already OVERDUE && still RESERVED
+  if (booking.to && booking.status === BookingStatus.ONGOING) {
     const when = new Date(booking.to);
     await scheduleNextBookingJob({
-      data: { ...data, eventType: bookingSchedulerEventsEnum.overdueHandler },
+      data: {
+        ...data,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
       when,
     });
   }
@@ -122,6 +114,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     .update({
       where: { id: data.id, status: BookingStatus.ONGOING },
       data: { status: BookingStatus.OVERDUE },
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     })
     .catch((cause) => {
       throw new ShelfError({
@@ -132,35 +125,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  //schedule the next job
-  if (booking.to) {
-    const when = new Date(booking.to);
-    when.setHours(when.getHours());
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: bookingSchedulerEventsEnum.overdueReminder,
-      },
-      when,
-    });
-  }
-};
-
-const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: bookingIncludeForEmails,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
-    });
-
+  /** Check this just in case  */
   if (booking.status !== BookingStatus.OVERDUE) {
     Logger.warn(
       `ignoring overdueReminder for booking with id ${data.id}, as its not in overdue status`
@@ -168,6 +133,7 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     return;
   }
 
+  /** Send the OVERDUE email */
   const email = booking.custodianUser?.email;
 
   if (email) {
@@ -196,13 +162,12 @@ const overdueReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const event2HandlerMap: Record<
-  bookingSchedulerEventsEnum,
+  BOOKING_SCHEDULER_EVENTS_ENUM,
   (job: PgBoss.Job<SchedulerData>) => Promise<void>
 > = {
-  [bookingSchedulerEventsEnum.checkinReminder]: checkinReminder,
-  [bookingSchedulerEventsEnum.checkoutReminder]: checkoutReminder,
-  [bookingSchedulerEventsEnum.overdueHandler]: overdueHandler,
-  [bookingSchedulerEventsEnum.overdueReminder]: overdueReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder]: checkoutReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder]: checkinReminder,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler]: overdueHandler,
 };
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */

@@ -22,7 +22,7 @@ import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import When from "~/components/when/when";
 import type { loader } from "~/routes/_layout+/_layout";
 import { isPersonalOrg } from "~/utils/organization";
-import { useCurrentOrganization } from "./use-current-organization-id";
+import { useCurrentOrganization } from "./use-current-organization";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 type BaseNavItem = {

@@ -30,6 +30,8 @@ export interface PdfDbResult {
   defaultOrgImg: string | null;
   from?: string;
   to?: string;
+  originalFrom?: string;
+  originalTo?: string;
 }
 
 async function getImageAsBase64(url: string) {

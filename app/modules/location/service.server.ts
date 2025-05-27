@@ -28,8 +28,11 @@ export async function getLocation(
     /** Assets to be loaded per page with the location */
     perPage?: number;
     search?: string | null;
+    orderBy?: string;
+    orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
+    include?: Prisma.LocationInclude;
   }
 ) {
   const {
@@ -40,6 +43,9 @@ export async function getLocation(
     search,
     userOrganizations,
     request,
+    orderBy = "createdAt",
+    orderDirection,
+    include,
   } = params;
 
   try {
@@ -71,22 +77,25 @@ export async function getLocation(
               : []),
           ],
         },
-        include: {
-          image: {
-            select: {
-              updatedAt: true,
+        include: include
+          ? include
+          : {
+              image: {
+                select: {
+                  updatedAt: true,
+                },
+              },
+              assets: {
+                include: {
+                  category: true,
+                  tags: true,
+                },
+                skip,
+                take,
+                where: assetsWhere,
+                orderBy: { [orderBy]: orderDirection },
+              },
             },
-          },
-          assets: {
-            include: {
-              category: true,
-              tags: true,
-            },
-            skip,
-            take,
-            where: assetsWhere,
-          },
-        },
       }),
 
       /** Count them */
@@ -127,6 +136,8 @@ export async function getLocation(
 
     return { location, totalAssetsWithinLocation };
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
       title: "Location not found",
@@ -138,7 +149,9 @@ export async function getLocation(
         ...(isLikeShelfError(cause) ? cause.additionalData : {}),
       },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

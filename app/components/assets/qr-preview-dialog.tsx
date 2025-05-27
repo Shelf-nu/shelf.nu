@@ -59,7 +59,7 @@ export const QrPreviewDialog = forwardRef<
               "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
             }
           >
-            <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+            <div className="flex max-h-[calc(100%-4rem)] grow flex-col items-center justify-center border-y border-gray-200 bg-gray-50">
               <When truthy={isLoading}>
                 <div className="relative size-full animate-pulse bg-gray-200">
                   <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-2">

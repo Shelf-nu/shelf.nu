@@ -1,10 +1,20 @@
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
-import type { ClientHint } from "./types";
+
+type BasicEmailContentArgs = {
+  bookingName: string;
+  assetsCount: number;
+  custodian: string;
+  from: Date;
+  to: Date;
+  bookingId: string;
+  hints: ClientHint;
+};
 
 /**
  * THis is the base content of the bookings related emails.
@@ -19,16 +29,7 @@ export const baseBookingTextEmailContent = ({
   assetsCount,
   emailContent,
   hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  emailContent: string;
-  hints: ClientHint;
-}) => {
+}: BasicEmailContentArgs & { emailContent: string }) => {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
     timeStyle: "short",
@@ -58,64 +59,20 @@ The Shelf Team
 /**
  * This is the content of the email sent to the custodian when a booking is reserved.
  */
-export const assetReservedEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const assetReservedEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
-    emailContent: `Booking reservation for ${custodian}.`,
+    ...args,
+    emailContent: `Booking reservation for ${args.custodian}.`,
   });
 
 /**
  * This is the content of the email sent to the custodian when a booking is checked out.
  */
-export const checkoutReminderEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const checkoutReminderEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
+    ...args,
     emailContent: `Your booking is due for checkout in ${getTimeRemainingMessage(
-      new Date(from),
+      new Date(args.from),
       new Date()
     )}.`,
   });
@@ -124,33 +81,11 @@ export const checkoutReminderEmailContent = ({
  * This is the content of the email sent to the custodian when a booking is checked in.
  */
 
-export const checkinReminderEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
+    ...args,
     emailContent: `Your booking is due for checkin in ${getTimeRemainingMessage(
-      new Date(to),
+      new Date(args.to),
       new Date()
     )}.`,
   });
@@ -191,32 +126,10 @@ export function sendCheckinReminder(
  *
  * This email gets sent when a booking is overdue
  */
-export const overdueBookingEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const overdueBookingEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
-    emailContent: `You have passed the deadline for checking in your booking "${bookingName}".`,
+    ...args,
+    emailContent: `You have passed the deadline for checking in your booking "${args.bookingName}".`,
   });
 
 /**
@@ -224,32 +137,10 @@ export const overdueBookingEmailContent = ({
  *
  * This email gets sent when a booking is checked-in
  */
-export const completedBookingEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const completedBookingEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
-    emailContent: `Your booking has been completed: "${bookingName}".`,
+    ...args,
+    emailContent: `Your booking has been completed: "${args.bookingName}".`,
   });
 
 /**
@@ -257,32 +148,10 @@ export const completedBookingEmailContent = ({
  *
  * This email gets sent when a booking is checked-in
  */
-export const deletedBookingEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const deletedBookingEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
-    emailContent: `Your booking has been deleted: "${bookingName}".`,
+    ...args,
+    emailContent: `Your booking has been deleted: "${args.bookingName}".`,
   });
 
 /**
@@ -290,30 +159,30 @@ export const deletedBookingEmailContent = ({
  *
  * This email gets sent when a booking is checked-in
  */
-export const cancelledBookingEmailContent = ({
-  bookingName,
-  custodian,
-  from,
-  to,
-  bookingId,
-  assetsCount,
-  hints,
-}: {
-  bookingName: string;
-  assetsCount: number;
-  custodian: string;
-  from: Date;
-  to: Date;
-  bookingId: string;
-  hints: ClientHint;
-}) =>
+export const cancelledBookingEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
-    hints,
-    bookingName,
-    custodian,
-    from,
-    to,
-    bookingId,
-    assetsCount,
-    emailContent: `Your booking has been cancelled: "${bookingName}".`,
+    ...args,
+    emailContent: `Your booking has been cancelled: "${args.bookingName}".`,
   });
+
+/**
+ * Booking is extended
+ *
+ * This email is sent when a booking's end date is extended.
+ */
+export function extendBookingEmailContent({
+  oldToDate,
+  ...args
+}: BasicEmailContentArgs & { oldToDate: Date }) {
+  const { format } = getDateTimeFormatFromHints(args.hints, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  return baseBookingTextEmailContent({
+    ...args,
+    emailContent: `You booking has been extended from ${format(
+      oldToDate
+    )} to ${format(args.to)}`,
+  });
+}

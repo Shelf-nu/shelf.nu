@@ -11,14 +11,17 @@ import {
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { DeleteBooking } from "./delete-booking";
-import { GenerateBookingPdf } from "./generate-booking-pdf";
+
+import ExtendBookingDialog from "./extend-booking-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
@@ -31,7 +34,7 @@ interface Props {
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatusHelpers(booking);
+    useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
@@ -47,6 +50,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     entity: PermissionEntity.booking,
     action: PermissionAction.cancel,
   });
+
+  const canExtendBooking = isOngoing || isOverdue;
 
   return (
     <DropdownMenu modal={false}>
@@ -101,6 +106,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           </When>
+          <When truthy={canExtendBooking}>
+            <ExtendBookingDialog
+              currentEndDate={dateForDateTimeInputValue(new Date(booking.to!))}
+            />
+          </When>
           <When truthy={isCompleted && canArchiveBooking}>
             <DropdownMenuItem asChild>
               <Button
@@ -138,7 +148,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
 
           <Divider className="my-2" />
-          <GenerateBookingPdf
+          <BookingOverviewPDF
             booking={booking}
             timeStamp={new Date().getTime()}
           />

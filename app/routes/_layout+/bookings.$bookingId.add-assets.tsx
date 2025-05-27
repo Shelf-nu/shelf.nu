@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -12,21 +13,30 @@ import {
   useNavigation,
   useSubmit,
 } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
-import { AssetImage } from "~/components/assets/asset-image";
+import {
+  disabledBulkItemsAtom,
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setDisabledBulkItemsAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
+import { AssetImage } from "~/components/assets/asset-image/component";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
 import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
-import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import type { ListItemData } from "~/components/list/list-item";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
@@ -37,21 +47,22 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getBooking,
   getKitIdsByAssets,
   removeAssets,
-  upsertBooking,
+  updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { getClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -60,13 +71,22 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { ListItemTagsColumn } from "./assets._index";
+
+export type AssetWithBooking = Asset & {
+  bookings: Booking[];
+  custody: Custody | null;
+  category: Category;
+  kitId?: string | null;
+  qrScanned: string;
+};
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -82,12 +102,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const {
       search,
@@ -118,6 +139,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+        additionalData: {
+          booking,
+          userId,
+          organizationId,
+          isSelfServiceOrBase,
+        },
+      });
+    }
+
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
@@ -131,7 +180,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your asset database",
           text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
-        showModal: true,
+        showSidebar: true,
         noScroll: true,
         booking,
         items: assets,
@@ -164,7 +213,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -222,16 +271,49 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const user = await getUserByID(authSession.userId);
 
+    const booking = await db.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        select: { id: true, status: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Booking",
+          message:
+            "Booking not found. Are you sure it exists in the current workspace.",
+        });
+      });
+
+    /** Self service can only manage assets for bookings that are DRAFT */
+    const cantManageAssetsAsBase =
+      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+
+    /** Changing assets is not allowed at this stage */
+    const notAllowedStatus: BookingStatus[] = [
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+      BookingStatus.COMPLETE,
+    ];
+
+    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: isSelfServiceOrBase
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "Changing of assets is not allowed for current status of booking.",
+      });
+    }
+
     /** We only update the booking if there are assets to add */
     if (assetIds.length > 0) {
       /** We update the booking with the new assets */
-      const b = await upsertBooking(
-        {
-          id: bookingId,
-          assetIds,
-        },
-        getClientHint(request)
-      );
+      const b = await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds,
+      });
 
       /** We create notes for the assets that were added */
       await createNotes({
@@ -274,29 +356,39 @@ export default function AddAssetsToNewBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, bookingKitIds, items, totalItems } =
+  const { booking, bookingKitIds, items, totalItems } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const submit = useSubmit();
 
-  const bookingAssetsIds = useMemo(
-    () => booking?.assets.map((a) => a.id) || [],
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+  const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
+
+  /** Assets with kits has to be handled from manage-kits */
+  const bookingAssets = useMemo(
+    () => booking.assets.filter((asset) => !asset.kitId),
     [booking.assets]
   );
 
-  const [selectedAssets, setSelectedAssets] = useAtom(
-    bookingsSelectedAssetsAtom
+  const removedAssets = useMemo(
+    () =>
+      bookingAssets.filter(
+        (asset) =>
+          !selectedBulkItems.some(
+            (selectedItem) => selectedItem.id === asset.id
+          )
+      ),
+    [bookingAssets, selectedBulkItems]
   );
-  const hasSelectedAll = selectedAssets.includes(ALL_SELECTED_KEY);
 
-  const removedAssetIds = useMemo(
-    () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
-    [bookingAssetsIds, selectedAssets]
-  );
-
-  const hasUnsavedChanges = selectedAssets.length !== bookingAssetsIds.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -312,31 +404,38 @@ export default function AddAssetsToNewBooking() {
   );
 
   /**
-   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
-   * So we do a manual effect to set the selected assets to the booking assets ids
-   * I would still rather use the useHydrateAtoms, but it's not working as expected.
-   *  https://github.com/pmndrs/jotai/discussions/669
+   * Set selected items for kit based on the route data
+   */
+  useEffect(function updateDefaultSelectedItems() {
+    /**
+     * We are setting the default items here, so we do not have to
+     * set the assets again if there are any items already present
+     */
+    if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingAssets);
+    }
+    // We only need to run this when component mounts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Set disabled items for kit
    */
   useEffect(() => {
-    setSelectedAssets(bookingAssetsIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking.id]);
+    const _disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
+      if (!asset.availableToBook || !!asset.kitId) {
+        acc.push(asset);
+      }
 
-  function handleSelectAll() {
-    if (hasSelectedAll) {
-      setSelectedAssets([]);
-    } else {
-      setSelectedAssets([
-        ...bookingAssetsIds,
-        ...items.map((item) => item.id),
-        ALL_SELECTED_KEY,
-      ]);
-    }
-  }
+      return acc;
+    }, []);
+
+    setDisabledBulkItems(_disabledBulkItems);
+  }, [items, setDisabledBulkItems]);
 
   return (
     <Tabs
-      className="-mx-6 flex h-full max-h-full flex-col"
+      className="flex h-full max-h-full flex-col"
       value="assets"
       onValueChange={() => {
         if (hasUnsavedChanges) {
@@ -347,19 +446,13 @@ export default function AddAssetsToNewBooking() {
         navigate(manageKitsUrl);
       }}
     >
-      <Header
-        {...header}
-        hideBreadcrumbs={true}
-        classNames="text-left [&>div]:px-6 -mt-6 mx-0"
-      />
-
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
             Assets{" "}
-            {selectedAssets.length > 0 ? (
+            {selectedBulkItemsCount > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {hasSelectedAll ? totalItems : selectedAssets.length}
+                {hasSelectedAllItems ? totalItems : selectedBulkItemsCount}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -375,7 +468,10 @@ export default function AddAssetsToNewBooking() {
       </div>
 
       <Filters
-        slots={{ "right-of-search": <AvailabilitySelect /> }}
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": <AvailabilitySelect />,
+        }}
         className="justify-between !border-t-0 border-b px-6 md:flex"
       />
 
@@ -434,17 +530,13 @@ export default function AddAssetsToNewBooking() {
           className="mx-0 mt-0 h-full border-0 "
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId, asset) => {
+          navigate={(_assetId, asset) => {
             /** Only allow user to select if the asset is available */
-            if (!asset.availableToBook || !!asset.kitId) {
+            if (disabledBulkItems.some((item) => item.id === asset.id)) {
               return;
             }
 
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
+            updateItem(asset);
           }}
           emptyStateClassName="py-10"
           customEmptyStateContent={{
@@ -453,22 +545,24 @@ export default function AddAssetsToNewBooking() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          headerExtraContent={
-            <Button
-              variant="secondary"
-              className="px-2 py-1 text-sm font-normal"
-              onClick={handleSelectAll}
-            >
-              {hasSelectedAll ? "Clear all" : "Select all"}
-            </Button>
+          bulkActions={<> </>}
+          disableSelectAllItems
+          headerChildren={
+            <>
+              <Th>Id</Th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
+              <Th>Location</Th>
+            </>
           }
         />
       </TabsContent>
 
       {/* Footer of the modal */}
-      <footer className="item-center flex justify-between border-t px-6 pt-3">
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
-          {hasSelectedAll ? totalItems : selectedAssets.length} assets selected
+          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
+          selected
         </p>
 
         <div className="flex gap-3">
@@ -477,22 +571,21 @@ export default function AddAssetsToNewBooking() {
           </Button>
           <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
-            {/* These are the asset ids, coming from the server */}
-            {removedAssetIds.map((assetId, i) => (
+            {removedAssets.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`removedAssetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedAssets.map((assetId, i) => (
+            {selectedBulkItems.map((asset, i) => (
               <input
-                key={assetId}
+                key={asset.id}
                 type="hidden"
                 name={`assetIds[${i}]`}
-                value={assetId}
+                value={asset.id}
               />
             ))}
             {hasUnsavedChanges && isAlertOpen ? (
@@ -525,68 +618,78 @@ export default function AddAssetsToNewBooking() {
   );
 }
 
-export type AssetWithBooking = Asset & {
-  bookings: Booking[];
-  custody: Custody | null;
-  category: Category;
-  kitId?: string | null;
-  qrScanned: string;
-};
-
-const RowComponent = ({ item }: { item: AssetWithBooking }) => {
-  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
-  const checked = selectedAssets.some((id) => id === item.id);
-
+const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const checked = selectedBulkItems.some((asset) => asset.id === item.id);
+  const { category, tags, location } = item;
   const isPartOfKit = !!item.kitId;
   const isAddedThroughKit = isPartOfKit && checked;
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      {/* Name */}
+      <Td className="w-full min-w-[330px] p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
-                {item.title}
+                {item.title}{" "}
               </p>
+              <div className="flex flex-row gap-x-2">
+                <When truthy={item.status === AssetStatus.AVAILABLE}>
+                  <AssetStatusBadge
+                    status={item.status}
+                    availableToBook={item.availableToBook}
+                  />
+                </When>
+
+                <AvailabilityLabel
+                  isAddedThroughKit={isAddedThroughKit}
+                  showKitStatus
+                  asset={item as unknown as AssetWithBooking}
+                  isCheckedOut={item.status === "CHECKED_OUT"}
+                />
+              </div>
             </div>
           </div>
         </div>
       </Td>
 
-      <Td className="text-right">
-        <AvailabilityLabel
-          isAddedThroughKit={isAddedThroughKit}
-          showKitStatus
-          asset={item}
-          isCheckedOut={item.status === "CHECKED_OUT"}
-        />
+      {/* ID */}
+      <Td>{item.id}</Td>
+
+      {/* Category */}
+      <Td>
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : (
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
+          </Badge>
+        )}
       </Td>
 
-      <Td>
-        <FakeCheckbox
-          className={tw(
-            "text-white",
-            isPartOfKit ? "text-gray-100" : "",
-            checked ? "text-primary" : "",
-            isAddedThroughKit ? "text-gray-300" : ""
-          )}
-          fillColor={isPartOfKit ? "#F2F4F7" : undefined}
-          checked={checked}
-          aria-disabled={isPartOfKit}
-        />
+      {/* Tags */}
+      <Td className="text-left">
+        <ListItemTagsColumn tags={tags} />
       </Td>
+
+      {/* Location */}
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };

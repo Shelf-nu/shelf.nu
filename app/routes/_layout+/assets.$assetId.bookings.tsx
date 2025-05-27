@@ -4,9 +4,10 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
-  formatBookingsDates,
   getBookings,
+  getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import {
@@ -46,19 +47,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status, teamMemberIds } =
-      getParamsValues(searchParams);
+    const { perPageParam } = getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
+
+    const {
+      page,
+      search,
+      status,
+      teamMemberIds,
+      orderBy,
+      orderDirection,
+      selfServiceData,
+    } = await getBookingsFilterData({
+      request,
+      canSeeAllBookings,
+      organizationId,
+      userId,
+    });
 
     const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
       getBookings({
@@ -69,10 +85,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId: authSession?.userId,
         assetIds: [assetId],
         statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-        ...(isSelfServiceOrBase && {
-          // If the user is self service, we only show bookings that belong to that user)
-          custodianUserId: authSession?.userId,
-        }),
+        ...selfServiceData,
+        orderBy,
+        orderDirection,
         custodianTeamMemberIds: teamMemberIds,
       }),
 
@@ -83,7 +98,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+        filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
         userId,
       }),
     ]);

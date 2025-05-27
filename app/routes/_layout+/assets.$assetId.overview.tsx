@@ -14,7 +14,6 @@ import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
-import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
@@ -42,12 +41,14 @@ import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
+import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -72,12 +73,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
 
     const { locale, timeZone } = getClientHint(request);
 
@@ -167,6 +169,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody,
           customFields,
         },
+        currentOrganization,
+        userId,
         lastScan,
         header,
         locale,
@@ -240,8 +244,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetOverview() {
-  const { asset, locale, timeZone, qrObj, lastScan } =
-    useLoaderData<typeof loader>();
+  const {
+    asset,
+    locale,
+    timeZone,
+    qrObj,
+    lastScan,
+    currentOrganization,
+    userId,
+  } = useLoaderData<typeof loader>();
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -355,11 +366,10 @@ export default function AssetOverview() {
                   </span>
                   <div className="-ml-2 md:w-3/5">
                     <div className="ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                      {asset.valuation.toLocaleString(locale, {
+                      {formatCurrency({
+                        value: asset.valuation,
+                        locale,
                         currency: asset.organization.currency,
-                        style: "currency",
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
                       })}{" "}
                     </div>
                   </div>
@@ -400,7 +410,7 @@ export default function AssetOverview() {
                           className={tw(
                             "mt-1 text-gray-600 md:mt-0 md:w-3/5",
                             field.customField.type !==
-                              CustomFieldType.MULTILINE_TEXT && "max-w-[250px]"
+                              CustomFieldType.MULTILINE_TEXT && "max-w-[350px]"
                           )}
                         >
                           {field.customField.type ===
@@ -414,12 +424,19 @@ export default function AssetOverview() {
                             <Button
                               role="link"
                               variant="link"
-                              className="text-gray text-end font-normal underline hover:text-gray-600"
+                              className="text-gray text-start font-normal underline hover:text-gray-600"
                               target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
                               {customFieldDisplayValue as string}
                             </Button>
+                          ) : field.customField.type ===
+                            CustomFieldType.AMOUNT ? (
+                            formatCurrency({
+                              value: fieldValue.raw as number,
+                              locale,
+                              currency: asset.organization.currency,
+                            })
                           ) : (
                             (customFieldDisplayValue as string)
                           )}
@@ -505,10 +522,11 @@ export default function AssetOverview() {
           <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
-            hasPermission={userHasPermission({
+            hasPermission={userCanViewSpecificCustody({
               roles,
-              entity: PermissionEntity.custody,
-              action: PermissionAction.read,
+              custodianUserId: asset?.custody?.custodian?.user?.id,
+              organization: currentOrganization,
+              currentUserId: userId,
             })}
           />
 
@@ -532,7 +550,6 @@ export default function AssetOverview() {
           </When>
         </div>
       </div>
-      <ContextualSidebar />
     </div>
   );
 }

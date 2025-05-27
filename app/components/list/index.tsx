@@ -9,6 +9,7 @@ import {
 } from "~/atoms/list";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -82,6 +83,11 @@ export type ListProps = {
   headerExtraContent?: React.ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
+
+  /** We have some views where the select all pages is not realistic to work, because we have some disabled items
+   * This should be used in those cases
+   */
+  disableSelectAllItems?: boolean;
 };
 
 /**
@@ -101,6 +107,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     customPagination,
     headerExtraContent,
     extraItemComponentProps,
+    disableSelectAllItems,
   }: ListProps,
   ref
 ) {
@@ -126,6 +133,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   function handleSelectAllItems() {
     setSelectedBulkItems([...items, { id: ALL_SELECTED_KEY }]);
   }
+
+  const isUserPage = useIsUserAssetsPage();
 
   return (
     <div
@@ -154,7 +163,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               <div>
                 <h5 className="text-left capitalize">{title || plural}</h5>
                 <div className="h-7">
-                  {hasSelectedItems ? (
+                  {!!bulkActions && hasSelectedItems ? (
                     <div className="flex items-start gap-2">
                       <Button
                         onClick={() => setSelectedBulkItems([])}
@@ -183,7 +192,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                         ? totalItems
                         : selectedBulkItemsCount}{" "}
                       selected
-                      {!hasSelectedAllItems &&
+                      {!disableSelectAllItems &&
+                        !hasSelectedAllItems &&
                         selectedBulkItemsCount < totalItems && (
                           <Button
                             onClick={handleSelectAllItems}
@@ -240,6 +250,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                     item={item}
                     extraProps={extraItemComponentProps}
                     bulkActions={bulkActions}
+                    isUserPage={isUserPage}
                   />
                 </ListItem>
               ))}

@@ -1,56 +1,33 @@
 import { useMemo } from "react";
-import type { AssetStatus, Booking } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 
-type BookingSubset = {
-  id: Booking["id"];
-  status: BookingStatus;
-  assets: {
-    status: AssetStatus;
-    availableToBook: boolean;
-    bookings?: { id: Booking["id"]; status: BookingStatus }[];
-  }[];
-};
+export function useBookingStatusHelpers(status: BookingStatus | undefined) {
+  // Handle undefined case at the beginning
+  const statusChecks = useMemo(() => {
+    // If status is undefined, return all flags as false
+    if (status === undefined) {
+      return {
+        isDraft: false,
+        isReserved: false,
+        isOngoing: false,
+        isCompleted: false,
+        isArchived: false,
+        isOverdue: false,
+        isCancelled: false,
+      };
+    }
 
-export function useBookingStatusHelpers(booking: BookingSubset) {
-  const isDraft = useMemo(
-    () => booking.status === BookingStatus.DRAFT,
-    [booking.status]
-  );
-  const isReserved = useMemo(
-    () => booking.status === BookingStatus.RESERVED,
-    [booking.status]
-  );
-  const isOngoing = useMemo(
-    () => booking.status === BookingStatus.ONGOING,
-    [booking.status]
-  );
-  const isCompleted = useMemo(
-    () => booking.status === BookingStatus.COMPLETE,
-    [booking.status]
-  );
-  const isArchived = useMemo(
-    () => booking.status === BookingStatus.ARCHIVED,
-    [booking.status]
-  );
+    // If status is defined, return each flag according to the status
+    return {
+      isDraft: status === BookingStatus.DRAFT,
+      isReserved: status === BookingStatus.RESERVED,
+      isOngoing: status === BookingStatus.ONGOING,
+      isCompleted: status === BookingStatus.COMPLETE,
+      isArchived: status === BookingStatus.ARCHIVED,
+      isOverdue: status === BookingStatus.OVERDUE,
+      isCancelled: status === BookingStatus.CANCELLED,
+    };
+  }, [status]);
 
-  const isOverdue = useMemo(
-    () => booking.status === BookingStatus.OVERDUE,
-    [booking.status]
-  );
-
-  const isCancelled = useMemo(
-    () => booking.status === BookingStatus.CANCELLED,
-    [booking.status]
-  );
-
-  return {
-    isDraft,
-    isReserved,
-    isOngoing,
-    isCompleted,
-    isArchived,
-    isOverdue,
-    isCancelled,
-  };
+  return statusChecks;
 }

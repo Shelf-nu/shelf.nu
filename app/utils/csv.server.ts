@@ -1,4 +1,10 @@
-import type { Asset, AssetIndexSettings } from "@prisma/client";
+import type {
+  Asset,
+  AssetIndexSettings,
+  Organization,
+  Prisma,
+  TeamMember,
+} from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
@@ -23,13 +29,13 @@ import type {
   FixedField,
 } from "~/modules/asset-index-settings/helpers";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
-  BOOKING_COMMON_INCLUDE,
-  formatBookingsDates,
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { SERVER_URL } from "./env";
@@ -422,7 +428,7 @@ const cleanMarkdownFormatting = (text: string): string =>
 /**
  * Safely formats a value for CSV export by properly escaping and quoting values
  */
-const formatValueForCsv = (value: any, isMarkdown = false): string => {
+export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values
   if (value === null || value === undefined || value === "") {
     return '""';
@@ -496,14 +502,14 @@ export async function exportBookingsFromIndexToCsv({
   request,
   userId,
   bookingsIds,
+  canSeeAllBookings,
   organizationId,
-  isSelfServiceOrBase,
 }: {
   request: Request;
   userId: string;
   bookingsIds: string[];
+  canSeeAllBookings: boolean;
   organizationId: string;
-  isSelfServiceOrBase: boolean;
 }) {
   try {
     const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
@@ -522,9 +528,9 @@ export async function exportBookingsFromIndexToCsv({
         selfServiceData,
       } = await getBookingsFilterData({
         request,
-        isSelfServiceOrBase,
-        userId,
+        canSeeAllBookings,
         organizationId,
+        userId,
       });
 
       const bookingsData = await getBookings({
@@ -564,7 +570,7 @@ export async function exportBookingsFromIndexToCsv({
       bookings as FlexibleBooking[]
     );
 
-    // // Join rows with CRLF as per CSV spec
+    // Join rows with CRLF as per CSV spec
     return csvData.join("\r\n");
   } catch (cause) {
     const message =
@@ -590,6 +596,8 @@ type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   assets: FlexibleAsset[];
   displayFrom?: string;
   displayTo?: string;
+  displayOriginalFrom?: string;
+  displayOriginalTo?: string;
 };
 
 /**
@@ -612,6 +620,8 @@ export const buildCsvExportDataFromBookings = (
     custodian: "Custodian",
     description: "Description", // string
     asset: "Assets", // New column for assets
+    originalFrom: "Original start date",
+    originalTo: "Original end date",
   };
 
   // Create data rows with assets
@@ -667,6 +677,17 @@ export const buildCsvExportDataFromBookings = (
           // Include the first asset title in the main booking row
           value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
           break;
+        case "originalFrom":
+          value = booking.displayOriginalFrom
+            ? booking.displayOriginalFrom
+            : booking.displayFrom;
+          break;
+
+        case "originalTo":
+          value = booking.displayOriginalTo
+            ? booking.displayOriginalTo
+            : booking.displayTo;
+          break;
         default:
           value = "";
       }
@@ -697,3 +718,90 @@ export const buildCsvExportDataFromBookings = (
   // Return headers followed by data rows
   return [Object.values(headers), ...rows];
 };
+
+export async function exportNRMsToCsv({
+  nrmIds,
+  organizationId,
+}: {
+  nrmIds: TeamMember["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
+      ? { organizationId }
+      : { id: { in: nrmIds }, organizationId };
+
+    const teamMembers = await db.teamMember.findMany({
+      where,
+      include: { _count: { select: { custodies: true } } },
+    });
+
+    return buildCsvExportDataFromTeamMembers({ teamMembers });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label: "Team Member",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while exporting NRMs to csv.",
+      additionalData: { nrmIds, organizationId },
+    });
+  }
+}
+
+export function buildCsvExportDataFromTeamMembers({
+  teamMembers,
+}: {
+  teamMembers: Prisma.TeamMemberGetPayload<{
+    include: { _count: { select: { custodies: true } } };
+  }>[];
+}) {
+  try {
+    const headers = {
+      id: "Id",
+      name: "Name",
+      custodies: "Custodies",
+    };
+
+    const rows: string[][] = [];
+
+    teamMembers.forEach((teamMember) => {
+      let value = "";
+
+      const teamMemberRow = Object.keys(headers).map((header) => {
+        switch (header) {
+          case "id":
+            value = teamMember.id;
+            break;
+
+          case "name":
+            value = teamMember.name;
+            break;
+
+          case "custodies":
+            value = teamMember._count.custodies.toString();
+            break;
+
+          default:
+            value = "";
+        }
+
+        return formatValueForCsv(value, false);
+      });
+
+      rows.push(teamMemberRow);
+    });
+
+    const finalCsv = [Object.values(headers), ...rows];
+
+    // Join rows with CRLF as per CSV spec
+    return finalCsv.join("\r\n");
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label: "Team Member",
+      message:
+        "Something went wrong while building csv from team members data.",
+    });
+  }
+}

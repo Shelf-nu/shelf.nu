@@ -1,13 +1,14 @@
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
 import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
+import KitQuickActions from "~/components/kits/kit-quick-actions";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
 import LineBreakText from "~/components/layout/line-break-text";
@@ -16,30 +17,38 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
+import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import type { MergeInclude } from "~/utils/utils";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -57,6 +66,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
         organizationId,
         extraInclude: {
+          qrCodes: { select: { id: true } },
           assets: {
             select: { id: true, availableToBook: true, status: true },
           },
@@ -67,8 +77,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           where: {
             deletedAt: null,
             organizationId,
-            userId:
-              role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+            userId: !canSeeAllCustody ? userId : undefined,
           },
           include: { user: true },
           orderBy: { userId: "asc" },
@@ -131,7 +140,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function KitsIndexPage() {
-  const navigate = useNavigate();
   const { roles, isBase } = useUserRoleHelper();
   const canCreateKit = userHasPermission({
     roles,
@@ -139,10 +147,11 @@ export default function KitsIndexPage() {
     action: PermissionAction.create,
   });
 
-  const canReadCustody = userHasPermission({
+  const organization = useCurrentOrganization();
+
+  const canReadCustody = userHasCustodyViewPermission({
     roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
+    organization: organization as OrganizationPermissionSettings,
   });
 
   return (
@@ -171,7 +180,7 @@ export default function KitsIndexPage() {
           {canReadCustody && (
             <DynamicDropdown
               trigger={
-                <div className="flex cursor-pointer items-center gap-2">
+                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
                   Custodian{" "}
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
@@ -194,12 +203,29 @@ export default function KitsIndexPage() {
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
           bulkActions={isBase ? undefined : <BulkActionsDropdown />}
-          navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
               <Th>Description</Th>
               <Th>Assets</Th>
-              {canReadCustody && <Th>Custodian</Th>}
+              <Th className="flex items-center gap-1 whitespace-nowrap">
+                Custodian{" "}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <>
+                      <h6>Asset custody</h6>
+                      <p>
+                        This column shows if a user has custody of the asset
+                        either via direct assignment or via a booking. If you
+                        see <GrayBadge>private</GrayBadge> that means you don't
+                        have the permissions to see who has custody of the
+                        asset.
+                      </p>
+                    </>
+                  }
+                />
+              </Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -210,46 +236,31 @@ export default function KitsIndexPage() {
 
 function ListContent({
   item,
+  bulkActions,
 }: {
   item: Prisma.KitGetPayload<{
-    include: {
-      _count: { select: { assets: true } };
-      custody: {
-        select: {
-          custodian: {
-            select: {
-              name: true;
-              user: {
-                select: {
-                  firstName: true;
-                  lastName: true;
-                  email: true;
-                  profilePicture: true;
-                };
-              };
-            };
-          };
+    include: MergeInclude<
+      typeof KITS_INCLUDE_FIELDS,
+      {
+        qrCodes: { select: { id: true } };
+        assets: {
+          select: { id: true; availableToBook: true; status: true };
         };
-      };
-      assets: {
-        select: {
-          id: true;
-          availableToBook: true;
-        };
-      };
-    };
+      }
+    >;
   }>;
+  bulkActions?: React.ReactNode;
 }) {
-  const { roles } = useUserRoleHelper();
-  const canReadCustody = userHasPermission({
-    roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
-  });
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <Link
+          to={`/kits/${item.id}/assets`}
+          className={tw(
+            "flex justify-between gap-3 py-4  md:justify-normal",
+            bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
+          )}
+        >
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <KitImage
@@ -274,7 +285,7 @@ function ListContent({
               </div>
             </div>
           </div>
-        </div>
+        </Link>
       </Td>
       <Td className="max-w-62 md:max-w-96">
         {item.description ? (
@@ -287,40 +298,18 @@ function ListContent({
         ) : null}
       </Td>
       <Td>{item._count.assets}</Td>
-      {canReadCustody && (
-        <Td>
-          {item.custody ? (
-            <GrayBadge>
-              <>
-                {item.custody.custodian?.user ? (
-                  <img
-                    src={
-                      item.custody.custodian?.user?.profilePicture ||
-                      "/static/images/default_pfp.jpg"
-                    }
-                    className="mr-1 size-4 rounded-full"
-                    alt=""
-                  />
-                ) : null}
-                <span className="mt-px">
-                  {resolveTeamMemberName({
-                    name: item?.custody?.custodian.name,
-                    user: item?.custody?.custodian?.user
-                      ? {
-                          firstName:
-                            item?.custody?.custodian?.user?.firstName || null,
-                          lastName:
-                            item?.custody?.custodian?.user?.lastName || null,
-                          email: item?.custody?.custodian?.user?.email || "",
-                        }
-                      : undefined,
-                  })}
-                </span>
-              </>
-            </GrayBadge>
-          ) : null}
-        </Td>
-      )}
+      <Td>
+        <TeamMemberBadge teamMember={item?.custody?.custodian} />
+      </Td>
+
+      <Td>
+        <KitQuickActions
+          kit={{
+            ...item,
+            qrId: item?.qrCodes[0]?.id,
+          }}
+        />
+      </Td>
     </>
   );
 }

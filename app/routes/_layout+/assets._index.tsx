@@ -7,10 +7,10 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { Link, useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
+import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 // eslint-disable-next-line import/no-cycle
 import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
@@ -29,6 +29,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {
@@ -38,12 +39,14 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -71,7 +74,6 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export type AssetIndexLoaderData = typeof loader;
 
@@ -276,10 +278,12 @@ export const AssetsList = ({
   customEmptyState,
   disableTeamMemberFilter,
   disableBulkActions,
+  wrapperClassName,
 }: {
   customEmptyState?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
+  wrapperClassName?: string;
 }) => {
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
@@ -290,11 +294,13 @@ export const AssetsList = ({
     (fetcher) => fetcher.key === "asset-index-settings-mode"
   );
 
+  const isUserPage = useIsUserAssetsPage();
+
   // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
 
   const columns = useAssetIndexColumns();
-  const { roles, isBase } = useUserRoleHelper();
+  const { isBase } = useUserRoleHelper();
 
   const searchParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
@@ -305,14 +311,24 @@ export const AssetsList = ({
     <>
       <Th>Category</Th>
       <Th>Tags</Th>
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.custody,
-          action: PermissionAction.read,
-        })}
-      >
-        <Th>Custodian</Th>
+      <When truthy={!isUserPage}>
+        <Th className="flex items-center gap-1 whitespace-nowrap">
+          Custodian{" "}
+          <InfoTooltip
+            iconClassName="size-4"
+            content={
+              <>
+                <h6>Asset custody</h6>
+                <p>
+                  This column shows if a user has custody of the asset either
+                  via direct assignment or via a booking. If you see{" "}
+                  <GrayBadge>private</GrayBadge> that means you don't have the
+                  permissions to see who has custody of the asset.
+                </p>
+              </>
+            }
+          />
+        </Th>
       </When>
       <Th>Location</Th>
       <Th>Actions</Th>
@@ -325,7 +341,8 @@ export const AssetsList = ({
     <div
       className={tw(
         "flex flex-col",
-        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2"
+        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
+        wrapperClassName
       )}
     >
       <When truthy={!!isSwappingMode}>
@@ -369,33 +386,36 @@ export const AssetsList = ({
 const ListAssetContent = ({
   item,
   bulkActions,
+  isUserPage,
 }: {
   item: AssetsFromViewItem;
   bulkActions?: React.ReactNode;
+  isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;
-  const { roles } = useUserRoleHelper();
   return (
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <Link
+        <div
           className={tw(
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
           )}
-          to={`/assets/${item.id}`}
+          // to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
-            <div className="relative flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
-                  assetId: item.id,
+                  id: item.id,
                   mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
                 }}
+                alt={item.title}
                 className="size-full rounded-[4px] border object-cover"
+                withPreview
               />
 
               {kit?.id ? (
@@ -415,8 +435,14 @@ const ListAssetContent = ({
               ) : null}
             </div>
             <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {item.title}
+              <span className="word-break mb-1 block ">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                >
+                  {item.title}
+                </Button>
               </span>
               <div>
                 <AssetStatusBadge
@@ -426,7 +452,7 @@ const ListAssetContent = ({
               </div>
             </div>
           </div>
-        </Link>
+        </div>
       </Td>
 
       {/* Category */}
@@ -448,42 +474,9 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.custody,
-          action: PermissionAction.read,
-        })}
-      >
+      <When truthy={!isUserPage}>
         <Td>
-          {custody ? (
-            <GrayBadge>
-              <>
-                {custody.custodian?.user ? (
-                  <img
-                    src={
-                      custody.custodian?.user?.profilePicture ||
-                      "/static/images/default_pfp.jpg"
-                    }
-                    className="mr-1 size-4 rounded-full"
-                    alt=""
-                  />
-                ) : null}
-                <span className="mt-px">
-                  {resolveTeamMemberName({
-                    name: custody.custodian.name,
-                    user: custody.custodian?.user
-                      ? {
-                          firstName: custody.custodian?.user?.firstName || null,
-                          lastName: custody.custodian?.user?.lastName || null,
-                          email: custody.custodian?.user?.email || "",
-                        }
-                      : undefined,
-                  })}
-                </span>
-              </>
-            </GrayBadge>
-          ) : null}
+          <TeamMemberBadge teamMember={custody?.custodian} />
         </Td>
       </When>
 

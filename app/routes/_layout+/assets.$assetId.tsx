@@ -11,7 +11,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
-import { AssetImage } from "~/components/assets/asset-image";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
@@ -32,6 +32,7 @@ import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -191,11 +192,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
         const hints = getHints(request);
 
-        const fmt = "yyyy-MM-dd'T'HH:mm";
-
         const alertDateTime = DateTime.fromFormat(
           formData.get("alertDateTime")!.toString()!,
-          fmt,
+          DATE_TIME_FORMAT,
           {
             zone: hints.timeZone,
           }
@@ -272,13 +271,14 @@ export default function AssetDetailsPage() {
           "left-of-title": (
             <AssetImage
               asset={{
-                assetId: asset.id,
+                id: asset.id,
                 mainImage: asset.mainImage,
+                thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
-                alt: asset.title,
               }}
+              alt={asset.title}
               className={tw(
-                "mr-4 size-[56px] cursor-pointer rounded border object-cover"
+                "mr-4 size-14 cursor-pointer rounded border object-cover"
               )}
               withPreview
             />

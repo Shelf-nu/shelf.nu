@@ -50,7 +50,6 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-
   assets            Asset[]
   categories        Category[]
   notes             Note[]
@@ -89,6 +88,7 @@ model Asset {
   title               String
   description         String?
   mainImage           String?
+  thumbnailImage      String?
   mainImageExpiration DateTime?
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
@@ -438,7 +438,14 @@ model Organization {
   enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
-  
+
+  // Permissions configuration
+  // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
+  selfServiceCanSeeCustody Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
+  baseUserCanSeeCustody   Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings  Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
@@ -457,7 +464,9 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   groups             Group[]
+
 }
+
 
 model UserOrganization {
   id String @id @unique @default(cuid())
@@ -585,6 +594,7 @@ enum CustomFieldType {
   BOOLEAN
   DATE
   MULTILINE_TEXT
+  AMOUNT
 }
 
 model AssetCustomFieldValue {
@@ -725,6 +735,11 @@ model Booking {
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
   from      DateTime? @db.Timestamptz(3)
   to        DateTime? @db.Timestamptz(3)
+
+  // When a booking is early check-in or early check-out, we store the original from and to
+  // dates here and updated the from and to dates to current date (if users agrees to change) 
+  originalFrom DateTime? @db.Timestamptz(3)
+  originalTo   DateTime? @db.Timestamptz(3)
 }
 
 model Kit {

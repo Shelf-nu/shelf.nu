@@ -6,7 +6,7 @@ import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { MAX_IMAGE_UPLOAD_SIZE } from "./constants";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
@@ -76,13 +76,25 @@ export async function createSignedUrl({
   }
 }
 
-async function uploadFile(
+export async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName, resizeOptions }: UploadOptions
-) {
+  {
+    filename,
+    contentType,
+    bucketName,
+    resizeOptions,
+    generateThumbnail = false,
+    thumbnailSize = 108, // Default thumbnail size
+  }: UploadOptions & {
+    generateThumbnail?: boolean;
+    thumbnailSize?: number;
+  }
+): Promise<string | { originalPath: string; thumbnailPath: string }> {
   try {
+    // Process original image
     const file = await cropImage(fileData, resizeOptions);
 
+    // Upload original file
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
@@ -91,6 +103,51 @@ async function uploadFile(
       throw error;
     }
 
+    // If thumbnail generation is requested
+    if (generateThumbnail) {
+      // Generate a thumbnail filename
+      let thumbFilename: string;
+
+      // Check if the file has an extension
+      if (filename.includes(".")) {
+        // File has extension, add '-thumbnail' before the extension
+        thumbFilename = filename.replace(/(\.[^.]+)$/, "-thumbnail$1");
+      } else {
+        // File has no extension, just append '-thumbnail'
+        thumbFilename = `${filename}-thumbnail`;
+      }
+
+      // Create thumbnail version with Sharp
+      const thumbnailFile = await cropImage(
+        // Convert Buffer back to AsyncIterable for consistency
+        (async function* () {
+          await Promise.resolve(); // Satisfy eslint requirement
+          yield new Uint8Array(file);
+        })(),
+        {
+          width: thumbnailSize,
+          height: thumbnailSize,
+          fit: "cover",
+          withoutEnlargement: true,
+        }
+      );
+
+      // Upload thumbnail
+      const { data: thumbData, error: thumbError } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .upload(thumbFilename, thumbnailFile, { contentType, upsert: true });
+
+      if (thumbError) {
+        throw thumbError;
+      }
+
+      return {
+        originalPath: data.path,
+        thumbnailPath: thumbData.path,
+      };
+    }
+
+    // Return just the path string for backward compatibility
     return data.path;
   } catch (cause) {
     throw new ShelfError({
@@ -115,11 +172,15 @@ export async function parseFileFormData({
   newFileName,
   bucketName = "profile-pictures",
   resizeOptions,
+  generateThumbnail = false,
+  thumbnailSize = 108,
 }: {
   request: Request;
   newFileName: string;
   bucketName?: string;
   resizeOptions?: ResizeOptions;
+  generateThumbnail?: boolean;
+  thumbnailSize?: number;
 }) {
   try {
     const uploadHandler = unstable_composeUploadHandlers(
@@ -128,15 +189,44 @@ export async function parseFileFormData({
           return undefined;
         }
 
+        // const fileSize = await calculateAsyncIterableSize(data);
+        // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
+        //   throw new ShelfError({
+        //     cause: null,
+        //     title: "File too large",
+        //     message: `Image file size exceeds maximum allowed size of ${
+        //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+        //     }MB`,
+        //     additionalData: { filename, contentType, bucketName },
+        //     label,
+        //     shouldBeCaptured: false,
+        //   });
+        // }
+
         const fileExtension = filename?.split(".").pop();
-        const uploadedFilePath = await uploadFile(data, {
+        const uploadedFilePaths = await uploadFile(data, {
           filename: `${newFileName}.${fileExtension}`,
           contentType,
           bucketName,
           resizeOptions,
+          generateThumbnail,
+          thumbnailSize,
         });
 
-        return uploadedFilePath;
+        // For profile pictures and other cases that don't need thumbnails,
+        // the uploadFile function returns a string path
+        if (typeof uploadedFilePaths === "string") {
+          return uploadedFilePaths;
+        }
+
+        // For cases where thumbnails are generated, we need to store the object
+        // in a way that FormData can handle. We'll store it as a stringified JSON
+        if (generateThumbnail) {
+          return JSON.stringify(uploadedFilePaths);
+        }
+
+        // This shouldn't happen, but if it does, return the originalPath
+        return (uploadedFilePaths as { originalPath: string }).originalPath;
       }
     );
 
@@ -149,8 +239,9 @@ export async function parseFileFormData({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while uploading the file. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
       label,
     });
   }
@@ -252,11 +343,11 @@ export async function uploadImageFromUrl(
     }
 
     const imageBlob = await response.blob();
-    if (imageBlob.size > MAX_IMAGE_UPLOAD_SIZE) {
+    if (imageBlob.size > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
       throw new ShelfError({
         cause: null,
         message: `Image file size exceeds maximum allowed size of ${
-          MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
         }MB`,
         additionalData: { imageUrl, size: imageBlob.size },
         label,
@@ -395,4 +486,15 @@ export async function deleteAssetImage({
       })
     );
   }
+}
+
+// Utility function to get size from AsyncIterable<Uint8Array>
+export async function calculateAsyncIterableSize(
+  data: AsyncIterable<Uint8Array>
+): Promise<number> {
+  let totalSize = 0;
+  for await (const chunk of data) {
+    totalSize += chunk.byteLength;
+  }
+  return totalSize;
 }

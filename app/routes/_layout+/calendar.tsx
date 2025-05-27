@@ -30,7 +30,8 @@ import {
   HoverCardTrigger,
 } from "~/components/shared/hover-card";
 import { Spinner } from "~/components/shared/spinner";
-import { UserBadge } from "~/components/shared/user-badge";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
+import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -69,10 +70,7 @@ type CalendarExtendedProps = {
   description: string | null;
   start: string;
   end: string;
-  custodian: {
-    name: string;
-    image?: string | null;
-  };
+  custodian: TeamMemberForBadge;
 };
 
 // Loader Function to Return Bookings Data
@@ -121,11 +119,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      isSelfService: isSelfServiceOrBase, // we can assume this is false because this view is not allowed for
+      filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
       userId,
     });
 
-    return json(data({ header, title, ...teamMembersData }));
+    return json(
+      data({ header, title, ...teamMembersData, currentOrganization })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -205,8 +205,8 @@ export default function Calendar() {
     }
   };
 
-  const toggleSpinner = useCallback(
-    (state: any) => {
+  const toggleLoader = useCallback(
+    (state: boolean) => {
       if (ripple.current) {
         if (state) {
           ripple.current.classList.remove("hidden");
@@ -277,16 +277,18 @@ export default function Calendar() {
 
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
-          <TitleContainer
-            calendarTitle={calendarTitle}
-            calendarSubtitle={calendarSubtitle}
-            calendarView={calendarView}
-          />
-
-          <div className="flex items-center">
+          <div className="flex items-center gap-2">
+            <TitleContainer
+              calendarTitle={calendarTitle}
+              calendarSubtitle={calendarSubtitle}
+              calendarView={calendarView}
+            />
             <div ref={ripple} className="mr-3 flex justify-center">
               <Spinner />
             </div>
+          </div>
+
+          <div className="flex items-center">
             <div className="mr-4">
               <ButtonGroup>
                 <Button
@@ -377,7 +379,7 @@ export default function Calendar() {
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
               windowResize={handleWindowResize}
-              eventContent={renderEventCard}
+              eventContent={RenderEventCard}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
@@ -405,7 +407,7 @@ export default function Calendar() {
                   viewType
                 );
               }}
-              loading={toggleSpinner}
+              loading={toggleLoader}
             />
           )}
         </ClientOnly>
@@ -414,7 +416,7 @@ export default function Calendar() {
   );
 }
 
-const renderEventCard = (args: EventContentArg) => {
+const RenderEventCard = (args: EventContentArg) => {
   const event = args.event;
   const viewType = event._context.calendarApi.view.type;
 
@@ -440,7 +442,7 @@ const renderEventCard = (args: EventContentArg) => {
               timeStyle: "short",
             }}
           />{" "}
-          | {args.event.title}
+          | {event.title}
         </div>
       </HoverCardTrigger>
 
@@ -458,13 +460,11 @@ const renderEventCard = (args: EventContentArg) => {
           <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
 
           <div className="mb-3 flex items-center gap-2">
-            <BookingStatusBadge status={booking.status} />
-
-            <UserBadge
-              imgClassName="rounded-full"
-              name={booking.custodian.name}
-              img={booking?.custodian.image ?? "/static/images/default_pfp.jpg"}
+            <BookingStatusBadge
+              status={booking.status}
+              custodianUserId={booking.custodian.user?.id}
             />
+            <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
 
           {booking.description ? (

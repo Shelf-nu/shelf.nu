@@ -38,7 +38,7 @@ export default function FormRow({
 
       <div
         className={tw(
-          "relative flex w-[512px] max-w-full flex-wrap",
+          "form-row-children-wrapper relative flex w-[512px] max-w-full flex-wrap",
           contentClassName
         )}
       >

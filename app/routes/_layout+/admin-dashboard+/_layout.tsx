@@ -38,6 +38,7 @@ const items = [
   },
   { to: "qrs", content: "QR codes" },
   { to: "announcements", content: "Announcements" },
+  { to: "test-supabase-rls", content: "Test Supabase RLS" },
 ];
 
 export default function Area51Page() {
