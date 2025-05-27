@@ -192,8 +192,8 @@ export default function LocationPage() {
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
-  /**When we are on the kit.scan-assets route, we render an outlet on the whole layout.
-   * On the .assets and .bookings routes, we render the outlet only on the left column
+  /**
+   * When we are on the location.scan-assets route, we render an outlet on the whole layout.
    */
   const shouldRenderFullOutlet =
     currentRoute?.handle?.name === "location.scan-assets";
