@@ -104,17 +104,41 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const { assetExtraInclude, kitExtraInclude } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z.string().optional(),
-        kitExtraInclude: z.string().optional(),
+        assetExtraInclude: z
+          .string()
+          .optional()
+          .transform((val) => (val ? JSON.parse(val) : undefined)),
+        kitExtraInclude: z
+          .string()
+          .optional()
+          .transform((val) => (val ? JSON.parse(val) : undefined)),
       })
-    );
+    ) as {
+      assetExtraInclude: Prisma.AssetInclude | undefined;
+      kitExtraInclude: Prisma.KitInclude | undefined;
+    };
 
     console.log("assetExtraInclude", assetExtraInclude);
     console.log("kitExtraInclude", kitExtraInclude);
+    // @TODO - further test this, more specifically the kit include
+    const include = {
+      ...QR_INCLUDE,
+
+      // Include additional data based on search params. This will override the default includes
+      ...(assetExtraInclude
+        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
+        : undefined),
+
+      ...(kitExtraInclude
+        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
+        : undefined),
+    };
+
+    console.log("include", include);
 
     const qr = await getQr({
       id: qrId,
-      include: QR_INCLUDE,
+      include,
     });
 
     if (qr.organizationId !== organizationId) {

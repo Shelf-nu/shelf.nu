@@ -234,6 +234,7 @@ export function AssetRow({ asset, kit }: { asset: AssetFromQr; kit: any }) {
       condition: !!asset.kitId && asset.kitId !== kit.id,
       badgeText: "Part of another kit",
       tooltipTitle: "Asset is part of another kit",
+      // @TODO - here we add a link to the other kit, once the updates to get-scanned-item.$qrId.ts are done
       tooltipContent:
         "You will still be able to add this asset to replace it's current kit.",
       priority: 70,
