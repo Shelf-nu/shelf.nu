@@ -55,25 +55,22 @@ export function GenericItemRow<T>({
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
 
-  console.log("assetExtraInclude", assetExtraInclude);
-  console.log("kitExtraInclude", kitExtraInclude);
-
   // Determine if we should fetch - only if we don't already have data or error
   const shouldFetch = !(item && (item.data || item.error));
-  const searchParam = new URLSearchParams();
+  const searchParams = new URLSearchParams();
   // Add asset extra include if provided
   if (assetExtraInclude) {
-    searchParam.append("assetExtraInclude", JSON.stringify(assetExtraInclude));
+    searchParams.append("assetExtraInclude", JSON.stringify(assetExtraInclude));
   }
   // Add kit extra include if provided
   if (kitExtraInclude) {
-    searchParam.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
+    searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
   }
-  // Append the search params to the API endpoint
-  const apiEndpoint = `/api/get-scanned-item/${qrId}?${searchParam.toString()}`;
+
   // Use the API hook to fetch item data
   const { data: response, error: fetchError } = useApiQuery<ApiResponse>({
-    api: apiEndpoint,
+    api: `/api/get-scanned-item/${qrId}`,
+    searchParams,
     enabled: shouldFetch,
   });
 

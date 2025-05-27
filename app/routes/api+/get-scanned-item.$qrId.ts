@@ -118,9 +118,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude: Prisma.KitInclude | undefined;
     };
 
-    console.log("assetExtraInclude", assetExtraInclude);
-    console.log("kitExtraInclude", kitExtraInclude);
-    // @TODO - further test this, more specifically the kit include
     const include = {
       ...QR_INCLUDE,
 
@@ -133,8 +130,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
         : undefined),
     };
-
-    console.log("include", include);
 
     const qr = await getQr({
       id: qrId,

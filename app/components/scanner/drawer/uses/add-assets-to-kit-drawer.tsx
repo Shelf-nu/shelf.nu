@@ -27,14 +27,22 @@ import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
 // Export the schema so it can be reused
-export const addScannedAssetsToBookingSchema = z.object({
+export const addScannedAssetsToKitSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
+
+/** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
+type AssetFromQrWithKit = AssetFromQr & {
+  kit: {
+    id: string;
+    name: string;
+  };
+};
 
 /**
  * Drawer component for managing scanned assets to be added to bookings
  */
-export default function AddAssetsToBookingDrawer({
+export default function AddAssetsToKitDrawer({
   className,
   style,
   isLoading,
@@ -46,7 +54,7 @@ export default function AddAssetsToBookingDrawer({
   defaultExpanded?: boolean;
 }) {
   const { kit } = useLoaderData<LoaderData>();
-
+  const kitAssetsIds = kit.assets.map((a) => a.id) || [];
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -79,11 +87,6 @@ export default function AddAssetsToBookingDrawer({
   // Asset is checked out
   const assetsCheckedOutIds = assets
     .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
-    .map((asset) => asset.id);
-
-  // Asset is already part of another kit
-  const assetsPartOfAnotherKitIds = assets
-    .filter((asset) => !!asset && asset.kitId && asset.kitId !== kit.id)
     .map((asset) => asset.id);
 
   // Get QR IDs for kits to block them from being added to other kits
@@ -180,7 +183,7 @@ export default function AddAssetsToBookingDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetFromQr} kit={kit} />;
+          return <AssetRow asset={data as AssetFromQrWithKit} kit={kit} />;
         } else if (item?.type === "kit") {
           return <KitRow kit={data as KitFromQr} />;
         }
@@ -199,8 +202,11 @@ export default function AddAssetsToBookingDrawer({
 
   return (
     <ConfigurableDrawer
-      schema={addScannedAssetsToBookingSchema}
-      formData={{ assetIds: assetIdsForKit }}
+      schema={addScannedAssetsToKitSchema}
+      /**
+       * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
+       * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
+      formData={{ assetIds: [...kitAssetsIds, ...assetIdsForKit] }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -211,13 +217,19 @@ export default function AddAssetsToBookingDrawer({
       defaultExpanded={defaultExpanded}
       className={className}
       style={style}
-      formName="AddScannedAssetsToBooking"
+      formName="AddScannedAssetsToKit"
     />
   );
 }
 
 // Implement item renderers
-export function AssetRow({ asset, kit }: { asset: AssetFromQr; kit: any }) {
+export function AssetRow({
+  asset,
+  kit,
+}: {
+  asset: AssetFromQrWithKit;
+  kit: any;
+}) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
@@ -234,9 +246,26 @@ export function AssetRow({ asset, kit }: { asset: AssetFromQr; kit: any }) {
       condition: !!asset.kitId && asset.kitId !== kit.id,
       badgeText: "Part of another kit",
       tooltipTitle: "Asset is part of another kit",
-      // @TODO - here we add a link to the other kit, once the updates to get-scanned-item.$qrId.ts are done
-      tooltipContent:
-        "You will still be able to add this asset to replace it's current kit.",
+      tooltipContent: (
+        <>
+          This asset is currently part of another kit
+          {asset?.kit ? (
+            <>
+              :{" "}
+              <Button
+                to={`/kits/${asset.kit.id}`}
+                target="_blank"
+                variant="link-gray"
+                className={"text-xs"}
+              >
+                {asset.kit.name}
+              </Button>
+              <br />
+            </>
+          ) : undefined}
+          You will still be able to add this asset to replace it's current kit.
+        </>
+      ),
       priority: 70,
     },
   ];
