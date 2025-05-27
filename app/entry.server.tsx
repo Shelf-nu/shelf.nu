@@ -22,7 +22,6 @@ import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 export * from "../server";
-
 // === start: register scheduler and workers ===
 schedulerService
   .init()
@@ -82,7 +81,7 @@ export const handleError = Sentry.wrapHandleErrorWithSentry;
 
 const ABORT_DELAY = 5000;
 
-export default async function handleRequest(
+export default function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
@@ -92,12 +91,77 @@ export default async function handleRequest(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   loadContext: AppLoadContext
 ) {
-  // Determine callback based on user agent (bot vs browser)
-  let callbackName = isbot(request.headers.get("user-agent"))
-    ? "onAllReady"
-    : "onShellReady";
+  return isbot(request.headers.get("user-agent") || "")
+    ? handleBotRequest(
+        request,
+        responseStatusCode,
+        responseHeaders,
+        remixContext
+      )
+    : handleBrowserRequest(
+        request,
+        responseStatusCode,
+        responseHeaders,
+        remixContext
+      );
+}
 
-  // Initialize i18n instance
+function handleBotRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  remixContext: EntryContext
+) {
+  return new Promise((resolve, reject) => {
+    let shellRendered = false;
+    const { pipe, abort } = renderToPipeableStream(
+      <RemixServer
+        context={remixContext}
+        url={request.url}
+        abortDelay={ABORT_DELAY}
+      />,
+      {
+        onAllReady() {
+          shellRendered = true;
+          const body = new PassThrough();
+          const stream = createReadableStreamFromReadable(body);
+
+          responseHeaders.set("Content-Type", "text/html");
+
+          resolve(
+            new Response(stream, {
+              headers: responseHeaders,
+              status: responseStatusCode,
+            })
+          );
+
+          pipe(body);
+        },
+        onShellError(error: unknown) {
+          reject(error);
+        },
+        onError(error: unknown) {
+          responseStatusCode = 500;
+          // Log streaming rendering errors from inside the shell.  Don't log
+          // errors encountered during initial shell rendering since they'll
+          // reject and get logged in handleDocumentRequest.
+          if (shellRendered) {
+            console.error(error);
+          }
+        },
+      }
+    );
+
+    setTimeout(abort, ABORT_DELAY);
+  });
+}
+
+async function handleBrowserRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  remixContext: EntryContext
+) {
   let instance = createInstance();
   let ns = i18next.getRouteNamespaces(remixContext);
   let lng = getLng(request);
@@ -112,7 +176,9 @@ export default async function handleRequest(
       backend: { loadPath: resolve("./public/locales/{{lng}}/{{ns}}.json") },
     });
   return new Promise((resolve, reject) => {
-    let didError = false;
+    // Initialize i18n instance
+
+    let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
       <I18nextProvider i18n={instance}>
         <RemixServer
@@ -120,9 +186,11 @@ export default async function handleRequest(
           url={request.url}
           abortDelay={ABORT_DELAY}
         />
+        ,
       </I18nextProvider>,
       {
-        [callbackName]: () => {
+        onShellReady() {
+          shellRendered = true;
           const body = new PassThrough();
           const stream = createReadableStreamFromReadable(body);
 
@@ -131,7 +199,7 @@ export default async function handleRequest(
           resolve(
             new Response(stream, {
               headers: responseHeaders,
-              status: didError ? 500 : responseStatusCode,
+              status: responseStatusCode,
             })
           );
 
@@ -141,9 +209,13 @@ export default async function handleRequest(
           reject(error);
         },
         onError(error: unknown) {
-          didError = true;
           responseStatusCode = 500;
-          console.error(error);
+          // Log streaming rendering errors from inside the shell.  Don't log
+          // errors encountered during initial shell rendering since they'll
+          // reject and get logged in handleDocumentRequest.
+          if (shellRendered) {
+            console.error(error);
+          }
         },
       }
     );
