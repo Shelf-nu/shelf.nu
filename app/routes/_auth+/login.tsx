@@ -14,7 +14,6 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
-import { getLng } from "~/i18n/cookie";
 import i18next from "~/i18n/i18next.server";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
@@ -24,7 +23,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
+import { setCookie ,getLng} from "~/utils/cookies.server";
 import {
   isLikeShelfError,
   isZodValidationError,

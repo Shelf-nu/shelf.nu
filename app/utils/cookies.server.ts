@@ -2,11 +2,12 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
+import { parse } from "cookie";
 import { cleanParamsForCookie } from "~/hooks/search-params";
+import i18n from "~/i18n/i18n";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getCurrentSearchParams } from "./http.server";
-
 // find cookie by name from request headers
 export function getCookie(name: string, headers: Headers) {
   const cookie = headers.get("cookie");
@@ -14,6 +15,17 @@ export function getCookie(name: string, headers: Headers) {
 
   const match = cookie.match(new RegExp(`(^| )${name}=([^;]+)`));
   if (match) return match[2];
+}
+/**
+ *  Get the language from the cookie , return the fallback language if not found
+ *  This function is used to determine the language for i18n based on the cookie
+ */
+export function getLng(request: { headers: { get: (arg0: string) => any } }) {
+  const cookies = request.headers.get("cookie");
+  if (!cookies) return i18n.fallbackLng;
+
+  const parsedCookies = parse(cookies);
+  return parsedCookies.i18next || i18n.fallbackLng;
 }
 
 /**

@@ -13,11 +13,11 @@ import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { registerEmailWorkers } from "./emails/email.worker.server";
-import { getLng } from "./i18n/cookie";
 import i18n from "./i18n/i18n"; // your i18n configuration file
 import i18next from "./i18n/i18next.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
+import { getLng } from "./utils/cookies.server"; // your cookie utility to get the language
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
