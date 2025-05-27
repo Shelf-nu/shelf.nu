@@ -23,7 +23,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie ,getLng} from "~/utils/cookies.server";
+import { setCookie, getLng } from "~/utils/cookies.server";
 import {
   isLikeShelfError,
   isZodValidationError,
