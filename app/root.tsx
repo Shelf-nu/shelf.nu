@@ -36,6 +36,7 @@ import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
+import { getLng } from "./cookie";
 
 
 export interface RootData {
@@ -66,12 +67,12 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export const loader = async ({ request }: LoaderFunctionArgs) =>
+export const loader =  ({ request }: LoaderFunctionArgs) =>
   json(
     data({
       env: getBrowserEnv(),
       maintenanceMode: false,
-      locale: await i18next.getLocale(request),
+      locale: getLng(request),
       requestInfo: {
         hints: getClientHint(request),
       },

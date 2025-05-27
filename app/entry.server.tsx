@@ -20,6 +20,7 @@ import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
+import { getLng } from "./cookie";
 export * from "../server";
 
 // === start: register scheduler and workers ===
@@ -98,24 +99,23 @@ export default async function handleRequest(
 
   // Initialize i18n instance
   let instance = createInstance();
-  let lng = await i18next.getLocale(request);
   let ns = i18next.getRouteNamespaces(remixContext);
-  
+  let lng = getLng(request)
   await instance
     .use(initReactI18next) // Tell our instance to use react-i18next
     .use(LanguageDetector)
     .use(Backend) // Setup our backend
     .init({
       detection: {
-        order: ["cookie", "subdomain", "htmlTag"],
+        order: ["htmlTag"],
         lookupCookie: "i18next",
+        
       },
-      ...i18n, // spread the configuration
-      lng, // The locale we detected above
+      ...i18n, // spread the configuration 
       ns, // The namespaces the routes about to render wants to use
+      lng, // The language to use
       backend: { loadPath: resolve("./public/locales/{{lng}}/{{ns}}.json") },
     });
-
   return new Promise((resolve, reject) => {
     let didError = false;
     const { pipe, abort } = renderToPipeableStream(

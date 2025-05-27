@@ -20,10 +20,8 @@ async function hydrate() {
         ns: getInitialNamespaces(),
       backend: { loadPath: "/locales/{{lng}}/{{ns}}.json" },
       detection: {
-        order: ["cookie","subdomain", "htmlTag"],
+        order: ["htmlTag"],
         lookupCookie: 'i18next',
-        // Because we only use htmlTag, there's no reason to cache the language
-        // on the browser, so we disable it
         caches: ['localStorage', 'cookie'],
       },
     });
