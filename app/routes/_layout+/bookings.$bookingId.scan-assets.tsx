@@ -25,7 +25,6 @@ import {
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canUserManageBookingAssets } from "~/utils/bookings";
-import { userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -86,17 +85,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    /** We get the userPrefs cookie so we can see if there is already a default camera */
-    const cookieHeader = request.headers.get("Cookie");
-    const cookie = (await userPrefs.parse(cookieHeader)) || {};
-
     const header: HeaderData = {
       title: `Scan assets for booking | ${booking.name}`,
     };
 
-    return json(
-      data({ header, booking, scannerCameraId: cookie.scannerCameraId })
-    );
+    return json(data({ header, booking }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });

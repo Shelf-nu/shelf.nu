@@ -290,7 +290,7 @@ export default function BookingsIndexPage({
           <When truthy={shouldRenderCustodianFilter}>
             <DynamicDropdown
               trigger={
-                <div className="flex cursor-pointer items-center gap-2">
+                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
                   Custodian{" "}
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
