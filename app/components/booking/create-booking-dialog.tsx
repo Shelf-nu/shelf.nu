@@ -3,9 +3,10 @@ import type { TeamMember } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { CalendarRangeIcon } from "lucide-react";
 import { useSearchParams } from "~/hooks/search-params";
+import { useUserData } from "~/hooks/use-user-data";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
-import { BookingForm } from "./form";
+import { NewBookingForm } from "./forms/new-booking-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
 type CreateBookingDialogProps = {
@@ -21,9 +22,12 @@ export default function CreateBookingDialog({
     teamMembers: TeamMember[];
     isSelfServiceOrBase: boolean;
   }>();
+  const user = useUserData();
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianRef = isSelfServiceOrBase ? teamMembers[0]?.id : undefined;
+  const custodianRef = isSelfServiceOrBase
+    ? teamMembers.find((tm) => tm.userId === user!.id)?.id
+    : undefined;
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [searchParams] = useSearchParams();
@@ -68,7 +72,7 @@ export default function CreateBookingDialog({
               </p>
             </div>
 
-            <BookingForm
+            <NewBookingForm
               booking={{
                 startDate,
                 endDate,

@@ -1,0 +1,4 @@
+.edit-booking-form input,
+.edit-booking-form textarea {
+  @apply lg:min-w-0;
+}

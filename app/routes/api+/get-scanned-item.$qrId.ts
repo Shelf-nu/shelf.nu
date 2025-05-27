@@ -4,7 +4,13 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,6 +85,7 @@ export type AssetFromQr = Prisma.AssetGetPayload<{
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const searchParams = getCurrentSearchParams(request);
 
   try {
     const { organizationId } = await requirePermission({
@@ -94,9 +101,53 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
+    const { assetExtraInclude, kitExtraInclude } = parseData(
+      searchParams,
+      z.object({
+        assetExtraInclude: z
+          .string()
+          .optional()
+          .transform((val) => {
+            if (!val) return undefined;
+            try {
+              return JSON.parse(val);
+            } catch (error) {
+              throw new Error("Invalid JSON input for assetExtraInclude");
+            }
+          }),
+        kitExtraInclude: z
+          .string()
+          .optional()
+          .transform((val) => {
+            if (!val) return undefined;
+            try {
+              return JSON.parse(val);
+            } catch (error) {
+              throw new Error("Invalid JSON input for kitExtraInclude");
+            }
+          }),
+      })
+    ) as {
+      assetExtraInclude: Prisma.AssetInclude | undefined;
+      kitExtraInclude: Prisma.KitInclude | undefined;
+    };
+
+    const include = {
+      ...QR_INCLUDE,
+
+      // Include additional data based on search params. This will override the default includes
+      ...(assetExtraInclude
+        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
+        : undefined),
+
+      ...(kitExtraInclude
+        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
+        : undefined),
+    };
+
     const qr = await getQr({
       id: qrId,
-      include: QR_INCLUDE,
+      include,
     });
 
     if (qr.organizationId !== organizationId) {
