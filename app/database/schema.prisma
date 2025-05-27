@@ -364,7 +364,7 @@ model Location {
 
 // Master data for roles
 model Role {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name Roles  @unique @default(USER)
 
   createdAt DateTime @default(now())
@@ -379,7 +379,7 @@ enum Roles {
 }
 
 model TeamMember {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name String
 
   organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -417,7 +417,7 @@ model Custody {
 }
 
 model Organization {
-  id   String           @id @unique @default(cuid())
+  id   String           @id @default(cuid())
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
@@ -467,7 +467,7 @@ model Organization {
 
 
 model UserOrganization {
-  id String @id @unique @default(cuid())
+  id String @id @default(cuid())
 
   user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId         String
@@ -546,7 +546,7 @@ model TierLimit {
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @unique @default(cuid())
+  id               String   @id @default(cuid())
   user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId           String?  @unique // This is the foreign key
   canImportAssets  Boolean  @default(true)
@@ -560,7 +560,7 @@ model CustomTierLimit {
 }
 
 model CustomField {
-  id       String  @id @unique @default(cuid())
+  id       String  @id @default(cuid())
   name     String
   helpText String?
   required Boolean @default(false)
