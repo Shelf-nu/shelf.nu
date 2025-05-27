@@ -1,4 +1,4 @@
-import React, {StrictMode } from "react";
+import React, { StrictMode } from "react";
 
 import { RemixBrowser } from "@remix-run/react";
 import i18next from "i18next";
@@ -17,23 +17,23 @@ async function hydrate() {
     .use(Backend)
     .init({
       ...i18n,
-        ns: getInitialNamespaces(),
+      ns: getInitialNamespaces(),
       backend: { loadPath: "/locales/{{lng}}/{{ns}}.json" },
       detection: {
         order: ["htmlTag"],
-        lookupCookie: 'i18next',
-        caches: ['localStorage', 'cookie'],
+        lookupCookie: "i18next",
+        caches: ["localStorage", "cookie"],
       },
     });
   React.startTransition(() => {
     hydrateRoot(
       document,
-       <I18nextProvider i18n={i18next}>
-      <React.StrictMode>
-        <JotaiProvider>
-          <RemixBrowser />
-        </JotaiProvider>
-      </React.StrictMode>
+      <I18nextProvider i18n={i18next}>
+        <React.StrictMode>
+          <JotaiProvider>
+            <RemixBrowser />
+          </JotaiProvider>
+        </React.StrictMode>
       </I18nextProvider>
     );
   });

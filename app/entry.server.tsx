@@ -2,16 +2,17 @@
 import { resolve } from "node:path";
 import { PassThrough } from "stream";
 
-import type { AppLoadContext, EntryContext} from "@remix-run/node";
-import { createReadableStreamFromReadable} from "@remix-run/node";
+import type { AppLoadContext, EntryContext } from "@remix-run/node";
+import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { createInstance } from "i18next";
-import LanguageDetector from 'i18next-browser-languagedetector';
+import LanguageDetector from "i18next-browser-languagedetector";
 import Backend from "i18next-fs-backend";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
+import { getLng } from "./cookie";
 import { registerEmailWorkers } from "./emails/email.worker.server";
 import i18n from "./i18n"; // your i18n configuration file
 import i18next from "./i18next.server";
@@ -20,7 +21,6 @@ import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
-import { getLng } from "./cookie";
 export * from "../server";
 
 // === start: register scheduler and workers ===
@@ -100,7 +100,7 @@ export default async function handleRequest(
   // Initialize i18n instance
   let instance = createInstance();
   let ns = i18next.getRouteNamespaces(remixContext);
-  let lng = getLng(request)
+  let lng = getLng(request);
   await instance
     .use(initReactI18next) // Tell our instance to use react-i18next
     .use(LanguageDetector)
@@ -109,9 +109,8 @@ export default async function handleRequest(
       detection: {
         order: ["htmlTag"],
         lookupCookie: "i18next",
-        
       },
-      ...i18n, // spread the configuration 
+      ...i18n, // spread the configuration
       ns, // The namespaces the routes about to render wants to use
       lng, // The language to use
       backend: { loadPath: resolve("./public/locales/{{lng}}/{{ns}}.json") },

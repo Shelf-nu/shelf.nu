@@ -25,6 +25,7 @@ import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
+import { getLng } from "./cookie";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
@@ -36,8 +37,6 @@ import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
-import { getLng } from "./cookie";
-
 
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -67,7 +66,7 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export const loader =  ({ request }: LoaderFunctionArgs) =>
+export const loader = ({ request }: LoaderFunctionArgs) =>
   json(
     data({
       env: getBrowserEnv(),
@@ -85,9 +84,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
-  let { locale } = useLoaderData<typeof loader>(); 
-  
-  let { i18n } = useTranslation()
+  let { locale } = useLoaderData<typeof loader>();
+
+  let { i18n } = useTranslation();
 
   useChangeLanguage(locale);
   useEffect(() => {
@@ -139,7 +138,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 function App() {
   useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
-
 
   return maintenanceMode ? (
     <BlockInteractions
