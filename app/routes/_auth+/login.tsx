@@ -44,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   let lng = getLng(request);
   let t = await i18next.getFixedT(lng);
   const title = "Log in";
-  const subHeading = t("greeting");
+  const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
@@ -182,7 +182,7 @@ export default function IndexLoginForm() {
           data-test-id="login"
           disabled={disabled}
         >
-          {t("greeting")}
+          {t("login.login")}
         </Button>
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">

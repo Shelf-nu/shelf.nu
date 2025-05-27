@@ -1,5 +1,4 @@
 /* eslint-disable no-console */
-import { resolve } from "node:path";
 import { PassThrough } from "stream";
 
 import type { AppLoadContext, EntryContext } from "@remix-run/node";
@@ -8,7 +7,6 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { createInstance } from "i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
-import Backend from "i18next-fs-backend";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
@@ -21,6 +19,8 @@ import { getLng } from "./utils/cookies.server"; // your cookie utility to get t
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
+import {en} from "../public/locales/en/common";
+import {fr} from "../public/locales/fr/common";
 export * from "../server";
 // === start: register scheduler and workers ===
 schedulerService
@@ -168,12 +168,11 @@ async function handleBrowserRequest(
   await instance
     .use(initReactI18next) // Tell our instance to use react-i18next
     .use(LanguageDetector)
-    .use(Backend) // Setup our backend
     .init({
       ...i18n, // spread the configuration
       ns, // The namespaces the routes about to render wants to use
       lng, // The language to use
-      backend: { loadPath: resolve("./public/locales/{{lng}}/{{ns}}.json") },
+      resources: {en : {common: en}, fr:{common: fr}},
     });
   return new Promise((resolve, reject) => {
     // Initialize i18n instance
