@@ -262,7 +262,7 @@ export function AssetRow({
               <br />
             </>
           ) : undefined}
-          You will still be able to add this asset to replace it's current kit.
+          You will still be able to add this asset to replace its current kit.
         </>
       ),
       priority: 70,
