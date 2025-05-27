@@ -8,7 +8,7 @@ import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { getInitialNamespaces } from "remix-i18next/client";
-import i18n from "./i18n";
+import i18n from "./i18n/i18n";
 
 async function hydrate() {
   await i18next
@@ -19,11 +19,6 @@ async function hydrate() {
       ...i18n,
       ns: getInitialNamespaces(),
       backend: { loadPath: "/locales/{{lng}}/{{ns}}.json" },
-      detection: {
-        order: ["htmlTag"],
-        lookupCookie: "i18next",
-        caches: ["localStorage", "cookie"],
-      },
     });
   React.startTransition(() => {
     hydrateRoot(

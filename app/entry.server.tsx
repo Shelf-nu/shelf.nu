@@ -12,10 +12,10 @@ import Backend from "i18next-fs-backend";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
-import { getLng } from "./cookie";
+import { getLng } from "./i18n/cookie";
 import { registerEmailWorkers } from "./emails/email.worker.server";
-import i18n from "./i18n"; // your i18n configuration file
-import i18next from "./i18next.server";
+import i18n from "./i18n/i18n"; // your i18n configuration file
+import i18next from "./i18n/i18next.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
@@ -106,10 +106,6 @@ export default async function handleRequest(
     .use(LanguageDetector)
     .use(Backend) // Setup our backend
     .init({
-      detection: {
-        order: ["htmlTag"],
-        lookupCookie: "i18next",
-      },
       ...i18n, // spread the configuration
       ns, // The namespaces the routes about to render wants to use
       lng, // The language to use

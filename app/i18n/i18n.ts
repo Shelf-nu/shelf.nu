@@ -1,4 +1,8 @@
 export default {
+  detection: {
+    order: ["htmlTag"],
+    lookupCookie: "i18next",
+  },
   // This is the list of languages your application supports
   supportedLngs: ["en", "fr"],
   // This is the language you want to use in case
