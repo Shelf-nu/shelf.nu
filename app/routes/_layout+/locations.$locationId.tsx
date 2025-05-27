@@ -208,18 +208,10 @@ export default function LocationPage() {
       <ContextualModal />
       <ContextualSidebar />
 
-      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+      <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column - assets list */}
-        <div className=" flex-1 overflow-hidden">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            <Button as="button" to="add-assets" variant="primary" width="full">
-              Manage assets
-            </Button>
-            <div className="w-full">
-              <ActionsDropdown location={location} fullWidth />
-            </div>
-          </div>
+        <div className=" flex-1 md:overflow-hidden">
+          <TextualDivider text="Assets" className="mb-4 lg:hidden" />
           <div className="flex flex-col md:gap-2">
             <Filters
               className="responsive-filters mb-2 lg:mb-0"
@@ -232,27 +224,29 @@ export default function LocationPage() {
                 ),
               }}
             >
-              <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                <div className="hidden lg:block">
-                  <When truthy={userRoleCanManageAssets}>
-                    <div className="flex items-center gap-2">
-                      <Button icon="scan" variant="secondary" to="scan-assets">
-                        Scan
-                      </Button>
-                      <Button
-                        to="manage-assets"
-                        variant="primary"
-                        width="full"
-                        className="whitespace-nowrap"
-                      >
-                        Manage assets
-                      </Button>
-                    </div>
-                  </When>
-                </div>
+              <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
+                <When truthy={userRoleCanManageAssets}>
+                  <Button
+                    icon="scan"
+                    variant="secondary"
+                    to="scan-assets"
+                    width="full"
+                  >
+                    Scan
+                  </Button>
+                  <Button
+                    to="manage-assets"
+                    variant="primary"
+                    width="full"
+                    className="whitespace-nowrap"
+                  >
+                    Manage assets
+                  </Button>
+                </When>
               </div>
             </Filters>
             <List
+              className=""
               ItemComponent={ListAssetContent}
               headerChildren={
                 <>

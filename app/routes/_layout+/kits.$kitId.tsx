@@ -367,9 +367,9 @@ export default function KitDetails() {
 
       <HorizontalTabs items={items} />
 
-      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+      <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 md:overflow-hidden">
           <Outlet />
         </div>
 

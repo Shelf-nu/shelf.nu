@@ -30,7 +30,7 @@ export const Filters = ({
   return (
     <div
       className={tw(
-        modeIsAdvanced ? "md:p-3" : "md:px-6 md:py-5",
+        modeIsAdvanced ? "md:p-3" : "md:px-4 md:py-5",
         "flex items-center justify-between bg-white py-2 md:rounded md:border md:border-gray-200 ",
         className
       )}
