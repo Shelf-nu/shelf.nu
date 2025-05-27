@@ -22,7 +22,6 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -57,9 +56,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       title: "Locations",
     };
 
-    /** We get the userPrefs cookie so we can see if there is already a default camera */
-    const cookieHeader = request.headers.get("Cookie");
-    const cookie = (await userPrefs.parse(cookieHeader)) || {};
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
 
@@ -104,7 +100,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     return json({
       header,
-      scannerCameraId: cookie.scannerCameraId,
       ...teamMemberData,
       ...locationsData,
     });

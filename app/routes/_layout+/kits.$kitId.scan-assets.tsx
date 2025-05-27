@@ -16,7 +16,6 @@ import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to
 import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -71,16 +70,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     /** We get the userPrefs cookie so we can see if there is already a default camera */
-    const cookieHeader = request.headers.get("Cookie");
-    const cookie = (await userPrefs.parse(cookieHeader)) || {};
     const title = `Scan assets for kit | ${kit.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return json(
-      data({ title, header, kit, scannerCameraId: cookie.scannerCameraId })
-    );
+    return json(data({ title, header, kit }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     throw json(error(reason), { status: reason.status });

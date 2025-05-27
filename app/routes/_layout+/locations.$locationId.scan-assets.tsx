@@ -16,7 +16,6 @@ import AddAssetsToLocationDrawer from "~/components/scanner/drawer/uses/add-asse
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
 
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -59,17 +58,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {},
     });
 
-    /** We get the userPrefs cookie so we can see if there is already a default camera */
-    const cookieHeader = request.headers.get("Cookie");
-    const cookie = (await userPrefs.parse(cookieHeader)) || {};
     const title = `Scan assets for location | ${location.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return json(
-      data({ title, header, location, scannerCameraId: cookie.scannerCameraId })
-    );
+    return json(data({ title, header, location }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw json(error(reason), { status: reason.status });
