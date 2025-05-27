@@ -107,11 +107,25 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         assetExtraInclude: z
           .string()
           .optional()
-          .transform((val) => (val ? JSON.parse(val) : undefined)),
+          .transform((val) => {
+            if (!val) return undefined;
+            try {
+              return JSON.parse(val);
+            } catch (error) {
+              throw new Error("Invalid JSON input for assetExtraInclude");
+            }
+          }),
         kitExtraInclude: z
           .string()
           .optional()
-          .transform((val) => (val ? JSON.parse(val) : undefined)),
+          .transform((val) => {
+            if (!val) return undefined;
+            try {
+              return JSON.parse(val);
+            } catch (error) {
+              throw new Error("Invalid JSON input for kitExtraInclude");
+            }
+          }),
       })
     ) as {
       assetExtraInclude: Prisma.AssetInclude | undefined;
