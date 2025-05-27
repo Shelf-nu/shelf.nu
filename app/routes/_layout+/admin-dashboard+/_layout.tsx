@@ -40,6 +40,7 @@ const items = [
   { to: "announcements", content: "Announcements" },
   { to: "move-location-images", content: "Move location images" },
   { to: "generate-locations", content: "Generate locations" },
+  { to: "test-supabase-rls", content: "Test Supabase RLS" },
 ];
 
 export default function Area51Page() {

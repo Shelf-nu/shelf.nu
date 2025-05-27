@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -28,7 +28,10 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -50,6 +53,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { ListItemTagsColumn } from "./assets._index";
 
@@ -177,8 +181,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationPage() {
   const { location, mapData } = useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+  const userRoleCanManageAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.manageAssets,
+  });
 
-  return (
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
+  /**
+   * When we are on the location.scan-assets route, we render an outlet on the whole layout.
+   */
+  const shouldRenderFullOutlet =
+    currentRoute?.handle?.name === "location.scan-assets";
+
+  return shouldRenderFullOutlet ? (
+    <Outlet />
+  ) : (
     <div>
       <Header
         slots={{
@@ -198,18 +219,10 @@ export default function LocationPage() {
       <ContextualModal />
       <ContextualSidebar />
 
-      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+      <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column - assets list */}
-        <div className=" flex-1 overflow-hidden">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            <Button as="button" to="add-assets" variant="primary" width="full">
-              Manage assets
-            </Button>
-            <div className="w-full">
-              <ActionsDropdown location={location} fullWidth />
-            </div>
-          </div>
+        <div className=" flex-1 md:overflow-hidden">
+          <TextualDivider text="Assets" className="mb-4 lg:hidden" />
           <div className="flex flex-col md:gap-2">
             <Filters
               className="responsive-filters mb-2 lg:mb-0"
@@ -222,20 +235,29 @@ export default function LocationPage() {
                 ),
               }}
             >
-              <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                <div className="hidden lg:block">
+              <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
+                <When truthy={userRoleCanManageAssets}>
                   <Button
-                    as="button"
-                    to="add-assets"
+                    icon="scan"
+                    variant="secondary"
+                    to="scan-assets"
+                    width="full"
+                  >
+                    Scan
+                  </Button>
+                  <Button
+                    to="manage-assets"
                     variant="primary"
+                    width="full"
                     className="whitespace-nowrap"
                   >
                     Manage assets
                   </Button>
-                </div>
+                </When>
               </div>
             </Filters>
             <List
+              className=""
               ItemComponent={ListAssetContent}
               headerChildren={
                 <>
