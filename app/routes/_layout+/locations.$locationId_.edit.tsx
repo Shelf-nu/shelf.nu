@@ -1,8 +1,4 @@
-import {
-  json,
-  unstable_parseMultipartFormData,
-  unstable_createMemoryUploadHandler,
-} from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -10,7 +6,6 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import invariant from "tiny-invariant";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -20,9 +15,12 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { Button } from "~/components/shared/button";
-import { getLocation, updateLocation } from "~/modules/location/service.server";
+import {
+  getLocation,
+  updateLocation,
+  updateLocationImage,
+} from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -104,30 +102,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
     const clonedRequest = request.clone();
 
-    const payload = parseData(await request.formData(), NewLocationFormSchema, {
-      additionalData: { userId, organizationId, id },
-    });
+    const payload = parseData(
+      await clonedRequest.formData(),
+      NewLocationFormSchema,
+      {
+        additionalData: { userId, organizationId, id },
+      }
+    );
 
     const { name, description, address } = payload;
 
-    const formDataFile = await unstable_parseMultipartFormData(
-      clonedRequest,
-      unstable_createMemoryUploadHandler({
-        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-      })
-    );
-
-    const file = formDataFile.get("image") as File | null;
-    invariant(file instanceof File, "file not the right type");
-
-    await updateLocation({
+    const location = await updateLocation({
       id,
       userId: authSession.userId,
       name,
       description,
       address,
-      image: file || null,
       organizationId,
+    });
+
+    await updateLocationImage({
+      request,
+      locationId: id,
+      organizationId,
+      prevImageUrl: location.imageUrl,
+      prevThumbnailUrl: location.thumbnailUrl,
     });
 
     sendNotification({
