@@ -20,7 +20,7 @@ import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 import en from "../public/locales/en/common";
-import fr  from "../public/locales/fr/common";
+import fr from "../public/locales/fr/common";
 export * from "../server";
 // === start: register scheduler and workers ===
 schedulerService

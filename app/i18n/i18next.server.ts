@@ -1,7 +1,7 @@
 import { RemixI18Next } from "remix-i18next/server";
 import i18n from "~/i18n/i18n"; // your i18n configuration file
-import { en } from "../../public/locales/en/common";
-import { fr } from "../../public/locales/fr/common";
+import en from "../../public/locales/en/common";
+import fr from "../../public/locales/fr/common";
 let i18next = new RemixI18Next({
   detection: {
     supportedLanguages: i18n.supportedLngs,
