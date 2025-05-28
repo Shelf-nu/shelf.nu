@@ -1,0 +1,13 @@
+{
+  "version": 1.8,
+  "locale": {
+    "source": "en",
+    "targets": ["fr"]
+  },
+  "buckets": {
+    "typescript": {
+      "include": ["public/locales/[locale]/common.ts"]
+    }
+  },
+  "$schema": "https://lingo.dev/schema/i18n.json"
+}

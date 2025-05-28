@@ -1,9 +1,8 @@
-import type { en } from "../en/common";
-
-export const fr: typeof en = {
+const fr = {
   login: {
     login: "Se connecter",
     subHeading:
-      "Bienvenue à nouveau ! Entrez vos informations ci-dessous pour vous connecter.",
+      "Bon retour ! Saisissez vos informations ci-dessous pour vous connecter.",
   },
-} satisfies typeof en;
+};
+export default fr;
