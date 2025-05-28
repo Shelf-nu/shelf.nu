@@ -370,8 +370,17 @@ export default function AddKitsToBooking() {
    * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
-  }, [bookingKitIds, setSelectedBulkItems]);
+    /**
+     * We are setting the default items here, so we do not have to
+     * set the kits again if there are any changes in the bookingKitIds
+     */
+    if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+    }
+
+    // We only need to run this when component mounts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Set disabled items for kit
