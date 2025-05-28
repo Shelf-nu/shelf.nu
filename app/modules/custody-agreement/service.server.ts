@@ -409,7 +409,14 @@ export async function getAgreementByCustodyId({
     const custody = await db.custody.findUnique({
       where: { id: custodyId },
       include: {
-        asset: { select: { id: true, title: true, organizationId: true } },
+        asset: {
+          select: {
+            id: true,
+            title: true,
+            organizationId: true,
+            user: { select: { email: true } },
+          },
+        },
         agreement: true,
         custodian: {
           include: {

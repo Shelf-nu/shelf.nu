@@ -16,8 +16,10 @@ import { useCrisp } from "~/components/marketing/crisp";
 
 import SignCustodyPage from "~/components/sign/sign-custody-page";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByCustodyId } from "~/modules/custody-agreement";
 import { createNote } from "~/modules/note/service.server";
+import { custodyAgreementSignedEmailText } from "~/modules/sign/email";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -178,6 +180,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       })
     );
 
+    let receiptId: string | undefined = undefined;
+
     await db.$transaction(async (tx) => {
       await tx.custody.update({
         where: { id: custody.id },
@@ -207,6 +211,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           message: "Could not find custody receipt, please contact support.",
         });
       }
+
+      receiptId = custodyReceipt.id;
 
       await tx.custodyReceipt.update({
         where: { id: custodyReceipt.id },
@@ -238,6 +244,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: authSession?.userId ?? custodyAgreement.createdById,
       assetId: custody.asset.id,
     });
+
+    if (receiptId) {
+      sendEmail({
+        to: asset.user.email, // Notify the asset owner
+        subject: `Custody Agreement '${custodyAgreement.name}' has been signed`,
+        text: custodyAgreementSignedEmailText({
+          custodianName: resolveTeamMemberName(custodian),
+          agreementName: custodyAgreement.name,
+          receiptId,
+        }),
+      });
+    }
 
     return json(data({ success: true }));
   } catch (cause) {

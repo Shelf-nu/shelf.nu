@@ -15,7 +15,9 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import SignCustodyPage from "~/components/sign/sign-custody-page";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByKitCustodyId } from "~/modules/kit/service.server";
+import { custodyAgreementSignedEmailText } from "~/modules/sign/email";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -31,6 +33,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, params, request }: LoaderFunctionArgs) {
   const authSession = context.getOptionalSession();
@@ -176,6 +179,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const assetIds = kit.assets.map((a) => a.id);
 
+    let receiptId: string | undefined = undefined;
+
     await db.$transaction(async (tx) => {
       /** Update sign info in kit's custody */
       await tx.kitCustody.update({
@@ -220,6 +225,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
+      receiptId = custodyReceipt.id;
+
       await tx.custodyReceipt.update({
         where: { id: custodyReceipt.id },
         data: {
@@ -239,6 +246,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: "Your kit has been signed successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
+      });
+    }
+
+    if (receiptId) {
+      sendEmail({
+        to: kit.createdBy.email, // Notify the owner
+        subject: `Custody Agreement '${custodyAgreement.name}' has been signed`,
+        text: custodyAgreementSignedEmailText({
+          custodianName: resolveTeamMemberName(custodian),
+          agreementName: custodyAgreement.name,
+          receiptId,
+        }),
       });
     }
 

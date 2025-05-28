@@ -1461,6 +1461,7 @@ export async function getAgreementByKitCustodyId({
             name: true,
             organizationId: true,
             assets: { select: { id: true } },
+            createdBy: { select: { email: true } },
           },
         },
         agreement: true,
