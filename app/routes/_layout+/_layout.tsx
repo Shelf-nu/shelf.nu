@@ -137,7 +137,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
-        scannerCameraId: userPrefsCookie.scannerCameraId,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),

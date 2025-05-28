@@ -6,7 +6,7 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { z } from "zod";
 import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
@@ -36,6 +36,7 @@ import { createNote } from "~/modules/note/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -326,7 +327,18 @@ export default function KitDetails() {
     { to: "bookings", content: "Bookings" },
   ];
 
-  return (
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
+  /**When we are on the kit.scan-assets route, we render an outlet on the whole layout.
+   * On the .assets and .bookings routes, we render the outlet only on the left column
+   */
+  const shouldRenderFullOutlet =
+    currentRoute?.handle?.name === "kit.scan-assets";
+
+  return shouldRenderFullOutlet ? (
+    <Outlet />
+  ) : (
     <>
       <Header
         subHeading={
@@ -365,9 +377,9 @@ export default function KitDetails() {
 
       <HorizontalTabs items={items} />
 
-      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+      <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 md:overflow-hidden">
           <Outlet />
         </div>
 

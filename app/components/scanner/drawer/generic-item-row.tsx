@@ -1,11 +1,31 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect } from "react";
+import type { Prisma } from "@prisma/client";
 import { motion } from "framer-motion";
 import { useSetAtom } from "jotai";
 import type { ScanListItem } from "~/atoms/qr-scanner";
 import { updateScannedItemAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
+import useApiQuery from "~/hooks/use-api-query";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
+
+// Type for the API response
+type ApiResponse = {
+  error?: { message: string };
+  qr?: {
+    type: "asset" | "kit";
+    asset?: AssetFromQr & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
+    kit?: KitFromQr & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
+  };
+};
 
 // Type for the row props
 type GenericItemRowProps<T> = {
@@ -14,11 +34,23 @@ type GenericItemRowProps<T> = {
   onRemove: (qrId: string) => void;
   renderItem: (item: T) => React.ReactNode;
   renderLoading: (qrId: string, error?: string) => React.ReactNode;
+  /**
+   * Optional array of strings to be sent as search params to the get-scanned-item endpoint
+   * This can allow for additional data to be fetched or included in the asset request for better UX
+   * The strings inside the array should be a json representation of prisma's include/select syntax,
+   */
+  assetExtraInclude?: Prisma.AssetInclude;
+  /**
+   * Optional array of strings to be sent as search params to the get-scanned-item endpoint
+   * This can allow for additional data to be fetched or included in the kit request for better UX
+   * The strings inside the array should be a json representation of prisma's include/select syntax,
+   */
+  kitExtraInclude?: Prisma.KitInclude;
 };
 
 /**
  * Generic component for rendering a row in the scanned items table
- * With self-contained fetch functionality
+ * With self-contained fetch functionality using useApiQuery hook
  */
 export function GenericItemRow<T>({
   qrId,
@@ -26,27 +58,34 @@ export function GenericItemRow<T>({
   onRemove,
   renderItem,
   renderLoading,
+  assetExtraInclude,
+  kitExtraInclude,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
-  const hasFetched = useRef(false);
 
-  /**
-   * Fetch item data for this specific row
-   */
-  const fetchItem = useCallback(async () => {
-    // Skip if we already have data or if we've already tried to fetch
-    if (hasFetched.current || (item && (item.data || item.error))) {
-      return;
-    }
+  // Determine if we should fetch - only if we don't already have data or error
+  const shouldFetch = !(item && (item.data || item.error));
+  const searchParams = new URLSearchParams();
+  // Add asset extra include if provided
+  if (assetExtraInclude) {
+    searchParams.append("assetExtraInclude", JSON.stringify(assetExtraInclude));
+  }
+  // Add kit extra include if provided
+  if (kitExtraInclude) {
+    searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
+  }
 
-    // Mark as fetched to prevent duplicate fetches
-    hasFetched.current = true;
+  // Use the API hook to fetch item data
+  const { data: response, error: fetchError } = useApiQuery<ApiResponse>({
+    api: `/api/get-scanned-item/${qrId}`,
+    searchParams,
+    enabled: shouldFetch,
+  });
 
-    try {
-      const request = await fetch(`/api/get-scanned-item/${qrId}`);
-      const response = await request.json();
-
-      /** If the server returns an error, add it to the item and return */
+  // Process the response when it changes
+  useEffect(() => {
+    if (response) {
+      // If the server returns an error, add it to the item and return
       if (response.error) {
         setItem({
           qrId,
@@ -56,14 +95,12 @@ export function GenericItemRow<T>({
       }
 
       const qr = response.qr;
-
-      /** Determine item type (asset or kit) and update accordingly */
+      // Determine item type (asset or kit) and update accordingly
       if (qr && qr.type === "asset") {
         const itemWithType: ScanListItem = {
           data: qr.asset,
           type: "asset",
         };
-
         if (itemWithType.data) {
           setItem({
             qrId,
@@ -75,7 +112,6 @@ export function GenericItemRow<T>({
           data: qr.kit,
           type: "kit",
         };
-
         if (itemWithType.data) {
           setItem({
             qrId,
@@ -83,22 +119,26 @@ export function GenericItemRow<T>({
           });
         }
       }
-    } catch (error) {
+    }
+  }, [response, qrId, setItem]);
+
+  // Handle fetch errors
+  useEffect(() => {
+    if (fetchError) {
       setItem({
         qrId,
         item: { error: "Failed to fetch item" },
       });
     }
-  }, [qrId, item, setItem]);
-
-  /** Fetch data when the component mounts */
-  useEffect(() => {
-    void fetchItem();
-  }, [fetchItem]);
+  }, [fetchError, qrId, setItem]);
 
   // Determine if we should show the item or loading state
   // Only show the item if we have both data and type (complete item)
   const shouldShowItem = item && item.data && item.type && !item.error;
+
+  // Determine the current state for better loading UX
+  const currentError =
+    item?.error || (fetchError ? "Failed to fetch item" : undefined);
 
   return (
     <Tr>
@@ -106,7 +146,7 @@ export function GenericItemRow<T>({
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           {shouldShowItem
             ? renderItem(item.data as unknown as T)
-            : renderLoading(qrId, item?.error)}
+            : renderLoading(qrId, currentError)}
         </div>
       </Td>
       <Td>

@@ -81,8 +81,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     const modelName = {
-      singular: "kit",
-      plural: "kits",
+      singular: "booking",
+      plural: "bookings",
     };
 
     const items = formatBookingsDates(bookings, request);
