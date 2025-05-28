@@ -13,13 +13,17 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const MigrationFormSchema = z.object({
   count: z.coerce.number().min(1).max(150, "Maximum 150 locations at a time"),
+  shouldFix: z
+    .string()
+    .optional()
+    .transform((value) => value === "on"),
 });
 
 export async function loader({ context }: LoaderFunctionArgs) {
@@ -54,17 +58,23 @@ export async function loader({ context }: LoaderFunctionArgs) {
  * files/organizationId/locations/locationId/imageId
  */
 
-// Validation function that catches more edge cases
+// Enhanced validation function that can suggest fixes
 function validateImageFormat(
   blob: any,
   contentType: string
-): { isValid: boolean; reason?: string } {
+): {
+  isValid: boolean;
+  reason?: string;
+  canFix?: boolean;
+  suggestedFix?: "convertWebP" | "updateContentType";
+  suggestedContentType?: string;
+} {
   if (!blob || blob.length < 10) {
-    return { isValid: false, reason: "Empty or too small blob" };
+    return { isValid: false, reason: "Empty or too small blob", canFix: false };
   }
 
   const uint8Array = new Uint8Array(blob);
-  const bytes = Array.from(uint8Array.slice(0, 20)); // Check more bytes
+  const bytes = Array.from(uint8Array.slice(0, 20));
 
   // Convert first 100 bytes to string to check for text content
   const textDecoder = new TextDecoder("utf-8", { fatal: false });
@@ -72,13 +82,17 @@ function validateImageFormat(
     .decode(uint8Array.slice(0, Math.min(100, uint8Array.length)))
     .toLowerCase();
 
-  // Check for HTML content (this might be the issue!)
+  // Check for HTML content
   if (
     firstChars.includes("<html") ||
     firstChars.includes("<!doctype") ||
     firstChars.includes("<body")
   ) {
-    return { isValid: false, reason: `HTML content stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `HTML content stored as ${contentType}`,
+      canFix: false,
+    };
   }
 
   // Check for other text formats that shouldn't be images
@@ -90,6 +104,7 @@ function validateImageFormat(
     return {
       isValid: false,
       reason: `Text/XML content stored as ${contentType}`,
+      canFix: false,
     };
   }
 
@@ -100,7 +115,11 @@ function validateImageFormat(
     bytes[2] === 0x44 &&
     bytes[3] === 0x46
   ) {
-    return { isValid: false, reason: `PDF file stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `PDF file stored as ${contentType}`,
+      canFix: false,
+    };
   }
 
   // Check for JPEG (FF D8 FF)
@@ -108,7 +127,13 @@ function validateImageFormat(
     if (contentType.includes("jpeg") || contentType.includes("jpg")) {
       return { isValid: true };
     }
-    return { isValid: false, reason: `JPEG file stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `JPEG file stored as ${contentType}`,
+      canFix: true,
+      suggestedFix: "updateContentType",
+      suggestedContentType: "image/jpeg",
+    };
   }
 
   // Check for PNG (89 50 4E 47)
@@ -121,22 +146,13 @@ function validateImageFormat(
     if (contentType.includes("png")) {
       return { isValid: true };
     }
-    return { isValid: false, reason: `PNG file stored as ${contentType}` };
-  }
-
-  // Check for GIF (47 49 46 38)
-  if (
-    bytes[0] === 0x47 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x38
-  ) {
-    return { isValid: false, reason: `GIF file stored as ${contentType}` };
-  }
-
-  // Check for BMP (42 4D)
-  if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
-    return { isValid: false, reason: `BMP file stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `PNG file stored as ${contentType}`,
+      canFix: true,
+      suggestedFix: "updateContentType",
+      suggestedContentType: "image/png",
+    };
   }
 
   // Check for WebP (RIFF container: 52 49 46 46 + WEBP at byte 8)
@@ -153,9 +169,19 @@ function validateImageFormat(
       bytes[10] === 0x42 &&
       bytes[11] === 0x50
     ) {
-      return { isValid: false, reason: `WebP file stored as ${contentType}` };
+      return {
+        isValid: false,
+        reason: `WebP file stored as ${contentType}`,
+        canFix: true,
+        suggestedFix: "convertWebP",
+        suggestedContentType: "image/jpeg",
+      };
     }
-    return { isValid: false, reason: `RIFF file stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `RIFF file stored as ${contentType}`,
+      canFix: false,
+    };
   }
 
   // Check for MP4/MOV (ftyp box at bytes 4-7: 66 74 79 70)
@@ -165,7 +191,11 @@ function validateImageFormat(
     bytes[6] === 0x79 &&
     bytes[7] === 0x70
   ) {
-    return { isValid: false, reason: `Video file stored as ${contentType}` };
+    return {
+      isValid: false,
+      reason: `Video file stored as ${contentType}`,
+      canFix: false,
+    };
   }
 
   // Check for very small files (likely corrupted)
@@ -173,6 +203,7 @@ function validateImageFormat(
     return {
       isValid: false,
       reason: `File too small (${blob.length} bytes), likely corrupted`,
+      canFix: false,
     };
   }
 
@@ -184,22 +215,113 @@ function validateImageFormat(
       reason: `File too large (${Math.round(
         blob.length / 1024 / 1024
       )}MB), might cause memory issues`,
+      canFix: false,
     };
   }
 
-  return { isValid: true }; // Assume valid for other formats
+  return { isValid: true };
 }
 
-// Enhanced migration action with validation
+// WebP to JPEG conversion function using Sharp
+async function convertWebPToJPEG(
+  webpBlob: any
+): Promise<{ success: boolean; jpegBlob?: any; error?: string }> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const jpegBuffer = await sharp(webpBlob).jpeg({ quality: 90 }).toBuffer();
+    return { success: true, jpegBlob: jpegBuffer };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to fix image format issues
+async function fixImageFormat(
+  blob: any,
+  validation: any
+): Promise<{
+  success: boolean;
+  fixedBlob?: any;
+  fixedContentType?: string;
+  error?: string;
+}> {
+  if (!validation.canFix) {
+    return { success: false, error: "Image cannot be fixed" };
+  }
+
+  if (validation.suggestedFix === "updateContentType") {
+    // Simple fix: just update content type
+    return {
+      success: true,
+      fixedBlob: blob, // Same blob
+      fixedContentType: validation.suggestedContentType,
+    };
+  }
+
+  if (validation.suggestedFix === "convertWebP") {
+    // Convert WebP to JPEG
+    const conversion = await convertWebPToJPEG(blob);
+    if (conversion.success) {
+      return {
+        success: true,
+        fixedBlob: conversion.jpegBlob,
+        fixedContentType: "image/jpeg",
+      };
+    } else {
+      return { success: false, error: conversion.error };
+    }
+  }
+
+  return { success: false, error: "Unknown fix type" };
+}
+
+// Function to organize results by type
+function organizeResultsByType(errors: string[]) {
+  const categories: {
+    [key: string]: string[];
+  } = {
+    "🌐 WebP Files (fixable)": [],
+    "🔄 Format Mismatches (fixable)": [],
+    "🎥 Video Files (skip)": [],
+    "📄 Text/XML Content (skip)": [],
+    "💾 Other Issues": [],
+  };
+
+  errors.forEach((error) => {
+    if (error.includes("WebP file stored as")) {
+      categories["🌐 WebP Files (fixable)"].push(error);
+    } else if (
+      error.includes("JPEG file stored as") ||
+      error.includes("PNG file stored as")
+    ) {
+      categories["🔄 Format Mismatches (fixable)"].push(error);
+    } else if (error.includes("Video file stored as")) {
+      categories["🎥 Video Files (skip)"].push(error);
+    } else if (error.includes("Text/XML content stored as")) {
+      categories["📄 Text/XML Content (skip)"].push(error);
+    } else {
+      categories["💾 Other Issues"].push(error);
+    }
+  });
+
+  // Only return categories that have items
+  return Object.fromEntries(
+    Object.entries(categories).filter(([_, items]) => items.length > 0)
+  );
+}
+
+// Enhanced migration action with validation and fixing
 export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
     await requireAdmin(userId);
 
-    // Get count from form data
+    // Get parameters from form data
     const formData = await request.formData();
-    const { count } = parseData(formData, MigrationFormSchema);
+    const { count, shouldFix } = parseData(formData, MigrationFormSchema);
+
+    console.log(`Migration started: count=${count}, shouldFix=${shouldFix}`);
 
     const locationWithImages = await db.location.findMany({
       where: { image: { isNot: null } },
@@ -208,21 +330,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
         organizationId: true,
         image: true,
       },
-      take: count, // Use the count from the form
+      take: count,
     });
 
     if (locationWithImages.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "No location images to move",
-        status: 400,
-        label: "Admin dashboard",
-      });
+      return json(
+        data({
+          moved: 0,
+          fixed: 0,
+          skipped: 0,
+          resultsByType: {},
+          errors: ["No locations with images found to process."],
+        })
+      );
     }
 
     const supabase = getSupabaseAdmin();
 
     const movedLocationIds: string[] = [];
+    const fixedLocationIds: string[] = [];
     const skippedLocationIds: string[] = [];
     const errorLog: string[] = [];
 
@@ -237,16 +363,48 @@ export async function action({ context, request }: ActionFunctionArgs) {
         location.image.contentType
       );
 
+      let processedBlob = location.image.blob;
+      let processedContentType = location.image.contentType;
+      let wasFixed = false;
+
       if (!validation.isValid) {
-        const skipMsg = `Skipping location ${location.id}: ${validation.reason}`;
-        console.error(skipMsg);
-        errorLog.push(skipMsg);
-        skippedLocationIds.push(location.id);
-        continue;
+        if (shouldFix && validation.canFix) {
+          // Try to fix the image
+          console.log(
+            `Attempting to fix location ${location.id}: ${validation.reason}`
+          );
+
+          const fixResult = await fixImageFormat(
+            location.image.blob,
+            validation
+          );
+
+          if (fixResult.success) {
+            processedBlob = fixResult.fixedBlob!;
+            processedContentType = fixResult.fixedContentType!;
+            wasFixed = true;
+
+            const fixMsg = `Fixed location ${location.id}: ${validation.reason} → ${processedContentType}`;
+            console.log(fixMsg);
+            fixedLocationIds.push(location.id);
+          } else {
+            const fixFailMsg = `Skipping location ${location.id}: ${validation.reason} (fix failed: ${fixResult.error})`;
+            console.error(fixFailMsg);
+            errorLog.push(fixFailMsg);
+            skippedLocationIds.push(location.id);
+            continue;
+          }
+        } else {
+          const skipMsg = `Skipping location ${location.id}: ${validation.reason}`;
+          console.error(skipMsg);
+          errorLog.push(skipMsg);
+          skippedLocationIds.push(location.id);
+          continue;
+        }
       }
 
       try {
-        const extension = location.image.contentType.split("/").at(-1);
+        const extension = processedContentType.split("/").at(-1);
         const baseFileName = `${location.organizationId}/locations/${
           location.id
         }/${id()}`;
@@ -254,28 +412,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const imagePath = `${baseFileName}.${extension}`;
         const thumbnailPath = `${baseFileName}-thumbnail.${extension}`;
 
-        console.log("-------------------------------");
         /** Uploading the image */
         console.log(
-          `Uploading image for location ${location.id}, size: ${location.image.blob.length} bytes`
+          `Uploading image for location ${location.id}, size: ${
+            processedBlob.length
+          } bytes${wasFixed ? " (fixed)" : ""}`
         );
-        let uploadResult;
-        try {
-          uploadResult = await supabase.storage
-            .from(PUBLIC_BUCKET)
-            .upload(imagePath, location.image.blob, {
-              upsert: true,
-              contentType: location.image.contentType,
-            });
-        } catch (uploadError) {
-          const uploadErrorMsg = `Upload API call failed for location ${location.id}: ${uploadError}`;
-          console.error(uploadErrorMsg);
-          errorLog.push(uploadErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
 
-        const { data, error } = uploadResult;
+        const { data, error } = await supabase.storage
+          .from(PUBLIC_BUCKET)
+          .upload(imagePath, processedBlob, {
+            upsert: true,
+            contentType: processedContentType,
+          });
 
         if (error) {
           console.error(
@@ -287,78 +436,32 @@ export async function action({ context, request }: ActionFunctionArgs) {
           continue;
         }
 
-        if (!data || !data.path) {
-          const noDataMsg = `Upload succeeded but no data returned for location ${location.id}`;
-          console.error(noDataMsg);
-          errorLog.push(noDataMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
-
-        console.log(
-          `Successfully uploaded image for location ${location.id} to path: ${data.path}`
-        );
-
-        /** Getting the public url that we can use to retrieve the image on frontend */
-        let publicUrlResult;
-        try {
-          publicUrlResult = supabase.storage
-            .from(PUBLIC_BUCKET)
-            .getPublicUrl(data.path);
-        } catch (urlError) {
-          const urlErrorMsg = `Get public URL failed for location ${location.id}: ${urlError}`;
-          console.error(urlErrorMsg);
-          errorLog.push(urlErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
-
+        /** Getting the public url */
         const {
           data: { publicUrl },
-        } = publicUrlResult;
+        } = supabase.storage.from(PUBLIC_BUCKET).getPublicUrl(data.path);
 
-        /** Generating thumbnail with enhanced error handling */
-        let thumbnailFile;
-        try {
-          thumbnailFile = await cropImage(
-            (async function* () {
-              await Promise.resolve(); // Satisfy eslint requirement
-              yield new Uint8Array(location.image!.blob);
-            })(),
-            {
-              width: 108,
-              height: 108,
-              fit: "cover",
-              withoutEnlargement: true,
-            }
-          );
-        } catch (cropError) {
-          const cropErrorMsg = `Failed to crop image for location ${location.id}: ${cropError}`;
-          console.error(cropErrorMsg);
-          errorLog.push(cropErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
+        /** Generating thumbnail */
+        const thumbnailFile = await cropImage(
+          (async function* () {
+            await Promise.resolve();
+            yield new Uint8Array(processedBlob);
+          })(),
+          {
+            width: 108,
+            height: 108,
+            fit: "cover",
+            withoutEnlargement: true,
+          }
+        );
 
-        console.log(`Uploading thumbnail for location ${location.id}`);
-        let thumbnailUploadResult;
-        try {
-          thumbnailUploadResult = await supabase.storage
+        const { data: thumbnailData, error: thumbnailError } =
+          await supabase.storage
             .from(PUBLIC_BUCKET)
             .upload(thumbnailPath, thumbnailFile, {
               upsert: true,
-              contentType: location.image.contentType,
+              contentType: processedContentType,
             });
-        } catch (thumbnailUploadError) {
-          const thumbnailUploadErrorMsg = `Thumbnail upload API call failed for location ${location.id}: ${thumbnailUploadError}`;
-          console.error(thumbnailUploadErrorMsg);
-          errorLog.push(thumbnailUploadErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
-
-        const { data: thumbnailData, error: thumbnailError } =
-          thumbnailUploadResult;
 
         if (thumbnailError) {
           console.error(
@@ -372,58 +475,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
           continue;
         }
 
-        if (!thumbnailData || !thumbnailData.path) {
-          const noThumbnailDataMsg = `Thumbnail upload succeeded but no data returned for location ${location.id}`;
-          console.error(noThumbnailDataMsg);
-          errorLog.push(noThumbnailDataMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
-
-        console.log(
-          `Successfully uploaded thumbnail for location ${location.id} to path: ${thumbnailData.path}`
-        );
-
-        /** Getting the public url that we can use to retrieve the image on frontend */
-        let thumbnailUrlResult;
-        try {
-          thumbnailUrlResult = supabase.storage
-            .from(PUBLIC_BUCKET)
-            .getPublicUrl(thumbnailData.path);
-        } catch (thumbnailUrlError) {
-          const thumbnailUrlErrorMsg = `Get thumbnail public URL failed for location ${location.id}: ${thumbnailUrlError}`;
-          console.error(thumbnailUrlErrorMsg);
-          errorLog.push(thumbnailUrlErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
-
+        /** Getting the thumbnail public url */
         const {
           data: { publicUrl: thumbnailPublicUrl },
-        } = thumbnailUrlResult;
+        } = supabase.storage
+          .from(PUBLIC_BUCKET)
+          .getPublicUrl(thumbnailData.path);
 
-        console.log(`Updating database for location ${location.id} with URLs`);
-        try {
-          await db.location.update({
-            where: { id: location.id },
-            data: {
-              imageUrl: publicUrl,
-              thumbnailUrl: thumbnailPublicUrl,
-            },
-          });
-          console.log(
-            `Successfully updated database for location ${location.id}`
-          );
-        } catch (dbError) {
-          const dbErrorMsg = `Database update failed for location ${location.id}: ${dbError}`;
-          console.error(dbErrorMsg);
-          errorLog.push(dbErrorMsg);
-          skippedLocationIds.push(location.id);
-          continue;
-        }
+        await db.location.update({
+          where: { id: location.id },
+          data: {
+            imageUrl: publicUrl,
+            thumbnailUrl: thumbnailPublicUrl,
+          },
+        });
 
         movedLocationIds.push(location.id);
-        console.log(`Successfully processed location ${location.id}`);
+        console.log(
+          `Successfully processed location ${location.id}${
+            wasFixed ? " (fixed)" : ""
+          }`
+        );
       } catch (err) {
         const errorMsg = `Error processing location ${location.id}: ${err}`;
         console.error(errorMsg);
@@ -444,33 +516,41 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    const successMsg = `${movedLocationIds.length} location images moved successfully`;
+    const successMsg = `${movedLocationIds.length} location images processed successfully`;
+    const fixedMsg =
+      shouldFix && fixedLocationIds.length > 0
+        ? `, ${fixedLocationIds.length} images fixed`
+        : "";
     const warningMsg =
       skippedLocationIds.length > 0
-        ? `, ${skippedLocationIds.length} skipped due to format issues`
+        ? `, ${skippedLocationIds.length} skipped`
         : "";
 
     sendNotification({
       title: "Location images migration completed",
-      message: successMsg + warningMsg,
+      message: successMsg + fixedMsg + warningMsg,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
 
+    // Organize results by type
+    const resultsByType = organizeResultsByType(errorLog);
+
     // Log detailed results
     console.log("Migration Results:");
     console.log(`- Successfully moved: ${movedLocationIds.length}`);
-    console.log(`- Skipped due to format issues: ${skippedLocationIds.length}`);
-    if (errorLog.length > 0) {
-      console.log("Detailed error log:");
-      errorLog.forEach((log) => console.log(`  - ${log}`));
+    if (shouldFix) {
+      console.log(`- Fixed and moved: ${fixedLocationIds.length}`);
     }
+    console.log(`- Skipped: ${skippedLocationIds.length}`);
 
     return json(
       data({
         moved: movedLocationIds.length,
+        fixed: shouldFix ? fixedLocationIds.length : 0,
         skipped: skippedLocationIds.length,
         errors: errorLog,
+        resultsByType,
       })
     );
   } catch (cause) {
@@ -484,6 +564,7 @@ export default function MoveLocationImages() {
   const actionData = useActionData<typeof action>();
   const disabled = useDisabled();
   const [count, setCount] = useState(100);
+  const [shouldFix, setShouldFix] = useState(false);
   const zo = useZorm("moveLocationImages", MigrationFormSchema);
 
   return (
@@ -505,28 +586,51 @@ export default function MoveLocationImages() {
           inputClassName="w-[100px]"
           error={zo.errors.count()?.message}
         />
+
+        <div className="mt-4">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="shouldFix"
+              checked={shouldFix}
+              onChange={(e) => setShouldFix(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm">
+              Fix corrupted JPEG, PNG and WebP images (converts WebP → JPEG,
+              fixes format mismatches)
+            </span>
+          </label>
+        </div>
+
         <div className="mt-4">
           <Button disabled={numberOfLocationWithImages === 0 || disabled}>
-            Move {count} location images
+            Move {count} location images {shouldFix && "(with fixing)"}
           </Button>
         </div>
       </Form>
 
-      {/* Show migration results */}
+      {/* Show migration results organized by type */}
       {actionData && (
         <div className="mt-6 rounded-md border bg-gray-50 p-4">
           <h3 className="mb-2 font-semibold">Migration Results:</h3>
           <pre className="whitespace-pre-wrap text-sm">
             {`✅ Successfully moved: ${actionData.moved} images
+${actionData.fixed ? `🔧 Fixed and moved: ${actionData.fixed} images` : ""}
 ❌ Skipped due to issues: ${actionData.skipped} images
 
 ${
-  actionData.errors && actionData.errors.length > 0
-    ? `Details of skipped images:
-${actionData.errors
-  .map((error: string, index: number) => `${index + 1}. ${error}`)
+  actionData.resultsByType
+    ? Object.entries(actionData.resultsByType)
+        .map(
+          ([type, items]) =>
+            `${type}:
+${(items as string[])
+  .map((item, index) => `  ${index + 1}. ${item}`)
   .join("\n")}`
-    : "No errors to report."
+        )
+        .join("\n\n")
+    : "No detailed breakdown available."
 }`}
           </pre>
         </div>
