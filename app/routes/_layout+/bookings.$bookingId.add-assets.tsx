@@ -419,7 +419,7 @@ export default function AddAssetsToNewBooking() {
   }, []);
 
   /**
-   * Set disabled items for kit
+   * Set disabled items for assets
    */
   useEffect(() => {
     const _disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
