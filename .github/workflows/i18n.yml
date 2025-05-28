@@ -1,0 +1,50 @@
+name: Auto Translation with Lingo.dev
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - "app/component/**"
+
+jobs:
+  auto-translate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Lingo.dev translation
+        run: npx lingo.dev@latest i18n
+        env:
+           LINGO_API_KEY: ${{ secrets.LINGO_API_KEY }}
+
+      - name: Check for changes
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit translation updates
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "i18n updated"
+          git push

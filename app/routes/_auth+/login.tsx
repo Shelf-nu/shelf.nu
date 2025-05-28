@@ -43,7 +43,7 @@ import { validEmail } from "~/utils/misc";
 export async function loader({ context, request }: LoaderFunctionArgs) {
   let lng = getLng(request);
   let t = await i18next.getFixedT(lng);
-  const title = "Log in";
+  const title = t("login.login");
   const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
 
@@ -138,8 +138,7 @@ export default function IndexLoginForm() {
     <div className="w-full max-w-md">
       {acceptedInvite ? (
         <div className="mb-8 text-center text-success-600">
-          Successfully accepted workspace invite. Please login to see your new
-          workspace.
+          {t("auth.acceptedInvite")}
         </div>
       ) : null}
 
