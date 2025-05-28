@@ -27,6 +27,10 @@ model Image {
 
   user   User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
+
+  // Indexes for foreign keys
+  @@index([ownerOrgId])
+  @@index([userId])
 }
 
 model User {
@@ -80,6 +84,8 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
+  // Index for foreign key
+  @@index([tierId])
 }
 
 model Asset {
@@ -128,6 +134,8 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
+  // Index for foreign key
+  @@index([userId])
 }
 
 enum AssetStatus {
@@ -165,6 +173,8 @@ model AssetIndexSettings {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, organizationId])
+  // Index for foreign key
+  @@index([organizationId])
 }
 
 enum AssetIndexMode {
@@ -193,6 +203,9 @@ model Category {
   organizationId String
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Tag {
@@ -213,6 +226,9 @@ model Tag {
   updatedAt DateTime @updatedAt
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Note {
@@ -229,6 +245,10 @@ model Note {
   userId  String?
   asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
+
+  // Indexes for foreign keys
+  @@index([assetId])
+  @@index([userId])
 }
 
 enum NoteType {
@@ -268,6 +288,11 @@ model Qr {
   scans     Scan[]
 
   @@index([assetId], name: "Qr_assetId_idx")
+  // Indexes for foreign keys
+  @@index([kitId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([batchId])
 }
 
 model PrintBatch {
@@ -302,6 +327,10 @@ model ReportFound {
 
   kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   kitId String?
+
+  // Indexes for foreign keys
+  @@index([assetId])
+  @@index([kitId])
 }
 
 enum ErrorCorrection {
@@ -335,6 +364,10 @@ model Scan {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([qrId])
+  @@index([userId])
 }
 
 model Location {
@@ -363,11 +396,14 @@ model Location {
   assets Asset[]
 
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 // Master data for roles
 model Role {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name Roles  @unique @default(USER)
 
   createdAt DateTime @default(now())
@@ -382,7 +418,7 @@ enum Roles {
 }
 
 model TeamMember {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name String
 
   organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -401,6 +437,9 @@ model TeamMember {
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Custody {
@@ -417,10 +456,12 @@ model Custody {
   updatedAt DateTime @updatedAt
 
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
+  // Index for foreign key
+  @@index([teamMemberId])
 }
 
 model Organization {
-  id   String           @id @unique @default(cuid())
+  id   String           @id @default(cuid())
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
@@ -465,12 +506,14 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
 
-
+  // Indexes for foreign keys
+  @@index([userId])
+  @@index([ssoDetailsId])
 }
 
 
 model UserOrganization {
-  id String @id @unique @default(cuid())
+  id String @id @default(cuid())
 
   user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId         String
@@ -482,6 +525,8 @@ model UserOrganization {
   updatedAt DateTime            @updatedAt
 
   @@unique([userId, organizationId])
+  // Index for foreign key
+  @@index([organizationId])
 }
 
 enum OrganizationType {
@@ -549,7 +594,7 @@ model TierLimit {
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @unique @default(cuid())
+  id               String   @id @default(cuid())
   user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId           String?  @unique // This is the foreign key
   canImportAssets  Boolean  @default(true)
@@ -563,7 +608,7 @@ model CustomTierLimit {
 }
 
 model CustomField {
-  id       String  @id @unique @default(cuid())
+  id       String  @id @default(cuid())
   name     String
   helpText String?
   required Boolean @default(false)
@@ -587,6 +632,9 @@ model CustomField {
   assetCustomFieldsValues AssetCustomFieldValue[]
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 enum CustomFieldType {
@@ -616,6 +664,8 @@ model AssetCustomFieldValue {
   updatedAt DateTime @updatedAt
 
   @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
+  // Index for foreign key
+  @@index([customFieldId])
 }
 
 enum Currency {
@@ -680,6 +730,12 @@ model Invite {
   expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([inviteeUserId])
+  @@index([inviterId])
+  @@index([organizationId])
+  @@index([teamMemberId])
 }
 
 model Announcement {
@@ -741,6 +797,12 @@ model Booking {
   // dates here and updated the from and to dates to current date (if users agrees to change) 
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
+
+  // Indexes for foreign keys
+  @@index([creatorId])
+  @@index([custodianTeamMemberId])
+  @@index([custodianUserId])
+  @@index([organizationId])
 }
 
 model Kit {
@@ -766,6 +828,10 @@ model Kit {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([createdById])
+  @@index([organizationId])
 }
 
 enum KitStatus {
@@ -785,6 +851,9 @@ model KitCustody {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Index for foreign key
+  @@index([custodianId])
 }
 
 model AssetReminder {
@@ -805,8 +874,11 @@ model AssetReminder {
 
   // Optimized indexes
   @@index([assetId, alertDateTime])
+  // Keeping these indexes as they were added for a purpose
   @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+  // Index for foreign key
+  @@index([createdById])
 }
