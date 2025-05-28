@@ -77,6 +77,7 @@ model User {
 
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
+  createdGroups   Group[]
 
   @@unique([email, username])
   @@index([firstName, lastName])
@@ -398,6 +399,7 @@ model TeamMember {
   deletedAt      DateTime?
   bookings       Booking[]
   assetReminders AssetReminder[]
+  groupsJoined   Group[]
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -464,7 +466,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
-
+  groups             Group[]
 
 }
 
@@ -809,4 +811,22 @@ model AssetReminder {
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+}
+
+model Group {
+  id   String @id @default(cuid())
+  name String
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
+
+  teamMembers TeamMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
 }
