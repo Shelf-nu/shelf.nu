@@ -33,13 +33,13 @@ import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
-import { Image } from "~/components/shared/image";
 
 import {
   Tabs,
@@ -77,7 +77,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import { ListItemTagsColumn } from "./assets._index";
 
 export type AssetWithBooking = Asset & {
@@ -511,13 +510,10 @@ export default function AddAssetsToNewBooking() {
           countKey="totalLocations"
           renderItem={({ metadata }) => (
             <div className="flex items-center gap-2">
-              <Image
-                imageId={metadata.imageId}
-                alt="img"
-                className={tw(
-                  "size-6 rounded-[2px] object-cover",
-                  metadata.description ? "rounded-b-none border-b-0" : ""
-                )}
+              <ImageWithPreview
+                thumbnailUrl={metadata.thumbnailUrl}
+                alt={metadata.name}
+                className="size-6 rounded-[2px]"
               />
               <div>{metadata.name}</div>
             </div>
