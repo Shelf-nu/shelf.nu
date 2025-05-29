@@ -161,6 +161,7 @@ export const WeeklyScheduleForm = ({
       onSubmit={handleSubmit}
       noValidate
     >
+      <input type="hidden" name="intent" value="updateSchedule" />
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
         <p className="text-sm text-gray-600">
@@ -256,12 +257,7 @@ export const WeeklyScheduleForm = ({
       </div>
 
       <div className="mt-6 text-right">
-        <Button
-          type="submit"
-          disabled={disabled}
-          name="intent"
-          value="updateSchedule"
-        >
+        <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save Schedule"}
         </Button>
       </div>

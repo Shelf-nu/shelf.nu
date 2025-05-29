@@ -5,14 +5,10 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
-
 import { useLoaderData } from "@remix-run/react";
-
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
-
 import type { HeaderData } from "~/components/layout/header/types";
-
 import { Card } from "~/components/shared/card";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
@@ -27,7 +23,6 @@ import {
   WeeklyScheduleSchema,
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -103,22 +98,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.workingHours,
       action: PermissionAction.update,
     });
+
     const formData = await request.formData();
 
-    const { intent } = parseData(
-      formData,
-      z.object({
-        intent: z.enum(["toggle", "updateSchedule"]),
-      }),
-      {
-        additionalData: {
-          organizationId,
-        },
-      }
-    );
+    // Get intent manually to avoid any parseData issues with numeric keys in updateSchedule form data
+    const intent = formData.get("intent") as string;
+    if (!intent || !["toggle", "updateSchedule"].includes(intent)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid action",
+        additionalData: { intent },
+        label: "Working hours",
+      });
+    }
 
     switch (intent) {
       case "toggle": {
+        // Only use parseData for simple fields without numeric keys
         const { enableWorkingHours } = parseData(
           formData,
           WorkingHoursToggleSchema
@@ -131,22 +127,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Workspace updated",
-          message: "Your workspace  has been updated successfully",
+          message: "Your workspace has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
 
         return json(data({ success: true }), { status: 200 });
       }
+
       case "updateSchedule": {
-        // Parse the weekly schedule from form data manually
+        // CRITICAL: Do NOT use parseData here - it will fail with numeric keys
+        // Parse manually using your utility function
         const weeklyScheduleData = parseWeeklyScheduleFromFormData(formData);
 
-        // Use Zod directly for JSON validation (not parseData)
+        // Validate directly with Zod (bypass parseData completely)
         const validation = WeeklyScheduleSchema.safeParse(weeklyScheduleData);
 
         if (!validation.success) {
-          // Create a ShelfError with validation details
           throw new ShelfError({
             cause: validation.error,
             title: "Invalid Schedule",
@@ -167,7 +164,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        // Use the validated data
         await updateWorkingHoursSchedule({
           organizationId,
           weeklySchedule: validation.data,
@@ -182,12 +178,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return json(data({ success: true }), { status: 200 });
       }
+
       default: {
         throw new ShelfError({
           cause: null,
           message: "Invalid action",
           additionalData: { intent },
-          label: "Team",
+          label: "Working hours",
         });
       }
     }
@@ -196,7 +193,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return json(error(reason), { status: reason.status });
   }
 }
-
 export default function GeneralPage() {
   const { header } = useLoaderData<typeof loader>();
   const { workingHours } = useLoaderData<typeof loader>();
