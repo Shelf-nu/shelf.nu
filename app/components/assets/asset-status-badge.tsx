@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Kit } from "@prisma/client";
 import { AssetStatus, KitStatus } from "@prisma/client";
 import { useNavigate } from "@remix-run/react";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { Badge } from "../shared/badge";
 import { CustomTooltip } from "../shared/custom-tooltip";
 import { UnavailableBadge } from "../shared/unavailable-badge";
@@ -45,6 +46,7 @@ export function AssetStatusBadge({
   kit?: Pick<Kit, "id" | "name" | "status"> | null;
 }) {
   const navigate = useNavigate();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const isPartOfNotAvailableKit =
     kit &&
@@ -118,7 +120,7 @@ export function AssetStatusBadge({
     event.preventDefault();
     event.stopPropagation();
 
-    if (status === AssetStatus.SIGNATURE_PENDING) {
+    if (status === AssetStatus.SIGNATURE_PENDING && !isBaseOrSelfService) {
       navigate(shareAgreementUrl);
     }
   }

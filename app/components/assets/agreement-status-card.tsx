@@ -1,6 +1,7 @@
 import type { Kit, User } from "@prisma/client";
 import { PenLineIcon } from "lucide-react";
 import { useUserData } from "~/hooks/use-user-data";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
@@ -29,6 +30,7 @@ export default function AgreementStatusCard({
   signUrl,
 }: AgreementStatusCardProps) {
   const user = useUserData();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const isCustodianCurrentUser = custodian?.user?.email === user?.email;
 
@@ -75,13 +77,15 @@ export default function AgreementStatusCard({
           </p>
         ) : null}
 
-        <Button to={getUrl()} variant="link-gray">
-          {isSignaturePending
-            ? isCustodianCurrentUser
-              ? "Sign document"
-              : "Share document"
-            : "View receipt"}
-        </Button>
+        {isSignaturePending && isBaseOrSelfService ? null : (
+          <Button to={getUrl()} variant="link-gray">
+            {isSignaturePending
+              ? isCustodianCurrentUser
+                ? "Sign document"
+                : "Share document"
+              : "View receipt"}
+          </Button>
+        )}
       </div>
     </Card>
   );
