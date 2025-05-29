@@ -1,4 +1,4 @@
-import { OrganizationType, WorkingHours } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
