@@ -63,3 +63,23 @@ export function sanitizeFilename(filename: string): string {
 export function formatEnum(value: string) {
   return _.startCase(_.toLower(value));
 }
+
+export async function getImageAsBase64(url: string) {
+  try {
+    // Fetch the image data
+    const response = await fetch(url);
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    // Convert the image data to a Base64-encoded string
+    const base64Image = Buffer.from(arrayBuffer).toString("base64");
+
+    return base64Image;
+
+    // Convert the image data to a Base64-encoded string
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Error fetching image:", error);
+    return null;
+  }
+}

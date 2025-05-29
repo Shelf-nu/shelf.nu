@@ -227,6 +227,12 @@ For File storage we use the storage buckets service provided by supabase. We don
 1. Create a bucket called `kits`
 2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `(bucket_id = 'kits'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
 
+### Locations
+
+1. Create a bucket called `files`
+2. Make it a public bucket
+3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. Then policy expression is: `(bucket_id = 'files'::text) AND (false)` and target roles should be set to `authenticated` & `anon`
+
 ## GitHub Actions
 
 > DISCLAIMER : Github actions ==> I'm not an expert about that. Read carefully before using it

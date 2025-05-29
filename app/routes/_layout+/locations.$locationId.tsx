@@ -12,6 +12,7 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
@@ -25,7 +26,6 @@ import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
@@ -56,7 +56,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -203,7 +202,19 @@ export default function LocationPage() {
     <Outlet />
   ) : (
     <div>
-      <Header>
+      <Header
+        slots={{
+          "left-of-title": (
+            <ImageWithPreview
+              className="mr-2"
+              imageUrl={location?.imageUrl ?? undefined}
+              thumbnailUrl={location?.thumbnailUrl ?? undefined}
+              alt={location.name}
+              withPreview
+            />
+          ),
+        }}
+      >
         <ActionsDropdown location={location} />
       </Header>
       <ContextualModal />
@@ -266,15 +277,6 @@ export default function LocationPage() {
         </div>
         {/* Right column - Location info */}
         <div className="w-full md:w-[360px] lg:ml-4">
-          <Image
-            imageId={location?.imageId}
-            alt={`${location.name}`}
-            className={tw(
-              "block h-auto w-full rounded border object-cover 2xl:h-auto",
-              location.description ? "rounded-b-none border-b-0" : ""
-            )}
-            updatedAt={location.image?.updatedAt}
-          />
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>
@@ -283,41 +285,38 @@ export default function LocationPage() {
 
           <TextualDivider text="Details" className="my-8 lg:hidden" />
 
-          {location.address ? (
-            <>
-              <div className="mt-4 flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
-                <span className=" text-xs font-medium text-gray-600">
-                  Address
-                </span>
-                <span className="font-medium">{location.address}</span>
+          <div className="flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
+            <span className=" text-xs font-medium text-gray-600">Address</span>
+            <span className="font-medium">{location.address ?? "-"}</span>
+          </div>
+
+          {mapData ? (
+            <div className="mb-10 mt-4 border">
+              <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
+              <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
+                <p>
+                  <Button
+                    to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
+                    variant="link"
+                    target="_blank"
+                    rel="nofollow noopener noreferrer"
+                  >
+                    See in Google Maps
+                  </Button>
+                </p>
               </div>
-              {mapData ? (
-                <div className="mb-10 mt-4 border">
-                  <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
-                  <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
-                    <p>
-                      <Button
-                        to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
-                        variant="link"
-                        target="_blank"
-                        rel="nofollow noopener noreferrer"
-                      >
-                        See in Google Maps
-                      </Button>
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="mb-10 mt-4 border">
-                  <MapPlaceholder
-                    description={
-                      "We couldn't geolocate your address. Please try formatting it differently."
-                    }
-                  />
-                </div>
-              )}
-            </>
-          ) : null}
+            </div>
+          ) : (
+            <div className="mb-10 mt-4 border">
+              <MapPlaceholder
+                description={
+                  location.address
+                    ? "We couldn't geolocate your address. Please try formatting it differently."
+                    : "Add an address to see it on the map."
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -7,6 +7,8 @@ import type {
 } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { PUBLIC_BUCKET } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -15,7 +17,13 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import {
+  getFileUploadPath,
+  parseFileFormData,
+  removePublicFile,
+} from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Location";
@@ -220,51 +228,28 @@ export async function createLocation({
   address,
   userId,
   organizationId,
-  image,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
   organizationId: Organization["id"];
-  image: File | null;
 }) {
   try {
-    const data = {
-      name,
-      description,
-      address,
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    };
-
-    if (image?.size && image?.size > 0) {
-      Object.assign(data, {
-        image: {
-          create: {
-            blob: Buffer.from(await image.arrayBuffer()),
-            contentType: image.type,
-            ownerOrg: {
-              connect: {
-                id: organizationId,
-              },
-            },
-            user: {
-              connect: {
-                id: userId,
-              },
-            },
+    return await db.location.create({
+      data: {
+        name,
+        description,
+        address,
+        user: {
+          connect: {
+            id: userId,
           },
         },
-      });
-    }
-
-    return await db.location.create({ data });
+        organization: {
+          connect: {
+            id: organizationId,
+          },
+        },
+      },
+    });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
@@ -303,52 +288,19 @@ export async function updateLocation(payload: {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
-  image: File | null;
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
-  const { id, name, address, description, image, userId, organizationId } =
-    payload;
+  const { id, name, address, description, userId, organizationId } = payload;
 
   try {
-    const data = {
-      name,
-      description,
-      address,
-    };
-
-    if (image?.size && image?.size > 0) {
-      const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
-        ownerOrg: {
-          connect: {
-            id: organizationId,
-          },
-        },
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      };
-
-      /** We do an upsert, because if a user creates a location without an image,
-       * we need to create an Image when the location is updated,
-       * else we need to update the Image */
-      Object.assign(data, {
-        image: {
-          upsert: {
-            create: imageData,
-            update: imageData,
-          },
-        },
-      });
-    }
-
     return await db.location.update({
       where: { id, organizationId },
-      data,
+      data: {
+        name,
+        description,
+        address,
+      },
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
@@ -472,6 +424,157 @@ export async function bulkDeleteLocations({
       cause,
       message: "Something went wrong while bulk deleting locations.",
       additionalData: { locationIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function updateLocationImage({
+  organizationId,
+  request,
+  locationId,
+  prevImageUrl,
+  prevThumbnailUrl,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  locationId: Location["id"];
+  prevImageUrl?: string | null;
+  prevThumbnailUrl?: string | null;
+}) {
+  try {
+    const fileData = await parseFileFormData({
+      request,
+      bucketName: PUBLIC_BUCKET,
+      newFileName: getFileUploadPath({
+        organizationId,
+        type: "locations",
+        typeId: locationId,
+      }),
+      resizeOptions: {
+        width: 1200,
+        withoutEnlargement: true,
+      },
+      generateThumbnail: true,
+      thumbnailSize: 108,
+    });
+
+    const image = fileData.get("image") as string | null;
+    if (!image) {
+      return;
+    }
+
+    let imagePath: string;
+    let thumbnailPath: string | null = null;
+
+    try {
+      const parsedImage = JSON.parse(image);
+      if (parsedImage.originalPath) {
+        imagePath = parsedImage.originalPath;
+        thumbnailPath = parsedImage.thumbnailPath;
+      } else {
+        imagePath = image;
+      }
+    } catch (error) {
+      imagePath = image;
+    }
+
+    const {
+      data: { publicUrl: imagePublicUrl },
+    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(imagePath);
+
+    let thumbnailPublicUrl: string | undefined;
+    if (thumbnailPath) {
+      const {
+        data: { publicUrl },
+      } = getSupabaseAdmin()
+        .storage.from(PUBLIC_BUCKET)
+        .getPublicUrl(thumbnailPath);
+      thumbnailPublicUrl = publicUrl;
+    }
+
+    await db.location.update({
+      where: { id: locationId, organizationId },
+      data: {
+        imageUrl: imagePublicUrl,
+        thumbnailUrl: thumbnailPublicUrl ? thumbnailPublicUrl : undefined,
+      },
+    });
+
+    if (prevImageUrl) {
+      await removePublicFile({ publicUrl: prevImageUrl });
+    }
+
+    if (prevThumbnailUrl) {
+      await removePublicFile({ publicUrl: prevThumbnailUrl });
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the location image.",
+      additionalData: { locationId },
+      label,
+    });
+  }
+}
+
+export async function generateLocationWithImages({
+  organizationId,
+  numberOfLocations,
+  image,
+  userId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  numberOfLocations: number;
+  image: File;
+}) {
+  try {
+    for (let i = 1; i <= numberOfLocations; i++) {
+      const imageCreated = await db.image.create({
+        data: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          ownerOrg: { connect: { id: organizationId } },
+          user: { connect: { id: userId } },
+        },
+      });
+
+      await db.location.create({
+        data: {
+          /**
+           * We are using id() for names because location names are unique.
+           * This location is going to be created for testing purposes only so the name in this case
+           * doesn't matter.
+           */
+          name: id(),
+          /**
+           * This approach is @deprecated and will not be used in the future.
+           * Instead, we will store images in supabase storage and use the public URL.
+           */
+          image: { connect: { id: imageCreated.id } },
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+        },
+      });
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while generating locations.",
+      additionalData: { organizationId, numberOfLocations },
       label,
     });
   }

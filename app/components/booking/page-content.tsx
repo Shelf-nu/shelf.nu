@@ -1,8 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import { formatBookingDuration } from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
-import { useHints } from "~/utils/client-hints";
-import { formatCurrency } from "~/utils/currency";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { BookingAssetsColumn } from "./booking-assets-column";
 import { BookingStatistics } from "./booking-statistics";
@@ -17,11 +15,9 @@ export function BookingPageContent() {
     totalItems: totalAssets,
     totalKits,
     totalValue,
-    currentOrganization,
     allCategories,
     assetsCount,
   } = useLoaderData<BookingPageLoaderData>();
-  const hints = useHints();
   const custodian = teamMembers.find((member) =>
     booking.custodianUserId
       ? booking.custodianUserId === member?.userId
@@ -50,11 +46,7 @@ export function BookingPageContent() {
             totalAssets={totalAssets}
             kitsCount={totalKits}
             assetsCount={assetsCount}
-            totalValue={formatCurrency({
-              value: totalValue,
-              locale: hints.locale,
-              currency: currentOrganization.currency,
-            })}
+            totalValue={totalValue}
             allCategories={allCategories}
           />
         </Card>

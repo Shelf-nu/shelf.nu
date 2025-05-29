@@ -52,6 +52,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -310,10 +311,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ...teamMembersData,
         bookingFlags,
         totalKits: Object.keys(assetsByKit).length,
-        totalValue: booking.assets.reduce(
-          (acc, asset) => acc + (asset.valuation || 0),
-          0
-        ),
+        totalValue: calculateTotalValueOfAssets({
+          assets: booking.assets,
+          currency: currentOrganization.currency,
+          locale: getClientHint(request).locale,
+        }),
         /** Assets inside the booking without kits */
         assetsCount: individualAssets.length,
         allCategories,
