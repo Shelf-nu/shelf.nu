@@ -449,7 +449,11 @@ export async function claimQrCode({
 }
 
 interface QRCodeMapParams {
-  assets: Asset[];
+  assets: Prisma.AssetGetPayload<{
+    include: {
+      qrCodes: true;
+    };
+  }>[];
   organizationId: string;
   userId: string;
   size: "small" | "medium" | "large" | "cable";
@@ -464,7 +468,7 @@ export async function getQrCodeMaps({
   try {
     const qrCodePromises = assets.map(async (asset) => {
       try {
-        let qr = await getQrByAssetId({ assetId: asset.id });
+        let qr = asset.qrCodes[0];
         const qrCode = qr
           ? await generateCode({
               version: qr.version as TypeNumber,

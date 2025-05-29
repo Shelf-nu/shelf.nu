@@ -40,7 +40,8 @@ export const loader = async ({
       bookingId,
       organizationId,
       userId,
-      role
+      role,
+      request
     );
 
     const dateTimeFormat = getDateTimeFormat(request, {

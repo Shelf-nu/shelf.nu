@@ -1,9 +1,10 @@
 import type { RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 
+import { Image } from "~/components/shared/image";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image/component";
@@ -54,6 +55,9 @@ export const BookingOverviewPDF = ({
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
   };
+  const disabled = !totalAssets && {
+    reason: "No assets in booking to generate PDF overview.",
+  };
 
   return (
     <>
@@ -63,7 +67,7 @@ export const BookingOverviewPDF = ({
         width="full"
         name="generate pdf"
         onClick={handleOpenDialog}
-        disabled={!totalAssets}
+        disabled={disabled}
       >
         Generate overview PDF
       </Button>
@@ -115,7 +119,7 @@ export const BookingOverviewPDF = ({
         className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
         width="full"
         name="generate pdf"
-        disabled={!totalAssets}
+        disabled={disabled}
         // onClick={handleMobileView}
       >
         Generate overview PDF
@@ -133,7 +137,8 @@ const BookingPDFPreview = ({
 }) => {
   if (!pdfMeta) return null;
 
-  const { booking, organization, assets, assetIdToQrCodeMap } = pdfMeta;
+  const { booking, organization, assets, assetIdToQrCodeMap, totalValue } =
+    pdfMeta;
   const custodianName = booking.custodianUser
     ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName} <${booking.custodianUser.email}>`
     : booking.custodianTeamMember?.name;
@@ -170,7 +175,15 @@ const BookingPDFPreview = ({
       >
         <div className="mb-5 flex justify-between">
           <div>
-            <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={organization.imageId}
+                alt="img"
+                className={tw("size-6 rounded-[2px] object-cover")}
+                updatedAt={organization.updatedAt}
+              />
+              <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
+            </div>
             <h1 className="mt-0.5 text-xl font-medium">
               Booking checklist for {booking?.name}
             </h1>
@@ -216,12 +229,20 @@ const BookingPDFPreview = ({
             </div>
           </When>
 
-          <div className="flex p-2">
+          <div className="flex border-b border-gray-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">
               Description
             </span>
             <span className="grow whitespace-pre-wrap text-gray-600">
               {booking?.description}
+            </span>
+          </div>
+          <div className="flex p-2">
+            <span className="min-w-[150px] text-sm font-medium">
+              Total assets value
+            </span>
+            <span className="grow whitespace-pre-wrap text-gray-600">
+              {totalValue}
             </span>
           </div>
         </section>
@@ -254,7 +275,7 @@ const BookingPDFPreview = ({
           </thead>
           <tbody>
             {assets.map((asset, index) => (
-              <>
+              <Fragment key={asset.id}>
                 <tr
                   key={asset.id}
                   className={tw(
@@ -313,7 +334,7 @@ const BookingPDFPreview = ({
                     </td>
                   </tr>
                 </When>
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
