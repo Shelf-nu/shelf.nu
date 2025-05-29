@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 // TypeScript types for JSON schedule
 export interface DaySchedule {
   isOpen: boolean;
@@ -104,16 +106,6 @@ export interface BookingTimeValidation {
       end: string; // "HH:MM" format (24-hour) in UTC
     };
   }>;
-}
-
-// For frontend components
-export interface WeeklyScheduleDisplay {
-  [key in DayOfWeek]: {
-    dayName: string;
-    isOpen: boolean;
-    hours?: string; // Formatted display string like "9:00 AM - 5:00 PM" (converted from UTC "HH:MM")
-    hasOverride?: boolean;
-  };
 }
 
 // Time validation utilities

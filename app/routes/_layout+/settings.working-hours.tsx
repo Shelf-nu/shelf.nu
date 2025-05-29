@@ -4,24 +4,29 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, MaxPartSizeExceededError } from "@remix-run/node";
+import { json } from "@remix-run/node";
 
-import { useFetcher, useLoaderData } from "@remix-run/react";
-import { useZorm } from "react-zorm";
+import { useLoaderData } from "@remix-run/react";
+
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
-import FormRow from "~/components/forms/form-row";
-import { Switch } from "~/components/forms/switch";
 
 import type { HeaderData } from "~/components/layout/header/types";
 
 import { Card } from "~/components/shared/card";
-import { useDisabled } from "~/hooks/use-disabled";
+import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
+import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
 import {
   getWorkingHoursForOrganization,
   toggleWorkingHours,
+  updateWorkingHoursSchedule,
 } from "~/modules/working-hours/service.server";
-import { WorkingHoursToggleSchema } from "~/modules/working-hours/zod-utils";
+import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
+import { parseWeeklyScheduleFromFormData } from "~/modules/working-hours/utils";
+import {
+  WeeklyScheduleSchema,
+  WorkingHoursToggleSchema,
+} from "~/modules/working-hours/zod-utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -103,7 +108,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { intent } = parseData(
       formData,
       z.object({
-        intent: z.enum(["toggle", "update"]),
+        intent: z.enum(["toggle", "updateSchedule"]),
       }),
       {
         additionalData: {
@@ -133,96 +138,50 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return json(data({ success: true }), { status: 200 });
       }
-      // case "permissions": {
-      //   const schema = EditWorkspacePermissionsSettingsFormSchema();
+      case "updateSchedule": {
+        // Parse the weekly schedule from form data manually
+        const weeklyScheduleData = parseWeeklyScheduleFromFormData(formData);
 
-      //   const payload = parseData(formData, schema, {
-      //     additionalData: { userId, organizationId },
-      //   });
+        // Use Zod directly for JSON validation (not parseData)
+        const validation = WeeklyScheduleSchema.safeParse(weeklyScheduleData);
 
-      //   const {
-      //     id,
-      //     selfServiceCanSeeCustody,
-      //     selfServiceCanSeeBookings,
-      //     baseUserCanSeeCustody,
-      //     baseUserCanSeeBookings,
-      //   } = payload;
+        if (!validation.success) {
+          // Create a ShelfError with validation details
+          throw new ShelfError({
+            cause: validation.error,
+            title: "Invalid Schedule",
+            message: "Please check your working hours schedule for errors",
+            additionalData: {
+              userId,
+              organizationId,
+              validationErrors: validation.error.errors.reduce(
+                (acc, error) => {
+                  const field = error.path.join(".");
+                  acc[field] = error.message;
+                  return acc;
+                },
+                {} as Record<string, string>
+              ),
+            },
+            label: "Working hours",
+          });
+        }
 
-      //   /** User is allowed to edit his/her current organization only not other organizations. */
-      //   if (currentOrganization.id !== id) {
-      //     throw new ShelfError({
-      //       cause: null,
-      //       message: "You are not allowed to edit this organization.",
-      //       label: "Organization",
-      //     });
-      //   }
+        // Use the validated data
+        await updateWorkingHoursSchedule({
+          organizationId,
+          weeklySchedule: validation.data,
+        });
 
-      //   await updateOrganizationPermissions({
-      //     id,
-      //     configuration: {
-      //       selfServiceCanSeeCustody,
-      //       selfServiceCanSeeBookings,
-      //       baseUserCanSeeCustody,
-      //       baseUserCanSeeBookings,
-      //     },
-      //   });
+        sendNotification({
+          title: "Schedule updated",
+          message: "Your weekly schedule has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
 
-      //   sendNotification({
-      //     title: "Workspace updated",
-      //     message: "Your workspace  has been updated successfully",
-      //     icon: { name: "success", variant: "success" },
-      //     senderId: authSession.userId,
-      //   });
-
-      //   return redirect("/settings/general");
-      // }
-      // case "sso": {
-      //   if (!currentOrganization.enabledSso) {
-      //     throw new ShelfError({
-      //       cause: null,
-      //       message: "SSO is not enabled for this organization.",
-      //       label: "Settings",
-      //     });
-      //   }
-      //   const schema = EditWorkspaceSSOSettingsFormSchema(
-      //     currentOrganization.enabledSso
-      //   );
-
-      //   const payload = parseData(formData, schema, {
-      //     additionalData: { userId, organizationId },
-      //   });
-
-      //   const { id, selfServiceGroupId, adminGroupId, baseUserGroupId } =
-      //     payload;
-
-      //   /** User is allowed to edit his/her current organization only not other organizations. */
-      //   if (currentOrganization.id !== id) {
-      //     throw new ShelfError({
-      //       cause: null,
-      //       message: "You are not allowed to edit this organization.",
-      //       label: "Organization",
-      //     });
-      //   }
-
-      //   await updateOrganization({
-      //     id,
-      //     userId: authSession.userId,
-      //     ssoDetails: {
-      //       selfServiceGroupId: selfServiceGroupId as string,
-      //       adminGroupId: adminGroupId as string,
-      //       baseUserGroupId: baseUserGroupId as string,
-      //     },
-      //   });
-
-      //   sendNotification({
-      //     title: "Workspace updated",
-      //     message: "Your workspace has been updated successfully",
-      //     icon: { name: "success", variant: "success" },
-      //     senderId: authSession.userId,
-      //   });
-
-      //   return redirect("/settings/general");
-      // }
+        return json(data({ success: true }), { status: 200 });
+      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -233,18 +192,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
-    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
-      error({
-        ...reason,
-        ...(isMaxPartSizeExceeded && {
-          title: "File too large",
-          message: "Max file size is 4MB.",
-        }),
-      }),
-      { status: reason.status }
-    );
+    return json(error(reason), { status: reason.status });
   }
 }
 
@@ -260,125 +209,14 @@ export default function GeneralPage() {
       <div>
         <EnableWorkingHoursForm enabled={workingHours.enabled} />
       </div>
-      {/* <input type="hidden" value={organization.id} name="id" /> */}
-
-      {/* <FormRow
-          rowLabel={"Name"}
-          className="border-b-0 pb-[10px] pt-0"
-          required={zodFieldIsRequired(schema.shape.name)}
-        >
-          <Input
-            label="Name"
-            hideLabel
-            name={zo.fields.name()}
-            disabled={isPersonalWorkspace || disabled}
-            error={zo.errors.name()?.message}
-            autoFocus
-            onChange={updateTitle}
-            className="w-full"
-            defaultValue={name || undefined}
-            placeholder=""
-            required={!isPersonalWorkspace}
-          />
-        </FormRow>
-
-        <FormRow rowLabel={"Main image"} className="border-b-0">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={fileError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
-          </div>
-        </FormRow>
-
-        <div>
-          <FormRow
-            rowLabel={"Currency"}
-            className={"border-b-0"}
-            subHeading={
-              <p>
-                Choose the currency for your workspace. If you don't see your
-                currency, please{" "}
-                <CrispButton variant="link" className="inline text-xs">
-                  contact support
-                </CrispButton>
-                .
-              </p>
-            }
-          >
-            <InnerLabel hideLg>Currency</InnerLabel>
-            <CurrencySelector
-              defaultValue={currency || "USD"}
-              name={zo.fields.currency()}
-            />
-          </FormRow>
-        </div>
-        <div className="text-right">
-          <Button
-            type="submit"
-            disabled={disabled}
-            value="general"
-            name="intent"
-          >
-            {disabled ? <Spinner /> : "Save"}
-          </Button>
-        </div> */}
-    </Card>
-    // </fetcher.Form>
-  );
-}
-
-function EnableWorkingHoursForm({ enabled }: { enabled: boolean }) {
-  const disabled = useDisabled();
-  const fetcher = useFetcher();
-  const zo = useZorm("EnableWorkingHoursForm", WorkingHoursToggleSchema);
-  return (
-    <div>
-      <fetcher.Form
-        ref={zo.ref}
-        method="post"
-        onChange={(e) => fetcher.submit(e.currentTarget)}
-      >
-        <FormRow
-          rowLabel={`Enable working hours`}
-          subHeading={
-            <div>Working hours will be enabled for your workspace.</div>
+      {/* New weekly schedule form - only show if working hours are enabled */}
+      {workingHours.enabled && (
+        <WeeklyScheduleForm
+          weeklySchedule={
+            workingHours.weeklySchedule as unknown as WeeklyScheduleJson
           }
-          className="border-b-0 pb-[10px]"
-          required
-        >
-          <div className="flex flex-col items-center gap-2">
-            <Switch
-              name={zo.fields.enableWorkingHours()}
-              disabled={disabled} // Disable for self service users
-              defaultChecked={enabled}
-              required
-              title={"Toggle working hours"}
-            />
-            <label
-              htmlFor={`enableWorkingHours-${zo.fields.enableWorkingHours()}`}
-              className=" hidden text-gray-500"
-            >
-              Enable working hours
-            </label>
-          </div>
-          <input type="hidden" value="toggle" name="intent" />
-        </FormRow>
-      </fetcher.Form>
-    </div>
+        />
+      )}
+    </Card>
   );
 }

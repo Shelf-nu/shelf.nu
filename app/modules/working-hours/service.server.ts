@@ -1,12 +1,10 @@
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import type { WorkingHoursWithOverrides } from "./types";
+import type { WeeklyScheduleJson } from "./types";
 
 const label = "Working hours";
 
-export async function getWorkingHoursForOrganization(
-  organizationId: string
-): WorkingHoursWithOverrides {
+export async function getWorkingHoursForOrganization(organizationId: string) {
   try {
     // First try to find existing working hours
     const existingWorkingHours = await db.workingHours.findUnique({
@@ -55,7 +53,7 @@ export async function toggleWorkingHours({
 }: {
   organizationId: string;
   enabled: boolean;
-}): Promise<WorkingHoursWithOverrides> {
+}) {
   try {
     const updatedWorkingHours = await db.workingHours.update({
       where: { organizationId },
@@ -68,6 +66,32 @@ export async function toggleWorkingHours({
       cause,
       message: "Failed to toggle working hours",
       additionalData: { organizationId, enabled },
+      label,
+    });
+  }
+}
+
+export async function updateWorkingHoursSchedule({
+  organizationId,
+  weeklySchedule,
+}: {
+  organizationId: string;
+  weeklySchedule: WeeklyScheduleJson;
+}) {
+  try {
+    // Update the weekly schedule - cast to any for Prisma Json type
+    await db.workingHours.update({
+      where: { organizationId },
+      data: {
+        weeklySchedule: weeklySchedule as any, // Prisma Json type requires any
+        updatedAt: new Date(),
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update weekly schedule",
+      additionalData: { organizationId, weeklySchedule },
       label,
     });
   }
