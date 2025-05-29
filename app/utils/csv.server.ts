@@ -615,13 +615,14 @@ export const buildCsvExportDataFromBookings = (
     url: "Booking URL", // custom string
     id: "Booking ID", // string
     name: "Name", // string
-    from: "Start date", // date
-    to: "End date", // date
+    status: "Status", // string
+    from: "Actual start date", // date
+    to: "Actual end date", // date
     custodian: "Custodian",
     description: "Description", // string
     asset: "Assets", // New column for assets
-    originalFrom: "Original start date",
-    originalTo: "Original end date",
+    originalFrom: "Planned start date",
+    originalTo: "Planned end date",
   };
 
   // Create data rows with assets
@@ -649,6 +650,11 @@ export const buildCsvExportDataFromBookings = (
           break;
         case "name":
           value = booking.name;
+          break;
+        case "status":
+          value =
+            booking.status.charAt(0).toUpperCase() +
+            booking.status.slice(1).toLowerCase();
           break;
         case "from":
           value = booking.displayFrom;
