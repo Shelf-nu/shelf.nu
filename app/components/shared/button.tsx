@@ -200,7 +200,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         {children && (
           <span
             className={tw(
-              newTab ? "inline-flex items-center gap-[2px]" : "",
+              newTab ? "inline-flex gap-[2px]" : "",
               onlyIconOnMobile ? "hidden lg:inline-block" : "",
               newTab && onlyNewTabIconOnHover ? "hover-parent " : ""
             )}

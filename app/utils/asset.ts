@@ -12,6 +12,6 @@ export function getShareAgreementUrl(
   return asset?.kit &&
     (asset.kit.status === KitStatus.IN_CUSTODY ||
       asset.kit.status === KitStatus.SIGNATURE_PENDING)
-    ? `/kits/${asset.kit.id}/share-agreement`
+    ? `/kits/${asset.kit.id}/asset/share-agreement`
     : `/assets/${asset.id}/overview/share-agreement`;
 }

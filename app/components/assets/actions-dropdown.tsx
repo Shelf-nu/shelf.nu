@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { AlarmClockIcon } from "lucide-react";
+import { AlarmClockIcon, MapPinIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -143,8 +143,14 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={handleMenuClose}
                     disabled={
-                      assetIsPartOfUnavailableKit ||
-                      disableReleaseForSelfService
+                      assetIsPartOfUnavailableKit
+                        ? { reason: "Asset is part of an unavailable kit" }
+                        : disableReleaseForSelfService
+                        ? {
+                            reason:
+                              "You are not allowed to release custody of this asset.",
+                          }
+                        : false
                     }
                   >
                     <span className="flex items-center gap-1">
@@ -192,7 +198,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={handleMenuClose}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="location" /> Update location
+                    <MapPinIcon className="size-5" /> Update location
                   </span>
                 </Button>
               </DropdownMenuItem>

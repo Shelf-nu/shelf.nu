@@ -73,7 +73,13 @@ export default function CustodyAgreementSelector({
       </div>
 
       <When truthy={addAgreementEnabled}>
-        <Select name="agreement" disabled={isLoading}>
+        <Select
+          name="agreement"
+          disabled={isLoading}
+          onValueChange={(value) => {
+            setSelectedAgreement(agreements?.find((a) => a.id === value));
+          }}
+        >
           <SelectTrigger className="text-left">
             <SelectValue placeholder="Select a PDF agreement" />
           </SelectTrigger>
@@ -103,9 +109,6 @@ export default function CustodyAgreementSelector({
                     key={agreement.id}
                     value={agreement.id}
                     className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
-                    onSelect={() => {
-                      setSelectedAgreement(agreement);
-                    }}
                   >
                     {agreement.name}{" "}
                     {!agreement.signatureRequired ? (
@@ -122,7 +125,7 @@ export default function CustodyAgreementSelector({
           </SelectContent>
         </Select>
 
-        {!selectedAgreement?.signatureRequired ? (
+        {selectedAgreement && !selectedAgreement?.signatureRequired ? (
           <p className="mt-1 text-sm text-warning-400">
             Selected custody agreement does not require a signature. The
             agreement will directly go in custody.

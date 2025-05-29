@@ -22,12 +22,21 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.custodyAgreement,
       action: PermissionAction.read,
     });
+
+    /** Self or base users are not allowed to share agreement */
+    if (isSelfServiceOrBase) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message: "You are not allowed to share custody agreements.",
+      });
+    }
 
     const { custody, custodyAgreement, custodian } = await getAgreementByKitId({
       kitId,

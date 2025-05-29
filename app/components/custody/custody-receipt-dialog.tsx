@@ -139,7 +139,6 @@ export default function CustodyReceiptDialog() {
                   variant="link-gray"
                 >
                   <p>{asset ? asset.title : kit?.name}</p>
-                  <p>{asset ? asset.id : kit?.id}</p>
                 </Button>
               </p>
               <Separator className="col-span-3" />

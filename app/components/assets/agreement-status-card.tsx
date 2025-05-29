@@ -38,7 +38,7 @@ export default function AgreementStatusCard({
         return signUrl;
       }
 
-      return "share-agreement";
+      return kit ? "assets/share-agreement" : "share-agreement";
     }
 
     return `/receipts?receiptId=${receiptId}`;

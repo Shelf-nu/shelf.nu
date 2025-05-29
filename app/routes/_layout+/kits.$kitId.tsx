@@ -398,6 +398,7 @@ export default function KitDetails() {
           kit.custody.agreement &&
           kit.custody.agreement.signatureRequired ? (
             <AgreementStatusCard
+              kit={kit}
               signUrl={`/sign/kit-custody/${kit.custody.id}`}
               className="mt-0"
               custodian={kit.custody.custodian}

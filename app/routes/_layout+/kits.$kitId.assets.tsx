@@ -187,7 +187,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
               </span>
               <AssetStatusBadge
                 kit={data?.kit}
-                shareAgreementUrl={`/kits/${item.kitId}/share-agreement`}
+                shareAgreementUrl={`/kits/${item.kitId}/assets/share-agreement`}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />
