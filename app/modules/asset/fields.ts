@@ -1,4 +1,8 @@
-import type { BookingStatus, Prisma } from "@prisma/client";
+import {
+  CustodySignatureStatus,
+  type BookingStatus,
+  type Prisma,
+} from "@prisma/client";
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
@@ -28,7 +32,11 @@ export const ASSET_OVERVIEW_FIELDS = {
   location: true,
   custody: {
     select: {
+      id: true,
+      agreement: true,
       createdAt: true,
+      signatureStatus: true,
+      agreementSigned: true,
       custodian: {
         include: {
           user: true,
@@ -60,7 +68,14 @@ export const ASSET_OVERVIEW_FIELDS = {
       },
     },
   },
-  kit: { select: { id: true, name: true, status: true } },
+  kit: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      custody: { select: { id: true } },
+    },
+  },
   bookings: {
     where: {
       status: { in: ["ONGOING", "OVERDUE"] },
@@ -72,6 +87,11 @@ export const ASSET_OVERVIEW_FIELDS = {
       custodianTeamMember: true,
       custodianUser: true,
     },
+  },
+  custodyReceipts: {
+    select: { id: true },
+    where: { signatureStatus: CustodySignatureStatus.SIGNED },
+    orderBy: { agreementSignedOn: "desc" },
   },
 } satisfies Prisma.AssetInclude;
 
@@ -100,6 +120,9 @@ export const assetIndexFields = ({
     },
     custody: {
       select: {
+        signatureStatus: true,
+        agreementSigned: true,
+        agreement: { select: { signatureRequired: true } },
         custodian: {
           select: {
             name: true,

@@ -1,6 +1,8 @@
 import type {
   Booking,
+  CustodyAgreement,
   Kit,
+  KitCustody,
   Organization,
   Prisma,
   Qr,
@@ -11,6 +13,8 @@ import type {
 import {
   AssetStatus,
   BookingStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
   ErrorCorrection,
   KitStatus,
 } from "@prisma/client";
@@ -110,9 +114,11 @@ export async function createKit({
       qrCodes,
     };
 
-    return await db.kit.create({
+    const createdKit = await db.kit.create({
       data,
     });
+
+    return createdKit;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, organizationId },
@@ -131,7 +137,7 @@ export async function updateKit({
   organizationId,
 }: UpdateKitPayload) {
   try {
-    return await db.kit.update({
+    const updatedKit = await db.kit.update({
       where: { id, organizationId },
       data: {
         name,
@@ -141,6 +147,8 @@ export async function updateKit({
         status,
       },
     });
+
+    return updatedKit;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, id },
@@ -520,7 +528,8 @@ export async function deleteKit({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    return await db.kit.delete({ where: { id, organizationId } });
+    const deletedKit = await db.kit.delete({ where: { id, organizationId } });
+    return deletedKit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -580,35 +589,93 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        assets: true,
-        createdBy: { select: { firstName: true, lastName: true } },
-        custody: { select: { custodian: true } },
-      },
+    /**
+     * We have 2 cases to handle for releasing custody
+     * 1. If the custody requires a signature and user has not signed it
+     * 2. If the custody does not require any signature
+     */
+    const kit = await db.kit
+      .findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          name: true,
+          assets: true,
+          createdBy: { select: { firstName: true, lastName: true } },
+          custody: {
+            select: {
+              custodian: true,
+              agreementSigned: true,
+              agreement: {
+                select: { signatureRequired: true },
+              },
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label: "Kit",
+          message:
+            "Kit not found, are you sure it exists in the current workspace.",
+        });
+      });
+
+    const custody = kit.custody;
+    if (!custody) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        message: "No custody exists on the kit.",
+      });
+    }
+
+    const custodyRequireSignatureButNotSigned =
+      custody.agreement &&
+      custody.agreement.signatureRequired &&
+      !custody.agreementSigned;
+
+    await db.$transaction(async (tx) => {
+      /** Update the kit */
+      await tx.kit.update({
+        where: { id: kit.id },
+        data: { status: KitStatus.AVAILABLE, custody: { delete: true } },
+      });
+
+      /** Make all the assets of the kit AVAILABLE in a single operation */
+      await tx.asset.updateMany({
+        where: { kitId: kit.id }, // Assuming assets have a kitId reference
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /** Update custody records separately - can't use nested writes with updateMany */
+      await tx.custody.deleteMany({
+        where: { assetId: { in: kit.assets.map((asset) => asset.id) } },
+      });
+
+      /** Update the custody receipt */
+      const custodyReceipt = await tx.custodyReceipt.findFirst({
+        where: { custodyStatus: CustodyStatus.ACTIVE, kitId: kit.id },
+        select: { id: true },
+      });
+      if (custodyReceipt) {
+        await tx.custodyReceipt.update({
+          where: { id: custodyReceipt.id },
+          data: {
+            custodyStatus: custodyRequireSignatureButNotSigned
+              ? CustodyStatus.CANCELLED
+              : CustodyStatus.FINISHED,
+            signatureStatus: custodyRequireSignatureButNotSigned
+              ? CustodySignatureStatus.CANCELLED
+              : undefined,
+          },
+        });
+      }
     });
 
-    await Promise.all([
-      db.kit.update({
-        where: { id: kitId, organizationId },
-        data: {
-          status: KitStatus.AVAILABLE,
-          custody: { delete: true },
-        },
-      }),
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.AVAILABLE,
-            custody: { delete: true },
-          },
-        })
-      ),
-      ...kit.assets.map((asset) =>
+    await Promise.all(
+      kit.assets.map((asset) =>
         createNote({
           content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
             .custody?.custodian
@@ -619,8 +686,8 @@ export async function releaseCustody({
           userId,
           assetId: asset.id,
         })
-      ),
-    ]);
+      )
+    );
 
     return kit;
   } catch (cause) {
@@ -640,7 +707,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
   try {
     /** When kits are checked out, we have to display the custodian from that booking */
     const checkedOutKits = kits
-      .filter((kit) => kit.status === "CHECKED_OUT")
+      .filter((kit) => kit.status === KitStatus.CHECKED_OUT)
       .map((k) => k.id);
 
     if (checkedOutKits.length === 0) {
@@ -808,7 +875,7 @@ export async function bulkDeleteKits({
       select: { id: true, image: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all kits */
       await tx.kit.deleteMany({
         where: { id: { in: kits.map((kit) => kit.id) } },
@@ -838,6 +905,7 @@ export async function bulkAssignKitCustody({
   custodianName,
   userId,
   currentSearchParams,
+  custodyAgreement,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
@@ -845,6 +913,7 @@ export async function bulkAssignKitCustody({
   custodianName: TeamMember["name"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  custodyAgreement?: CustodyAgreement["id"];
 }) {
   try {
     /**
@@ -870,6 +939,11 @@ export async function bulkAssignKitCustody({
               title: true,
               status: true,
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              custody: { select: { id: true } },
+              custodyReceipts: {
+                where: { custodyStatus: CustodyStatus.ACTIVE },
+                select: { id: true, signatureStatus: true },
+              },
             },
           },
         },
@@ -877,7 +951,9 @@ export async function bulkAssignKitCustody({
       getUserByID(userId),
     ]);
 
-    const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
+    const someKitsNotAvailable = kits.some(
+      (kit) => kit.status !== KitStatus.AVAILABLE
+    );
     if (someKitsNotAvailable) {
       throw new ShelfError({
         cause: null,
@@ -888,17 +964,49 @@ export async function bulkAssignKitCustody({
     }
 
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
-
-    const someAssetsUnavailable = allAssetsOfAllKits.some(
-      (asset) => asset.status !== "AVAILABLE"
+    const allAssetCustodyReceipts = allAssetsOfAllKits.flatMap(
+      (asset) => asset.custodyReceipts
     );
-    if (someAssetsUnavailable) {
+
+    const someAssetsCheckedOut = allAssetsOfAllKits.some(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+    if (someAssetsCheckedOut) {
       throw new ShelfError({
         cause: null,
         message:
-          "There are some unavailable assets in some kits. Please make sure you have all available assets in kits.",
+          "There are some checked out assets in some kits. Please make sure you have all available assets in kits.",
         label,
       });
+    }
+
+    const assetCustodies = allAssetsOfAllKits
+      .map((asset) => asset.custody?.id)
+      .filter(Boolean) as string[];
+
+    /** Check if the agreement exists and is in the same organization */
+    let agreementFound: Pick<
+      CustodyAgreement,
+      "id" | "name" | "signatureRequired"
+    > | null = null;
+    if (custodyAgreement) {
+      agreementFound = await db.custodyAgreement
+        .findUniqueOrThrow({
+          where: { id: custodyAgreement, organizationId },
+          select: {
+            id: true,
+            name: true,
+            signatureRequired: true,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            label: "Custody",
+            message:
+              "Custody agreement not found. Are you sure it exists in the same organization.",
+          });
+        });
     }
 
     /**
@@ -907,35 +1015,76 @@ export async function bulkAssignKitCustody({
      * 1. Create custodies for kit
      * 2. Update status of all kits to IN_CUSTODY
      */
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
           custodianId,
           kitId: kit.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreementId: agreementFound?.id,
         })),
       });
 
       /** Updating status of all kits */
       await tx.kit.updateMany({
         where: { id: { in: kits.map((kit) => kit.id) } },
-        data: { status: KitStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? KitStatus.SIGNATURE_PENDING
+            : KitStatus.IN_CUSTODY,
+        },
       });
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
+
+      /** If the assets of kit already have a custody, then we have to remove it before assigning the new custody */
+      if (assetCustodies.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: assetCustodies } },
+        });
+      }
+
+      /* Update all the custody receipt status accordingly */
+      for (const receipt of allAssetCustodyReceipts) {
+        await tx.custodyReceipt.update({
+          where: { id: receipt.id },
+          data: {
+            custodyStatus:
+              receipt.signatureStatus === CustodySignatureStatus.SIGNED ||
+              receipt.signatureStatus === CustodySignatureStatus.NOT_REQUIRED
+                ? CustodyStatus.FINISHED
+                : CustodyStatus.CANCELLED,
+            signatureStatus:
+              receipt.signatureStatus === CustodySignatureStatus.PENDING
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+          },
+        });
+      }
 
       /** Creating custodies over assets of kits */
       await tx.custody.createMany({
         data: allAssetsOfAllKits.map((asset) => ({
           teamMemberId: custodianId,
           assetId: asset.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
+          agreementId: agreementFound?.id,
         })),
       });
 
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
+        data: {
+          status: agreementFound?.signatureRequired
+            ? AssetStatus.SIGNATURE_PENDING
+            : AssetStatus.IN_CUSTODY,
+        },
       });
 
       /** Creating notes for all the assets of the kit */
@@ -946,6 +1095,19 @@ export async function bulkAssignKitCustody({
           type: "UPDATE",
           userId,
           assetId: asset.id,
+        })),
+      });
+
+      /** Creating a Receipt for custody */
+      await tx.custodyReceipt.createMany({
+        data: kitIds.map((kitId) => ({
+          kitId,
+          custodianId,
+          organizationId,
+          agreementId: agreementFound?.id,
+          signatureStatus: agreementFound?.signatureRequired
+            ? CustodySignatureStatus.PENDING
+            : CustodySignatureStatus.NOT_REQUIRED,
         })),
       });
     });
@@ -996,7 +1158,14 @@ export async function bulkReleaseKitCustody({
         select: {
           id: true,
           status: true,
-          custody: { select: { id: true, custodian: true } },
+          custody: {
+            select: {
+              id: true,
+              custodian: true,
+              agreementSigned: true,
+              agreement: { select: { signatureRequired: true } },
+            },
+          },
           assets: {
             select: {
               id: true,
@@ -1006,6 +1175,10 @@ export async function bulkReleaseKitCustody({
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
             },
           },
+          custodyReceipts: {
+            select: { id: true },
+            where: { custodyStatus: CustodyStatus.ACTIVE },
+          },
         },
       }),
       getUserByID(userId),
@@ -1014,7 +1187,7 @@ export async function bulkReleaseKitCustody({
     const custodian = kits[0].custody?.custodian;
 
     /** Kits will be released only if all the selected kits are IN_CUSTODY */
-    const allKitsInCustody = kits.every((kit) => kit.status === "IN_CUSTODY");
+    const allKitsInCustody = kits.every((kit) => !!kit.custody);
     if (!allKitsInCustody) {
       throw new ShelfError({
         cause: null,
@@ -1026,7 +1199,7 @@ export async function bulkReleaseKitCustody({
 
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all custodies of kits */
       await tx.kitCustody.deleteMany({
         where: {
@@ -1063,6 +1236,37 @@ export async function bulkReleaseKitCustody({
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      await Promise.all(
+        kits.map((kit) => {
+          const receiptId = kit.custodyReceipts[0]?.id;
+          /**
+           * If we do not find a receipt associated with kit
+           * that means this custody was created before Signed Custody feature.
+           * In that case we do not have to update the receipt.
+           */
+          if (!receiptId) {
+            return null;
+          }
+
+          const custodyRequireSignatureButNotSigned =
+            kit.custody?.agreement &&
+            kit.custody.agreement.signatureRequired &&
+            !kit.custody.agreementSigned;
+
+          return tx.custodyReceipt.update({
+            where: { id: receiptId },
+            data: {
+              custodyStatus: custodyRequireSignatureButNotSigned
+                ? CustodyStatus.CANCELLED
+                : CustodyStatus.FINISHED,
+              signatureStatus: custodyRequireSignatureButNotSigned
+                ? CustodySignatureStatus.CANCELLED
+                : undefined,
+            },
+          });
+        })
+      );
 
       /** Creating notes for all the assets */
       await tx.note.createMany({
@@ -1188,7 +1392,7 @@ export async function updateKitQrCode({
       });
 
     // Connect the new QR code
-    return await db.kit
+    const updatedKit = await db.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -1205,6 +1409,8 @@ export async function updateKitQrCode({
           additionalData: { kitId, organizationId, newQrId },
         });
       });
+
+    return updatedKit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1234,6 +1440,124 @@ export async function getAvailableKitAssetForBooking(
         cause?.message ||
         "Something went wrong while getting available assets.",
       label: "Assets",
+    });
+  }
+}
+
+export async function getAgreementByKitCustodyId({
+  custodyId,
+  organizationId,
+}: {
+  custodyId: KitCustody["id"];
+  organizationId?: Kit["organizationId"];
+}) {
+  try {
+    const kitCustody = await db.kitCustody.findUniqueOrThrow({
+      where: { id: custodyId },
+      include: {
+        kit: {
+          select: {
+            id: true,
+            name: true,
+            organizationId: true,
+            assets: { select: { id: true } },
+            createdBy: { select: { email: true } },
+          },
+        },
+        agreement: true,
+        custodian: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (organizationId && organizationId !== kitCustody.kit.organizationId) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "This custody belongs to any other workspace.",
+      });
+    }
+
+    const custodyAgreement = kitCustody.agreement;
+    if (!custodyAgreement) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "There is not an agreement associated with this custody.",
+      });
+    }
+
+    const custodian = kitCustody.custodian;
+    if (!custodian) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "There is no custodian associated with this custody.",
+      });
+    }
+
+    return {
+      kit: kitCustody.kit,
+      custodyAgreement,
+      custody: kitCustody,
+      custodian,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error fetching agreement",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while fetching the custody agreement. Please try again or contact support.",
+    });
+  }
+}
+
+export async function getAgreementByKitId({
+  kitId,
+  organizationId,
+}: {
+  kitId: Kit["id"];
+  organizationId: Kit["organizationId"];
+}) {
+  try {
+    const custody = await db.kitCustody
+      .findUniqueOrThrow({
+        where: { kitId },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message: "There is no custody over this kit.",
+        });
+      });
+
+    const agreement = await getAgreementByKitCustodyId({
+      custodyId: custody.id,
+      organizationId,
+    });
+
+    return agreement;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Error fetching agreement",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while fetching the custody agreement. Please try again or contact support.",
     });
   }
 }

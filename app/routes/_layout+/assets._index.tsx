@@ -1,4 +1,4 @@
-import { type Tag } from "@prisma/client";
+import type { Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -62,6 +62,7 @@ import {
 } from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -226,7 +227,7 @@ export function shouldRevalidate({
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   /**
-   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * If we are toggling the sidebar, no need to revalidate this loader.
    * Revalidation happens in _layout
    */
   if (actionResult?.isTogglingSidebar) {
@@ -402,7 +403,6 @@ const ListAssetContent = ({
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
           )}
-          // to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
             <div className="relative flex size-14 shrink-0 items-center justify-center">
@@ -444,10 +444,12 @@ const ListAssetContent = ({
                   {item.title}
                 </Button>
               </span>
-              <div>
+              <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
+                  kit={item?.kit}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                 />
               </div>
             </div>

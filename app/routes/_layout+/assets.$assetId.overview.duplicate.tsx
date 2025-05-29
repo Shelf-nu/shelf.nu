@@ -13,6 +13,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -45,6 +46,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      include: { kit: { select: { id: true, name: true, status: true } } },
     });
 
     return json(
@@ -165,6 +167,8 @@ export default function DuplicateAsset() {
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={asset?.kit}
+                  shareAgreementUrl={getShareAgreementUrl(asset)}
                   status={asset.status}
                   availableToBook={asset.availableToBook}
                 />
