@@ -18,8 +18,17 @@ export async function getPaginatedAndFilterableReceipts({
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, signatureStatus, custodyStatus } =
-      getParamsValues(searchParams);
+    const {
+      page,
+      perPageParam,
+      search,
+      signatureStatus,
+      custodyStatus,
+      asset,
+      kit,
+      teamMember,
+      custodyAgreement,
+    } = getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
@@ -67,6 +76,22 @@ export async function getPaginatedAndFilterableReceipts({
 
     if (custodyStatus) {
       where.custodyStatus = custodyStatus;
+    }
+
+    if (asset) {
+      where.assetId = asset;
+    }
+
+    if (kit) {
+      where.kitId = kit;
+    }
+
+    if (teamMember) {
+      where.custodianId = teamMember;
+    }
+
+    if (custodyAgreement) {
+      where.agreementId = custodyAgreement;
     }
 
     /** Self and base users can only view their own custody receipts */

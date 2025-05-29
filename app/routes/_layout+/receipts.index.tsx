@@ -5,7 +5,9 @@ import type {
   LoaderFunctionArgs,
   SerializeFrom,
 } from "@remix-run/node";
+import { ChevronDown } from "lucide-react";
 import CustodyReceiptDialog from "~/components/custody/custody-receipt-dialog";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -14,7 +16,10 @@ import { Filters } from "~/components/list/filters";
 import Select from "~/components/select/select";
 import { Badge } from "~/components/shared/badge";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPaginatedAndFilterableReceipts } from "~/modules/custody-receipt/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -23,8 +28,10 @@ import {
   SIGN_STATUS_COLOR,
 } from "~/utils/custody-agreement";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { formatEnum } from "~/utils/misc";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -36,13 +43,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.receipts,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      currentOrganization,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.receipts,
+      action: PermissionAction.read,
+    });
 
     let { receipts, page, perPage, search, totalPages, totalReceipts } =
       await getPaginatedAndFilterableReceipts({
@@ -64,6 +75,71 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ? datetime.format(receipt.agreementSignedOn)
         : undefined,
     }));
+
+    const searchParams = getCurrentSearchParams(request);
+
+    /**
+     * Filters data
+     */
+    const [
+      assets,
+      totalAssets,
+      teamMembers,
+      totalTeamMembers,
+      kits,
+      totalKits,
+      agreements,
+      totalAgreements,
+    ] = await Promise.all([
+      /** Assets */
+      db.asset.findMany({
+        where: { organizationId },
+        select: { id: true, title: true },
+        take: searchParams.get("getAll") === "asset" ? undefined : 12,
+      }),
+      /** Total assets */
+      db.asset.count({ where: { organizationId } }),
+
+      /** Team members/Custodian */
+      db.teamMember.findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+          userId: !canSeeAllCustody ? userId : undefined,
+        },
+        include: { user: true },
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
+      }),
+      /** Total team members */
+      db.teamMember.count({
+        where: {
+          deletedAt: null,
+          organizationId,
+          userId: !canSeeAllCustody ? userId : undefined,
+        },
+      }),
+
+      /** Kits */
+      db.kit.findMany({
+        where: { organizationId },
+        select: { id: true, name: true },
+        take: searchParams.get("getAll") === "kit" ? undefined : 12,
+      }),
+      db.kit.count({
+        where: { organizationId },
+      }),
+
+      /** Agreements */
+      db.custodyAgreement.findMany({
+        where: { organizationId },
+        select: { id: true, name: true },
+        take:
+          searchParams.get("getAll") === "custodyAgreement" ? undefined : 12,
+      }),
+      db.custodyAgreement.count({
+        where: { organizationId },
+      }),
+    ]);
 
     const header: HeaderData = {
       title: "Receipts",
@@ -91,6 +167,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organization: {
           name: currentOrganization.name,
         },
+        teamMembers,
+        totalTeamMembers,
+        assets,
+        totalAssets,
+        kits,
+        totalKits,
+        agreements,
+        totalAgreements,
       })
     );
   } catch (cause) {
@@ -105,6 +189,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function Receipts() {
   const [_, setSearchParams] = useSearchParams();
+  const { roles } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
+
+  const canReadCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings,
+  });
 
   return (
     <>
@@ -117,6 +208,7 @@ export default function Receipts() {
             "left-of-search": (
               <div className="flex items-center gap-2">
                 <Select
+                  className="py-2.5"
                   placeholder="Signature status"
                   strategy="searchParams"
                   paramKey="signatureStatus"
@@ -134,6 +226,7 @@ export default function Receipts() {
                 />
 
                 <Select
+                  className="py-2.5"
                   placeholder="Custody status"
                   strategy="searchParams"
                   paramKey="custodyStatus"
@@ -150,8 +243,75 @@ export default function Receipts() {
               </div>
             ),
           }}
-          searchClassName="text-[14px]"
-        />
+          searchClassName="text-sm"
+        >
+          <div className="flex items-center gap-2">
+            <DynamicDropdown
+              trigger={
+                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
+                  Asset <ChevronDown className="hidden size-4 md:inline" />
+                </div>
+              }
+              model={{ name: "asset", queryKey: "title" }}
+              label="Filter by asset"
+              placeholder="Search asset"
+              countKey="totalAssets"
+              initialDataKey="assets"
+              renderItem={(item) => item?.name ?? item?.title}
+            />
+
+            <DynamicDropdown
+              trigger={
+                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
+                  Kit <ChevronDown className="hidden size-4 md:inline" />
+                </div>
+              }
+              model={{ name: "kit", queryKey: "name" }}
+              label="Filter by kit"
+              placeholder="Search kit"
+              countKey="totalKits"
+              initialDataKey="kits"
+            />
+
+            {canReadCustody && (
+              <DynamicDropdown
+                trigger={
+                  <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
+                    Custodian{" "}
+                    <ChevronDown className="hidden size-4 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                label="Filter by custodian"
+                placeholder="Search team members"
+                countKey="totalTeamMembers"
+                initialDataKey="teamMembers"
+                transformItem={(item) => ({
+                  ...item,
+                  id: item.metadata?.userId ? item.metadata.userId : item.id,
+                })}
+                renderItem={(item) => resolveTeamMemberName(item, true)}
+              />
+            )}
+
+            <DynamicDropdown
+              trigger={
+                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
+                  Agreement <ChevronDown className="hidden size-4 md:inline" />
+                </div>
+              }
+              model={{ name: "custodyAgreement", queryKey: "name" }}
+              label="Filter by agreement"
+              placeholder="Search agreement"
+              countKey="totalAgreements"
+              initialDataKey="agreements"
+            />
+          </div>
+        </Filters>
 
         <List
           hideFirstHeaderColumn

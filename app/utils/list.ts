@@ -49,6 +49,10 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     searchParams.get("signatureStatus") === "ALL"
       ? null
       : (searchParams.get("signatureStatus") as CustodySignatureStatus),
+  asset: searchParams.get("asset"),
+  kit: searchParams.get("kit"),
+  teamMember: searchParams.get("teamMember"),
+  custodyAgreement: searchParams.get("custodyAgreement"),
 });
 
 export const ALL_SELECTED_KEY = "all-selected";
