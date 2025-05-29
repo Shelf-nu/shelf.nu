@@ -10,7 +10,7 @@ export interface WeeklyScheduleJson {
 }
 
 export enum DayOfWeek {
-  SUNDAY = 0,
+  SUNDAY = 0, // Sunday is 0, following ISO 8601 standard
   MONDAY = 1,
   TUESDAY = 2,
   WEDNESDAY = 3,
@@ -18,7 +18,6 @@ export enum DayOfWeek {
   FRIDAY = 5,
   SATURDAY = 6,
 }
-
 export interface TimeSlot {
   openTime: string | null; // Format: "HH:MM" (24-hour) in UTC
   closeTime: string | null; // Format: "HH:MM" (24-hour) in UTC
@@ -52,15 +51,11 @@ export interface WorkingHoursOverride extends TimeSlot {
 }
 
 // Comprehensive working hours with all related data
-export interface WorkingHoursComplete extends WorkingHoursConfig {
-  schedules: WorkingHoursSchedule[];
-  overrides: WorkingHoursOverride[];
-  organization: {
-    id: string;
-    name: string;
-    currency: string;
+export type WorkingHoursWithOverrides = Prisma.WorkingHoursGetPayload<{
+  include: {
+    overrides: true;
   };
-}
+}>;
 
 // For API requests/responses
 export interface CreateWorkingHoursRequest {

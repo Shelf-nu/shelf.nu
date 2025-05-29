@@ -3,6 +3,13 @@ import { z } from "zod";
 // Time format validation regex
 const TIME_FORMAT_REGEX = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
+export const WorkingHoursToggleSchema = z.object({
+  enableWorkingHours: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
+});
+
 // Base time string schema with proper validation
 const TimeStringSchema = z
   .string()

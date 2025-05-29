@@ -50,12 +50,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.generalSettings,
-      action: PermissionAction.read,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.generalSettings,
+        action: PermissionAction.read,
+      });
 
     const user = await db.user
       .findUniqueOrThrow({
@@ -100,24 +101,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
       });
 
-    const currentOrganization = user.userOrganizations.find(
-      (userOrg) => userOrg.organizationId === organizationId
-    );
-
     /* Check the tier limit */
     const tierLimit = await getOrganizationTierLimit({
       organizationId,
       organizations,
     });
-
-    if (!currentOrganization) {
-      throw new ShelfError({
-        cause: null,
-        message: "Organization not found",
-        additionalData: { userId, organizationId },
-        label: "Settings",
-      });
-    }
 
     const header: HeaderData = {
       title: "General",
@@ -126,12 +114,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         header,
-        organization: currentOrganization.organization,
+        organization: currentOrganization,
         canExportAssets: canExportAssets(tierLimit),
         user,
         curriences: Object.keys(Currency),
         isPersonalWorkspace:
-          currentOrganization.organization.type === OrganizationType.PERSONAL,
+          currentOrganization.type === OrganizationType.PERSONAL,
       })
     );
   } catch (cause) {
