@@ -73,9 +73,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       },
       userOrganizations: {
-        where: {
-          userId: authSession.userId,
-        },
         select: {
           id: true,
           organization: true,

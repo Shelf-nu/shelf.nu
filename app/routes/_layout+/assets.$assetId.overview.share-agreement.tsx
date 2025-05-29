@@ -31,13 +31,17 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { custody, custodyAgreement, custodian } =
+    const { custody, custodyAgreement, custodian, asset } =
       await getAgreementByAssetId({
         assetId,
         organizationId,
       });
 
-    const signUrl = `${SERVER_URL}/sign/${custody.id}`;
+    const isInsideKit = !!asset.kit;
+
+    const signUrl = `${SERVER_URL}/sign${isInsideKit ? "/kit-custody" : ""}/${
+      isInsideKit ? asset.kit?.custody?.id : custody.id
+    }`;
     const isCustodianNrm = !custodian.user;
 
     const header = {

@@ -2,6 +2,7 @@ import {
   AssetStatus,
   CustodySignatureStatus,
   CustodyStatus,
+  OrganizationRoles,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -20,6 +21,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByCustodyId } from "~/modules/custody-agreement";
 import { createNote } from "~/modules/note/service.server";
 import { custodyAgreementSignedEmailText } from "~/modules/sign/email";
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -41,12 +43,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
   try {
+    const authSession = context.getOptionalSession();
+
     const { custodian, custody, custodyAgreement } =
       await getAgreementByCustodyId({ custodyId });
 
+    let isBaseOrSelfService = false;
+
     /** If there is a user associated with the custodian then make sure that right user is signing the custody. */
     if (custodian.user) {
-      const authSession = context.getOptionalSession();
       if (!authSession?.userId) {
         throw new ShelfError({
           cause: null,
@@ -58,12 +63,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       }
 
-      await requirePermission({
+      const { organizationId } = await requirePermission({
         userId: authSession.userId,
         request,
         entity: PermissionEntity.custodyAgreement,
         action: PermissionAction.read,
       });
+
+      const user = await getUserByID(authSession.userId, {
+        userOrganizations: true,
+      });
+
+      const roles = user?.userOrganizations.find(
+        (userOrg) => userOrg.organizationId === organizationId
+      )?.roles;
+
+      const isSelfService =
+        roles?.includes(OrganizationRoles.SELF_SERVICE) || false;
+      const isBase = roles?.includes(OrganizationRoles.BASE) || false;
+
+      isBaseOrSelfService = isSelfService || isBase;
 
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
@@ -94,8 +113,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `Sign "${custodyAgreement.name}"`,
     };
 
-    const authSession = context.getOptionalSession();
-
     return json(
       data({
         header,
@@ -104,6 +121,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         isAgreementSigned: !!custody.agreementSigned,
         isLoggedIn: !!authSession,
         asset: custody.asset,
+        isBaseOrSelfService,
       })
     );
   } catch (cause) {
@@ -204,6 +222,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: { assetId: asset.id, custodyStatus: CustodyStatus.ACTIVE },
         select: { id: true },
       });
+
       if (!custodyReceipt) {
         throw new ShelfError({
           cause: null,
@@ -272,10 +291,12 @@ export default function Sign() {
     isAgreementSigned,
     isLoggedIn,
     asset,
+    isBaseOrSelfService,
   } = useLoaderData<typeof loader>();
 
   return (
     <SignCustodyPage
+      isBaseOrSelfService={isBaseOrSelfService}
       custodyAgreement={custodyAgreement}
       custodyAgreementFile={custodyAgreementFile}
       isAgreementSigned={isAgreementSigned}

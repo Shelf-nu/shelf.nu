@@ -19,6 +19,7 @@ type SignCustodyPageProps = {
     label: string;
     url: string;
   };
+  isBaseOrSelfService: boolean;
 };
 
 export default function SignCustodyPage({
@@ -27,6 +28,7 @@ export default function SignCustodyPage({
   isAgreementSigned,
   isLoggedIn,
   overviewButton,
+  isBaseOrSelfService,
 }: SignCustodyPageProps) {
   const [isClosed, setIsClosed] = useState(false);
 
@@ -59,15 +61,13 @@ export default function SignCustodyPage({
             }
           >
             <div className="flex w-full flex-col items-center gap-4 md:flex-row">
-              <Button className="w-full" variant="secondary" to="/dashboard">
-                To Dashboard
-              </Button>
+              <When truthy={!isBaseOrSelfService}>
+                <Button className="w-full" variant="secondary" to="/dashboard">
+                  To Dashboard
+                </Button>
+              </When>
 
-              <Button
-                className="w-full break-keep"
-                to={overviewButton.url}
-                // to={`/assets/${asset.id}/overview`}
-              >
+              <Button className="w-full break-keep" to={overviewButton.url}>
                 {overviewButton.label}
               </Button>
             </div>

@@ -132,7 +132,12 @@ export const AgreementForm = ({
         subHeading={
           <>
             Shown to end users as the agreement name.{" "}
-            <Button to="#" target="_blank" variant="link" className={"text-xs"}>
+            <Button
+              to="https://www.shelf.nu/knowledge-base/understanding-and-using-pdf-agreements-for-asset-custody-in-shelf"
+              target="_blank"
+              variant="link"
+              className={"text-xs"}
+            >
               See a sample
             </Button>
           </>
@@ -173,7 +178,12 @@ export const AgreementForm = ({
         subHeading={
           <>
             Shown to end users for signing - use to give context.{" "}
-            <Button to="#" target="_blank" variant="link" className={"text-xs"}>
+            <Button
+              to="https://www.shelf.nu/knowledge-base/understanding-and-using-pdf-agreements-for-asset-custody-in-shelf"
+              target="_blank"
+              variant="link"
+              className={"text-xs"}
+            >
               See a sample
             </Button>
           </>

@@ -32,6 +32,7 @@ export const ASSET_OVERVIEW_FIELDS = {
   location: true,
   custody: {
     select: {
+      id: true,
       agreement: true,
       createdAt: true,
       signatureStatus: true,
@@ -67,7 +68,14 @@ export const ASSET_OVERVIEW_FIELDS = {
       },
     },
   },
-  kit: { select: { id: true, name: true, status: true } },
+  kit: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      custody: { select: { id: true } },
+    },
+  },
   bookings: {
     where: {
       status: { in: ["ONGOING", "OVERDUE"] },

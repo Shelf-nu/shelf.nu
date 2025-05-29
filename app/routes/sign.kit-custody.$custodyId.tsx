@@ -3,6 +3,7 @@ import {
   CustodySignatureStatus,
   CustodyStatus,
   KitStatus,
+  OrganizationRoles,
 } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type {
@@ -18,6 +19,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { getAgreementByKitCustodyId } from "~/modules/kit/service.server";
 import { custodyAgreementSignedEmailText } from "~/modules/sign/email";
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -36,12 +38,15 @@ import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, params, request }: LoaderFunctionArgs) {
-  const authSession = context.getOptionalSession();
   const { custodyId } = getParams(params, z.object({ custodyId: z.string() }));
 
   try {
+    const authSession = context.getOptionalSession();
+
     const { custodian, custody, custodyAgreement, kit } =
       await getAgreementByKitCustodyId({ custodyId });
+
+    let isBaseOrSelfService = false;
 
     /**
      * If there is a user associated with the custodian then make sure
@@ -59,12 +64,26 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         });
       }
 
-      await requirePermission({
+      const { organizationId } = await requirePermission({
         userId: authSession.userId,
         request,
         entity: PermissionEntity.custodyAgreement,
         action: PermissionAction.read,
       });
+
+      const user = await getUserByID(authSession.userId, {
+        userOrganizations: true,
+      });
+
+      const roles = user?.userOrganizations.find(
+        (userOrg) => userOrg.organizationId === organizationId
+      )?.roles;
+
+      const isSelfService =
+        roles?.includes(OrganizationRoles.SELF_SERVICE) || false;
+      const isBase = roles?.includes(OrganizationRoles.BASE) || false;
+
+      isBaseOrSelfService = isSelfService || isBase;
 
       if (authSession.userId !== custodian.user.id) {
         throw new ShelfError({
@@ -102,6 +121,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         isAgreementSigned: !!custody.agreementSigned,
         isLoggedIn: !!authSession,
         kit,
+        isBaseOrSelfService,
       })
     );
   } catch (cause) {
@@ -275,6 +295,7 @@ export default function SignKitCustody() {
     isAgreementSigned,
     isLoggedIn,
     kit,
+    isBaseOrSelfService,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -287,6 +308,7 @@ export default function SignKitCustody() {
         label: "To Kit's Page",
         url: `/kits/${kit.id}`,
       }}
+      isBaseOrSelfService={isBaseOrSelfService}
     />
   );
 }

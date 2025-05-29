@@ -403,7 +403,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           subject: `You have been assigned custody over ${updatedKit.name}.`,
           text: kitCustodyAssignedWithAgreementEmailText({
             kitName: updatedKit.name,
-            assignerName: resolveTeamMemberName(custodian),
+            assignerName: `${user.firstName} ${user.lastName}`,
             kitId,
             custodyId: updatedKit?.custody?.id ?? "",
             signatureRequired: agreementFound.signatureRequired,

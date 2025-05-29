@@ -1,4 +1,4 @@
-import { AssetStatus, CustodySignatureStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -127,8 +127,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           qrCodes: true,
           custodyReceipts: {
             select: { id: true },
-            where: { signatureStatus: CustodySignatureStatus.SIGNED },
             orderBy: { agreementSignedOn: "desc" },
+            take: 1, // take the latest custody receipt
           },
         },
         userOrganizations,
@@ -394,8 +394,11 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          {kit.custody && kit.custody.agreement ? (
+          {kit.custody &&
+          kit.custody.agreement &&
+          kit.custody.agreement.signatureRequired ? (
             <AgreementStatusCard
+              signUrl={`/sign/kit-custody/${kit.custody.id}`}
               className="mt-0"
               custodian={kit.custody.custodian}
               receiptId={

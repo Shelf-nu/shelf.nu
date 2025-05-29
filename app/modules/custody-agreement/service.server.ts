@@ -6,7 +6,11 @@ import type {
   CustodyAgreement,
   Custody,
 } from "@prisma/client";
-import { AssetStatus, CustodyAgreementType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodyAgreementType,
+  CustodySignatureStatus,
+} from "@prisma/client";
 import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -75,6 +79,38 @@ export async function updateCustodyAgreement({
   userId: User["id"];
 }) {
   try {
+    const agreement = await db.custodyAgreement.findUnique({
+      where: { id, organizationId },
+      select: { id: true, signatureRequired: true },
+    });
+
+    /**
+     * If there was signature required before and user is changing it to false,
+     * we need to check if there are any custodies that have this agreement
+     */
+    if (agreement?.signatureRequired && !signatureRequired) {
+      const custodies = await db.custody.count({
+        where: {
+          signatureStatus: {
+            in: [CustodySignatureStatus.PENDING, CustodySignatureStatus.SIGNED],
+          },
+          agreementId: id,
+        },
+      });
+
+      /**
+       * If we found such custodies then it is not allowed to perform this action
+       * */
+      if (custodies > 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: "Agreement cannot be updated to not require signature",
+          title: "Agreement cannot be updated",
+        });
+      }
+    }
+
     const data = {
       name,
       description,
@@ -415,6 +451,7 @@ export async function getAgreementByCustodyId({
             title: true,
             organizationId: true,
             user: { select: { email: true } },
+            kit: { select: { custody: { select: { id: true } } } },
           },
         },
         agreement: true,

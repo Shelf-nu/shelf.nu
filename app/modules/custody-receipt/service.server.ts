@@ -8,9 +8,13 @@ import { getParamsValues } from "~/utils/list";
 export async function getPaginatedAndFilterableReceipts({
   organizationId,
   request,
+  userId,
+  isSelfServiceOrBase = false,
 }: {
   organizationId: Organization["id"];
   request: Request;
+  userId: string;
+  isSelfServiceOrBase?: boolean;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
@@ -63,6 +67,11 @@ export async function getPaginatedAndFilterableReceipts({
 
     if (custodyStatus) {
       where.custodyStatus = custodyStatus;
+    }
+
+    /** Self and base users can only view their own custody receipts */
+    if (isSelfServiceOrBase) {
+      where.custodian = { userId };
     }
 
     const [receipts, totalReceipts] = await Promise.all([

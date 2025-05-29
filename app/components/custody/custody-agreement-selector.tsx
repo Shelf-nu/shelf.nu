@@ -27,6 +27,9 @@ export default function CustodyAgreementSelector({
   disabled,
 }: CustodyAgreementSelectorProps) {
   const [addAgreementEnabled, setAddAgreementEnabled] = useState(false);
+  const [selectedAgreement, setSelectedAgreement] =
+    useState<CustodyAgreement>();
+
   const { isLoading, data } = useApiQuery<{ agreements: CustodyAgreement[] }>({
     api: "/api/custody-agreements",
     enabled: addAgreementEnabled,
@@ -100,14 +103,31 @@ export default function CustodyAgreementSelector({
                     key={agreement.id}
                     value={agreement.id}
                     className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                    onSelect={() => {
+                      setSelectedAgreement(agreement);
+                    }}
                   >
-                    {agreement.name}
+                    {agreement.name}{" "}
+                    {!agreement.signatureRequired ? (
+                      <span className="text-xs font-normal text-gray-500">
+                        (view only)
+                      </span>
+                    ) : (
+                      ""
+                    )}
                   </SelectItem>
                 ))}
               </div>
             </When>
           </SelectContent>
         </Select>
+
+        {!selectedAgreement?.signatureRequired ? (
+          <p className="mt-1 text-sm text-warning-400">
+            Selected custody agreement does not require a signature. The
+            agreement will directly go in custody.
+          </p>
+        ) : null}
 
         <Link
           target="_blank"

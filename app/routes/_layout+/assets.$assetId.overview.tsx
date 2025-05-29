@@ -259,6 +259,12 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
   } = useLoaderData<typeof loader>();
+
+  const isInsideKit = !!asset.kit;
+  const signUrl = `/sign${isInsideKit ? "/kit-custody" : ""}/${
+    isInsideKit ? asset.kit?.custody?.id : asset.custody?.id
+  }`;
+
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -525,8 +531,11 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {asset.custody && asset.custody?.agreement ? (
+          {asset.custody &&
+          asset.custody?.agreement &&
+          asset.custody.agreement?.signatureRequired ? (
             <AgreementStatusCard
+              signUrl={signUrl}
               kit={
                 asset.kit &&
                 (asset.kit.status === KitStatus.SIGNATURE_PENDING ||

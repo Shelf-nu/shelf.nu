@@ -71,7 +71,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.custodyAgreement]: [PermissionAction.read],
-    [PermissionEntity.receipts]: [],
+    [PermissionEntity.receipts]: [PermissionAction.read],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],

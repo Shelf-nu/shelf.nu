@@ -91,14 +91,18 @@ export function AgreementsActionsDropdown({
               icon="deactivate"
               role="link"
               variant="link"
-              className={tw(
-                "justify-start text-gray-700 hover:text-gray-700",
-                agreement.isDefault || disabled
-                  ? "pointer-events-none border-gray-300 text-gray-300"
-                  : ""
-              )}
+              className="justify-start text-gray-700 hover:text-gray-700"
               width="full"
-              disabled={disabled || agreement.isDefault}
+              disabled={
+                disabled
+                  ? disabled
+                  : agreement.isDefault
+                  ? {
+                      title: "Disabled",
+                      reason: "Default agreements cannot be deactivated.",
+                    }
+                  : false
+              }
             >
               {agreement.isActive ? "Deactivate" : "Activate"}
             </Button>

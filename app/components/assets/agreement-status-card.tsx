@@ -1,5 +1,6 @@
 import type { Kit, User } from "@prisma/client";
 import { PenLineIcon } from "lucide-react";
+import { useUserData } from "~/hooks/use-user-data";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
@@ -15,6 +16,7 @@ type AgreementStatusCardProps = {
   };
   agreementName: string;
   kit?: Pick<Kit, "id" | "name">;
+  signUrl: string;
 };
 
 export default function AgreementStatusCard({
@@ -24,7 +26,24 @@ export default function AgreementStatusCard({
   custodian,
   agreementName,
   kit,
+  signUrl,
 }: AgreementStatusCardProps) {
+  const user = useUserData();
+
+  const isCustodianCurrentUser = custodian?.user?.email === user?.email;
+
+  function getUrl() {
+    if (isSignaturePending) {
+      if (isCustodianCurrentUser) {
+        return signUrl;
+      }
+
+      return "share-agreement";
+    }
+
+    return `/receipts?receiptId=${receiptId}`;
+  }
+
   return (
     <Card className={tw("my-3 flex items-center gap-2", className)}>
       <div className="flex size-12 items-center justify-center rounded-full bg-gray-50">
@@ -36,7 +55,12 @@ export default function AgreementStatusCard({
       <div>
         <p className="font-semibold">
           {isSignaturePending ? (
-            <>Awaiting signature from {resolveTeamMemberName(custodian)}</>
+            <>
+              Awaiting signature from{" "}
+              {isCustodianCurrentUser
+                ? "you"
+                : resolveTeamMemberName(custodian)}
+            </>
           ) : (
             agreementName
           )}
@@ -51,15 +75,12 @@ export default function AgreementStatusCard({
           </p>
         ) : null}
 
-        <Button
-          to={
-            isSignaturePending
-              ? "share-agreement"
-              : `/receipts?receiptId=${receiptId}`
-          }
-          variant="link-gray"
-        >
-          {isSignaturePending ? "Share document" : "View receipt"}
+        <Button to={getUrl()} variant="link-gray">
+          {isSignaturePending
+            ? isCustodianCurrentUser
+              ? "Sign document"
+              : "Share document"
+            : "View receipt"}
         </Button>
       </div>
     </Card>

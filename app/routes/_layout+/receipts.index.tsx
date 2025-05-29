@@ -36,17 +36,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.receipts,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.receipts,
+        action: PermissionAction.read,
+      });
 
     let { receipts, page, perPage, search, totalPages, totalReceipts } =
       await getPaginatedAndFilterableReceipts({
         organizationId,
         request,
+        userId,
+        isSelfServiceOrBase,
       });
 
     const datetime = getDateTimeFormat(request, {
@@ -192,7 +195,11 @@ function ReceiptRow({
       <Td>{resolveTeamMemberName(item.custodian)}</Td>
       <Td>{item?.agreement?.name}</Td>
       <Td>
-        <Badge color={signColor}>{formatEnum(item.signatureStatus)}</Badge>
+        <Badge color={signColor}>
+          {item.signatureStatus === CustodySignatureStatus.NOT_REQUIRED
+            ? "View only agreement"
+            : formatEnum(item.signatureStatus)}
+        </Badge>
       </Td>
       <Td>
         {item.signatureStatus === CustodySignatureStatus.PENDING ? (
