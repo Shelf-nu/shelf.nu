@@ -8,15 +8,12 @@ import { hydrateRoot } from "react-dom/client";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { getInitialNamespaces } from "remix-i18next/client";
 import i18n from "./i18n/i18n";
-import en from "../public/locales/en/common";
-import fr from "../public/locales/fr/common";
 async function hydrate() {
   await i18next
     .use(initReactI18next)
     .use(LanguageDetector)
     .init({
       ...i18n,
-      resources: { en: { common: en }, fr: { common: fr } },
       ns: getInitialNamespaces(),
     });
   React.startTransition(() => {

@@ -23,7 +23,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie} from "~/utils/cookies.server";
+import { setCookie } from "~/utils/cookies.server";
 import {
   isLikeShelfError,
   isZodValidationError,
@@ -41,7 +41,7 @@ import {
 import { validEmail } from "~/utils/misc";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const t =  await initTranslationLoader(request);
+  const t = await initTranslationLoader(request);
   const title = "Log in";
   const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;

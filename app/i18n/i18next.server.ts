@@ -21,7 +21,10 @@ let RemixI18next = new RemixI18Next({
   },
 });
 
-export async function createI18nInstance(request: Request, remixContext: EntryContext) {
+export async function createI18nInstance(
+  request: Request,
+  remixContext: EntryContext
+) {
   const instance = createInstance();
   const ns = RemixI18next.getRouteNamespaces(remixContext);
   const lng = getLng(request);
@@ -33,17 +36,14 @@ export async function createI18nInstance(request: Request, remixContext: EntryCo
       ...i18n,
       ns,
       lng,
-      resources: {
-        en: { common: en },
-        fr: { common: fr }
-      },
+      resources: { en: { common: en }, fr: { common: fr } },
     });
 
   return instance;
 }
 
 export async function initTranslationLoader(
-  request: Request,
+  request: Request
 ): Promise<TFunction> {
   let lng = getLng(request);
   let t = await i18next.getFixedT(lng);

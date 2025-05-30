@@ -45,4 +45,7 @@ export interface Config {
    * Disable SSO
    */
   disableSSO: boolean;
+
+  SUPPORTED_LANGUAGES: Array<string>;
+  FALLBACK_LANGUAGE: string;
 }
