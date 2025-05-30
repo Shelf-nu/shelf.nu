@@ -1,4 +1,6 @@
-const fr = {
+import type en from "../en/common";
+
+const fr: typeof en = {
   login: {
     login: "Se connecter",
     subHeading:

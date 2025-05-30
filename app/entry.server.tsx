@@ -5,22 +5,16 @@ import type { AppLoadContext, EntryContext } from "@remix-run/node";
 import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
-import { createInstance } from "i18next";
-import LanguageDetector from "i18next-browser-languagedetector";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
-import { I18nextProvider, initReactI18next } from "react-i18next";
+import { I18nextProvider } from "react-i18next";
 import { registerEmailWorkers } from "./emails/email.worker.server";
-import i18n from "./i18n/i18n"; // your i18n configuration file
-import i18next from "./i18n/i18next.server";
+import { createI18nInstance } from "./i18n/i18next.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
-import { getLng } from "./utils/cookies.server"; // your cookie utility to get the language
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
-import en from "../public/locales/en/common";
-import fr from "../public/locales/fr/common";
 export * from "../server";
 // === start: register scheduler and workers ===
 schedulerService
@@ -162,18 +156,7 @@ async function handleBrowserRequest(
   responseHeaders: Headers,
   remixContext: EntryContext
 ) {
-  let instance = createInstance();
-  let ns = i18next.getRouteNamespaces(remixContext);
-  let lng = getLng(request);
-  await instance
-    .use(initReactI18next) // Tell our instance to use react-i18next
-    .use(LanguageDetector)
-    .init({
-      ...i18n, // spread the configuration
-      ns, // The namespaces the routes about to render wants to use
-      lng, // The language to use
-      resources: { en: { common: en }, fr: { common: fr } },
-    });
+ const instance = await createI18nInstance(request, remixContext);
   return new Promise((resolve, reject) => {
     // Initialize i18n instance
 

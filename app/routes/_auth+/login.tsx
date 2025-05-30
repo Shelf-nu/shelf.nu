@@ -14,7 +14,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
-import i18next from "~/i18n/i18next.server";
+import { initTranslationLoader } from "~/i18n/i18next.server";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -23,7 +23,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie, getLng } from "~/utils/cookies.server";
+import { setCookie} from "~/utils/cookies.server";
 import {
   isLikeShelfError,
   isZodValidationError,
@@ -41,8 +41,7 @@ import {
 import { validEmail } from "~/utils/misc";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  let lng = getLng(request);
-  let t = await i18next.getFixedT(lng);
+  const t =  await initTranslationLoader(request);
   const title = "Log in";
   const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
