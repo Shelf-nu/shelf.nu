@@ -4,10 +4,16 @@ import {
   ENABLE_PREMIUM_FEATURES,
   FREE_TRIAL_DAYS,
   SEND_ONBOARDING_EMAIL,
+  SUPPORTED_LANGUAGES,
+  FALLBACK_LANGUAGE,
+
 } from "~/utils/env";
 import { Config } from "./types";
 
+
 export const config: Config = {
+  SUPPORTED_LANGUAGES: SUPPORTED_LANGUAGES || ["en", "fr"],
+  FALLBACK_LANGUAGE: FALLBACK_LANGUAGE || "en",
   sendOnboardingEmail: SEND_ONBOARDING_EMAIL || false,
   enablePremiumFeatures: ENABLE_PREMIUM_FEATURES || false,
   freeTrialDays: Number(FREE_TRIAL_DAYS || 7),

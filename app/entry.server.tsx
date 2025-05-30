@@ -1,20 +1,21 @@
 /* eslint-disable no-console */
 import { PassThrough } from "stream";
 
-import { createReadableStreamFromReadable } from "@remix-run/node";
 import type { AppLoadContext, EntryContext } from "@remix-run/node";
+import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { I18nextProvider } from "react-i18next";
 import { registerEmailWorkers } from "./emails/email.worker.server";
+import { createI18nInstance } from "./i18n/i18next.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 export * from "../server";
-
 // === start: register scheduler and workers ===
 schedulerService
   .init()
@@ -149,20 +150,26 @@ function handleBotRequest(
   });
 }
 
-function handleBrowserRequest(
+async function handleBrowserRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext
 ) {
+ const instance = await createI18nInstance(request, remixContext);
   return new Promise((resolve, reject) => {
+    // Initialize i18n instance
+
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
-      <RemixServer
-        context={remixContext}
-        url={request.url}
-        abortDelay={ABORT_DELAY}
-      />,
+      <I18nextProvider i18n={instance}>
+        <RemixServer
+          context={remixContext}
+          url={request.url}
+          abortDelay={ABORT_DELAY}
+        />
+        ,
+      </I18nextProvider>,
       {
         onShellReady() {
           shellRendered = true;
