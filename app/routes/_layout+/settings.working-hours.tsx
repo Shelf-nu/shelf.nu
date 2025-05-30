@@ -8,7 +8,6 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Card } from "~/components/shared/card";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
 import {
@@ -31,7 +30,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -196,14 +194,9 @@ export default function GeneralPage() {
   const { header } = useLoaderData<typeof loader>();
   const { workingHours } = useLoaderData<typeof loader>();
   return (
-    <Card className={tw("my-0")}>
-      <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
-        <p className="text-sm text-gray-600">{header.subHeading}</p>
-      </div>
-      <div>
-        <EnableWorkingHoursForm enabled={workingHours.enabled} />
-      </div>
+    <>
+      <EnableWorkingHoursForm enabled={workingHours.enabled} header={header} />
+
       {/* New weekly schedule form - only show if working hours are enabled */}
       {workingHours.enabled && (
         <WeeklyScheduleForm
@@ -212,6 +205,6 @@ export default function GeneralPage() {
           }
         />
       )}
-    </Card>
+    </>
   );
 }

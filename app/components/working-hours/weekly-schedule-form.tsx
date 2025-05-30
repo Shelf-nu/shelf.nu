@@ -9,6 +9,7 @@ import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
+import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 
 interface WeeklyScheduleFormProps {
@@ -153,123 +154,128 @@ export const WeeklyScheduleForm = ({
   };
 
   return (
-    <fetcher.Form
-      method="post"
-      className="mt-4 flex flex-col gap-2 pt-4"
-      onSubmit={handleSubmit}
-      noValidate
-    >
-      <input type="hidden" name="intent" value="updateSchedule" />
-      <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
-        <p className="text-sm text-gray-600">
-          Set your working hours for each day of the week. Times are in 24-hour
-          format.
-        </p>
-        {validationErrors.general && (
-          <p className="mt-2 text-sm text-red-600">
-            {validationErrors.general}
+    <Card>
+      <fetcher.Form
+        method="post"
+        className="flex flex-col gap-2"
+        onSubmit={handleSubmit}
+        noValidate
+      >
+        <input type="hidden" name="intent" value="updateSchedule" />
+        <div className="mb-4 border-b pb-4">
+          <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
+          <p className="text-sm text-gray-600">
+            Set your working hours for each day of the week. Times are in
+            24-hour format.
           </p>
-        )}
-      </div>
 
-      <div className="space-y-4">
-        {WEEK_DISPLAY_ORDER.map((dayOfWeek) => {
-          const dayNumber = dayOfWeek.toString();
-          const dayState =
-            scheduleState[dayNumber as keyof WeeklyScheduleState];
-          const dayName = DAY_NAMES[dayOfWeek];
+          {validationErrors.general && (
+            <p className="mt-2 text-sm text-red-600">
+              {validationErrors.general}
+            </p>
+          )}
+        </div>
 
-          return (
-            <div key={dayName} className="flex items-center gap-4">
-              <div className="flex h-[42px] min-w-[280px] items-center gap-3">
-                <Switch
-                  name={`${dayNumber}.isOpen`}
-                  id={`day-${dayNumber}-enabled`}
-                  disabled={disabled}
-                  defaultChecked={dayState.isOpen}
-                  onCheckedChange={(checked) =>
-                    handleDayToggle(dayNumber, checked)
-                  }
-                />
-                <label htmlFor={`day-${dayNumber}-enabled`}>{dayName}</label>
-              </div>
-              <div className="flex items-center gap-4">
-                {/* Time Inputs - Show when day is open */}
-                {dayState.isOpen && (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-3">
-                      <Input
-                        label="Open Time"
-                        hideLabel
-                        type="time"
+        <div className="space-y-4">
+          {WEEK_DISPLAY_ORDER.map((dayOfWeek) => {
+            const dayNumber = dayOfWeek.toString();
+            const dayState =
+              scheduleState[dayNumber as keyof WeeklyScheduleState];
+            const dayName = DAY_NAMES[dayOfWeek];
+
+            return (
+              <div key={dayName} className="flex items-center gap-4">
+                <div className="flex h-[42px] min-w-[280px] items-center gap-3">
+                  <Switch
+                    name={`${dayNumber}.isOpen`}
+                    id={`day-${dayNumber}-enabled`}
+                    disabled={disabled}
+                    defaultChecked={dayState.isOpen}
+                    onCheckedChange={(checked) =>
+                      handleDayToggle(dayNumber, checked)
+                    }
+                  />
+                  <label htmlFor={`day-${dayNumber}-enabled`}>{dayName}</label>
+                </div>
+                <div className="flex items-center gap-4">
+                  {/* Time Inputs - Show when day is open */}
+                  {dayState.isOpen && (
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-3">
+                        <Input
+                          label="Open Time"
+                          hideLabel
+                          type="time"
+                          name={`${dayNumber}.openTime`}
+                          value={dayState.openTime}
+                          onChange={(e) =>
+                            handleTimeChange(
+                              dayNumber,
+                              "openTime",
+                              e.target.value
+                            )
+                          }
+                          disabled={disabled}
+                          required={dayState.isOpen}
+                        />
+                        <div> - </div>
+                        <Input
+                          label="Close Time"
+                          hideLabel
+                          type="time"
+                          name={`${dayNumber}.closeTime`}
+                          value={dayState.closeTime}
+                          onChange={(e) =>
+                            handleTimeChange(
+                              dayNumber,
+                              "closeTime",
+                              e.target.value
+                            )
+                          }
+                          disabled={disabled}
+                          required={dayState.isOpen}
+                        />
+                      </div>
+                      {validationErrors[`${dayNumber}`] && (
+                        <div className="text-sm text-error-500">
+                          {validationErrors[`${dayNumber}`]}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Hidden inputs to ensure form data is captured correctly */}
+                  <input
+                    type="hidden"
+                    name={`${dayNumber}.isOpen`}
+                    value={dayState.isOpen ? "on" : "off"}
+                  />
+                  {!dayState.isOpen && (
+                    <>
+                      <input
+                        type="hidden"
                         name={`${dayNumber}.openTime`}
-                        value={dayState.openTime}
-                        onChange={(e) =>
-                          handleTimeChange(
-                            dayNumber,
-                            "openTime",
-                            e.target.value
-                          )
-                        }
-                        disabled={disabled}
-                        required={dayState.isOpen}
+                        value=""
                       />
-                      <div> - </div>
-                      <Input
-                        label="Close Time"
-                        hideLabel
-                        type="time"
+                      <input
+                        type="hidden"
                         name={`${dayNumber}.closeTime`}
-                        value={dayState.closeTime}
-                        onChange={(e) =>
-                          handleTimeChange(
-                            dayNumber,
-                            "closeTime",
-                            e.target.value
-                          )
-                        }
-                        disabled={disabled}
-                        required={dayState.isOpen}
+                        value=""
                       />
-                    </div>
-                    <div className="text-sm text-error-500">
-                      {validationErrors[`${dayNumber}`]}
-                    </div>
-                  </div>
-                )}
-
-                {/* Hidden inputs to ensure form data is captured correctly */}
-                <input
-                  type="hidden"
-                  name={`${dayNumber}.isOpen`}
-                  value={dayState.isOpen ? "on" : "off"}
-                />
-                {!dayState.isOpen && (
-                  <>
-                    <input
-                      type="hidden"
-                      name={`${dayNumber}.openTime`}
-                      value=""
-                    />
-                    <input
-                      type="hidden"
-                      name={`${dayNumber}.closeTime`}
-                      value=""
-                    />
-                  </>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
 
-      <div className="mt-6 text-right">
-        <Button type="submit" disabled={disabled}>
-          {disabled ? <Spinner /> : "Save Schedule"}
-        </Button>
-      </div>
-    </fetcher.Form>
+        <div className="mt-6 text-right">
+          <Button type="submit" disabled={disabled}>
+            {disabled ? <Spinner /> : "Save Schedule"}
+          </Button>
+        </div>
+      </fetcher.Form>
+    </Card>
   );
 };
