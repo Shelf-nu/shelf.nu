@@ -68,8 +68,7 @@ export const WeeklyScheduleForm = ({
     if (!isOpen) {
       setValidationErrors((prev) => {
         const newErrors = { ...prev };
-        delete newErrors[`${dayNumber}.openTime`];
-        delete newErrors[`${dayNumber}.closeTime`];
+        delete newErrors[`${dayNumber}`];
         return newErrors;
       });
     }
@@ -91,7 +90,7 @@ export const WeeklyScheduleForm = ({
     // Clear specific validation error
     setValidationErrors((prev) => {
       const newErrors = { ...prev };
-      delete newErrors[`${dayNumber}.${timeType}`];
+      delete newErrors[`${dayNumber}`];
       return newErrors;
     });
   };
@@ -109,12 +108,12 @@ export const WeeklyScheduleForm = ({
 
         // Validate open time
         if (!dayState.openTime) {
-          errors[`${dayNumber}.openTime`] = "Open time is required";
+          errors[`${dayNumber}`] = "Open time is required";
         }
 
         // Validate close time
         if (!dayState.closeTime) {
-          errors[`${dayNumber}.closeTime`] = "Close time is required";
+          errors[`${dayNumber}`] = "Close time is required";
         }
 
         // Validate time logic
@@ -130,8 +129,7 @@ export const WeeklyScheduleForm = ({
           const closeTotalMinutes = closeHours * 60 + closeMinutes;
 
           if (openTotalMinutes >= closeTotalMinutes) {
-            errors[`${dayNumber}.closeTime`] =
-              "Close time must be after open time";
+            errors[`${dayNumber}`] = "Close time must be after open time";
           }
         }
       }
@@ -199,34 +197,45 @@ export const WeeklyScheduleForm = ({
               <div className="flex items-center gap-4">
                 {/* Time Inputs - Show when day is open */}
                 {dayState.isOpen && (
-                  <div className="flex items-center gap-3">
-                    <Input
-                      label="Open Time"
-                      hideLabel
-                      type="time"
-                      name={`${dayNumber}.openTime`}
-                      value={dayState.openTime}
-                      onChange={(e) =>
-                        handleTimeChange(dayNumber, "openTime", e.target.value)
-                      }
-                      disabled={disabled}
-                      required={dayState.isOpen}
-                      error={validationErrors[`${dayNumber}.openTime`]}
-                    />
-                    <div> - </div>
-                    <Input
-                      label="Close Time"
-                      hideLabel
-                      type="time"
-                      name={`${dayNumber}.closeTime`}
-                      value={dayState.closeTime}
-                      onChange={(e) =>
-                        handleTimeChange(dayNumber, "closeTime", e.target.value)
-                      }
-                      disabled={disabled}
-                      required={dayState.isOpen}
-                      error={validationErrors[`${dayNumber}.closeTime`]}
-                    />
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                      <Input
+                        label="Open Time"
+                        hideLabel
+                        type="time"
+                        name={`${dayNumber}.openTime`}
+                        value={dayState.openTime}
+                        onChange={(e) =>
+                          handleTimeChange(
+                            dayNumber,
+                            "openTime",
+                            e.target.value
+                          )
+                        }
+                        disabled={disabled}
+                        required={dayState.isOpen}
+                      />
+                      <div> - </div>
+                      <Input
+                        label="Close Time"
+                        hideLabel
+                        type="time"
+                        name={`${dayNumber}.closeTime`}
+                        value={dayState.closeTime}
+                        onChange={(e) =>
+                          handleTimeChange(
+                            dayNumber,
+                            "closeTime",
+                            e.target.value
+                          )
+                        }
+                        disabled={disabled}
+                        required={dayState.isOpen}
+                      />
+                    </div>
+                    <div className="text-sm text-error-500">
+                      {validationErrors[`${dayNumber}`]}
+                    </div>
                   </div>
                 )}
 
