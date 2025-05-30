@@ -11,6 +11,7 @@ import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import { TimeRangeDisplay } from "../shared/time-display";
 
 interface WeeklyScheduleFormProps {
   weeklySchedule: WeeklyScheduleJson;
@@ -165,8 +166,8 @@ export const WeeklyScheduleForm = ({
         <div className="mb-4 border-b pb-4">
           <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
           <p className="text-sm text-gray-600">
-            Set your working hours for each day of the week. Times are in
-            24-hour format.
+            Set your working hours for each day of the week. Times will be
+            displayed in your local format.
           </p>
 
           {validationErrors.general && (
@@ -195,7 +196,21 @@ export const WeeklyScheduleForm = ({
                       handleDayToggle(dayNumber, checked)
                     }
                   />
-                  <label htmlFor={`day-${dayNumber}-enabled`}>{dayName}</label>
+                  <label
+                    htmlFor={`day-${dayNumber}-enabled`}
+                    className="font-medium"
+                  >
+                    {dayName}
+                  </label>
+                  {/* Show time preview when day is open */}
+                  {dayState.isOpen && (
+                    <div className="text-sm text-gray-600">
+                      <TimeRangeDisplay
+                        openTime={dayState.openTime}
+                        closeTime={dayState.closeTime}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-4">
                   {/* Time Inputs - Show when day is open */}

@@ -3,6 +3,8 @@ import type { SerializeFrom } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import { TrashIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
+import { TimeRangeDisplay } from "~/components/shared/time-display";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
 
@@ -26,36 +28,24 @@ export function OverridePreview({ override }: OverridePreviewProps) {
     }
   };
 
-  // Format the date for display
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-  };
+  const optimisticDeleted =
+    deleteFetcher.formData &&
+    deleteFetcher?.formData.get("overrideId") === override.id;
 
-  // Format the time display
-  const formatTimeRange = (): string => {
-    if (!override.isOpen) {
-      return "Closed all day";
-    }
-
-    if (override.openTime && override.closeTime) {
-      return `${override.openTime} - ${override.closeTime}`;
-    }
-
-    return "Open (times not specified)";
-  };
-
-  return (
-    <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-200 p-4 transition-colors">
+  return !optimisticDeleted ? (
+    <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
       <div className="flex-1">
         <div className="flex items-center gap-3">
           <span className="font-semibold text-gray-900">
-            {formatDate(override.date)}
+            <DateS
+              date={override.date}
+              options={{
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }}
+            />
           </span>
           <span
             className={tw(
@@ -69,7 +59,14 @@ export function OverridePreview({ override }: OverridePreviewProps) {
           </span>
         </div>
         <div className="mt-1 flex items-center gap-4 text-sm text-gray-600">
-          <span>{formatTimeRange()}</span>
+          {override.isOpen ? (
+            <TimeRangeDisplay
+              openTime={override.openTime || undefined}
+              closeTime={override.closeTime || undefined}
+            />
+          ) : (
+            <span>Closed all day</span>
+          )}
           {override.reason && (
             <>
               <span>•</span>
@@ -87,5 +84,5 @@ export function OverridePreview({ override }: OverridePreviewProps) {
         <TrashIcon className="size-4" />
       </Button>
     </div>
-  );
+  ) : null;
 }

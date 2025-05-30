@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import FormRow from "~/components/forms/form-row";
@@ -7,9 +7,16 @@ import { Switch } from "~/components/forms/switch";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
-import { WorkingHoursOverrideSchema } from "~/modules/working-hours/zod-utils";
+import { CreateOverrideSchema } from "~/modules/working-hours/zod-utils";
 import type { ActionData } from "~/routes/_layout+/settings.working-hours";
+import { useHints } from "~/utils/client-hints";
+import {
+  adjustDateToUserTimezone,
+  adjustDateToUTC,
+  getTodayInUserTimezone,
+} from "~/utils/date-fns";
 
 export function NewOverrideDialog() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -67,27 +74,56 @@ export function NewOverrideDialog() {
 interface WorkingHoursOverrideFormProps {
   onSuccess?: () => void;
   onCancel?: () => void;
+  // For editing existing overrides
+  initialData?: {
+    id: string;
+    isOpen: boolean;
+    date: string; // UTC date from database
+    openTime?: string;
+    closeTime?: string;
+    reason: string;
+  };
 }
 
 export const WorkingHoursOverrideForm = ({
   onSuccess,
   onCancel,
+  initialData,
 }: WorkingHoursOverrideFormProps) => {
   const fetcher = useFetcher<ActionData>({ key: "workingHoursOverride" });
   const disabled = useDisabled(fetcher);
-  const zo = useZorm("WorkingHoursOverrideForm", WorkingHoursOverrideSchema);
+  const zo = useZorm("WorkingHoursOverrideForm", CreateOverrideSchema);
+  const { timeZone } = useHints();
 
-  // Local state for form fields
-  const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [date, setDate] = useState<string>("");
-  const [openTime, setOpenTime] = useState<string>("09:00");
-  const [closeTime, setCloseTime] = useState<string>("17:00");
-  const [reason, setReason] = useState<string>("");
+  // Convert initial data from UTC to user timezone for display
+  const initialLocalDate = useMemo(() => {
+    if (initialData?.date) {
+      return adjustDateToUserTimezone(initialData.date, timeZone);
+    }
+    return "";
+  }, [initialData?.date, timeZone]);
+
+  // Local state for form fields (all in user's timezone)
+  const [isOpen, setIsOpen] = useState<boolean>(initialData?.isOpen ?? false);
+  const [localDate, setLocalDate] = useState<string>(initialLocalDate);
+  const [openTime, setOpenTime] = useState<string>(
+    initialData?.openTime ?? "09:00"
+  );
+  const [closeTime, setCloseTime] = useState<string>(
+    initialData?.closeTime ?? "17:00"
+  );
+  const [reason, setReason] = useState<string>(initialData?.reason ?? "");
 
   // Track validation errors locally for better UX
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
+
+  // Get today's date in user timezone for minimum date validation
+  const todayInUserTimezone = useMemo(
+    () => getTodayInUserTimezone(timeZone),
+    [timeZone]
+  );
 
   const handleIsOpenChange = (checked: boolean) => {
     setIsOpen(checked);
@@ -113,7 +149,7 @@ export const WorkingHoursOverrideForm = ({
     // Update local state
     switch (field) {
       case "date":
-        setDate(value);
+        setLocalDate(value);
         break;
       case "openTime":
         setOpenTime(value);
@@ -128,48 +164,66 @@ export const WorkingHoursOverrideForm = ({
   };
 
   const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    // Validate date is not in the past (in user's timezone)
+    if (localDate && localDate < todayInUserTimezone) {
+      errors.date = "Date must be today or in the future";
+    }
+
+    // Convert to UTC for backend validation
+    const utcDate = localDate ? adjustDateToUTC(localDate, timeZone) : "";
+
     const formData = {
       isOpen: isOpen ? "on" : "off",
-      date,
+      date: utcDate,
       openTime: isOpen ? openTime : undefined,
       closeTime: isOpen ? closeTime : undefined,
       reason,
     };
 
-    const validation = WorkingHoursOverrideSchema.safeParse(formData);
+    const validation = CreateOverrideSchema.safeParse(formData);
 
     if (!validation.success) {
-      const errors: Record<string, string> = {};
       validation.error.errors.forEach((error) => {
         const field = error.path.join(".");
         errors[field] = error.message;
       });
-      setValidationErrors(errors);
-      return false;
     }
 
-    setValidationErrors({});
-    return true;
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (validateForm()) {
-      fetcher.submit(event.currentTarget);
+      // Create a new FormData with UTC date for submission
+      const formData = new FormData(event.currentTarget);
+      const utcDate = adjustDateToUTC(localDate, timeZone);
+
+      // Replace the local date with UTC date
+      formData.set("date", utcDate);
+
+      fetcher.submit(formData, {
+        method: "post",
+      });
     }
   };
 
   // Handle successful submission
-  if (
-    fetcher.state === "idle" &&
-    fetcher.data &&
-    "success" in fetcher.data &&
-    fetcher.data.success &&
-    onSuccess
-  ) {
-    onSuccess();
-  }
+  useEffect(() => {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      "success" in fetcher.data &&
+      fetcher.data.success &&
+      onSuccess
+    ) {
+      onSuccess();
+    }
+  }, [fetcher.state, fetcher.data, onSuccess]);
 
   return (
     <div className="">
@@ -180,7 +234,14 @@ export const WorkingHoursOverrideForm = ({
         onSubmit={handleSubmit}
         noValidate
       >
-        <input type="hidden" name="intent" value="createOverride" />
+        <input
+          type="hidden"
+          name="intent"
+          value={initialData ? "updateOverride" : "createOverride"}
+        />
+        {initialData && (
+          <input type="hidden" name="overrideId" value={initialData.id} />
+        )}
 
         {/* Override Open/Closed Toggle */}
         <FormRow
@@ -194,6 +255,7 @@ export const WorkingHoursOverrideForm = ({
               id="override-is-open"
               disabled={disabled}
               checked={isOpen}
+              value={isOpen ? "on" : "off"}
               onCheckedChange={handleIsOpenChange}
               title="Toggle override status"
             />
@@ -212,19 +274,19 @@ export const WorkingHoursOverrideForm = ({
         <FormRow
           rowLabel="Date"
           subHeading="Select the date for this override"
-          className="w-full border-b pb-4"
+          className="border-b pb-4"
           required
         >
           <Input
             label="Override Date"
             hideLabel
             type="date"
-            name={zo.fields.date()}
-            value={date}
+            name="date" // Will be replaced with UTC date on submit
+            value={localDate}
             onChange={(e) => handleInputChange("date", e.target.value)}
             disabled={disabled}
             required
-            min={new Date().toISOString().split("T")[0]} // Prevent past dates
+            min={todayInUserTimezone}
             error={validationErrors.date}
             className="w-full"
           />
@@ -307,20 +369,37 @@ export const WorkingHoursOverrideForm = ({
         )}
 
         {/* Form Actions */}
-        <div className="flex justify-end gap-3 pt-4">
-          {onCancel && (
+        <div className="mt-4 flex justify-between gap-3">
+          <When truthy={!!fetcher?.data?.error}>
+            <p className="text-sm text-error-500">
+              {fetcher.data?.error?.message}
+            </p>
+          </When>
+          <div className="ml-auto flex items-center gap-2">
+            {onCancel && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onCancel}
+                disabled={disabled}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
-              type="button"
-              variant="secondary"
-              onClick={onCancel}
+              type="submit"
               disabled={disabled}
+              className={"whitespace-nowrap"}
             >
-              Cancel
+              {disabled ? (
+                <Spinner />
+              ) : initialData ? (
+                "Update Override"
+              ) : (
+                "Create Override"
+              )}
             </Button>
-          )}
-          <Button type="submit" disabled={disabled}>
-            {disabled ? <Spinner /> : "Create override"}
-          </Button>
+          </div>
         </div>
       </fetcher.Form>
     </div>

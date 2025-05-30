@@ -1,5 +1,5 @@
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import type { WeeklyScheduleJson } from "./types";
 
 const label = "Working hours";
@@ -127,6 +127,7 @@ export async function createWorkingHoursOverride({
     if (existingOverride) {
       throw new ShelfError({
         cause: null,
+        title: "Invalid date",
         message: "An override already exists for this date",
         additionalData: { organizationId, date },
         label,
@@ -147,9 +148,13 @@ export async function createWorkingHoursOverride({
 
     return override;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Failed to create working hours override",
+      message: isShelfError
+        ? cause.message
+        : "Failed to create working hours override",
       additionalData: {
         organizationId,
         date,
