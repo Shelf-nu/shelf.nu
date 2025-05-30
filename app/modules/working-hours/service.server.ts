@@ -110,7 +110,7 @@ export async function createWorkingHoursOverride({
   isOpen: boolean;
   openTime?: string; // HH:MM format
   closeTime?: string; // HH:MM format
-  reason: string;
+  reason?: string;
 }) {
   try {
     // First ensure working hours exist for this organization

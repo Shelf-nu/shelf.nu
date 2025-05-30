@@ -21,11 +21,12 @@ import {
 import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
 import { parseWeeklyScheduleFromFormData } from "~/modules/working-hours/utils";
 import {
+  CreateOverrideFormSchema,
   WeeklyScheduleSchema,
-  WorkingHoursOverrideSchema,
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { adjustDateToUTC } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -189,24 +190,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return json(data({ success: true }), { status: 200 });
       }
       case "createOverride": {
-        // Parse override form data
-        const { isOpen, date, openTime, closeTime, reason } = parseData(
-          formData,
-          WorkingHoursOverrideSchema
-        );
+        // Extract timezone from form data first
+        const timeZone = formData.get("timeZone") as string;
+        if (!timeZone) {
+          throw new ShelfError({
+            cause: null,
+            message: "Timezone is required",
+            label: "Working hours",
+          });
+        }
+
+        // Use parseData function following your standard pattern
+        const validatedData = parseData(formData, CreateOverrideFormSchema);
+
+        // Convert date from user timezone to UTC
+        const utcDate = adjustDateToUTC(validatedData.date, timeZone);
 
         await createWorkingHoursOverride({
           organizationId,
-          date,
-          isOpen,
-          openTime: isOpen ? openTime : undefined,
-          closeTime: isOpen ? closeTime : undefined,
-          reason,
+          date: utcDate,
+          isOpen: validatedData.isOpen,
+          openTime: validatedData.openTime || undefined,
+          closeTime: validatedData.closeTime || undefined,
+          reason: validatedData.reason,
         });
 
         sendNotification({
           title: "Override created",
-          message: "Your working hours override has been created successfully",
+          message: "Working hours override has been created successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

@@ -13,7 +13,7 @@ export function Overrides({
   return (
     <Card className={tw("my-0")}>
       <div className="flex w-full items-start justify-between border-b pb-4">
-        <div className="mb-4 ">
+        <div className="">
           <h3 className="text-text-lg font-semibold">Date overrides</h3>
           <p className="text-sm text-gray-600">
             Add dates when working hours change from your daily hours.
