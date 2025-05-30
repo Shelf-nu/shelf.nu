@@ -90,53 +90,127 @@ export const WeeklyScheduleSchema = z
     }
   });
 
-// Override schema for specific dates
-export const WorkingHoursOverrideSchema = z
-  .object({
-    workingHoursId: z.string().cuid(),
-    date: z.string().datetime().or(z.date()),
-    isOpen: z.boolean(),
-    openTime: TimeStringSchema.optional(),
-    closeTime: TimeStringSchema.optional(),
-    reason: z.string().optional(),
-  })
-  .superRefine((data, ctx) => {
+// Date string schema for HTML date input (YYYY-MM-DD format)
+const DateStringSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format")
+  .refine((dateStr) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day for comparison
+
+    // Check if date is valid and not in the past
+    return !isNaN(date.getTime()) && date >= today;
+  }, "Date must be today or in the future");
+// Flexible boolean schema that handles both form data and direct booleans
+const FlexibleBooleanSchema = z.union([
+  z.boolean(),
+  z.string().transform((val) => val === "on" || val === "true"),
+]);
+
+// Base object schema without superRefine (so we can use .omit() and .partial())
+const BaseOverrideSchema = z.object({
+  // Optional for create, required for update operations
+  id: z.string().cuid().optional(),
+  workingHoursId: z.string().cuid().optional(), // Added by backend
+
+  // Core fields
+  isOpen: FlexibleBooleanSchema,
+  date: DateStringSchema,
+  openTime: z.string().optional(),
+  closeTime: z.string().optional(),
+  reason: z
+    .string()
+    .min(1, "Reason is required")
+    .max(500, "Reason must be less than 500 characters")
+    .trim(),
+});
+
+// Function to add validation logic to any schema
+const addOverrideValidation = <T extends z.ZodRawShape>(
+  schema: z.ZodObject<T>
+) =>
+  schema.superRefine((data, ctx) => {
     if (data.isOpen) {
-      if (!data.openTime) {
+      // When override is open, both times are required and must be valid
+      if (!data.openTime || data.openTime.trim() === "") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Open time is required when override day is marked as open",
+          message: "Open time is required when override is marked as open",
           path: ["openTime"],
         });
-      }
-      if (!data.closeTime) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Close time is required when override day is marked as open",
-          path: ["closeTime"],
-        });
-      }
-
-      // Validate time logic for overrides too
-      if (data.openTime && data.closeTime) {
-        const [openHours, openMinutes] = data.openTime.split(":").map(Number);
-        const [closeHours, closeMinutes] = data.closeTime
-          .split(":")
-          .map(Number);
-
-        const openTotalMinutes = openHours * 60 + openMinutes;
-        const closeTotalMinutes = closeHours * 60 + closeMinutes;
-
-        if (openTotalMinutes >= closeTotalMinutes) {
+      } else {
+        const openTimeValidation = TimeStringSchema.safeParse(data.openTime);
+        if (!openTimeValidation.success) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: "Close time must be after open time",
+            message:
+              openTimeValidation.error.errors[0]?.message ||
+              "Invalid open time format",
+            path: ["openTime"],
+          });
+        }
+      }
+
+      if (!data.closeTime || data.closeTime.trim() === "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Close time is required when override is marked as open",
+          path: ["closeTime"],
+        });
+      } else {
+        const closeTimeValidation = TimeStringSchema.safeParse(data.closeTime);
+        if (!closeTimeValidation.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              closeTimeValidation.error.errors[0]?.message ||
+              "Invalid close time format",
             path: ["closeTime"],
           });
         }
       }
+
+      // Validate time logic when both times are present and valid
+      if (data.openTime && data.closeTime) {
+        const openTimeValidation = TimeStringSchema.safeParse(data.openTime);
+        const closeTimeValidation = TimeStringSchema.safeParse(data.closeTime);
+
+        if (openTimeValidation.success && closeTimeValidation.success) {
+          const [openHours, openMinutes] = data.openTime.split(":").map(Number);
+          const [closeHours, closeMinutes] = data.closeTime
+            .split(":")
+            .map(Number);
+
+          const openTotalMinutes = openHours * 60 + openMinutes;
+          const closeTotalMinutes = closeHours * 60 + closeMinutes;
+
+          if (openTotalMinutes >= closeTotalMinutes) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Close time must be after open time",
+              path: ["closeTime"],
+            });
+          }
+        }
+      }
     }
   });
+
+// Main schema with validation
+export const WorkingHoursOverrideSchema =
+  addOverrideValidation(BaseOverrideSchema);
+
+// Specific schemas for different use cases (derived from the base schema)
+export const CreateOverrideSchema = addOverrideValidation(
+  BaseOverrideSchema.omit({ id: true, workingHoursId: true })
+);
+
+export const UpdateOverrideSchema = addOverrideValidation(
+  BaseOverrideSchema.partial().extend({
+    id: z.string().cuid(), // Required for updates
+  })
+);
 
 // Complete working hours configuration schema
 export const CreateWorkingHoursSchema = z.object({
@@ -156,5 +230,8 @@ export type DayScheduleInput = z.infer<typeof DayScheduleSchema>;
 export type WorkingHoursOverrideInput = z.infer<
   typeof WorkingHoursOverrideSchema
 >;
+
+export type CreateOverrideInput = z.infer<typeof CreateOverrideSchema>;
+export type UpdateOverrideInput = z.infer<typeof UpdateOverrideSchema>;
 export type CreateWorkingHoursInput = z.infer<typeof CreateWorkingHoursSchema>;
 export type UpdateWorkingHoursInput = z.infer<typeof UpdateWorkingHoursSchema>;

@@ -8,9 +8,12 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
 import {
+  createWorkingHoursOverride,
+  deleteWorkingHoursOverride,
   getWorkingHoursForOrganization,
   toggleWorkingHours,
   updateWorkingHoursSchedule,
@@ -19,6 +22,7 @@ import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
 import { parseWeeklyScheduleFromFormData } from "~/modules/working-hours/utils";
 import {
   WeeklyScheduleSchema,
+  WorkingHoursOverrideSchema,
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -84,6 +88,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const ErrorBoundary = () => <ErrorContent />;
 
+export type ActionData = typeof action;
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -100,7 +105,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // Get intent manually to avoid any parseData issues with numeric keys in updateSchedule form data
     const intent = formData.get("intent") as string;
-    if (!intent || !["toggle", "updateSchedule"].includes(intent)) {
+    if (
+      !intent ||
+      ![
+        "toggle",
+        "updateSchedule",
+        "createOverride",
+        "deleteOverride",
+      ].includes(intent)
+    ) {
       throw new ShelfError({
         cause: null,
         message: "Invalid action",
@@ -175,6 +188,55 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return json(data({ success: true }), { status: 200 });
       }
+      case "createOverride": {
+        // Parse override form data
+        const { isOpen, date, openTime, closeTime, reason } = parseData(
+          formData,
+          WorkingHoursOverrideSchema
+        );
+
+        await createWorkingHoursOverride({
+          organizationId,
+          date,
+          isOpen,
+          openTime: isOpen ? openTime : undefined,
+          closeTime: isOpen ? closeTime : undefined,
+          reason,
+        });
+
+        sendNotification({
+          title: "Override created",
+          message: "Your working hours override has been created successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }), { status: 200 });
+      }
+
+      case "deleteOverride": {
+        const overrideId = formData.get("overrideId") as string;
+
+        if (!overrideId) {
+          throw new ShelfError({
+            cause: null,
+            message: "Override ID is required",
+            additionalData: { intent },
+            label: "Working hours",
+          });
+        }
+
+        await deleteWorkingHoursOverride(overrideId);
+
+        sendNotification({
+          title: "Override deleted",
+          message: "Your working hours override has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }), { status: 200 });
+      }
 
       default: {
         throw new ShelfError({
@@ -196,7 +258,6 @@ export default function GeneralPage() {
   return (
     <>
       <EnableWorkingHoursForm enabled={workingHours.enabled} header={header} />
-
       {/* New weekly schedule form - only show if working hours are enabled */}
       {workingHours.enabled && (
         <WeeklyScheduleForm
@@ -205,6 +266,8 @@ export default function GeneralPage() {
           }
         />
       )}
+      {/* New weekly schedule form - only show if working hours are enabled */}
+      {workingHours.enabled && <Overrides overrides={workingHours.overrides} />}
     </>
   );
 }

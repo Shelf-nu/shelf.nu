@@ -192,3 +192,49 @@ export function adjustDateToUTC(dateString: string, timeZone: string): string {
   const utcDate = fromZonedTime(zonedDate, timeZone);
   return format(utcDate, "yyyy-MM-dd");
 }
+
+/**
+ * Converts a UTC date string to the user's local timezone for display.
+ * This ensures dates are shown correctly in the user's local context.
+ *
+ * @param dateString - The UTC date string from the database
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} A date string in 'yyyy-MM-dd' format, adjusted to user timezone
+ *
+ * @example
+ * adjustDateToUserTimezone("2024-01-01", "America/New_York") // returns local equivalent
+ */
+export function adjustDateToUserTimezone(
+  dateString: string,
+  timeZone: string
+): string {
+  // If the date string is empty or not a valid date format, return empty string
+  if (!dateString || !isDateString(dateString)) {
+    return "";
+  }
+
+  try {
+    const date = toZonedTime(parseISO(dateString), timeZone);
+    return format(date, "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Gets today's date in the user's timezone, formatted as YYYY-MM-DD.
+ * Useful for setting minimum dates and default values.
+ *
+ * @param timeZone - The user's timezone
+ * @returns {string} Today's date in YYYY-MM-DD format
+ */
+export function getTodayInUserTimezone(timeZone: string): string {
+  try {
+    const now = new Date();
+    const zonedDate = toZonedTime(now, timeZone);
+    return format(zonedDate, "yyyy-MM-dd");
+  } catch {
+    // Fallback to local date if timezone conversion fails
+    return format(new Date(), "yyyy-MM-dd");
+  }
+}
