@@ -4,6 +4,7 @@ import { useZorm } from "react-zorm";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
+import { TimeSelect } from "~/components/forms/time-select";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -53,7 +54,7 @@ export function NewOverrideDialog() {
               </p>
             </div>
           }
-          className="[&_.dialog-header>button]:mt-1"
+          className="md:w-[650px] [&_.dialog-header>button]:mt-1"
         >
           <div className="px-6 pb-4">
             <WorkingHoursOverrideForm
@@ -103,8 +104,8 @@ export const WorkingHoursOverrideForm = ({
   }, [fetcher.state, fetcher.data, onSuccess]);
 
   return (
-    <div className="space-y-6">
-      <fetcher.Form ref={zo.ref} method="post" className="space-y-6">
+    <div className="">
+      <fetcher.Form ref={zo.ref} method="post" className="">
         <input type="hidden" name="intent" value="createOverride" />
 
         {/* Hidden timezone field for server-side conversion */}
@@ -126,7 +127,7 @@ export const WorkingHoursOverrideForm = ({
               title="Toggle override status"
             />
             <label htmlFor="override-is-open" className="text-sm font-medium">
-              {isOpen ? "Open" : "Closed"}
+              Open
             </label>
           </div>
           {zo.errors.isOpen()?.message && (
@@ -136,7 +137,7 @@ export const WorkingHoursOverrideForm = ({
           )}
         </FormRow>
 
-        {/* Date Field - ✅ No defaultValue from initialData */}
+        {/* Date Field */}
         <FormRow
           rowLabel="Date"
           subHeading="Select the date for this override"
@@ -166,27 +167,22 @@ export const WorkingHoursOverrideForm = ({
           >
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3">
-                {/* ✅ Static default values instead of initialData */}
-                <Input
-                  label="Open Time"
-                  hideLabel
-                  type="time"
-                  name={zo.fields.openTime()}
-                  defaultValue="09:00"
+                <TimeSelect
+                  name="openTime"
                   disabled={disabled}
+                  placeholder="Select opening time"
+                  aria-label="Override opening time"
                   required={isOpen}
-                  placeholder="09:00"
+                  defaultValue="09:00"
                 />
                 <div className="text-gray-500">-</div>
-                <Input
-                  label="Close Time"
-                  hideLabel
-                  type="time"
-                  name={zo.fields.closeTime()}
-                  defaultValue="17:00"
+                <TimeSelect
+                  name="closeTime"
                   disabled={disabled}
+                  placeholder="Select closing time"
+                  aria-label="Override closing time"
                   required={isOpen}
-                  placeholder="17:00"
+                  defaultValue="17:00"
                 />
               </div>
               {(zo.errors.openTime()?.message ||
@@ -200,7 +196,7 @@ export const WorkingHoursOverrideForm = ({
           </FormRow>
         )}
 
-        {/* Reason Field - ✅ No defaultValue from initialData */}
+        {/* Reason Field */}
         <FormRow
           rowLabel="Reason"
           subHeading="Provide a reason for this override (e.g., Holiday, Maintenance, etc.)"
@@ -217,6 +213,7 @@ export const WorkingHoursOverrideForm = ({
             placeholder="e.g., Public Holiday, Staff Training, etc."
             maxLength={500}
             error={zo.errors.reason()?.message}
+            className="w-full"
           />
         </FormRow>
 

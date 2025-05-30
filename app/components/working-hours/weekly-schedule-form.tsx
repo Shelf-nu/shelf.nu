@@ -6,8 +6,8 @@ import {
   WEEK_DISPLAY_ORDER,
 } from "~/modules/working-hours/constants";
 import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
-import Input from "../forms/input";
 import { Switch } from "../forms/switch";
+import { TimeSelect } from "../forms/time-select";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -202,52 +202,33 @@ export const WeeklyScheduleForm = ({
                   >
                     {dayName}
                   </label>
-                  {/* Show time preview when day is open */}
-                  {dayState.isOpen && (
-                    <div className="text-sm text-gray-600">
-                      <TimeRangeDisplay
-                        openTime={dayState.openTime}
-                        closeTime={dayState.closeTime}
-                      />
-                    </div>
-                  )}
                 </div>
                 <div className="flex items-center gap-4">
                   {/* Time Inputs - Show when day is open */}
                   {dayState.isOpen && (
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-3">
-                        <Input
-                          label="Open Time"
-                          hideLabel
-                          type="time"
+                        <TimeSelect
                           name={`${dayNumber}.openTime`}
                           value={dayState.openTime}
-                          onChange={(e) =>
-                            handleTimeChange(
-                              dayNumber,
-                              "openTime",
-                              e.target.value
-                            )
+                          onValueChange={(time) =>
+                            handleTimeChange(dayNumber, "openTime", time)
                           }
                           disabled={disabled}
+                          placeholder="Select opening time"
+                          aria-label={`${dayName} opening time`}
                           required={dayState.isOpen}
                         />
                         <div> - </div>
-                        <Input
-                          label="Close Time"
-                          hideLabel
-                          type="time"
+                        <TimeSelect
                           name={`${dayNumber}.closeTime`}
                           value={dayState.closeTime}
-                          onChange={(e) =>
-                            handleTimeChange(
-                              dayNumber,
-                              "closeTime",
-                              e.target.value
-                            )
+                          onValueChange={(time) =>
+                            handleTimeChange(dayNumber, "closeTime", time)
                           }
                           disabled={disabled}
+                          placeholder="Select closing time"
+                          aria-label={`${dayName} closing time`}
                           required={dayState.isOpen}
                         />
                       </div>
