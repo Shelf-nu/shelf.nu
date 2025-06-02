@@ -6,10 +6,8 @@ import {
   SEND_ONBOARDING_EMAIL,
   SUPPORTED_LANGUAGES,
   FALLBACK_LANGUAGE,
-
 } from "~/utils/env";
 import { Config } from "./types";
-
 
 export const config: Config = {
   SUPPORTED_LANGUAGES: SUPPORTED_LANGUAGES || ["en", "fr"],

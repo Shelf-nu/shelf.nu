@@ -18,7 +18,6 @@ async function hydrate() {
       ...i18n,
       ns: getInitialNamespaces(),
       resources: { en: { common: en }, fr: { common: fr } },
-      
     });
   React.startTransition(() => {
     hydrateRoot(

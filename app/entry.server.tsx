@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import { PassThrough } from "stream";
 
 import type { AppLoadContext, EntryContext } from "@remix-run/node";
@@ -156,7 +155,7 @@ async function handleBrowserRequest(
   responseHeaders: Headers,
   remixContext: EntryContext
 ) {
- const instance = await createI18nInstance(request, remixContext);
+  const instance = await createI18nInstance(request, remixContext);
   return new Promise((resolve, reject) => {
     // Initialize i18n instance
 

@@ -12,5 +12,4 @@ export default {
   fallbackLng: config.FALLBACK_LANGUAGE,
   // The default namespace of i18next is "translation", but you can customize it here
   defaultNS: "common",
-
 };

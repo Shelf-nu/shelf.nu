@@ -153,7 +153,7 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
  */
 export const SUPPORTED_LANGUAGES = getEnv("SUPPORTED_LANGUAGES", {
   isRequired: false,
-})
+});
 export const FALLBACK_LANGUAGE = getEnv("FALLBACK_LANGUAGE", {
   isRequired: false,
 });
