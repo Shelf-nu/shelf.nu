@@ -5,8 +5,10 @@ import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { NewBookingLoaderReturnType } from "~/routes/_layout+/bookings.new";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import { useHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -71,12 +73,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   const bookingStatus = useBookingStatusHelpers(status);
   const { teamMembers, userId, currentOrganization } =
-    useLoaderData<NewBookingLoaderReturnType>();
+    useLoaderData<BookingPageLoaderData>();
   const [endDate, setEndDate] = useState(incomingEndDate);
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const isProcessing = isFormProcessing(navigation.state);
+  const hints = useHints();
+
+  // Fetch working hours for validation
+  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { workingHours, isLoading: isLoadingWorkingHours } = workingHoursData;
 
   const disabled = isProcessing || bookingStatus?.isArchived;
 
@@ -93,8 +100,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
+      hints,
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
+      workingHours: workingHours || undefined,
     })
   );
 
@@ -140,7 +149,6 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * This is also used to disabled the name & description fields
    *
    */
-
   const canSeeActions =
     !isBaseOrSelfService ||
     (isBaseOrSelfService &&
@@ -178,7 +186,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               />
               <Button
                 type="submit"
-                disabled={disabled}
+                disabled={disabled || isLoadingWorkingHours}
                 variant="secondary"
                 name="intent"
                 value="save"
@@ -195,6 +203,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <Button
               disabled={
                 disabled ||
+                isLoadingWorkingHours ||
                 !bookingFlags?.hasAssets ||
                 bookingFlags?.hasAlreadyBookedAssets ||
                 bookingFlags?.hasUnavailableAssets
@@ -203,7 +212,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                         ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
                         : bookingFlags?.hasAlreadyBookedAssets
                         ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                        : isProcessing
+                        : isProcessing || isLoadingWorkingHours
                         ? undefined
                         : "You need to add assets to your booking before you can reserve it",
                     }
@@ -226,15 +235,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               booking={{ id, name: name!, from: startDate! }}
               disabled={
                 disabled ||
+                isLoadingWorkingHours ||
                 bookingFlags?.hasUnavailableAssets ||
                 bookingFlags?.hasCheckedOutAssets ||
                 bookingFlags?.hasAssetsInCustody
                   ? {
                       reason: bookingFlags?.hasAssetsInCustody
                         ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
-                        : isProcessing
+                        : isProcessing || isLoadingWorkingHours
                         ? undefined
-                        : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
+                        : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
                     }
                   : false
               }
@@ -250,7 +260,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <CheckinDialog
               portalContainer={zo.form}
               booking={{ id, name: name!, to: endDate! }}
-              disabled={disabled}
+              disabled={disabled || isLoadingWorkingHours}
             />
           </When>
         </AbsolutePositionedHeaderActions>
@@ -272,6 +282,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   fieldName={zo.fields.name()}
                   disabled={
                     disabled ||
+                    isLoadingWorkingHours ||
                     bookingStatus?.isCompleted ||
                     bookingStatus?.isCancelled ||
                     bookingStatus?.isArchived ||
@@ -291,13 +302,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   endDateError={zo.errors.endDate()?.message}
                   setEndDate={setEndDate}
                   disabled={inputFieldIsDisabled}
+                  workingHoursData={workingHoursData}
                 />
               </div>
               <div className="mt-[10px]">
                 <CustodianField
                   defaultTeamMember={defaultTeamMember}
                   disabled={
-                    disabled || isBaseOrSelfService || inputFieldIsDisabled
+                    disabled ||
+                    isLoadingWorkingHours ||
+                    isBaseOrSelfService ||
+                    inputFieldIsDisabled
                   }
                   userCanSeeCustodian={userCanSeeCustodian}
                   error={zo.errors.custodian()?.message}
@@ -316,6 +331,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   fieldName={zo.fields.description()}
                   disabled={
                     disabled ||
+                    isLoadingWorkingHours ||
                     bookingStatus?.isCompleted ||
                     bookingStatus?.isCancelled ||
                     bookingStatus?.isArchived ||

@@ -70,7 +70,8 @@ export default function SettingsPage() {
   /** If user is self service, remove the extra items */
   if (isBaseOrSelfService) {
     items = items.filter(
-      (item) => !["custom-fields", "team", "general"].includes(item.to)
+      (item) =>
+        !["custom-fields", "team", "general", "working-hours"].includes(item.to)
     );
   }
 

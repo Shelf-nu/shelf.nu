@@ -11,7 +11,6 @@ import { TimeSelect } from "../forms/time-select";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
-import { TimeRangeDisplay } from "../shared/time-display";
 
 interface WeeklyScheduleFormProps {
   weeklySchedule: WeeklyScheduleJson;

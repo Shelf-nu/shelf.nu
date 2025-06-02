@@ -4,8 +4,10 @@ import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { NewBookingLoaderReturnType } from "~/routes/_layout+/bookings.new";
+import { useHints } from "~/utils/client-hints";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 import { tw } from "~/utils/tw";
@@ -48,11 +50,19 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const disabled = useDisabled();
+  const hints = useHints();
+
+  // Fetch working hours for validation
+  const workingHoursData = useWorkingHours(currentOrganization.id);
+
+  const { workingHours } = workingHoursData;
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      action: "new", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
+      hints,
+      action: "new",
+      workingHours: workingHours || undefined,
     })
   );
 
@@ -105,6 +115,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   setEndDate={setEndDate}
                   disabled={disabled}
                   isNewBooking={true}
+                  workingHoursData={workingHoursData}
                 />
               </Card>
               <Card className="m-0">

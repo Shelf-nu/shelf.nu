@@ -45,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId: authSession.userId,
       request,
       entity: PermissionEntity.workingHours,
-      action: PermissionAction.read,
+      action: PermissionAction.update,
     });
 
     if (currentOrganization.type === OrganizationType.PERSONAL) {
