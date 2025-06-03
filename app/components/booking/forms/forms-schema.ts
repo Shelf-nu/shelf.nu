@@ -2,22 +2,17 @@ import { BookingStatus } from "@prisma/client";
 import { format, parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { z } from "zod";
-import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
+import type { WorkingHoursData } from "~/modules/working-hours/utils";
+import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
 
-interface WorkingHoursOverride {
+export interface WorkingHoursOverride {
   id: string;
   date: string; // ISO string
   isOpen: boolean;
   openTime: string | null;
   closeTime: string | null;
   reason: string | null;
-}
-
-interface WorkingHoursData {
-  enabled: boolean;
-  weeklySchedule: WeeklyScheduleJson;
-  overrides: WorkingHoursOverride[];
 }
 
 type ValidationResult = { isValid: true } | { isValid: false; message: string };
@@ -131,7 +126,7 @@ interface BookingFormSchemaParams {
   hints?: ReturnType<typeof getHints>;
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
-  workingHours?: WorkingHoursData;
+  workingHours?: any; // Accept any type, validate internally
 }
 /**
  * Returns a Zod validation schema for the booking form based on the action and booking status.
@@ -158,8 +153,11 @@ export function BookingFormSchema({
   hints,
   action,
   status,
-  workingHours,
+  workingHours: rawWorkingHours,
 }: BookingFormSchemaParams) {
+  // Transform and validate working hours data
+  const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
+
   // Base schema - let TypeScript infer the complex Zod types
   const baseSchema = z.object({
     name: z.string().min(2, "Name is required"),

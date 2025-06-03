@@ -4,6 +4,23 @@ import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
+async function createDefaultWorkingHours(organizationId: string) {
+  const defaultSchedule = getDefaultWeeklySchedule();
+
+  return db.workingHours.create({
+    data: {
+      organizationId,
+      enabled: false,
+      weeklySchedule: defaultSchedule,
+    },
+    include: {
+      overrides: {
+        orderBy: { date: "asc" },
+      },
+    },
+  });
+}
+
 export async function getWorkingHoursForOrganization(organizationId: string) {
   try {
     // First try to find existing working hours
@@ -20,21 +37,7 @@ export async function getWorkingHoursForOrganization(organizationId: string) {
       return existingWorkingHours;
     }
 
-    // Create with default schedule if it doesn't exist
-    const defaultSchedule = getDefaultWeeklySchedule();
-
-    const newWorkingHours = await db.workingHours.create({
-      data: {
-        organizationId,
-        enabled: false,
-        weeklySchedule: defaultSchedule,
-      },
-      include: {
-        overrides: {
-          orderBy: { date: "asc" },
-        },
-      },
-    });
+    const newWorkingHours = await createDefaultWorkingHours(organizationId);
 
     return newWorkingHours;
   } catch (cause) {
@@ -113,13 +116,23 @@ export async function createWorkingHoursOverride({
   reason?: string;
 }) {
   try {
+    let workingHoursId: string;
     // First ensure working hours exist for this organization
-    const workingHours = await getWorkingHoursForOrganization(organizationId);
+    const workingHours = await db.workingHours.findUnique({
+      where: { organizationId },
+      select: { id: true },
+    });
+    if (!workingHours) {
+      const workingHours = await createDefaultWorkingHours(organizationId);
+      workingHoursId = workingHours.id;
+    } else {
+      workingHoursId = workingHours.id;
+    }
 
     // Check if an override already exists for this date
     const existingOverride = await db.workingHoursOverride.findFirst({
       where: {
-        workingHoursId: workingHours.id,
+        workingHoursId,
         date: new Date(date),
       },
     });
@@ -137,7 +150,7 @@ export async function createWorkingHoursOverride({
     // Create the override
     const override = await db.workingHoursOverride.create({
       data: {
-        workingHoursId: workingHours.id,
+        workingHoursId,
         date: new Date(date),
         isOpen,
         openTime: isOpen ? openTime : null,
