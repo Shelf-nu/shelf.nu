@@ -83,18 +83,6 @@ export default function KitAssets() {
       <ContextualSidebar />
       <ContextualModal />
 
-      <div className="mb-3 flex gap-4 lg:hidden">
-        {userRoleCanManageAssets ? (
-          <Button
-            to="manage-assets?status=AVAILABLE"
-            variant="primary"
-            width="full"
-          >
-            Manage assets
-          </Button>
-        ) : null}
-      </div>
-
       <div className="flex flex-col md:gap-2">
         <Filters
           className="responsive-filters mb-2 lg:mb-0"
@@ -107,20 +95,26 @@ export default function KitAssets() {
             ),
           }}
         >
-          {userRoleCanManageAssets ? (
-            <div className="flex items-center justify-normal gap-6 xl:justify-end">
-              <div className="hidden lg:block">
-                <Button
-                  to="manage-assets?status=AVAILABLE"
-                  variant="primary"
-                  width="full"
-                  className="whitespace-nowrap"
-                >
-                  Manage assets
-                </Button>
-              </div>
+          <When truthy={userRoleCanManageAssets}>
+            <div className="mt-2 flex w-full items-center gap-2 md:mt-0">
+              <Button
+                icon="scan"
+                variant="secondary"
+                to="../scan-assets"
+                width={"full"}
+              >
+                Scan
+              </Button>
+              <Button
+                to="manage-assets?status=AVAILABLE"
+                variant="primary"
+                width="full"
+                className="whitespace-nowrap"
+              >
+                Manage assets
+              </Button>
             </div>
-          ) : null}
+          </When>
         </Filters>
 
         <List

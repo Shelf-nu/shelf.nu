@@ -6,12 +6,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
@@ -25,10 +26,12 @@ import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -50,8 +53,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -178,27 +181,48 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationPage() {
   const { location, mapData } = useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+  const userRoleCanManageAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.manageAssets,
+  });
 
-  return (
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
+  /**
+   * When we are on the location.scan-assets route, we render an outlet on the whole layout.
+   */
+  const shouldRenderFullOutlet =
+    currentRoute?.handle?.name === "location.scan-assets";
+
+  return shouldRenderFullOutlet ? (
+    <Outlet />
+  ) : (
     <div>
-      <Header>
+      <Header
+        slots={{
+          "left-of-title": (
+            <ImageWithPreview
+              className="mr-2"
+              imageUrl={location?.imageUrl ?? undefined}
+              thumbnailUrl={location?.thumbnailUrl ?? undefined}
+              alt={location.name}
+              withPreview
+            />
+          ),
+        }}
+      >
         <ActionsDropdown location={location} />
       </Header>
       <ContextualModal />
       <ContextualSidebar />
 
-      <div className="mx-[-16px] mt-4 block md:mx-0 lg:flex">
+      <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column - assets list */}
-        <div className=" flex-1 overflow-hidden">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            <Button as="button" to="add-assets" variant="primary" width="full">
-              Manage assets
-            </Button>
-            <div className="w-full">
-              <ActionsDropdown location={location} fullWidth />
-            </div>
-          </div>
+        <div className=" flex-1 md:overflow-hidden">
+          <TextualDivider text="Assets" className="mb-4 lg:hidden" />
           <div className="flex flex-col md:gap-2">
             <Filters
               className="responsive-filters mb-2 lg:mb-0"
@@ -211,20 +235,29 @@ export default function LocationPage() {
                 ),
               }}
             >
-              <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                <div className="hidden lg:block">
+              <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
+                <When truthy={userRoleCanManageAssets}>
                   <Button
-                    as="button"
-                    to="add-assets"
+                    icon="scan"
+                    variant="secondary"
+                    to="scan-assets"
+                    width="full"
+                  >
+                    Scan
+                  </Button>
+                  <Button
+                    to="manage-assets"
                     variant="primary"
+                    width="full"
                     className="whitespace-nowrap"
                   >
                     Manage assets
                   </Button>
-                </div>
+                </When>
               </div>
             </Filters>
             <List
+              className=""
               ItemComponent={ListAssetContent}
               headerChildren={
                 <>
@@ -243,15 +276,6 @@ export default function LocationPage() {
         </div>
         {/* Right column - Location info */}
         <div className="w-full md:w-[360px] lg:ml-4">
-          <Image
-            imageId={location?.imageId}
-            alt={`${location.name}`}
-            className={tw(
-              "block h-auto w-full rounded border object-cover 2xl:h-auto",
-              location.description ? "rounded-b-none border-b-0" : ""
-            )}
-            updatedAt={location.image?.updatedAt}
-          />
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>
@@ -260,41 +284,38 @@ export default function LocationPage() {
 
           <TextualDivider text="Details" className="my-8 lg:hidden" />
 
-          {location.address ? (
-            <>
-              <div className="mt-4 flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
-                <span className=" text-xs font-medium text-gray-600">
-                  Address
-                </span>
-                <span className="font-medium">{location.address}</span>
+          <div className="flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
+            <span className=" text-xs font-medium text-gray-600">Address</span>
+            <span className="font-medium">{location.address ?? "-"}</span>
+          </div>
+
+          {mapData ? (
+            <div className="mb-10 mt-4 border">
+              <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
+              <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
+                <p>
+                  <Button
+                    to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
+                    variant="link"
+                    target="_blank"
+                    rel="nofollow noopener noreferrer"
+                  >
+                    See in Google Maps
+                  </Button>
+                </p>
               </div>
-              {mapData ? (
-                <div className="mb-10 mt-4 border">
-                  <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
-                  <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
-                    <p>
-                      <Button
-                        to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
-                        variant="link"
-                        target="_blank"
-                        rel="nofollow noopener noreferrer"
-                      >
-                        See in Google Maps
-                      </Button>
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="mb-10 mt-4 border">
-                  <MapPlaceholder
-                    description={
-                      "We couldn't geolocate your address. Please try formatting it differently."
-                    }
-                  />
-                </div>
-              )}
-            </>
-          ) : null}
+            </div>
+          ) : (
+            <div className="mb-10 mt-4 border">
+              <MapPlaceholder
+                description={
+                  location.address
+                    ? "We couldn't geolocate your address. Please try formatting it differently."
+                    : "Add an address to see it on the map."
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

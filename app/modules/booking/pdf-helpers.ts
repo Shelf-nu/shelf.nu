@@ -2,15 +2,14 @@ import type {
   Asset,
   Location,
   Category,
-  Image,
   Organization,
-  Custody,
   Prisma,
   Kit,
 } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { SERVER_URL } from "~/utils/env";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -20,45 +19,28 @@ export interface PdfDbResult {
     include: { custodianTeamMember: true; custodianUser: true };
   }>;
   assets: (Asset & {
-    category: Category | null;
-    location: Location | null;
-    custody: Custody | null;
-    kit: Kit | null;
+    category: Pick<Category, "name"> | null;
+    location: Pick<Location, "name"> | null;
+    kit: Pick<Kit, "name"> | null;
   })[];
-  organization: (Partial<Organization> & { image: Image | null }) | null;
+  totalValue: string;
+  organization: Pick<
+    Organization,
+    "id" | "name" | "imageId" | "currency" | "updatedAt"
+  >;
   assetIdToQrCodeMap: Record<string, string>;
-  defaultOrgImg: string | null;
   from?: string;
   to?: string;
   originalFrom?: string;
   originalTo?: string;
 }
 
-async function getImageAsBase64(url: string) {
-  try {
-    // Fetch the image data
-    const response = await fetch(url);
-
-    const arrayBuffer = await response.arrayBuffer();
-
-    // Convert the image data to a Base64-encoded string
-    const base64Image = Buffer.from(arrayBuffer).toString("base64");
-
-    return base64Image;
-
-    // Convert the image data to a Base64-encoded string
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Error fetching image:", error);
-    return null;
-  }
-}
-
 export async function fetchAllPdfRelatedData(
   bookingId: string,
   organizationId: string,
   userId: string,
-  role: OrganizationRoles | undefined
+  role: OrganizationRoles | undefined,
+  request: Request
 ): Promise<PdfDbResult> {
   try {
     const booking = await getBooking({ id: bookingId, organizationId });
@@ -76,38 +58,50 @@ export async function fetchAllPdfRelatedData(
       });
     }
 
-    const [assets, organization, defaultOrgImg] = await Promise.all([
+    const [assets, organization] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: booking?.assets.map((a) => a.id) || [] },
         },
         include: {
-          category: true,
-          custody: true,
-          qrCodes: true,
-          location: true,
-          bookings: {
-            where: {
-              ...(booking?.from && booking?.to
-                ? {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                    OR: [
-                      { from: { lte: booking.to }, to: { gte: booking.from } },
-                      { from: { gte: booking.from }, to: { lte: booking.to } },
-                    ],
-                  }
-                : {}),
+          category: {
+            select: {
+              name: true,
             },
           },
-          kit: true,
+          qrCodes: true,
+          location: {
+            select: {
+              name: true,
+            },
+          },
+          kit: {
+            select: {
+              name: true,
+            },
+          },
         },
       }),
       db.organization.findUnique({
         where: { id: organizationId },
-        select: { imageId: true, name: true, id: true, image: true },
+        select: {
+          imageId: true,
+          name: true,
+          id: true,
+          currency: true,
+          updatedAt: true,
+        },
       }),
-      getImageAsBase64(`${SERVER_URL}/static/images/asset-placeholder.jpg`),
     ]);
+
+    if (!organization) {
+      throw new ShelfError({
+        cause: null,
+        message: "Organization not found",
+        status: 404,
+        label: "Organization",
+      });
+    }
 
     const assetIdToQrCodeMap = await getQrCodeMaps({
       assets,
@@ -118,9 +112,13 @@ export async function fetchAllPdfRelatedData(
     return {
       booking,
       assets,
+      totalValue: calculateTotalValueOfAssets({
+        assets: booking.assets,
+        currency: organization.currency,
+        locale: getClientHint(request).locale,
+      }),
       organization,
       assetIdToQrCodeMap,
-      defaultOrgImg,
     };
   } catch (cause) {
     throw new ShelfError({

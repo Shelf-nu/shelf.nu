@@ -106,6 +106,8 @@ export async function simpleModeLoader({
           select: { id: true, name: true, status: true, from: true, to: true },
         },
       },
+      isSelfService,
+      userId,
     }),
   ]);
 
