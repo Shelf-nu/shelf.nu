@@ -21,7 +21,7 @@ interface WorkingHoursApiResponse {
   workingHours: WorkingHoursData;
 }
 
-interface UseWorkingHoursResult {
+export interface UseWorkingHoursResult {
   workingHours: WorkingHoursData | null;
   isLoading: boolean;
   error: string | undefined;

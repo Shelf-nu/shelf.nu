@@ -3,7 +3,11 @@ import Input from "~/components/forms/input";
 import { InfoBox } from "~/components/shared/info-box";
 import { Spinner } from "~/components/shared/spinner";
 import { TimeDisplay } from "~/components/shared/time-display";
-import type { useWorkingHours } from "~/hooks/use-working-hours";
+import { WorkingHoursPreviewDialog } from "~/components/working-hours/working-hours-preview-dialog";
+import type {
+  useWorkingHours,
+  UseWorkingHoursResult,
+} from "~/hooks/use-working-hours";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 
 export function DatesFields({
@@ -29,9 +33,7 @@ export function DatesFields({
   isNewBooking?: boolean;
   workingHoursData: NonNullable<ReturnType<typeof useWorkingHours>>;
 }) {
-  const { workingHours, isLoading, error } = workingHoursData;
-
-  const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
+  const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
 
   return (
@@ -95,9 +97,10 @@ export function DatesFields({
           unavailable for other bookings.
         </p>
       </FormRow>
-      {shouldShowWorkingHoursInfo && (
-        <WorkingHoursInfo workingHours={workingHours} loading={isLoading} />
-      )}
+      <WorkingHoursInfo
+        workingHoursData={workingHoursData}
+        loading={isLoading}
+      />
       {error && (
         <p className="mt-1 text-sm text-orange-600">
           Working hours validation unavailable: {error}
@@ -108,12 +111,25 @@ export function DatesFields({
 }
 
 function WorkingHoursInfo({
-  workingHours,
+  workingHoursData,
   loading,
 }: {
-  workingHours: NonNullable<ReturnType<typeof useWorkingHours>["workingHours"]>;
+  workingHoursData: UseWorkingHoursResult;
   loading: boolean;
 }) {
+  if (loading) {
+    return (
+      <InfoBox className="py-2">
+        <div className="flex items-center gap-2">
+          <div>Loading working hours</div>
+          <Spinner className="mt-1 size-4" />
+        </div>
+      </InfoBox>
+    );
+  }
+  const { workingHours, error } = workingHoursData;
+  if (!workingHours) return null;
+
   // Get working days from weekly schedule
   const workingDays: string[] = [];
   const dayNames = [
@@ -142,6 +158,7 @@ function WorkingHoursInfo({
   const typicalHours = mondaySchedule?.isOpen
     ? mondaySchedule
     : firstWorkingDay;
+  const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
 
   return (
     <InfoBox className="py-2">
@@ -150,7 +167,7 @@ function WorkingHoursInfo({
           <div>Loading working hours</div>
           <Spinner className="mt-1 size-4" />
         </div>
-      ) : (
+      ) : shouldShowWorkingHoursInfo ? (
         <div className="mt-1 text-sm text-gray-600">
           <p>
             <strong>Working days:</strong>{" "}
@@ -168,6 +185,14 @@ function WorkingHoursInfo({
               Special dates and holidays are also considered
             </p>
           )}
+          <div className="shrink-0">
+            <WorkingHoursPreviewDialog workingHoursData={workingHoursData} />
+          </div>
+        </div>
+      ) : (
+        <div className="mt-1 text-sm text-gray-600">
+          No specific working hours set. You can schedule your booking for any
+          day and time.
         </div>
       )}
     </InfoBox>
