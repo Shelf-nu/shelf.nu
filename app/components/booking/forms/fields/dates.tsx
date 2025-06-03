@@ -91,7 +91,7 @@ export function DatesFields({
         />
 
         <p className="text-[14px] text-gray-600">
-          Within this period the assets in this booking will 'checked out' and
+          Within this period the assets in this booking will be checked out and
           unavailable for other bookings.
         </p>
       </FormRow>
