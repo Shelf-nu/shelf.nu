@@ -235,6 +235,16 @@ export function BookingFormSchema({
       }
     });
 
+  const crossFieldDateValidation = (data: any, ctx: z.RefinementCtx) => {
+    if (data.endDate && data.startDate && data.endDate <= data.startDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "End date cannot be earlier than start date",
+        path: ["endDate"],
+      });
+    }
+  };
+
   // Enhanced schema with date validation
   const fullSchema = baseSchema.extend({
     startDate: createValidatedStartDateSchema(),
@@ -242,36 +252,16 @@ export function BookingFormSchema({
   });
 
   // Schema with ID field for existing bookings
-  const fullSchemaWithId = fullSchema
-    .extend({ id: z.string() })
-    .superRefine((data, ctx) => {
-      // Cross-field validation: end date must be after start date
-      if (data.endDate && data.startDate && data.endDate <= data.startDate) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "End date cannot be earlier than start date",
-          path: ["endDate"],
-        });
-      }
-    });
+  const fullSchemaWithId = fullSchema.extend({ id: z.string() });
 
   // Return appropriate schema based on action
   switch (action) {
     case "new": {
-      return fullSchema.superRefine((data, ctx) => {
-        // Cross-field validation for new bookings
-        if (data.endDate && data.startDate && data.endDate <= data.startDate) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "End date cannot be earlier than start date",
-            path: ["endDate"],
-          });
-        }
-      });
+      return fullSchema.superRefine(crossFieldDateValidation);
     }
 
     case "reserve": {
-      return fullSchemaWithId;
+      return fullSchemaWithId.superRefine(crossFieldDateValidation);
     }
 
     case "save": {
@@ -281,7 +271,7 @@ export function BookingFormSchema({
 
       switch (status) {
         case BookingStatus.DRAFT: {
-          return fullSchemaWithId;
+          return fullSchemaWithId.superRefine(crossFieldDateValidation);
         }
 
         case BookingStatus.RESERVED:
