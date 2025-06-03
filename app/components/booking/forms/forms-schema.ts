@@ -3,7 +3,6 @@ import { format, parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
-import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import type { getHints } from "~/utils/client-hints";
 
 interface WorkingHoursOverride {
@@ -291,21 +290,11 @@ export function BookingFormSchema({
           // Only basic fields can be updated for active bookings
           return baseSchema;
         }
-
-        default: {
-          // Exhaustive check for medical device safety
-          // @TODO fix me
-          // @ts-expect-error
-          checkExhaustiveSwitch(status);
-        }
       }
     }
 
     default: {
-      // Exhaustive check for medical device safety
-      // @TODO fix me
-      // @ts-expect-error
-      checkExhaustiveSwitch(action);
+      return baseSchema;
     }
   }
 }

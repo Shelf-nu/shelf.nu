@@ -12,6 +12,7 @@ import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-up
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { useUserData } from "~/hooks/use-user-data";
+import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
@@ -40,6 +41,8 @@ export default function CreateBookingForSelectedAssetsDialog() {
     organization: currentOrganization,
     currentUserId: user?.id,
   });
+
+  const workingHoursData = useWorkingHours(currentOrganization.id);
 
   return (
     <BulkUpdateDialogContent
@@ -73,6 +76,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               setEndDate={setEndDate}
               disabled={disabled}
               isNewBooking
+              workingHoursData={workingHoursData}
             />
           </Card>
           <Card className="m-0 mb-2">
