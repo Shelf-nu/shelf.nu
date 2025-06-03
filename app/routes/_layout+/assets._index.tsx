@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -18,6 +19,7 @@ import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-t
 import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
 // eslint-disable-next-line import/no-cycle
 import AssetQuickActions from "~/components/assets/assets-index/asset-quick-actions";
+import AssetsAvailability from "~/components/assets/assets-index/assets-availability";
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
@@ -285,6 +287,8 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
+  const [showAssetAvailability] = useState(true);
+
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
   const { isMd } = useViewportHeight();
@@ -365,18 +369,24 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          <List
-            title="Assets"
-            ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-            customPagination={<AssetIndexPagination />}
-            bulkActions={
-              disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
-            }
-            customEmptyStateContent={
-              customEmptyState ? customEmptyState : undefined
-            }
-            headerChildren={headerChildren}
-          />
+          {showAssetAvailability ? (
+            <AssetsAvailability />
+          ) : (
+            <List
+              title="Assets"
+              ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+              customPagination={<AssetIndexPagination />}
+              bulkActions={
+                disableBulkActions || isBase ? undefined : (
+                  <BulkActionsDropdown />
+                )
+              }
+              customEmptyStateContent={
+                customEmptyState ? customEmptyState : undefined
+              }
+              headerChildren={headerChildren}
+            />
+          )}
         </ListContentWrapper>
       )}
     </div>
