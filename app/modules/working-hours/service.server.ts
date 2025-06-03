@@ -1,6 +1,6 @@
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import type { WeeklyScheduleJson } from "./types";
+import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
@@ -76,14 +76,14 @@ export async function updateWorkingHoursSchedule({
   weeklySchedule,
 }: {
   organizationId: string;
-  weeklySchedule: WeeklyScheduleJson;
+  weeklySchedule: WeeklyScheduleForUpdate;
 }) {
   try {
     // Update the weekly schedule - cast to any for Prisma Json type
     await db.workingHours.update({
       where: { organizationId },
       data: {
-        weeklySchedule: weeklySchedule as any, // Prisma Json type requires any
+        weeklySchedule, // Prisma Json type requires any
         updatedAt: new Date(),
       },
     });

@@ -11,6 +11,10 @@ export interface WeeklyScheduleJson {
   [dayOfWeek: string]: DaySchedule; // "0" through "6"
 }
 
+// Input specific type
+export type WeeklyScheduleForUpdate = Prisma.InputJsonObject &
+  WeeklyScheduleJson;
+
 export enum DayOfWeek {
   SUNDAY = 0, // Sunday is 0, following ISO 8601 standard
   MONDAY = 1,
