@@ -48,20 +48,6 @@ export interface WorkingHoursData {
 }
 
 /**
- * Type guard to validate working hours data structure
- */
-function isValidWorkingHoursData(data: any): data is WorkingHoursData {
-  return (
-    data &&
-    typeof data.enabled === "boolean" &&
-    data.weeklySchedule &&
-    typeof data.weeklySchedule === "object" &&
-    !Array.isArray(data.weeklySchedule) &&
-    Array.isArray(data.overrides)
-  );
-}
-
-/**
  * Transforms and validates working hours data from various sources (Prisma DB, API, etc.)
  * into a consistent format for validation schemas.
  *
@@ -75,12 +61,7 @@ export function normalizeWorkingHoursForValidation(
     return undefined;
   }
 
-  // If data is already in the correct format, return as-is
-  if (isValidWorkingHoursData(rawWorkingHours)) {
-    return rawWorkingHours;
-  }
-
-  // Handle Prisma data format or other variations
+  // Always transform the data to ensure consistency
   try {
     const workingHours: WorkingHoursData = {
       enabled: Boolean(rawWorkingHours.enabled),
@@ -98,14 +79,13 @@ export function normalizeWorkingHoursForValidation(
       })),
     };
 
-    // Validate the transformed data
-    if (isValidWorkingHoursData(workingHours)) {
+    // ✅ Validate the transformed result
+    if (workingHours.weeklySchedule && Array.isArray(workingHours.overrides)) {
       return workingHours;
     }
 
     return undefined;
   } catch (error) {
-    // Log error in production for debugging, but don't throw
     return undefined;
   }
 }

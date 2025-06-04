@@ -4,7 +4,7 @@ body > .container {
   @apply overflow-hidden;
 }
 dialog {
-  @apply w-[480px] max-w-full overflow-scroll bg-white md:overflow-auto md:bg-transparent;
+  @apply w-[480px] lg:w-[600px] max-w-full overflow-scroll bg-white md:overflow-auto md:bg-transparent;
 }
 
 dialog > div {

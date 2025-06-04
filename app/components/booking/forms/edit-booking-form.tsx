@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
 import type { BookingStatus } from "@prisma/client";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type {
+  BookingPageActionData,
+  BookingPageLoaderData,
+} from "~/routes/_layout+/bookings.$bookingId";
 import { useHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
@@ -29,6 +33,7 @@ import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDialog from "../checkin-dialog";
 import CheckoutDialog from "../checkout-dialog";
+import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
 
 type BookingFlags = {
@@ -103,8 +108,14 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       hints,
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
-      workingHours: workingHours || undefined,
+      workingHours: workingHours,
     })
+  );
+
+  const actionData = useActionData<BookingPageActionData>();
+  /** This handles server side errors in case client side validation fails */
+  const validationErrors = getValidationErrors<BookingFormSchemaType>(
+    actionData?.error
   );
 
   const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();
@@ -288,7 +299,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     bookingStatus?.isArchived ||
                     !canSeeActions
                   }
-                  error={zo.errors.name()?.message}
+                  error={
+                    validationErrors?.name?.message || zo.errors.name()?.message
+                  }
                   onChange={updateName}
                 />
               </div>
@@ -296,10 +309,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 <DatesFields
                   startDate={startDate}
                   startDateName={zo.fields.startDate()}
-                  startDateError={zo.errors.startDate()?.message}
+                  startDateError={
+                    validationErrors?.startDate?.message ||
+                    zo.errors.startDate()?.message
+                  }
                   endDate={endDate}
                   endDateName={zo.fields.endDate()}
-                  endDateError={zo.errors.endDate()?.message}
+                  endDateError={
+                    validationErrors?.endDate?.message ||
+                    zo.errors.endDate()?.message
+                  }
                   setEndDate={setEndDate}
                   disabled={inputFieldIsDisabled}
                   workingHoursData={workingHoursData}
@@ -315,7 +334,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     inputFieldIsDisabled
                   }
                   userCanSeeCustodian={userCanSeeCustodian}
-                  error={zo.errors.custodian()?.message}
+                  error={
+                    validationErrors?.custodian?.message ||
+                    zo.errors.custodian()?.message
+                  }
                 />
               </div>
             </div>
@@ -337,7 +359,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     bookingStatus?.isArchived ||
                     !canSeeActions
                   }
-                  error={zo.errors.description()?.message}
+                  error={
+                    validationErrors?.description?.message ||
+                    zo.errors.description()?.message
+                  }
                 />
               </div>
             </div>

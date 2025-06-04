@@ -126,7 +126,7 @@ interface BookingFormSchemaParams {
   hints?: ReturnType<typeof getHints>;
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
-  workingHours?: any; // Accept any type, validate internally
+  workingHours: any; // Accept any type, normalize internally
 }
 /**
  * Returns a Zod validation schema for the booking form based on the action and booking status.
@@ -286,3 +286,5 @@ export function BookingFormSchema({
     }
   }
 }
+
+export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;

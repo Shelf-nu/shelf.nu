@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { NewBookingLoaderReturnType } from "~/routes/_layout+/bookings.new";
+import type {
+  NewBookingActionReturnType,
+  NewBookingLoaderReturnType,
+} from "~/routes/_layout+/bookings.new";
 import { useHints } from "~/utils/client-hints";
+import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 import { tw } from "~/utils/tw";
-import { Form } from "../../custom-form";
 import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
-import { BookingFormSchema } from "./forms-schema";
+import { BookingFormSchema, type BookingFormSchemaType } from "./forms-schema";
 import { Button } from "../../shared/button";
 import { Card } from "../../shared/card";
 
@@ -36,6 +39,7 @@ type NewBookingFormData = {
 };
 
 export function NewBookingForm({ booking, action }: NewBookingFormData) {
+  const fetcher = useFetcher<NewBookingActionReturnType>();
   const {
     startDate,
     endDate: incomingEndDate,
@@ -49,7 +53,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
-  const disabled = useDisabled();
+  const disabled = useDisabled(fetcher);
   const hints = useHints();
 
   // Fetch working hours for validation
@@ -62,7 +66,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     BookingFormSchema({
       hints,
       action: "new",
-      workingHours: workingHours || undefined,
+      workingHours: workingHours,
     })
   );
 
@@ -89,9 +93,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     [incomingEndDate]
   );
 
+  /** This handles server side errors in case client side validation fails */
+  const validationErrors = getValidationErrors<BookingFormSchemaType>(
+    fetcher.data?.error
+  );
   return (
     <div>
-      <Form ref={zo.ref} method="post" action={action}>
+      <fetcher.Form ref={zo.ref} method="post" action={action}>
         <div className="-mx-4 mb-4 md:mx-0">
           <div className={tw("mb-8 w-full lg:mb-0 ")}>
             <div className="flex w-full flex-col gap-3">
@@ -100,7 +108,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   name={undefined}
                   fieldName={zo.fields.name()}
                   disabled={disabled}
-                  error={zo.errors.name()?.message}
+                  error={
+                    validationErrors?.name?.message || zo.errors.name()?.message
+                  }
                   onChange={updateName}
                 />
               </Card>
@@ -108,10 +118,16 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                 <DatesFields
                   startDate={startDate}
                   startDateName={zo.fields.startDate()}
-                  startDateError={zo.errors.startDate()?.message}
+                  startDateError={
+                    validationErrors?.startDate?.message ||
+                    zo.errors.startDate()?.message
+                  }
                   endDate={endDate}
                   endDateName={zo.fields.endDate()}
-                  endDateError={zo.errors.endDate()?.message}
+                  endDateError={
+                    validationErrors?.endDate?.message ||
+                    zo.errors.endDate()?.message
+                  }
                   setEndDate={setEndDate}
                   disabled={disabled}
                   isNewBooking={true}
@@ -124,7 +140,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   disabled={disabled || isBaseOrSelfService}
                   userCanSeeCustodian={userCanSeeCustodian}
                   isNewBooking={true}
-                  error={zo.errors.custodian()?.message}
+                  error={
+                    validationErrors?.custodian?.message ||
+                    zo.errors.custodian()?.message
+                  }
                 />
               </Card>
               <Card className="m-0">
@@ -132,7 +151,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   description={undefined}
                   fieldName={zo.fields.description()}
                   disabled={disabled}
-                  error={zo.errors.description()?.message}
+                  error={
+                    validationErrors?.description?.message ||
+                    zo.errors.description()?.message
+                  }
                 />
               </Card>
             </div>
@@ -183,7 +205,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
           </div>
           <div className="h-3" />
         </Card>
-      </Form>
+      </fetcher.Form>
     </div>
   );
 }

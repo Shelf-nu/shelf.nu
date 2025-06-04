@@ -97,6 +97,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+export type NewBookingActionReturnType = typeof action;
+
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -113,7 +115,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
     const hints = getHints(request);
     const workingHours = await getWorkingHoursForOrganization(organizationId);
-
     const payload = parseData(
       formData,
       BookingFormSchema({
