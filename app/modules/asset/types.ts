@@ -154,7 +154,9 @@ export type AdvancedIndexAsset = Pick<
   > & {
     displayDate: string;
   };
-  bookings: Array<Pick<Booking, "id" | "name" | "from" | "to">>;
+  bookings: Array<
+    Pick<Booking, "id" | "name" | "from" | "to" | "status" | "description">
+  >;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{

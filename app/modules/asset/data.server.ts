@@ -103,7 +103,14 @@ export async function simpleModeLoader({
       extraInclude: {
         bookings: {
           where: { status: { in: ["RESERVED", "ONGOING", "OVERDUE"] } },
-          select: { id: true, name: true, status: true, from: true, to: true },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            from: true,
+            to: true,
+            description: true,
+          },
         },
       },
       isSelfService,
