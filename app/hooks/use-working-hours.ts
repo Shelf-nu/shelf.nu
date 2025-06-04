@@ -1,21 +1,5 @@
 import useApiQuery from "~/hooks/use-api-query";
-import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
-
-interface WorkingHoursOverride {
-  id: string;
-  date: string; // ISO string
-  isOpen: boolean;
-  openTime: string | null;
-  closeTime: string | null;
-  reason: string | null;
-}
-
-export interface WorkingHoursData {
-  id: string;
-  enabled: boolean;
-  weeklySchedule: WeeklyScheduleJson;
-  overrides: WorkingHoursOverride[];
-}
+import type { WorkingHoursData } from "~/modules/working-hours/types";
 
 interface WorkingHoursApiResponse {
   workingHours: WorkingHoursData;

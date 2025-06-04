@@ -3,14 +3,12 @@ import { CalendarDays, Clock, AlertCircle, Info } from "lucide-react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { DateS } from "~/components/shared/date";
 import { TimeDisplay } from "~/components/shared/time-display";
-import type {
-  UseWorkingHoursResult,
-  WorkingHoursData,
-} from "~/hooks/use-working-hours";
+import type { UseWorkingHoursResult } from "~/hooks/use-working-hours";
 import {
   DAY_ABBREVIATIONS,
   DAY_NAMES,
 } from "~/modules/working-hours/constants";
+import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 

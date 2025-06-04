@@ -1,5 +1,8 @@
-import type { WorkingHoursOverride } from "~/components/booking/forms/forms-schema";
-import type { DaySchedule, WeeklyScheduleJson } from "./types";
+import type {
+  DaySchedule,
+  WeeklyScheduleJson,
+  WorkingHoursData,
+} from "./types";
 
 /**
  * Parses form data into WeeklyScheduleJson format
@@ -39,12 +42,6 @@ export function parseWeeklyScheduleFromFormData(
   });
 
   return weeklyScheduleData as WeeklyScheduleJson;
-}
-
-export interface WorkingHoursData {
-  enabled: boolean;
-  weeklySchedule: WeeklyScheduleJson;
-  overrides: WorkingHoursOverride[];
 }
 
 /**

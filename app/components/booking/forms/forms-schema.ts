@@ -2,18 +2,9 @@ import { BookingStatus } from "@prisma/client";
 import { format, parseISO } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { z } from "zod";
-import type { WorkingHoursData } from "~/modules/working-hours/utils";
+import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
-
-export interface WorkingHoursOverride {
-  id: string;
-  date: string; // ISO string
-  isOpen: boolean;
-  openTime: string | null;
-  closeTime: string | null;
-  reason: string | null;
-}
 
 type ValidationResult = { isValid: true } | { isValid: false; message: string };
 

@@ -1,4 +1,5 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, WorkingHoursOverride } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 
 // TypeScript types for JSON schedule
 export interface DaySchedule {
@@ -37,6 +38,12 @@ export interface WorkingHoursConfig {
   updatedAt: Date;
 }
 
+export interface WorkingHoursData {
+  enabled: boolean;
+  weeklySchedule: WeeklyScheduleJson;
+  overrides: SerializedWorkingHoursOverride[];
+}
+
 export interface WorkingHoursSchedule extends TimeSlot {
   id: string;
   workingHoursId: string;
@@ -46,15 +53,8 @@ export interface WorkingHoursSchedule extends TimeSlot {
   updatedAt: Date;
 }
 
-export interface WorkingHoursOverride extends TimeSlot {
-  id: string;
-  workingHoursId: string;
-  date: Date;
-  isOpen: boolean;
-  reason?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export type SerializedWorkingHoursOverride =
+  SerializeFrom<WorkingHoursOverride>;
 
 // Comprehensive working hours with all related data
 export type WorkingHoursWithOverrides = Prisma.WorkingHoursGetPayload<{
