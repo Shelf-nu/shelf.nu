@@ -1,6 +1,7 @@
 import { AssetStatus } from "@prisma/client";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import { Switch } from "~/components/forms/switch";
 import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Filters } from "~/components/list/filters";
@@ -10,6 +11,7 @@ import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
+  useSearchParams,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -31,13 +33,16 @@ export function AssetIndexFilters({
 }: {
   disableTeamMemberFilter?: boolean;
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get("view") ?? "table";
+
   /** Used for filtering based on user type */
-  const searchParams: string[] = ["category", "tag", "location"];
+  const filterParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
+    filterParams.push("teamMember");
   }
-  const hasFiltersToClear = useSearchParamHasValue(...searchParams);
-  const clearFilters = useClearValueFromParams(...searchParams);
+  const hasFiltersToClear = useSearchParamHasValue(...filterParams);
+  const clearFilters = useClearValueFromParams(...filterParams);
   const { roles } = useUserRoleHelper();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
@@ -54,10 +59,31 @@ export function AssetIndexFilters({
         slots={{
           "left-of-search": <StatusFilter statusItems={AssetStatus} />,
           "right-of-search": (
-            <SortBy
-              sortingOptions={ASSET_SORTING_OPTIONS}
-              defaultSortingBy="createdAt"
-            />
+            <div className="flex items-center gap-2">
+              <SortBy
+                sortingOptions={ASSET_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+              />
+
+              <div className="flex items-start gap-2">
+                <span>Table</span>
+                <Switch
+                  checked={view === "availability"}
+                  onCheckedChange={(value) => {
+                    setSearchParams((prev) => {
+                      if (value) {
+                        prev.set("view", "availability");
+                        return prev;
+                      }
+
+                      prev.delete("view");
+                      return prev;
+                    });
+                  }}
+                />
+                <span>Assets Availability</span>
+              </div>
+            </div>
           ),
         }}
       >
@@ -76,7 +102,6 @@ export function AssetIndexFilters({
               <div className="text-gray-500"> | </div>
             </div>
           ) : null}
-
           <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
             <DynamicDropdown
               trigger={

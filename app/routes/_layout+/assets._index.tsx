@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -45,6 +44,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
+import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -228,7 +228,7 @@ export function shouldRevalidate({
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   /**
-   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * If we are toggling the sidebar, no need to revalidate this loader.
    * Revalidation happens in _layout
    */
   if (actionResult?.isTogglingSidebar) {
@@ -287,7 +287,8 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const [showAssetAvailability] = useState(true);
+  const [searchParams] = useSearchParams();
+  const view = searchParams.get("view") ?? "table";
 
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
@@ -305,11 +306,6 @@ export const AssetsList = ({
 
   const columns = useAssetIndexColumns();
   const { isBase } = useUserRoleHelper();
-
-  const searchParams: string[] = ["category", "tag", "location"];
-  if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
-  }
 
   const headerChildren = modeIsSimple ? (
     <>
@@ -365,11 +361,11 @@ export const AssetsList = ({
       {!isMd && !modeIsSimple ? (
         <AdvancedModeMobileFallback />
       ) : (
-        <ListContentWrapper>
+        <ListContentWrapper className="md:mt-0">
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {showAssetAvailability ? (
+          {view === "availability" ? (
             <AssetsAvailability />
           ) : (
             <List
@@ -412,7 +408,6 @@ const ListAssetContent = ({
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
           )}
-          // to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
             <div className="relative flex size-14 shrink-0 items-center justify-center">
