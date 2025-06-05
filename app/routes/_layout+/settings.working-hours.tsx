@@ -59,7 +59,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     const workingHours = await getWorkingHoursForOrganization(organizationId);
-
     const header: HeaderData = {
       title: "Working hours",
       subHeading:
@@ -266,6 +265,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 export default function GeneralPage() {
   const { header } = useLoaderData<typeof loader>();
   const { workingHours } = useLoaderData<typeof loader>();
+
   return (
     <>
       <EnableWorkingHoursForm enabled={workingHours.enabled} header={header} />

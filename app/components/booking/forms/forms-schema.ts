@@ -1,6 +1,5 @@
 import { BookingStatus } from "@prisma/client";
 import { format, parseISO } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
@@ -11,21 +10,23 @@ type ValidationResult = { isValid: true } | { isValid: false; message: string };
 /**
  * Validates if a datetime falls within working hours
  */
+/**
+ * Validates if a datetime falls within working hours
+ */
 function validateWorkingHours(
   dateTime: Date,
-  workingHours: WorkingHoursData,
-  timeZone: string
+  workingHours: WorkingHoursData
 ): ValidationResult {
   // If working hours are disabled, all times are valid
   if (!workingHours.enabled) {
     return { isValid: true };
   }
 
-  // Convert to user's timezone for day-of-week calculation
-  const zonedDateTime = toZonedTime(dateTime, timeZone);
-  const dayOfWeek = zonedDateTime.getDay().toString(); // 0 = Sunday, 1 = Monday, etc.
-  const timeString = format(zonedDateTime, "HH:mm");
-  const dateString = format(zonedDateTime, "yyyy-MM-dd");
+  // Extract day and time directly - no timezone conversion needed
+  // dateTime is already correctly parsed from user input
+  const dayOfWeek = dateTime.getDay().toString(); // 0 = Sunday, 1 = Monday, etc.
+  const timeString = format(dateTime, "HH:mm");
+  const dateString = format(dateTime, "yyyy-MM-dd");
 
   // Check for date-specific overrides first
   const override = workingHours.overrides.find((override) => {
@@ -43,7 +44,7 @@ function validateWorkingHours(
       };
     }
 
-    // Validate time against override hours
+    // Validate time against override hours (absolute comparison)
     if (override.openTime && override.closeTime) {
       if (timeString < override.openTime || timeString > override.closeTime) {
         return {
@@ -75,7 +76,7 @@ function validateWorkingHours(
     };
   }
 
-  // Validate time against regular working hours
+  // Validate time against regular working hours (absolute comparison)
   if (daySchedule.openTime && daySchedule.closeTime) {
     if (
       timeString < daySchedule.openTime ||
@@ -192,11 +193,7 @@ export function BookingFormSchema({
 
       // 2. Validate working hours if available
       if (workingHours && hints?.timeZone) {
-        const workingHoursValidation = validateWorkingHours(
-          data,
-          workingHours,
-          hints.timeZone
-        );
+        const workingHoursValidation = validateWorkingHours(data, workingHours);
         if (!workingHoursValidation.isValid) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -210,11 +207,7 @@ export function BookingFormSchema({
     z.coerce.date().superRefine((data, ctx) => {
       // Only validate working hours for end date (no future date requirement)
       if (workingHours && hints?.timeZone) {
-        const validation = validateWorkingHours(
-          data,
-          workingHours,
-          hints.timeZone
-        );
+        const validation = validateWorkingHours(data, workingHours);
         if (!validation.isValid) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

@@ -238,3 +238,45 @@ export function getTodayInUserTimezone(timeZone: string): string {
     return format(new Date(), "yyyy-MM-dd");
   }
 }
+
+/**
+ * Converts a UTC time string to the user's local timezone for display.
+ * This ensures time strings are shown correctly in the user's local context.
+ *
+ * @param utcTimeString - The UTC time string from the database (e.g., "07:15")
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} A time string in 'HH:mm' format, adjusted to user timezone
+ *
+ * @example
+ * adjustTimeToUserTimezone("07:15", "America/New_York") // returns local equivalent like "03:15"
+ */
+export function adjustTimeToUserTimezone(
+  utcTimeString: string,
+  timeZone: string
+): string {
+  if (!utcTimeString || !utcTimeString.includes(":")) {
+    return "";
+  }
+
+  try {
+    const [hours, minutes] = utcTimeString.split(":").map(Number);
+
+    // Create a UTC date for today with the specified time
+    const today = new Date();
+    const utcDate = new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+        hours,
+        minutes
+      )
+    );
+
+    // Convert to user's timezone
+    const localDate = toZonedTime(utcDate, timeZone);
+    return format(localDate, "HH:mm");
+  } catch {
+    return "";
+  }
+}
