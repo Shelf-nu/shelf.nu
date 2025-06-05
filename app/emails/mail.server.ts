@@ -26,7 +26,7 @@ const addToQueue = async (payload: EmailPayloadType) => {
       retryDelay: 5,
     });
   } catch (err) {
-    Logger.warn({
+    Logger.error({
       err,
       details: {
         to: payload.to,
