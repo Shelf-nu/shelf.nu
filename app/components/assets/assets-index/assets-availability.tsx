@@ -1,39 +1,26 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import type { EventContentArg } from "@fullcalendar/core";
+import { useMemo, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
-import type { BookingStatus } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
+import type { Booking, TeamMember, User } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import {
-  ArrowRightIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-} from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
+import EventCard from "~/components/calendar/event-card";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
-import { DateS } from "~/components/shared/date";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "~/components/shared/hover-card";
-import { Spinner } from "~/components/shared/spinner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import { DATE_FORMAT_OPTIONS } from "~/routes/_layout+/calendar";
-import { bookingStatusColorMap } from "~/utils/bookings";
+import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
 import { tw } from "~/utils/tw";
+import { AssetImage } from "../asset-image";
 
 export default function AssetsAvailability() {
   const { items } = useLoaderData<AssetIndexLoaderData>();
   const calendarRef = useRef<FullCalendar>(null);
-  const ripple = useRef<HTMLDivElement>(null);
   const { isMd } = useViewportHeight();
+  const [calendarTitle, setCalendarTitle] = useState<string>();
   const [calendarView, setCalendarView] = useState(
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
@@ -42,44 +29,59 @@ export default function AssetsAvailability() {
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
 
   const { resources, events } = useMemo(() => {
-    const resources = items.map((item) => ({ id: item.id, title: item.title }));
+    const resources = items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      mainImage: item.mainImage,
+      thumbnailImage: item.thumbnailImage,
+      mainImageExpiration: item.mainImageExpiration,
+    }));
 
     const events = items
       .map((asset) => [
-        ...asset.bookings.map((b) => ({
-          title: b.name,
-          resourceId: asset.id,
-          start: b.from!,
-          end: b.to!,
-          extendedProps: {
-            id: b.id,
-            status: b.status,
-            title: b.name,
-            description: b.description,
-            start: b.from,
-            end: b.to,
-          },
-        })),
+        ...asset.bookings.map((b) => {
+          const booking = b as Booking & {
+            custodianUser?: User;
+            custodianTeamMember?: TeamMember;
+          };
+
+          const custodianName = booking?.custodianUser
+            ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+            : booking.custodianTeamMember?.name;
+
+          return {
+            title: booking.name,
+            resourceId: asset.id,
+            start: booking.from!,
+            end: booking.to!,
+            extendedProps: {
+              id: b.id,
+              status: b.status,
+              title: b.name,
+              description: b.description,
+              start: b.from,
+              end: b.to,
+              custodian: {
+                name: custodianName,
+                user: booking.custodianUser
+                  ? {
+                      id: booking.custodianUserId,
+                      firstName: booking.custodianUser?.firstName,
+                      lastName: booking.custodianUser?.lastName,
+                      profilePicture: booking.custodianUser?.profilePicture,
+                    }
+                  : undefined,
+              },
+            },
+          };
+        }),
       ])
       .flat();
 
     return { resources, events };
   }, [items]);
 
-  const toggleLoader = useCallback(
-    (state: boolean) => {
-      if (ripple.current) {
-        if (state) {
-          ripple.current.classList.remove("hidden");
-        } else {
-          ripple.current.classList.add("hidden");
-        }
-      }
-    },
-    [ripple]
-  );
-
-  const handleNavigation = (navigateTo: "prev" | "today" | "next") => {
+  function handleNavigation(navigateTo: "prev" | "today" | "next") {
     const calendarApi = calendarRef.current?.getApi();
     if (navigateTo == "prev") {
       calendarApi?.prev();
@@ -88,23 +90,30 @@ export default function AssetsAvailability() {
     } else if (navigateTo == "today") {
       calendarApi?.gotoDate(new Date());
     }
-  };
 
-  const handleViewChange = (view: string) => {
+    updateTitle();
+  }
+
+  function handleViewChange(view: string) {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
     calendarApi?.changeView(view);
-  };
+
+    updateTitle();
+  }
+
+  function updateTitle() {
+    const calendarApi = calendarRef.current?.getApi();
+    if (calendarApi) {
+      setCalendarTitle(calendarApi.view.title);
+    }
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
         <div className="flex items-center gap-2">
-          <h3>{calendarRef?.current?.getApi()?.view.title}</h3>
-
-          <div ref={ripple} className="mr-3 flex justify-center">
-            <Spinner />
-          </div>
+          <h3>{calendarTitle ?? calendarRef?.current?.getApi()?.view.title}</h3>
         </div>
 
         <div className="flex items-center">
@@ -188,6 +197,7 @@ export default function AssetsAvailability() {
               minute: "2-digit",
               meridiem: "short",
             }}
+            resourceOrder="none"
             plugins={[resourceTimelinePlugin]}
             schedulerLicenseKey={FULL_CALENDAR_LICENSE_KEY}
             initialView="resourceTimelineMonth"
@@ -196,61 +206,40 @@ export default function AssetsAvailability() {
             events={events}
             resourceAreaHeaderContent="Assets"
             resourceLabelContent={({ resource }) => (
-              <div className="p-2">{resource.title}</div>
+              <div className="flex items-center gap-2 px-2">
+                <AssetImage
+                  asset={{
+                    id: resource.id,
+                    mainImage: resource.extendedProps?.mainImage,
+                    thumbnailImage: resource.extendedProps?.thumbnailImage,
+                    mainImageExpiration:
+                      resource.extendedProps?.mainImageExpiration,
+                  }}
+                  alt={resource.title}
+                  className="size-10 rounded border object-cover"
+                  withPreview
+                />
+
+                <p>{resource.title}</p>
+              </div>
             )}
             eventContent={EventCard}
-            eventClassNames="cursor-pointer border border-primary-500 bg-primary-50 rounded px-2"
-            loading={toggleLoader}
+            eventClassNames={(eventInfo) => {
+              const viewType = eventInfo.view.type;
+              const isOneDay = isOneDayEvent(
+                eventInfo.event.start,
+                eventInfo.event.end
+              );
+
+              return getStatusClasses(
+                eventInfo.event.extendedProps.status,
+                isOneDay,
+                viewType
+              );
+            }}
           />
         )}
       </ClientOnly>
     </div>
-  );
-}
-
-function EventCard(args: EventContentArg) {
-  const event = args.event;
-  const booking = args.event.extendedProps;
-
-  return (
-    <HoverCard openDelay={0} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <div className="text-primary-700">
-          {args.timeText} | {event.title}
-        </div>
-      </HoverCardTrigger>
-
-      <HoverCardPortal>
-        <HoverCardContent
-          className="pointer-events-none z-[99999] md:w-96"
-          side="top"
-          align="start"
-        >
-          <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
-            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
-            <ArrowRightIcon className="size-3 text-gray-600" />
-            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
-          </div>
-
-          <div className="mb-3 mt-1 text-sm font-medium">{booking.title}</div>
-
-          <div className="mb-3 flex items-center gap-2">
-            <Badge
-              color={bookingStatusColorMap[booking.status as BookingStatus]}
-            >
-              <span className="block whitespace-nowrap lowercase first-letter:uppercase">
-                {booking.status}
-              </span>
-            </Badge>
-          </div>
-
-          {booking.description ? (
-            <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
-              {booking.description}
-            </div>
-          ) : null}
-        </HoverCardContent>
-      </HoverCardPortal>
-    </HoverCard>
   );
 }

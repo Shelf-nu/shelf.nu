@@ -301,7 +301,6 @@ export const AssetsList = ({
 
   const isUserPage = useIsUserAssetsPage();
 
-  // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
 
   const columns = useAssetIndexColumns();
@@ -366,7 +365,10 @@ export const AssetsList = ({
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
           {view === "availability" ? (
-            <AssetsAvailability />
+            <>
+              <AssetsAvailability />
+              <AssetIndexPagination />
+            </>
           ) : (
             <List
               title="Assets"

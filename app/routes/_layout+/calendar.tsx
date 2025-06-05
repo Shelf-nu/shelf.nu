@@ -1,38 +1,25 @@
 import { useState, useRef, useCallback } from "react";
-import type {
-  EventContentArg,
-  EventHoveringArg,
-} from "@fullcalendar/core/index.js";
+import type { EventHoveringArg } from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import type { BookingStatus } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
-import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
+import EventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
-import { ArrowRightIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
-import { DateS } from "~/components/shared/date";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "~/components/shared/hover-card";
 import { Spinner } from "~/components/shared/spinner";
-import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
-import When from "~/components/when/when";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -63,7 +50,7 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
-type CalendarExtendedProps = {
+export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
   name: string;
@@ -134,12 +121,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
-
-export const DATE_FORMAT_OPTIONS = {
-  weekday: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-} as const;
 
 // Calendar Component
 export default function Calendar() {
@@ -379,7 +360,7 @@ export default function Calendar() {
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
               windowResize={handleWindowResize}
-              eventContent={RenderEventCard}
+              eventContent={EventCard}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
@@ -415,67 +396,5 @@ export default function Calendar() {
     </>
   );
 }
-
-const RenderEventCard = (args: EventContentArg) => {
-  const event = args.event;
-  const viewType = event._context.calendarApi.view.type;
-
-  const booking = event.extendedProps as CalendarExtendedProps;
-  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
-
-  return (
-    <HoverCard openDelay={0} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <div
-          className={tw(
-            "inline-block size-full whitespace-normal bg-transparent lg:truncate"
-          )}
-        >
-          {viewType == "dayGridMonth" && (
-            <When truthy={_isOneDayEvent}>
-              <div className="fc-daygrid-event-dot inline-block" />
-            </When>
-          )}
-          <DateS
-            date={booking.start}
-            options={{
-              timeStyle: "short",
-            }}
-          />{" "}
-          | {event.title}
-        </div>
-      </HoverCardTrigger>
-
-      <HoverCardPortal>
-        <HoverCardContent
-          className="pointer-events-none z-[99999] md:w-96"
-          side="top"
-        >
-          <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
-            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
-            <ArrowRightIcon className="size-3 text-gray-600" />
-            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
-          </div>
-
-          <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
-
-          <div className="mb-3 flex items-center gap-2">
-            <BookingStatusBadge
-              status={booking.status}
-              custodianUserId={booking.custodian.user?.id}
-            />
-            <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
-          </div>
-
-          {booking.description ? (
-            <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
-              {booking.description}
-            </div>
-          ) : null}
-        </HoverCardContent>
-      </HoverCardPortal>
-    </HoverCard>
-  );
-};
 
 export const ErrorBoundary = () => <ErrorContent />;

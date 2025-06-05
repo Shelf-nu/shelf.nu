@@ -71,6 +71,9 @@ export async function simpleModeLoader({
     return redirect(`/assets?${cookieParams.toString()}`);
   }
 
+  const searchParams = getCurrentSearchParams(request);
+  const view = searchParams.get("view") ?? "table";
+
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
@@ -100,19 +103,26 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
-      extraInclude: {
-        bookings: {
-          where: { status: { in: ["RESERVED", "ONGOING", "OVERDUE"] } },
-          select: {
-            id: true,
-            name: true,
-            status: true,
-            from: true,
-            to: true,
-            description: true,
-          },
-        },
-      },
+      extraInclude:
+        view === "availability"
+          ? {
+              bookings: {
+                where: {
+                  status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+                },
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  from: true,
+                  to: true,
+                  description: true,
+                  custodianTeamMember: true,
+                  custodianUser: true,
+                },
+              },
+            }
+          : undefined,
       isSelfService,
       userId,
     }),
