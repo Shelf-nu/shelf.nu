@@ -1,4 +1,4 @@
-import { Currency, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -155,12 +155,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.generalSettings,
-      action: PermissionAction.update,
-    });
+    const { organizationId, currentOrganization, role } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.generalSettings,
+        action: PermissionAction.update,
+      });
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -267,6 +268,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "sso": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to edit SSO settings.",
+            label: "Settings",
+          });
+        }
+
         if (!currentOrganization.enabledSso) {
           throw new ShelfError({
             cause: null,
