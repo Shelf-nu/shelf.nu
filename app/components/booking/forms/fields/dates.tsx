@@ -130,6 +130,7 @@ export function WorkingHoursInfo({
       </InfoBox>
     );
   }
+
   const { workingHours, error } = workingHoursData;
   if (!workingHours) return null;
 
@@ -145,24 +146,36 @@ export function WorkingHoursInfo({
     "Saturday",
   ];
 
+  const workingDaySchedules: Array<{
+    day: string;
+    openTime: string;
+    closeTime: string;
+  }> = [];
+
   Object.entries(workingHours.weeklySchedule).forEach(
     ([dayNumber, schedule]) => {
-      if (schedule.isOpen) {
-        workingDays.push(dayNames[parseInt(dayNumber)]);
+      if (schedule.isOpen && schedule.openTime && schedule.closeTime) {
+        const dayName = dayNames[parseInt(dayNumber)];
+        workingDays.push(dayName);
+        workingDaySchedules.push({
+          day: dayName,
+          openTime: schedule.openTime,
+          closeTime: schedule.closeTime,
+        });
       }
     }
   );
 
-  // Get typical working hours (from Monday if available, or first working day)
-  const mondaySchedule = workingHours.weeklySchedule["1"];
-  const firstWorkingDay = Object.values(workingHours.weeklySchedule).find(
-    (day) => day.isOpen
-  );
-  const typicalHours = mondaySchedule?.isOpen
-    ? mondaySchedule
-    : firstWorkingDay;
-  const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
+  // Check if all working days have the same hours
+  const hasUniformHours =
+    workingDaySchedules.length > 0 &&
+    workingDaySchedules.every(
+      (schedule) =>
+        schedule.openTime === workingDaySchedules[0].openTime &&
+        schedule.closeTime === workingDaySchedules[0].closeTime
+    );
 
+  const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
   return (
     <InfoBox className={tw("py-2", className)}>
       {loading ? (
@@ -176,11 +189,15 @@ export function WorkingHoursInfo({
             <strong>Working days:</strong>{" "}
             {workingDays.length > 0 ? workingDays.join(", ") : "None"}
           </p>
-          {typicalHours?.openTime && typicalHours?.closeTime && (
+          {hasUniformHours ? (
             <p>
               <strong>Working hours:</strong>{" "}
-              <TimeDisplay time={typicalHours.openTime} /> -{" "}
-              <TimeDisplay time={typicalHours.closeTime} />
+              <TimeDisplay time={workingDaySchedules[0].openTime} /> -{" "}
+              <TimeDisplay time={workingDaySchedules[0].closeTime} />
+            </p>
+          ) : (
+            <p>
+              <strong>Working hours:</strong> Vary by day
             </p>
           )}
           {workingHours.overrides.length > 0 && (
