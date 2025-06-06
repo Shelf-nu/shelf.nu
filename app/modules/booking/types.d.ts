@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Booking, Prisma } from "@prisma/client";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ResponsePayload } from "~/utils/http.server";
@@ -74,3 +74,9 @@ interface BaseBookingLoaderResponse {
  * Combined type for booking loader response that includes ResponsePayload requirements
  */
 export type BookingLoaderResponse = BaseBookingLoaderResponse & ResponsePayload;
+
+/**
+ * Minimum type for clashing bookings
+ * This is used to represent bookings that clash with the current booking when extending or modifying a booking.
+ */
+export type ClashingBooking = Pick<Booking, "id" | "name">;

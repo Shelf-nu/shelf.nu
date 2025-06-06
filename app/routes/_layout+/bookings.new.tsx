@@ -16,6 +16,7 @@ import { useUserData } from "~/hooks/use-user-data";
 import { createBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
@@ -96,6 +97,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+export type NewBookingActionReturnType = typeof action;
+
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -111,10 +114,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
     const hints = getHints(request);
-
+    const workingHours = await getWorkingHoursForOrganization(organizationId);
     const payload = parseData(
       formData,
-      BookingFormSchema({ hints, action: "new" }),
+      BookingFormSchema({
+        hints,
+        action: "new",
+        workingHours,
+      }),
       {
         additionalData: { userId, organizationId },
       }

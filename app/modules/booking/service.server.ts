@@ -52,6 +52,7 @@ import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
+  ClashingBooking,
   SchedulerData,
 } from "./types";
 import {
@@ -1168,7 +1169,7 @@ export async function extendBooking({
       });
 
     /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
-    const clashingBookings = await db.booking.findMany({
+    const clashingBookings: ClashingBooking[] = await db.booking.findMany({
       where: {
         id: { not: booking.id },
         organizationId,

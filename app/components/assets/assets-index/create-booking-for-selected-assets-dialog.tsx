@@ -7,22 +7,22 @@ import { CustodianField } from "~/components/booking/forms/fields/custodian";
 import { DatesFields } from "~/components/booking/forms/fields/dates";
 import { DescriptionField } from "~/components/booking/forms/fields/description";
 import { NameField } from "~/components/booking/forms/fields/name";
+import type { BookingFormSchemaType } from "~/components/booking/forms/forms-schema";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { useUserData } from "~/hooks/use-user-data";
+import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
+import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const zo = useZorm(
-    "CreateBookingWithAssets",
-    BookingFormSchema({ action: "new" })
-  );
+
   const { startDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes();
   const [endDate, setEndDate] = useState(defaultEndDate);
@@ -41,6 +41,12 @@ export default function CreateBookingForSelectedAssetsDialog() {
     currentUserId: user?.id,
   });
 
+  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { workingHours } = workingHoursData;
+  const zo = useZorm(
+    "CreateBookingWithAssets",
+    BookingFormSchema({ action: "new", workingHours })
+  );
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
@@ -51,72 +57,93 @@ export default function CreateBookingForSelectedAssetsDialog() {
       actionUrl="/bookings/new"
       className="lg:w-[600px]"
     >
-      {({ disabled, handleCloseDialog, fetcherError }) => (
-        <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
-          <Card className="m-0 mb-2">
-            <NameField
-              name={undefined}
-              fieldName={zo.fields.name()}
-              error={zo.errors.name()?.message}
-              disabled={disabled}
-              onChange={() => {}}
-            />
-          </Card>
-          <Card className="m-0 mb-2">
-            <DatesFields
-              startDate={startDate}
-              startDateName={zo.fields.startDate()}
-              startDateError={zo.errors.startDate()?.message}
-              endDate={endDate}
-              endDateName={zo.fields.endDate()}
-              endDateError={zo.errors.endDate()?.message}
-              setEndDate={setEndDate}
-              disabled={disabled}
-              isNewBooking
-            />
-          </Card>
-          <Card className="m-0 mb-2">
-            <CustodianField
-              defaultTeamMember={defaultTeamMember}
-              disabled={disabled || isBaseOrSelfService}
-              userCanSeeCustodian={userCanSeeCustodian}
-              isNewBooking
-              error={zo.errors.custodian()?.message}
-            />
-          </Card>
-          <Card className="m-0 mb-2">
-            <DescriptionField
-              description={undefined}
-              fieldName={zo.fields.description()}
-              disabled={disabled}
-              error={zo.errors.description()?.message}
-            />
-          </Card>
+      {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => {
+        /** This handles server side errors in case client side validation fails */
+        const validationErrors = getValidationErrors<BookingFormSchemaType>(
+          fetcherData?.error
+        );
+        return (
+          <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
+            <Card className="m-0 mb-2">
+              <NameField
+                name={undefined}
+                fieldName={zo.fields.name()}
+                error={
+                  validationErrors?.name?.message || zo.errors.name()?.message
+                }
+                disabled={disabled}
+                onChange={() => {}}
+              />
+            </Card>
+            <Card className="m-0 mb-2">
+              <DatesFields
+                startDate={startDate}
+                startDateName={zo.fields.startDate()}
+                startDateError={
+                  validationErrors?.startDate?.message ||
+                  zo.errors.startDate()?.message
+                }
+                endDate={endDate}
+                endDateName={zo.fields.endDate()}
+                endDateError={
+                  validationErrors?.endDate?.message ||
+                  zo.errors.endDate()?.message
+                }
+                setEndDate={setEndDate}
+                disabled={disabled}
+                isNewBooking
+                workingHoursData={workingHoursData}
+              />
+            </Card>
+            <Card className="m-0 mb-2">
+              <CustodianField
+                defaultTeamMember={defaultTeamMember}
+                disabled={disabled || isBaseOrSelfService}
+                userCanSeeCustodian={userCanSeeCustodian}
+                isNewBooking
+                error={
+                  validationErrors?.custodian?.message ||
+                  zo.errors.custodian()?.message
+                }
+              />
+            </Card>
+            <Card className="m-0 mb-2">
+              <DescriptionField
+                description={undefined}
+                fieldName={zo.fields.description()}
+                disabled={disabled}
+                error={
+                  validationErrors?.description?.message ||
+                  zo.errors.description()?.message
+                }
+              />
+            </Card>
 
-          {fetcherError ? (
-            <p className="mt-2 text-sm text-error-500">{fetcherError}</p>
-          ) : null}
+            {fetcherError && !validationErrors ? (
+              <p className="mt-2 text-sm text-error-500">{fetcherError}</p>
+            ) : null}
 
-          <div className="flex items-center gap-3">
-            <Button
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-              onClick={handleCloseDialog}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              width="full"
-              disabled={disabled}
-            >
-              Confirm
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                width="full"
+                disabled={disabled}
+                onClick={handleCloseDialog}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                width="full"
+                disabled={disabled}
+              >
+                Confirm
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      }}
     </BulkUpdateDialogContent>
   );
 }

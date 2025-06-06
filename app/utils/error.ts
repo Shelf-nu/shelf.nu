@@ -69,6 +69,7 @@ export type FailureReason = {
     | "QR"
     | "Report"
     | "Settings"
+    | "Working hours"
     | "File storage"
     | "Scan"
     | "Scheduler"
