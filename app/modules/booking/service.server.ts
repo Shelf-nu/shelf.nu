@@ -1420,6 +1420,7 @@ export async function getBookings(params: {
   takeAll?: boolean;
   orderBy?: string;
   orderDirection?: SortingDirection;
+  kitId?: string;
 }) {
   const {
     organizationId,
@@ -1438,6 +1439,7 @@ export async function getBookings(params: {
     takeAll = false,
     orderBy = "from",
     orderDirection = "asc",
+    kitId,
   } = params;
 
   try {
@@ -1544,6 +1546,12 @@ export async function getBookings(params: {
           to: { lte: bookingTo },
         },
       ];
+    }
+
+    if (kitId) {
+      where.assets = {
+        some: { kitId },
+      };
     }
 
     const [bookings, bookingCount] = await Promise.all([
