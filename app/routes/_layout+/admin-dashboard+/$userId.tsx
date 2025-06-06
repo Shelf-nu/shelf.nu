@@ -500,7 +500,7 @@ const SsoUsersByDomainTable = ({
   if (sortedDomains.length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">
-        No SSO users found workspaces owned by this user.
+        No SSO users found in workspaces owned by this user.
       </div>
     );
   }
