@@ -9,6 +9,7 @@ import type {
   UseWorkingHoursResult,
 } from "~/hooks/use-working-hours";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { tw } from "~/utils/tw";
 
 export function DatesFields({
   startDate,
@@ -110,16 +111,18 @@ export function DatesFields({
   );
 }
 
-function WorkingHoursInfo({
+export function WorkingHoursInfo({
   workingHoursData,
   loading,
+  className,
 }: {
   workingHoursData: UseWorkingHoursResult;
   loading: boolean;
+  className?: string;
 }) {
   if (loading) {
     return (
-      <InfoBox className="py-2">
+      <InfoBox className={tw("py-2", className)}>
         <div className="flex items-center gap-2">
           <div>Loading working hours</div>
           <Spinner className="mt-1 size-4" />
@@ -161,7 +164,7 @@ function WorkingHoursInfo({
   const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
 
   return (
-    <InfoBox className="py-2">
+    <InfoBox className={tw("py-2", className)}>
       {loading ? (
         <div className="flex items-center gap-2">
           <div>Loading working hours</div>

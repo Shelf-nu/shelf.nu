@@ -14,7 +14,10 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
+import {
+  BookingFormSchema,
+  ExtendBookingSchema,
+} from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
 import { TimeRemaining } from "~/components/booking/time-remaining";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -743,16 +746,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
       case "extend-booking": {
-        const endDate = formData.get("endDate")!.toString()!;
-        if (!endDate) {
-          throw new ShelfError({
-            cause: null,
-            label: "Booking",
-            message: "End date is required.",
-          });
-        }
-
         const hints = getClientHint(request);
+        const { endDate } = parseData(
+          formData,
+          ExtendBookingSchema({
+            workingHours,
+            timeZone: hints.timeZone,
+          }),
+          {
+            additionalData: { userId, organizationId },
+          }
+        );
 
         const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
           zone: hints.timeZone,

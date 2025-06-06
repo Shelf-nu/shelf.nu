@@ -10,9 +10,6 @@ type ValidationResult = { isValid: true } | { isValid: false; message: string };
 /**
  * Validates if a datetime falls within working hours
  */
-/**
- * Validates if a datetime falls within working hours
- */
 function validateWorkingHours(
   dateTime: Date,
   workingHours: WorkingHoursData
@@ -272,3 +269,61 @@ export function BookingFormSchema({
 }
 
 export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
+
+interface ExtendBookingSchemaParams {
+  workingHours?: any;
+}
+
+interface ExtendBookingSchemaParams {
+  workingHours?: any;
+  timeZone?: string;
+}
+
+export function ExtendBookingSchema({
+  workingHours: rawWorkingHours,
+  timeZone,
+}: ExtendBookingSchemaParams) {
+  // Transform and validate working hours data (same as BookingFormSchema)
+  const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
+
+  return z.object({
+    endDate: z.string().superRefine((dateString, ctx) => {
+      // Convert string to Date for validation purposes
+      const dateTime = new Date(dateString);
+
+      if (isNaN(dateTime.getTime())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Invalid date format",
+        });
+        return;
+      }
+
+      // 1. Validate future date using existing function
+      const futureValidation = validateFutureDate(dateTime, timeZone);
+      if (!futureValidation.isValid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: futureValidation.message,
+        });
+        return;
+      }
+
+      // 2. Validate working hours using existing function
+      if (workingHours) {
+        const workingHoursValidation = validateWorkingHours(
+          dateTime,
+          workingHours
+        );
+        if (!workingHoursValidation.isValid) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: workingHoursValidation.message,
+          });
+        }
+      }
+    }),
+  });
+}
+
+export type ExtendBookingSchemaType = ReturnType<typeof ExtendBookingSchema>;
