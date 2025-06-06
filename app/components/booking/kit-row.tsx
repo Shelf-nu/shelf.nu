@@ -72,20 +72,20 @@ export default function KitRow({
             </div>
           </div>
         </Td>
+        <When truthy={isOverlapping} fallback={<Td> </Td>}>
+          <Td>
+            <AvailabilityBadge
+              badgeText="Already booked"
+              tooltipTitle="Kit is already booked"
+              tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
+            />
+          </Td>
+        </When>
 
-        <Td> </Td>
         <Td> </Td>
 
         <Td className="pr-4 text-right align-middle">
           <div className="flex items-center justify-end gap-5">
-            <When truthy={isOverlapping}>
-              <AvailabilityBadge
-                badgeText="Already booked"
-                tooltipTitle="Some assets are already booked"
-                tooltipContent="This kit contains some assets that are added to a booking that is overlapping the selected time period."
-              />
-            </When>
-
             <Button
               onClick={() => {
                 onToggleExpansion && onToggleExpansion(kit.id);
