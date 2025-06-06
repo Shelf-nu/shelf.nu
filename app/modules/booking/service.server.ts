@@ -2016,6 +2016,10 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
   );
 
+  const hasAssetsWithSignaturePending = assets.some(
+    (asset) => asset.status === AssetStatus.SIGNATURE_PENDING
+  );
+
   const hasKits = assets.some((asset) => !!asset.kitId);
 
   return {
@@ -2024,6 +2028,7 @@ export async function getBookingFlags(
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
+    hasAssetsWithSignaturePending,
     hasKits,
   };
 }

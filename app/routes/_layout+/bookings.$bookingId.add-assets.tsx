@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody, Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -62,7 +62,9 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { makeShelfError, ShelfError } from "~/utils/error";
+
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -85,6 +87,7 @@ export type AssetWithBooking = Asset & {
   category: Category;
   kitId?: string | null;
   qrScanned: string;
+  kit: Pick<Kit, "id" | "name" | "status"> | null;
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -646,8 +649,10 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
               <div className="flex flex-row gap-x-2">
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    kit={item?.kit}
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    shareAgreementUrl={getShareAgreementUrl(item)}
                   />
                 </When>
 
@@ -655,7 +660,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   isAddedThroughKit={isAddedThroughKit}
                   showKitStatus
                   asset={item as unknown as AssetWithBooking}
-                  isCheckedOut={item.status === "CHECKED_OUT"}
+                  isCheckedOut={item.status === AssetStatus.CHECKED_OUT}
                 />
               </div>
             </div>
