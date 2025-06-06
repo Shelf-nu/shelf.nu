@@ -61,6 +61,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianUserId: userId,
         }),
         custodianTeamMemberIds: teamMemberIds,
+        kitId,
       }),
 
       // TeamMember data for custodian

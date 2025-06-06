@@ -23,8 +23,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })
     );
 
-    // Get asset with mainImage
-    const asset = await db.asset.findUniqueOrThrow({
+    // Use findUnique instead of findUniqueOrThrow to handle missing assets gracefully
+    const asset = await db.asset.findUnique({
       where: { id: assetId },
       select: {
         id: true,
@@ -33,6 +33,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
         organizationId: true,
       },
     });
+
+    // If asset doesn't exist, return early with error information
+    if (!asset) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: `Asset not found for thumbnail generation: ${assetId}`,
+          additionalData: { assetId },
+          label: "Assets",
+        })
+      );
+
+      return json(
+        data({
+          asset: null,
+          error: "Asset not found",
+        })
+      );
+    }
 
     // If thumbnail already exists, refresh its URL
     if (asset.thumbnailImage) {
@@ -62,7 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
           return json(data({ asset: updatedAsset }));
         } catch (error) {
-          Logger.warn(
+          Logger.error(
             new ShelfError({
               cause: error,
               message: `Failed to refresh thumbnail URL for asset ${assetId}`,
@@ -171,6 +190,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
       bucketName: "assets",
     });
 
+    // Double-check the asset still exists before updating (in case it was deleted during processing)
+    const existsCheck = await db.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true },
+    });
+
+    if (!existsCheck) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: `Asset was deleted during thumbnail generation: ${assetId}`,
+          additionalData: { assetId },
+          label: "Assets",
+        })
+      );
+
+      return json(
+        data({
+          asset: null,
+          error: "Asset was deleted during processing",
+        })
+      );
+    }
+
     // Update the asset record with both the thumbnail and a fresh expiration
     const updatedAsset = await db.asset.update({
       where: { id: assetId },
@@ -211,6 +254,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cause,
       message: "Error generating thumbnail.",
       label: "Assets",
+      additionalData: { assetId: url.searchParams.get("assetId") || "unknown" },
     });
 
     // Log the error for debugging
