@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { TeamMember } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { tw } from "~/utils/tw";
@@ -22,8 +23,15 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignKitCustody", BulkAssignKitCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  const { teamMembers } = useLoaderData<{ teamMembers: TeamMember[] }>();
-  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const { teamMembers } = useLoaderData<{
+    teamMembers: Prisma.TeamMemberGetPayload<{ include: { user: true } }>[];
+  }>();
+
+  const user = useUserData();
+  const currentTeamMember = teamMembers.find((tm) => tm.userId === user?.id);
+
+  const [hasCustodianSelected, setHasCustodianSelected] =
+    useState(isSelfService); // If self-service, we assume the custodian is already selected
 
   return (
     <BulkUpdateDialogContent
@@ -44,10 +52,11 @@ export default function BulkAssignCustodyDialog() {
             <DynamicSelect
               hidden={isSelfService}
               defaultValue={
-                isSelfService && teamMembers?.length > 0
+                isSelfService && currentTeamMember
                   ? JSON.stringify({
-                      id: teamMembers[0].id,
-                      name: resolveTeamMemberName(teamMembers[0]),
+                      id: currentTeamMember.id,
+                      name: resolveTeamMemberName(currentTeamMember),
+                      email: currentTeamMember.user?.email,
                     })
                   : undefined
               }
@@ -87,7 +96,7 @@ export default function BulkAssignCustodyDialog() {
           </div>
 
           <CustodyAgreementSelector
-            className="my-5"
+            className={tw("mb-12", isSelfService ? "-mt-10" : "mt-4")}
             hasCustodianSelected={hasCustodianSelected}
           />
 

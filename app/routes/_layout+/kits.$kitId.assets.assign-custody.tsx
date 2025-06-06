@@ -446,12 +446,13 @@ export default function GiveKitCustody() {
   const disabled = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
   const { kit, teamMembers } = useLoaderData<typeof loader>();
-  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const { isSelfService } = useUserRoleHelper();
+
+  const [hasCustodianSelected, setHasCustodianSelected] =
+    useState(isSelfService); // If self-service, we assume the custodian is already selected
   const submit = useSubmit();
 
   const [isAlertOpen, setIsAlertOpen] = useState(false);
-
-  const { isSelfService } = useUserRoleHelper();
 
   const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);

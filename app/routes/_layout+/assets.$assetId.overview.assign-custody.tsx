@@ -380,7 +380,8 @@ export default function Custody() {
   const actionData = useActionData<typeof action>();
   const zo = useZorm("AssignAssetCustody", AssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
-  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const [hasCustodianSelected, setHasCustodianSelected] =
+    useState(isSelfService); // If self-service, we assume the custodian is already selected
 
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 

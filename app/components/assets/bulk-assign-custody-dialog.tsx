@@ -29,7 +29,8 @@ export default function BulkAssignCustodyDialog() {
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<typeof loader>();
 
-  const [hasCustodianSelected, setHasCustodianSelected] = useState(false);
+  const [hasCustodianSelected, setHasCustodianSelected] =
+    useState(isSelfService); // If self-service, we assume the custodian is already selected
   const [isSuccess, setIsSuccess] = useState(false);
 
   const assetsSelected = useAtomValue(selectedBulkItemsAtom);
@@ -63,6 +64,7 @@ export default function BulkAssignCustodyDialog() {
                     ? JSON.stringify({
                         id: teamMembers[0].id,
                         name: resolveTeamMemberName(teamMembers[0]),
+                        email: teamMembers[0]?.user?.email,
                       })
                     : undefined
                 }
@@ -106,7 +108,7 @@ export default function BulkAssignCustodyDialog() {
               ) : null}
 
               <CustodyAgreementSelector
-                className="mt-5"
+                className={tw("mb-12", !isSelfService && "mt-4")}
                 hasCustodianSelected={hasCustodianSelected}
               />
             </div>
