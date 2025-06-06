@@ -17,6 +17,7 @@ declare global {
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
+      FULL_CALENDAR_LICENSE_KEY: string;
     };
   }
 }
@@ -55,6 +56,7 @@ declare global {
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
+      FULL_CALENDAR_LICENSE_KEY: string;
     }
   }
 }
@@ -191,6 +193,10 @@ export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
 });
 
+export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {
+  isSecret: false,
+});
+
 export const MAINTENANCE_MODE =
   getEnv("MAINTENANCE_MODE", {
     isSecret: false,
@@ -246,5 +252,6 @@ export function getBrowserEnv() {
     URL_SHORTENER,
     FREE_TRIAL_DAYS,
     SUPPORT_EMAIL,
+    FULL_CALENDAR_LICENSE_KEY,
   };
 }
