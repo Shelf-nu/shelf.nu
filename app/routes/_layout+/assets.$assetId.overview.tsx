@@ -260,7 +260,8 @@ export default function AssetOverview() {
     userId,
   } = useLoaderData<typeof loader>();
 
-  const isInsideKit = !!asset.kit;
+  const isInsideKit =
+    !!asset.kit && asset.kit.status === KitStatus.SIGNATURE_PENDING;
   const signUrl = `/sign${isInsideKit ? "/kit-custody" : ""}/${
     isInsideKit ? asset.kit?.custody?.id : asset.custody?.id
   }`;

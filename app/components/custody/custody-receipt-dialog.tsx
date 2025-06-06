@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useReactToPrint } from "react-to-print";
 import { useSearchParams } from "~/hooks/search-params";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type loader } from "~/routes/_layout+/receipts.index";
 import { useHints } from "~/utils/client-hints";
 import { formatEnum } from "~/utils/misc";
@@ -17,6 +18,8 @@ export default function CustodyReceiptDialog() {
   const { items, organization } = useLoaderData<typeof loader>();
   const receiptRef = useRef<HTMLDivElement>(null);
   const hints = useHints();
+
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const receiptId = searchParams.get("receiptId");
   const receipt = items.find((item) => item.id === receiptId);
@@ -110,7 +113,11 @@ export default function CustodyReceiptDialog() {
               <p className="col-span-2 py-2 text-gray-600">
                 {custodian.user ? (
                   <Button
-                    to={`/settings/team/users/${custodian.user.id}`}
+                    to={
+                      isBaseOrSelfService
+                        ? "/me/assets"
+                        : `/settings/team/users/${custodian.user.id}`
+                    }
                     variant="link-gray"
                     target="_blank"
                   >

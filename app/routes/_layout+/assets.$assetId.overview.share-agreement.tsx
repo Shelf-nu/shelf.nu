@@ -1,3 +1,4 @@
+import { KitStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -37,7 +38,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         organizationId,
       });
 
-    const isInsideKit = !!asset.kit;
+    const isInsideKit =
+      !!asset.kit && asset.kit.status === KitStatus.SIGNATURE_PENDING;
 
     const signUrl = `${SERVER_URL}/sign${isInsideKit ? "/kit-custody" : ""}/${
       isInsideKit ? asset.kit?.custody?.id : custody.id

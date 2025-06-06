@@ -451,7 +451,9 @@ export async function getAgreementByCustodyId({
             title: true,
             organizationId: true,
             user: { select: { email: true } },
-            kit: { select: { custody: { select: { id: true } } } },
+            kit: {
+              select: { status: true, custody: { select: { id: true } } },
+            },
           },
         },
         agreement: true,

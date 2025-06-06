@@ -77,7 +77,9 @@ export default function AgreementStatusCard({
           </p>
         ) : null}
 
-        {isSignaturePending && isBaseOrSelfService ? null : (
+        {isSignaturePending &&
+        isBaseOrSelfService &&
+        !isCustodianCurrentUser ? null : (
           <Button to={getUrl()} variant="link-gray">
             {isSignaturePending
               ? isCustodianCurrentUser
