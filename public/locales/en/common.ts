@@ -1,0 +1,7 @@
+const en = {
+  login: {
+    login: "Log in",
+    subHeading: "Welcome back! Enter your details below to log in.",
+  },
+};
+export default en;
