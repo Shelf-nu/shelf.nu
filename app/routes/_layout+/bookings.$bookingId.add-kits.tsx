@@ -377,7 +377,9 @@ export default function AddKitsToBooking() {
     if (!selectedBulkItems.length) {
       setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
     }
-  }, [bookingKitIds, selectedBulkItems.length, setSelectedBulkItems]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Set disabled items for kit
@@ -413,7 +415,13 @@ export default function AddKitsToBooking() {
     >
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
-          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="assets"
+            onClick={() => {
+              setSelectedBulkItems([]);
+            }}
+          >
             Assets{" "}
             {totalAssetsSelected > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">

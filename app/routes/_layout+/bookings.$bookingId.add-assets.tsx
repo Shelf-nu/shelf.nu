@@ -420,7 +420,8 @@ export default function AddAssetsToNewBooking() {
       }
     },
 
-    [bookingAssets, selectedBulkItems.length, setSelectedBulkItems]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
   );
 
   /**
@@ -461,7 +462,13 @@ export default function AddAssetsToNewBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="kits"
+            onClick={() => {
+              setSelectedBulkItems([]);
+            }}
+          >
             Kits
             {bookingKitIds.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
