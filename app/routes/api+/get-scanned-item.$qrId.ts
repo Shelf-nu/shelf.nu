@@ -166,6 +166,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         cause: null,
         message: "QR code is not linked to any asset or kit",
         additionalData: { qrId, shouldSendNotification: false },
+        shouldBeCaptured: false,
         label: "QR",
       });
     }
