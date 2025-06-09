@@ -7,8 +7,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useLoaderData } from "@remix-run/react";
-import { format, parseISO } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
+import { parseISO } from "date-fns";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
@@ -28,7 +27,11 @@ import {
 } from "~/components/shared/tooltip";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { useHints } from "~/utils/client-hints";
-import { adjustDateToUTC, isDateString } from "~/utils/date-fns";
+import {
+  adjustDateToUserTimezone,
+  adjustDateToUTC,
+  isDateString,
+} from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { extractQrIdFromValue } from "./helpers";
@@ -1341,20 +1344,6 @@ export function DateField({
   }, [localError, error]);
 
   useEffect(() => {
-    function adjustDateToUserTimezone(dateString: string): string {
-      // If the date string is empty or not a valid date format, return empty string
-      if (!dateString || !isDateString(dateString)) {
-        return "";
-      }
-
-      try {
-        const date = toZonedTime(parseISO(dateString), timeZone);
-        return format(date, "yyyy-MM-dd");
-      } catch {
-        return "";
-      }
-    }
-
     if (Array.isArray(filter.value)) {
       const start = isDateString(filter.value[0])
         ? filter.value[0]
@@ -1363,14 +1352,14 @@ export function DateField({
         ? filter.value[1]
         : String(filter.value[1]);
       setLocalValue([
-        adjustDateToUserTimezone(start),
-        adjustDateToUserTimezone(end),
+        adjustDateToUserTimezone(start, timeZone),
+        adjustDateToUserTimezone(end, timeZone),
       ]);
     } else {
       const value = isDateString(filter.value)
         ? filter.value
         : String(filter.value);
-      setLocalValue([adjustDateToUserTimezone(value), ""]);
+      setLocalValue([adjustDateToUserTimezone(value, timeZone), ""]);
     }
   }, [filter.value, timeZone]);
 
