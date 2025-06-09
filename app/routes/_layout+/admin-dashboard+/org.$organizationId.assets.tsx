@@ -156,7 +156,6 @@ export default function AdminOrgQrCodes() {
       <div className="flex justify-between">
         <div className="flex items-end gap-3">
           <h2>Assets</h2>
-          {/* <span>{members.length} total members</span> */}
         </div>
       </div>
       <AssetsList />

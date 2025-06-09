@@ -4,7 +4,7 @@ import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
-async function createDefaultWorkingHours(organizationId: string) {
+export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
 
   const workingHours = await db.workingHours.create({
@@ -274,7 +274,7 @@ export async function getWorkingHoursOverridesForOrganization(
   }
 }
 
-function getDefaultWeeklySchedule(): Record<string, any> {
+export function getDefaultWeeklySchedule(): Record<string, any> {
   return {
     "0": { isOpen: false }, // Sunday
     "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Monday
