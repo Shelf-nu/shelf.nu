@@ -6,6 +6,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
+import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
 
@@ -169,6 +170,13 @@ export async function createOrganization({
               id: userId,
             },
           },
+        },
+      },
+
+      workingHours: {
+        create: {
+          enabled: false,
+          weeklySchedule: getDefaultWeeklySchedule(),
         },
       },
     } satisfies Prisma.OrganizationCreateInput;

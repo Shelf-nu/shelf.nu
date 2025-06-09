@@ -33,11 +33,7 @@ import type {
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
-// eslint-disable-next-line import/no-cycle
-import {
-  ListItemTagsColumn,
-  type AssetIndexLoaderData,
-} from "~/routes/_layout+/assets._index";
+import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isLink } from "~/utils/misc";
@@ -52,6 +48,8 @@ import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
+// eslint-disable-next-line import/no-cycle
+import { ListItemTagsColumn } from "./assets-list";
 
 export function AdvancedIndexColumn({
   column,

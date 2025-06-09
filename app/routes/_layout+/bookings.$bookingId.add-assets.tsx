@@ -25,6 +25,7 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -77,7 +78,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { ListItemTagsColumn } from "./assets._index";
 
 export type AssetWithBooking = Asset & {
   bookings: Booking[];
@@ -140,21 +140,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /** Self service can only manage assets for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
+    const cantManageAssetsAsBaseOrSelfService =
       isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
 
     /** Changing assets is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
+    const isNotAllowedStatus = (
+      [
+        BookingStatus.CANCELLED,
+        BookingStatus.ARCHIVED,
+        BookingStatus.COMPLETE,
+      ] as BookingStatus[]
+    ).includes(booking.status);
 
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    if (cantManageAssetsAsBaseOrSelfService || isNotAllowedStatus) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
+        message: isNotAllowedStatus
+          ? "Changing of assets is not allowed for current status of booking."
+          : isSelfServiceOrBase
           ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
         additionalData: {
