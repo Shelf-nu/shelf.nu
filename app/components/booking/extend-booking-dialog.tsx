@@ -1,44 +1,50 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { CalendarIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
-import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useWorkingHours } from "~/hooks/use-working-hours";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import { useHints } from "~/utils/client-hints";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
+import { WorkingHoursInfo } from "./forms/fields/dates";
+import {
+  ExtendBookingSchema,
+  type ExtendBookingSchemaType,
+} from "./forms/forms-schema";
 
 type ExtendBookingDialogProps = {
   className?: string;
   currentEndDate: string;
 };
 
-export const ExtendBookingSchema = z.object({
-  endDate: z.coerce.date().refine((endDate) => {
-    const now = new Date();
-    return endDate > now;
-  }, "Please select a date in future."),
-});
-
 export default function ExtendBookingDialog({
   className,
   currentEndDate,
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
-  const fetcher = useFetcherWithReset<{
-    error?: {
-      message: string;
-      additionalData?: {
-        clashingBookings?: { id: string; name: string }[];
-      };
-    };
-    success: boolean;
-  }>();
-
-  const zo = useZorm("ExtendBooking", ExtendBookingSchema);
+  const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
+  const hints = useHints();
+  const { currentOrganization } = useLoaderData<BookingPageLoaderData>();
+  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { isLoading = true, error } = workingHoursData;
+  const workingHoursDisabled = disabled || isLoading;
+
+  const zo = useZorm(
+    "ExtendBooking",
+    ExtendBookingSchema({
+      timeZone: hints.timeZone,
+      workingHours: workingHoursData.workingHours,
+    })
+  );
 
   function handleOpen() {
     setOpen(true);
@@ -51,11 +57,21 @@ export default function ExtendBookingDialog({
 
   useEffect(
     function closeOnSuccess() {
-      if (fetcher?.data?.success) {
+      if (
+        fetcher?.data &&
+        "success" in fetcher?.data &&
+        fetcher?.data?.success
+      ) {
         handleClose();
       }
     },
-    [fetcher?.data?.success, handleClose]
+    [fetcher?.data, handleClose]
+  );
+
+  /** This handles server side errors in case client side validation fails */
+
+  const validationErrors = getValidationErrors<ExtendBookingSchemaType>(
+    fetcher?.data?.error
   );
 
   return (
@@ -100,36 +116,49 @@ export default function ExtendBookingDialog({
                 type="datetime-local"
                 hideLabel
                 name={zo.fields.endDate()}
-                disabled={disabled}
-                error={zo.errors.endDate()?.message}
+                disabled={disabled || workingHoursDisabled}
+                error={
+                  validationErrors?.endDate?.message ||
+                  zo.errors.endDate()?.message
+                }
                 className="mb-4 w-full"
                 placeholder="Booking"
               />
 
               <When truthy={!!fetcher?.data?.error}>
-                <p className="text-sm text-error-500">
-                  {fetcher.data?.error?.message}
-                </p>
                 {fetcher.data?.error?.additionalData?.clashingBookings && (
                   <ul className="mb-4 mt-1 list-inside list-disc pl-4">
-                    {fetcher.data.error.additionalData.clashingBookings.map(
-                      (booking) => (
-                        <li key={booking.id}>
-                          <Button
-                            variant="link-gray"
-                            className={"text-error-500 no-underline"}
-                            target="_blank"
-                            to={`/bookings/${booking.id}`}
-                          >
-                            {booking.name}
-                          </Button>
-                        </li>
-                      )
-                    )}
+                    {(
+                      fetcher.data.error.additionalData.clashingBookings as {
+                        id: string;
+                        name: string;
+                      }[]
+                    ).map((booking) => (
+                      <li key={booking.id}>
+                        <Button
+                          variant="link-gray"
+                          className={"text-error-500 no-underline"}
+                          target="_blank"
+                          to={`/bookings/${booking.id}`}
+                        >
+                          {booking.name}
+                        </Button>
+                      </li>
+                    ))}
                   </ul>
                 )}
               </When>
 
+              <WorkingHoursInfo
+                workingHoursData={workingHoursData}
+                loading={isLoading}
+                className="mb-4"
+              />
+              {error && (
+                <p className="mt-1 text-sm text-orange-600">
+                  Working hours validation unavailable: {error}
+                </p>
+              )}
               <input type="hidden" name="intent" value="extend-booking" />
 
               <div className="flex items-center gap-2">
