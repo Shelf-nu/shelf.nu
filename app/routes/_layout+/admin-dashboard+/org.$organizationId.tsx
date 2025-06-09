@@ -10,6 +10,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Form } from "~/components/custom-form";
@@ -227,11 +228,20 @@ export default function OrgPage() {
   return (
     <div>
       <h1>{organization.name}</h1>
-      <h3>
-        {" "}
-        Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
-        {organization.owner.email}
-      </h3>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="secondary"
+          to={`/admin-dashboard/${organization.owner.id}`}
+          className={"p-2"}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <h3>
+          {" "}
+          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          {organization.owner.email}
+        </h3>
+      </div>
 
       {/* @ts-ignore */}
       {actionData && actionData.message && (
