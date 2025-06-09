@@ -12,6 +12,9 @@ import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
 
+/**
+ * Generates a thumbnail for an asset if missing, with proper handling for existing files
+ */
 async function generateThumbnailIfMissing(asset: {
   id: string;
   mainImage: string | null;
@@ -76,22 +79,54 @@ async function generateThumbnailIfMissing(asset: {
       thumbnailPath = `${originalPath}-thumbnail`;
     }
 
-    // Create and upload thumbnail
-    const paths = await uploadFile(createAsyncIterable(), {
-      filename: thumbnailPath,
-      contentType: originalFile.type,
-      bucketName: "assets",
-      resizeOptions: {
-        width: THUMBNAIL_SIZE,
-        height: THUMBNAIL_SIZE,
-        fit: "cover",
-        withoutEnlargement: true,
-      },
-    });
+    // Try to upload thumbnail, but handle the case where it already exists
+    let uploadResult: string | { originalPath: string; thumbnailPath: string };
+
+    try {
+      // Create and upload thumbnail
+      uploadResult = await uploadFile(createAsyncIterable(), {
+        filename: thumbnailPath,
+        contentType: originalFile.type,
+        bucketName: "assets",
+        resizeOptions: {
+          width: THUMBNAIL_SIZE,
+          height: THUMBNAIL_SIZE,
+          fit: "cover",
+          withoutEnlargement: true,
+        },
+      });
+    } catch (uploadError: any) {
+      // Check if it's a duplicate error (file already exists)
+      if (
+        uploadError?.cause?.statusCode === "409" ||
+        uploadError?.cause?.error === "Duplicate" ||
+        (uploadError?.message && uploadError.message.includes("already exists"))
+      ) {
+        // File already exists in storage, so we can just create a signed URL for it
+        Logger.info(
+          `Thumbnail already exists for asset ${asset.id}, creating signed URL for existing file`,
+          { assetId: asset.id, thumbnailPath }
+        );
+
+        // Create signed URL for the existing thumbnail
+        const thumbnailSignedUrl = await createSignedUrl({
+          filename: thumbnailPath,
+          bucketName: "assets",
+        });
+
+        return thumbnailSignedUrl;
+      }
+
+      // If it's a different error, re-throw it
+      throw uploadError;
+    }
 
     // Create signed URL for the thumbnail
     const thumbnailSignedUrl = await createSignedUrl({
-      filename: typeof paths === "string" ? paths : paths.originalPath,
+      filename:
+        typeof uploadResult === "string"
+          ? uploadResult
+          : uploadResult.originalPath,
       bucketName: "assets",
     });
 
@@ -145,7 +180,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         });
       } catch (error) {
         // If it fails, log the error and keep the existing URL
-        Logger.warn(
+        Logger.error(
           new ShelfError({
             cause: error,
             message: `Failed to refresh main image URL for asset ${assetId}`,
@@ -169,7 +204,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             bucketName: "assets",
           });
         } catch (error) {
-          Logger.warn(
+          Logger.error(
             new ShelfError({
               cause: error,
               message: `Failed to refresh thumbnail URL for asset ${assetId}`,

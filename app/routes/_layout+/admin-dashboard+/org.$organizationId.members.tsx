@@ -4,6 +4,7 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
+import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -84,7 +85,12 @@ export default function AdminOrgQrCodes() {
               <Td>
                 {member.firstName} {member.lastName}
               </Td>
-              <Td>{member.email}</Td>
+              <Td>
+                <span>
+                  {member.email}{" "}
+                  <SSOUserBadge sso={member.sso} userId={member.id} />
+                </span>
+              </Td>
               <Td>{member.userOrganizations[0].roles.join(" ,")}</Td>
               <Td>
                 <DateS
