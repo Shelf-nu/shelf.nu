@@ -1,10 +1,5 @@
 import type { Tag } from "@prisma/client";
-import {
-  TooltipProvider,
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@radix-ui/react-tooltip";
+
 import { useFetcher, useFetchers } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { KitIcon } from "~/components/icons/library";
@@ -16,6 +11,12 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Th, Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
