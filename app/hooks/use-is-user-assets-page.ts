@@ -6,7 +6,7 @@ import { useMatches } from "@remix-run/react";
  */
 export function useIsUserAssetsPage(): boolean {
   const matches = useMatches() as UIMatch<any, any>[];
-  const currentRoute = matches.at(-1);
+  const currentRoute = matches[matches.length - 1];
 
   // Check if route exists, has a handle with a name property
   const routeName = currentRoute?.handle?.name;
