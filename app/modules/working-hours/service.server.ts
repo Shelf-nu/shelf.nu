@@ -7,7 +7,7 @@ const label = "Working hours";
 async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
 
-  return db.workingHours.create({
+  const workingHours = await db.workingHours.create({
     data: {
       organizationId,
       enabled: false,
@@ -19,6 +19,7 @@ async function createDefaultWorkingHours(organizationId: string) {
       },
     },
   });
+  return workingHours;
 }
 
 export async function getWorkingHoursForOrganization(organizationId: string) {
@@ -143,6 +144,7 @@ export async function createWorkingHoursOverride({
         title: "Invalid date",
         message: "An override already exists for this date",
         additionalData: { organizationId, date },
+        shouldBeCaptured: false,
         label,
       });
     }
