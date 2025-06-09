@@ -377,10 +377,7 @@ export default function AddKitsToBooking() {
     if (!selectedBulkItems.length) {
       setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
     }
-
-    // We only need to run this when component mounts
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bookingKitIds, selectedBulkItems.length, setSelectedBulkItems]);
 
   /**
    * Set disabled items for kit
