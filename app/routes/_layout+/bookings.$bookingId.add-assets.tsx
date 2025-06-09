@@ -25,6 +25,7 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -77,7 +78,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { ListItemTagsColumn } from "./assets._index";
 
 export type AssetWithBooking = Asset & {
   bookings: Booking[];

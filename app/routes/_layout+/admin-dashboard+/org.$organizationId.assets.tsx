@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import {
   bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
@@ -16,7 +17,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requireAdmin, requirePermission } from "~/utils/roles.server";
-import { AssetsList } from "../assets._index";
 
 export const loader = async ({
   request,
@@ -150,7 +150,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-export default function AdminOrgQrCodes() {
+export default function AdminOrgQrAssets() {
   return (
     <>
       <div className="flex justify-between">
@@ -158,7 +158,7 @@ export default function AdminOrgQrCodes() {
           <h2>Assets</h2>
         </div>
       </div>
-      <AssetsList />
+      <AssetsList disableBulkActions />
     </>
   );
 }
