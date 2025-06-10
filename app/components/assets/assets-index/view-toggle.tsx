@@ -4,7 +4,11 @@ import { ButtonGroup } from "~/components/shared/button-group";
 import { useSearchParams } from "~/hooks/search-params";
 import { tw } from "~/utils/tw";
 
-export function AssetsIndexViewToggle() {
+export function AssetsIndexViewToggle({
+  modeIsSimple = true,
+}: {
+  modeIsSimple?: boolean;
+}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = searchParams.get("view") ?? "table";
   const disabledButtonStyles =
@@ -17,8 +21,9 @@ export function AssetsIndexViewToggle() {
         <Button
           variant="secondary"
           className={tw(
-            "px-[14px] py-[10px] hover:cursor-pointer",
-            !isAvailabilityView ? disabledButtonStyles : ""
+            "px-[14px]  hover:cursor-pointer",
+            !isAvailabilityView ? disabledButtonStyles : "",
+            modeIsSimple ? "py-[10px]" : ""
           )}
           type="button"
           onClick={() => {
@@ -35,8 +40,9 @@ export function AssetsIndexViewToggle() {
         <Button
           variant="secondary"
           className={tw(
-            "px-[14px] py-[10px] hover:cursor-pointer",
-            isAvailabilityView ? disabledButtonStyles : ""
+            "px-[14px]  hover:cursor-pointer",
+            isAvailabilityView ? disabledButtonStyles : "",
+            modeIsSimple ? "py-[10px]" : ""
           )}
           type={"button"}
           onClick={() => {

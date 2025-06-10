@@ -180,6 +180,7 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
+        "right-of-search": <AssetsIndexViewToggle modeIsSimple={false} />,
       }}
       searchClassName="leading-5"
     >
