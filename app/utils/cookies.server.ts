@@ -93,9 +93,17 @@ export async function initializePerPageCookieOnLayout(request: Request) {
 }
 
 /** ASSET FILTER COOKIE - SIMPLE MODE */
-export const createAssetFilterCookie = (orgId: string) =>
-  createCookie(`${orgId}_assetFilter`, {
-    path: "/assets",
+export const createFilterCookie = ({
+  orgId,
+  name,
+  path,
+}: {
+  orgId: string;
+  name: string;
+  path: string;
+}) =>
+  createCookie(`${orgId}_${name}`, {
+    path,
     sameSite: "lax",
     secrets: [process.env.SESSION_SECRET],
     secure: process.env.NODE_ENV === "production",
@@ -104,25 +112,31 @@ export const createAssetFilterCookie = (orgId: string) =>
 
 export async function getFiltersFromRequest(
   request: Request,
-  organizationId: string
+  organizationId: string,
+  cookie: { name: string; path: string }
 ) {
   let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");
 
-  const assetFilterCookie = createAssetFilterCookie(organizationId);
+  const filterCookie = createFilterCookie({
+    orgId: organizationId,
+    name: cookie.name,
+    path: cookie.path,
+  });
+
   if (filters) {
     // Clean filters before storing in cookie
     const cleanedFilters = cleanParamsForCookie(filters);
     // Only serialize to cookie if we have filters after cleaning
     const serializedCookie = cleanedFilters
-      ? await assetFilterCookie.serialize(cleanedFilters)
+      ? await filterCookie.serialize(cleanedFilters)
       : null;
 
     // Return original filters for URL but cleaned cookie
     return { filters, serializedCookie };
   } else if (cookieHeader) {
     // Use existing cookie filter but clean it
-    filters = (await assetFilterCookie.parse(cookieHeader)) || {};
+    filters = (await filterCookie.parse(cookieHeader)) || {};
     const cleanedFilters = cleanParamsForCookie(filters);
 
     // Only redirect if we have filters after cleaning
@@ -131,6 +145,7 @@ export async function getFiltersFromRequest(
       redirectNeeded: !!cleanedFilters,
     };
   }
+
   return { filters: "" };
 }
 

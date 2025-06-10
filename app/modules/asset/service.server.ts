@@ -2838,7 +2838,8 @@ export async function getUserAssetsTabLoaderData({
   try {
     const { filters, redirectNeeded } = await getFiltersFromRequest(
       request,
-      organizationId
+      organizationId,
+      { name: "assetFilter", path: "/assets" }
     );
 
     if (filters && redirectNeeded) {
