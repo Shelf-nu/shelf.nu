@@ -55,6 +55,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message:
           "You are not allowed to access working hours in a personal workspace.",
         label: "Settings",
+        shouldBeCaptured: false,
       });
     }
 
