@@ -371,14 +371,10 @@ export default function AddKitsToBooking() {
    */
   useEffect(() => {
     /**
-     * We are setting the default items here, so we do not have to
-     * set the kits again if there are any changes in the bookingKitIds
+     * We are setting the default items here from the server data. This runs only once on mount
      */
-    if (!selectedBulkItems.length) {
-      setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
-    }
+    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
 
-    // We only need to run this when component mounts
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
