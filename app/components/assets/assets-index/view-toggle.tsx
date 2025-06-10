@@ -1,4 +1,4 @@
-import { CalendarIcon, ListIcon } from "lucide-react";
+import { CalendarIcon } from "@radix-ui/react-icons";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { useSearchParams } from "~/hooks/search-params";
@@ -22,6 +22,7 @@ export function AssetsIndexViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px]  hover:cursor-pointer",
+            "font-normal text-gray-500",
             !isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -34,13 +35,14 @@ export function AssetsIndexViewToggle({
             });
           }}
           title="Switch to list view"
-        >
-          <ListIcon className="size-5" />
-        </Button>
+          tooltip="List view"
+          icon="sort"
+        />
         <Button
           variant="secondary"
           className={tw(
-            "px-[14px]  hover:cursor-pointer",
+            "px-[14px] hover:cursor-pointer",
+            "font-normal text-gray-500",
             isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -53,6 +55,7 @@ export function AssetsIndexViewToggle({
             });
           }}
           title={"Switch to availability view"}
+          tooltip="Availability view"
         >
           <CalendarIcon className="size-5" />
         </Button>

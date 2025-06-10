@@ -1,4 +1,4 @@
-import { Prisma, CustomFieldType, BookingStatus } from "@prisma/client";
+import { Prisma, CustomFieldType } from "@prisma/client";
 
 import type {
   Filter,

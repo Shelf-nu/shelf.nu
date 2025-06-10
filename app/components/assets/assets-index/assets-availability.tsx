@@ -18,7 +18,9 @@ import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 
 export default function AssetsAvailability() {
-  const { items } = useLoaderData<AssetIndexLoaderData>();
+  const { items, modelName, totalItems, perPage } =
+    useLoaderData<AssetIndexLoaderData>();
+  const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
   const { isMd } = useViewportHeight();
   const [calendarTitle, setCalendarTitle] = useState<string>();
@@ -33,11 +35,13 @@ export default function AssetsAvailability() {
     const resources = items.map((item) => ({
       id: item.id,
       title: item.title,
-      mainImage: item.mainImage,
-      thumbnailImage: item.thumbnailImage,
-      mainImageExpiration: item.mainImageExpiration,
-      status: item.status,
-      availableToBook: item.availableToBook,
+      extendedProps: {
+        mainImage: item.mainImage,
+        thumbnailImage: item.thumbnailImage,
+        mainImageExpiration: item.mainImageExpiration,
+        status: item.status,
+        availableToBook: item.availableToBook,
+      },
     }));
 
     const events = items
@@ -134,6 +138,7 @@ export default function AssetsAvailability() {
                 variant="secondary"
                 className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
                 onClick={() => handleNavigation("today")}
+                tooltip={"Go to today"}
               >
                 Today
               </Button>
@@ -208,11 +213,32 @@ export default function AssetsAvailability() {
             headerToolbar={false}
             resources={resources}
             events={events}
-            resourceAreaHeaderContent="Assets"
+            resourceAreaHeaderContent={
+              <div className="px-2 py-1">
+                <h5 className="text-left capitalize">{plural}</h5>
+
+                <div>
+                  {perPage < totalItems ? (
+                    <p>
+                      {items.length} {items.length > 1 ? plural : singular}{" "}
+                      <span className="text-gray-400">out of {totalItems}</span>
+                    </p>
+                  ) : (
+                    <span>
+                      {totalItems} {items.length > 1 ? plural : singular}
+                    </span>
+                  )}
+                </div>
+              </div>
+            }
+            resourceAreaHeaderClassNames={() => [
+              "text-md font-semibold text-gray-900",
+            ]}
             slotLabelFormat={[
               { month: "long", year: "numeric" }, // top level of text
               { weekday: "short", day: "2-digit" }, // lower level of text
             ]}
+            slotLabelClassNames={() => ["font-normal text-gray-600"]}
             slotMinWidth={100}
             resourceLabelContent={({ resource }) => (
               <div className="flex items-center gap-2 px-2">
@@ -241,8 +267,8 @@ export default function AssetsAvailability() {
                     </Button>
                   </div>
                   <AssetStatusBadge
-                    status={resource.status}
-                    availableToBook={resource.availableToBook}
+                    status={resource.extendedProps?.status}
+                    availableToBook={resource.extendedProps?.availableToBook}
                   />
                 </div>
               </div>
