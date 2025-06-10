@@ -416,9 +416,9 @@ export default function AddAssetsToNewBooking() {
        * set the assets again if there are any items already present
        */
 
-      if (!selectedBulkItems.length) {
-        setSelectedBulkItems(bookingAssets);
-      }
+      // if (!selectedBulkItems.length) {
+      setSelectedBulkItems(bookingAssets);
+      // }
     },
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
