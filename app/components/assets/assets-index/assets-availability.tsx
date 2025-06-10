@@ -15,6 +15,7 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
+import { AssetStatusBadge } from "../asset-status-badge";
 
 export default function AssetsAvailability() {
   const { items } = useLoaderData<AssetIndexLoaderData>();
@@ -35,6 +36,8 @@ export default function AssetsAvailability() {
       mainImage: item.mainImage,
       thumbnailImage: item.thumbnailImage,
       mainImageExpiration: item.mainImageExpiration,
+      status: item.status,
+      availableToBook: item.availableToBook,
     }));
 
     const events = items
@@ -192,6 +195,7 @@ export default function AssetsAvailability() {
             height="auto"
             timeZone="local"
             slotEventOverlap
+            nowIndicator
             eventTimeFormat={{
               hour: "numeric",
               minute: "2-digit",
@@ -205,6 +209,11 @@ export default function AssetsAvailability() {
             resources={resources}
             events={events}
             resourceAreaHeaderContent="Assets"
+            slotLabelFormat={[
+              { month: "long", year: "numeric" }, // top level of text
+              { weekday: "short", day: "2-digit" }, // lower level of text
+            ]}
+            slotMinWidth={100}
             resourceLabelContent={({ resource }) => (
               <div className="flex items-center gap-2 px-2">
                 <AssetImage
@@ -216,11 +225,26 @@ export default function AssetsAvailability() {
                       resource.extendedProps?.mainImageExpiration,
                   }}
                   alt={resource.title}
-                  className="size-10 rounded border object-cover"
+                  className="size-14 rounded border object-cover"
                   withPreview
                 />
-
-                <p>{resource.title}</p>
+                <div className="flex flex-col gap-1">
+                  <div className="min-w-0 flex-1 truncate">
+                    <Button
+                      to={`/assets/${resource.id}`}
+                      variant="link"
+                      className="text-left font-medium text-gray-900 hover:text-gray-700"
+                      target={"_blank"}
+                      onlyNewTabIconOnHover={true}
+                    >
+                      {resource.title}
+                    </Button>
+                  </div>
+                  <AssetStatusBadge
+                    status={resource.status}
+                    availableToBook={resource.availableToBook}
+                  />
+                </div>
               </div>
             )}
             eventContent={EventCard}

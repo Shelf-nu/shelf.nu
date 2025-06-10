@@ -1,7 +1,6 @@
 import { AssetStatus } from "@prisma/client";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { Switch } from "~/components/forms/switch";
 import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Filters } from "~/components/list/filters";
@@ -11,7 +10,6 @@ import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
-  useSearchParams,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -21,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { AssetsIndexViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
   title: "Name",
@@ -33,9 +32,6 @@ export function AssetIndexFilters({
 }: {
   disableTeamMemberFilter?: boolean;
 }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const view = searchParams.get("view") ?? "table";
-
   /** Used for filtering based on user type */
   const filterParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
@@ -65,24 +61,7 @@ export function AssetIndexFilters({
                 defaultSortingBy="createdAt"
               />
 
-              <div className="flex items-start gap-2">
-                <span>Table</span>
-                <Switch
-                  checked={view === "availability"}
-                  onCheckedChange={(value) => {
-                    setSearchParams((prev) => {
-                      if (value) {
-                        prev.set("view", "availability");
-                        return prev;
-                      }
-
-                      prev.delete("view");
-                      return prev;
-                    });
-                  }}
-                />
-                <span>Assets Availability</span>
-              </div>
+              <AssetsIndexViewToggle />
             </div>
           ),
         }}
