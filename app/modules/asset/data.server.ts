@@ -235,6 +235,7 @@ export async function advancedModeLoader({
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
+  const view = searchParams.get("view") ?? "table";
 
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
@@ -282,6 +283,7 @@ export async function advancedModeLoader({
       organizationId,
       filters,
       settings,
+      getBookings: view === "availability",
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
