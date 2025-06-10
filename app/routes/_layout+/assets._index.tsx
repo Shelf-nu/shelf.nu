@@ -1,4 +1,3 @@
-import { type Tag } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -7,56 +6,22 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
-import { motion } from "framer-motion";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image/component";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-// eslint-disable-next-line import/no-cycle
-import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asset-row";
-import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
-import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
-// eslint-disable-next-line import/no-cycle
-import AssetQuickActions from "~/components/assets/assets-index/asset-quick-actions";
-import AssetsAvailability from "~/components/assets/assets-index/assets-availability";
-import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
-import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
+import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";
-import { KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
-import type { ListProps } from "~/components/list";
-import { List } from "~/components/list";
-import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
-import { InfoTooltip } from "~/components/shared/info-tooltip";
-import { Spinner } from "~/components/shared/spinner";
-import { Tag as TagBadge } from "~/components/shared/tag";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
-import { Td, Th } from "~/components/table";
-import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
-import { useSearchParams } from "~/hooks/search-params";
-import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useDisabled } from "~/hooks/use-disabled";
-import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   advancedModeLoader,
   simpleModeLoader,
 } from "~/modules/asset/data.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
-import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   changeMode,
@@ -75,7 +40,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export type AssetIndexLoaderData = typeof loader;
 
@@ -272,288 +236,6 @@ export default function AssetIndexPage() {
         </When>
       </Header>
       <AssetsList />
-    </div>
-  );
-}
-
-export const AssetsList = ({
-  customEmptyState,
-  disableTeamMemberFilter,
-  disableBulkActions,
-  wrapperClassName,
-}: {
-  customEmptyState?: ListProps["customEmptyStateContent"];
-  disableTeamMemberFilter?: boolean;
-  disableBulkActions?: boolean;
-  wrapperClassName?: string;
-}) => {
-  const [searchParams] = useSearchParams();
-  const view = searchParams.get("view") ?? "table";
-
-  // We use the hook because it handles optimistic UI
-  const { modeIsSimple } = useAssetIndexViewState();
-  const { isMd } = useViewportHeight();
-  const fetchers = useFetchers();
-  /** Find the fetcher used for toggling between asset index modes */
-  const modeFetcher = fetchers.find(
-    (fetcher) => fetcher.key === "asset-index-settings-mode"
-  );
-
-  const isUserPage = useIsUserAssetsPage();
-
-  const isSwappingMode = modeFetcher?.formData;
-
-  const columns = useAssetIndexColumns();
-  const { isBase } = useUserRoleHelper();
-
-  const headerChildren = modeIsSimple ? (
-    <>
-      <Th>Category</Th>
-      <Th>Tags</Th>
-      <When truthy={!isUserPage}>
-        <Th className="flex items-center gap-1 whitespace-nowrap">
-          Custodian{" "}
-          <InfoTooltip
-            iconClassName="size-4"
-            content={
-              <>
-                <h6>Asset custody</h6>
-                <p>
-                  This column shows if a user has custody of the asset either
-                  via direct assignment or via a booking. If you see{" "}
-                  <GrayBadge>private</GrayBadge> that means you don't have the
-                  permissions to see who has custody of the asset.
-                </p>
-              </>
-            }
-          />
-        </Th>
-      </When>
-      <Th>Location</Th>
-      <Th>Actions</Th>
-    </>
-  ) : (
-    <AdvancedTableHeader columns={columns} />
-  );
-
-  return (
-    <div
-      className={tw(
-        "flex flex-col",
-        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
-        wrapperClassName
-      )}
-    >
-      <When truthy={!!isSwappingMode}>
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ delay: 0.2 }}
-          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gray-25/95 pt-[200px]"
-        >
-          <Spinner />
-          <p className="mt-2">Changing mode...</p>
-        </motion.div>
-      </When>
-
-      {!isMd && !modeIsSimple ? (
-        <AdvancedModeMobileFallback />
-      ) : (
-        <ListContentWrapper className="md:mt-0">
-          <AssetIndexFilters
-            disableTeamMemberFilter={disableTeamMemberFilter}
-          />
-          {view === "availability" ? (
-            <>
-              <AssetsAvailability />
-              <AssetIndexPagination />
-            </>
-          ) : (
-            <List
-              title="Assets"
-              ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-              customPagination={<AssetIndexPagination />}
-              bulkActions={
-                disableBulkActions || isBase ? undefined : (
-                  <BulkActionsDropdown />
-                )
-              }
-              customEmptyStateContent={
-                customEmptyState ? customEmptyState : undefined
-              }
-              headerChildren={headerChildren}
-            />
-          )}
-        </ListContentWrapper>
-      )}
-    </div>
-  );
-};
-
-const ListAssetContent = ({
-  item,
-  bulkActions,
-  isUserPage,
-}: {
-  item: AssetsFromViewItem;
-  bulkActions?: React.ReactNode;
-  isUserPage?: boolean;
-}) => {
-  const { category, tags, custody, location, kit } = item;
-  return (
-    <>
-      {/* Item */}
-      <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div
-          className={tw(
-            "flex justify-between gap-3 py-4  md:justify-normal",
-            bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
-          )}
-        >
-          <div className="flex items-center gap-3">
-            <div className="relative flex size-14 shrink-0 items-center justify-center">
-              <AssetImage
-                asset={{
-                  id: item.id,
-                  mainImage: item.mainImage,
-                  thumbnailImage: item.thumbnailImage,
-                  mainImageExpiration: item.mainImageExpiration,
-                }}
-                alt={item.title}
-                className="size-full rounded-[4px] border object-cover"
-                withPreview
-              />
-
-              {kit?.id ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-gray-200">
-                        <KitIcon className="size-2" />
-                      </div>
-                    </TooltipTrigger>
-
-                    <TooltipContent side="top">
-                      <p className="text-sm">{kit.name}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : null}
-            </div>
-            <div className="min-w-[130px]">
-              <span className="word-break mb-1 block ">
-                <Button
-                  to={`/assets/${item.id}`}
-                  variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
-                >
-                  {item.title}
-                </Button>
-              </span>
-              <div>
-                <AssetStatusBadge
-                  status={item.status}
-                  availableToBook={item.availableToBook}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </Td>
-
-      {/* Category */}
-      <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
-      </Td>
-
-      {/* Tags */}
-      <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
-      </Td>
-
-      {/* Custodian */}
-      <When truthy={!isUserPage}>
-        <Td>
-          <TeamMemberBadge teamMember={custody?.custodian} />
-        </Td>
-      </When>
-
-      {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
-
-      {/* Quick Actions */}
-      <Td>
-        <AssetQuickActions
-          asset={{
-            ...item,
-            qrId: item.qrCodes[0].id,
-          }}
-        />
-      </Td>
-    </>
-  );
-};
-
-export const ListItemTagsColumn = ({
-  tags,
-}: {
-  tags: Pick<Tag, "id" | "name">[] | undefined;
-}) => {
-  const visibleTags = tags?.slice(0, 2);
-  const remainingTags = tags?.slice(2);
-
-  return tags && tags?.length > 0 ? (
-    <div className="">
-      {visibleTags?.map((tag) => (
-        <TagBadge key={tag.id} className="mr-2">
-          {tag.name}
-        </TagBadge>
-      ))}
-      {remainingTags && remainingTags?.length > 0 ? (
-        <TagBadge
-          className="mr-2 w-6 text-center"
-          title={`${remainingTags?.map((t) => t.name).join(", ")}`}
-        >
-          {`+${tags.length - 2}`}
-        </TagBadge>
-      ) : null}
-    </div>
-  ) : null;
-};
-
-function AdvancedModeMobileFallback() {
-  const fetcher = useFetcher();
-  const disabled = useDisabled(fetcher);
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2">
-      <p className="text-center">
-        Advanced mode is currently not available on mobile.
-      </p>
-      <fetcher.Form
-        method="post"
-        action="/api/asset-index-settings"
-        onSubmit={() => {
-          window.scrollTo({
-            top: 0,
-            behavior: "smooth",
-          });
-        }}
-      >
-        <input type="hidden" name="intent" value="changeMode" />
-
-        <Button name="mode" value="SIMPLE" disabled={disabled}>
-          Change to simple mode
-        </Button>
-      </fetcher.Form>
     </div>
   );
 }

@@ -202,6 +202,11 @@ export function useSidebarNavItems() {
           to: "/settings/general",
         },
         {
+          title: "Working hours",
+          to: "/settings/working-hours",
+          hidden: isPersonalOrganization,
+        },
+        {
           title: "Custom fields",
           to: "/settings/custom-fields",
         },

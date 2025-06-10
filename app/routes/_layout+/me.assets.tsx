@@ -1,4 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -7,7 +8,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { AssetsList } from "./assets._index";
 
 /**
  * Handle is used for properly displaying columns in AssetsList

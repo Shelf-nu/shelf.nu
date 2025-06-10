@@ -108,7 +108,7 @@ export async function simpleModeLoader({
           ? {
               bookings: {
                 where: {
-                  status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
                 },
                 select: {
                   id: true,

@@ -14,7 +14,10 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
+import {
+  BookingFormSchema,
+  ExtendBookingSchema,
+} from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
 import { TimeRemaining } from "~/components/booking/time-remaining";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -50,6 +53,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
+import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
@@ -62,7 +66,11 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import {
+  ShelfError,
+  isZodValidationError,
+  makeShelfError,
+} from "~/utils/error";
 import {
   data,
   error,
@@ -346,6 +354,8 @@ export const handle = {
   name: "bookings.$bookingId",
 };
 
+export type BookingPageActionData = typeof action;
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { bookingId: id } = getParams(
@@ -417,17 +427,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       where: { id },
       select: { id: true, status: true },
     });
-
+    const workingHours = await getWorkingHoursForOrganization(organizationId);
     switch (intent) {
       case "save": {
         const hints = getHints(request);
-
         const payload = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
             hints,
+            workingHours,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -480,6 +490,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             hints,
             action: "reserve",
             status: basicBookingInfo.status,
+            workingHours,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -689,12 +700,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(
-          { success: true },
-          {
-            headers,
-          }
-        );
+        return json(data({ success: true }), {
+          headers,
+        });
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
@@ -738,16 +746,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
       case "extend-booking": {
-        const endDate = formData.get("endDate")!.toString()!;
-        if (!endDate) {
-          throw new ShelfError({
-            cause: null,
-            label: "Booking",
-            message: "End date is required.",
-          });
-        }
-
         const hints = getClientHint(request);
+        const { endDate } = parseData(
+          formData,
+          ExtendBookingSchema({
+            workingHours,
+            timeZone: hints.timeZone,
+          }),
+          {
+            additionalData: { userId, organizationId },
+          }
+        );
 
         const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
           zone: hints.timeZone,
@@ -775,7 +784,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, id });
+    const reason = makeShelfError(
+      cause,
+      { userId, id },
+      !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }
