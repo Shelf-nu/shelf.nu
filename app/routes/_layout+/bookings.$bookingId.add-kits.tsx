@@ -374,9 +374,7 @@ export default function AddKitsToBooking() {
      * We are setting the default items here, so we do not have to
      * set the kits again if there are any changes in the bookingKitIds
      */
-    if (!selectedBulkItems.length) {
-      setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
-    }
+    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -418,9 +416,9 @@ export default function AddKitsToBooking() {
           <TabsTrigger
             className="flex-1 gap-x-2"
             value="assets"
-            onClick={() => {
-              setSelectedBulkItems([]);
-            }}
+            // onClick={() => {
+            //   setSelectedBulkItems([]);
+            // }}
           >
             Assets{" "}
             {totalAssetsSelected > 0 ? (
