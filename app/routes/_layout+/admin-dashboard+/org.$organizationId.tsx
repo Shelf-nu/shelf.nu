@@ -10,6 +10,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Form } from "~/components/custom-form";
@@ -25,6 +26,7 @@ import {
   toggleOrganizationSso,
   toggleWorkspaceDisabled,
 } from "~/modules/organization/service.server";
+import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -56,6 +58,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           },
           owner: true,
           ssoDetails: true,
+          workingHours: true,
         },
       })
       .catch((cause) => {
@@ -68,6 +71,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           label: "Admin dashboard",
         });
       });
+
+    if (!organization.workingHours) {
+      await createDefaultWorkingHours(organization.id);
+    }
 
     return json(data({ organization }));
   } catch (cause) {
@@ -227,11 +234,20 @@ export default function OrgPage() {
   return (
     <div>
       <h1>{organization.name}</h1>
-      <h3>
-        {" "}
-        Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
-        {organization.owner.email}
-      </h3>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="secondary"
+          to={`/admin-dashboard/${organization.owner.id}`}
+          className={"p-2"}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <h3>
+          {" "}
+          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          {organization.owner.email}
+        </h3>
+      </div>
 
       {/* @ts-ignore */}
       {actionData && actionData.message && (
@@ -244,13 +260,18 @@ export default function OrgPage() {
         <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
           <h4>Organization details</h4>
           <ol className="">
-            {Object.entries(organization).map(([key, value]) => (
-              <li key={key}>
-                <span className="font-semibold">{key}</span>:{" "}
-                {typeof value === "string" ? value : null}
-                {typeof value === "boolean" ? String(value) : null}
-              </li>
-            ))}
+            {Object.entries(organization).map(
+              ([key, value]) =>
+                !["workingHours", "ssoDetails", "owner", "qrCodes"].includes(
+                  key
+                ) && (
+                  <li key={key}>
+                    <span className="font-semibold">{key}</span>:{" "}
+                    {typeof value === "string" ? value : null}
+                    {typeof value === "boolean" ? String(value) : null}
+                  </li>
+                )
+            )}
           </ol>
           <hr className="border-1 border-gray-700" />
           <h4>Enable SSO</h4>

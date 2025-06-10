@@ -52,6 +52,7 @@ import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
+  ClashingBooking,
   SchedulerData,
 } from "./types";
 import {
@@ -1168,7 +1169,7 @@ export async function extendBooking({
       });
 
     /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
-    const clashingBookings = await db.booking.findMany({
+    const clashingBookings: ClashingBooking[] = await db.booking.findMany({
       where: {
         id: { not: booking.id },
         organizationId,
@@ -2203,6 +2204,11 @@ export async function bulkArchiveBookings({
         message:
           "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
         label,
+        additionalData: {
+          bookings,
+          organizationId,
+          bookingIds,
+        },
       });
     }
 
@@ -2217,15 +2223,19 @@ export async function bulkArchiveBookings({
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk archive booking.";
+    const isShelfError = isLikeShelfError(cause);
 
     throw new ShelfError({
       cause,
-      message,
-      additionalData: { bookingIds, organizationId },
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while archiving bookings.",
+      additionalData: isShelfError
+        ? cause.additionalData
+        : {
+            bookingIds,
+            organizationId,
+          },
       label,
     });
   }
@@ -2284,6 +2294,11 @@ export async function bulkCancelBookings({
         message:
           "There are some unavailable to cancel booking selected. Please make sure you are selecting the booking which are allowed to cancel.",
         label,
+        additionalData: {
+          bookings,
+          organizationId,
+          bookingIds,
+        },
       });
     }
 
@@ -2385,15 +2400,16 @@ export async function bulkCancelBookings({
       })
     );
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk cancelling bookings.";
+    const isShelfError = isLikeShelfError(cause);
 
     throw new ShelfError({
       cause,
-      message,
-      additionalData: { bookingIds, organizationId, userId },
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while bulk cancelling bookings.",
+      additionalData: isShelfError
+        ? cause.additionalData
+        : { bookingIds, organizationId, userId },
       label,
     });
   }

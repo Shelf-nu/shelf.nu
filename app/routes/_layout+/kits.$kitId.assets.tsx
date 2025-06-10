@@ -3,6 +3,7 @@ import { useRouteLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -27,7 +28,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { ListItemTagsColumn } from "./assets._index";
 import type { KitPageLoaderData } from "./kits.$kitId";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

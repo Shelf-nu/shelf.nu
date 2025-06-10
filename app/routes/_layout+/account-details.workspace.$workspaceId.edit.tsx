@@ -1,4 +1,4 @@
-import { Currency, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
   json,
   MaxPartSizeExceededError,
@@ -135,7 +135,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -259,6 +259,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json({ success: true });
       }
       case "sso": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to edit SSO settings.",
+            label: "Settings",
+          });
+        }
+
         const { enabledSso } = organization;
         if (!enabledSso) {
           throw new ShelfError({

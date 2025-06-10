@@ -71,6 +71,12 @@ const Input = forwardRef(function Input(
   }: InputProps,
   ref
 ) {
+  /**
+   * @TODO
+   * Add automatic server side validation for error messages using getValidationErrors so we dont have to server side errors manually but only pass client side useZorm errors
+   *
+   */
+
   const iconClasses = tw(
     "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]",
     iconClassName

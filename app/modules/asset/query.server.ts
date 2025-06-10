@@ -1126,9 +1126,17 @@ export function parseSortingOptions(sortBy: string[]): {
       console.warn(`Unknown sort field: ${field.name}`);
     }
   }
+  if (orderByParts.length === 0) {
+    // Default sort: Most recent assets first, with stable secondary sort by ID
+    // This provides a logical default while ensuring deterministic results
+    orderByParts.push(
+      '"assetCreatedAt" DESC', // Primary: Newest assets first
+      '"assetId" ASC' // Secondary: Stable sort for identical timestamps
+    );
+  }
 
-  const orderByClause =
-    orderByParts.length > 0 ? `ORDER BY ${orderByParts.join(", ")}` : "";
+  // Always generate an ORDER BY clause for predictable results
+  const orderByClause: string = `ORDER BY ${orderByParts.join(", ")}`;
 
   return { orderByClause, customFieldSortings };
 }
