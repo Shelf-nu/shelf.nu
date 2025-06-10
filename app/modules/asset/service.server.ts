@@ -2355,6 +2355,7 @@ export async function bulkCheckOutAssets({
   custodianEmail,
   organizationId,
   currentSearchParams,
+  orgName,
 }: {
   userId: User["id"];
   custodyAgreement?: CustodyAgreement["id"];
@@ -2364,6 +2365,7 @@ export async function bulkCheckOutAssets({
   custodianEmail?: User["email"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  orgName: string;
 }) {
   try {
     /**
@@ -2518,6 +2520,7 @@ export async function bulkCheckOutAssets({
             assetId: custody.asset.id,
             custodyId: custody.id,
             signatureRequired: agreementFound.signatureRequired,
+            orgName,
           }),
         });
       });

@@ -26,12 +26,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, currentOrganization } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      });
 
     const formData = await request.formData();
 
@@ -75,6 +76,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       custodyAgreement: agreement,
+      orgName: currentOrganization.name,
     });
 
     sendNotification({

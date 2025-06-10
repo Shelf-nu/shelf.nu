@@ -73,7 +73,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.custodyAgreement,
@@ -103,6 +103,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         kitId,
         custodyId: custody.id,
         signatureRequired: custodyAgreement.signatureRequired,
+        orgName: currentOrganization.name,
       }),
     });
 

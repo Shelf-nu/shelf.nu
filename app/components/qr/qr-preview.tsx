@@ -78,7 +78,7 @@ export const QrPreview = ({
 
   return (
     <div
-      className={tw("mb-4 w-auto rounded border bg-white", className)}
+      className={tw("my-3 w-auto rounded border bg-white", className)}
       style={style}
     >
       <div className="flex w-full justify-center pt-6">

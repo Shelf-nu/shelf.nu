@@ -151,12 +151,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role, organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { role, organizationId, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      });
 
     const formData = await request.formData();
 
@@ -323,6 +324,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assetId: asset.id,
             custodyId: asset.custody.id,
             signatureRequired: agreementFound.signatureRequired,
+            orgName: currentOrganization.name,
           }),
         });
       }
@@ -472,7 +474,13 @@ export default function Custody() {
           <WarningBox className="my-8">
             This asset is part of a kit. By assigning it individual custody, you
             might get some inconsistent information and face limitations when
-            trying to update the kit custody later on.
+            trying to update the kit custody later on.{" "}
+            <Link
+              to={`/kits/${asset?.kitId}/assets/assign-custody`}
+              className="underline"
+            >
+              Assign kit custody
+            </Link>
           </WarningBox>
         </When>
 

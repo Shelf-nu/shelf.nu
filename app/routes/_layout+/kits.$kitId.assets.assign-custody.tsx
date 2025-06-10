@@ -173,12 +173,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role, organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.custody,
-    });
+    const { role, organizationId, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.custody,
+      });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const { custodian, agreement } = parseData(
@@ -407,6 +408,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             kitId,
             custodyId: updatedKit?.custody?.id ?? "",
             signatureRequired: agreementFound.signatureRequired,
+            orgName: currentOrganization.name,
           }),
         });
       }

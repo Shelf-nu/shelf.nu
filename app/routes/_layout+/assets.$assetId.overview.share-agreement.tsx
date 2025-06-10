@@ -71,7 +71,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const { assetId } = getParams(params, z.object({ assetId: z.string() }));
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.custodyAgreement,
@@ -108,6 +108,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         assetId: asset.id,
         custodyId: custody.id,
         signatureRequired: custodyAgreement.signatureRequired,
+        orgName: currentOrganization.name,
       }),
     });
 

@@ -30,7 +30,7 @@ export default function AgreementStatusCard({
   signUrl,
 }: AgreementStatusCardProps) {
   const user = useUserData();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isBase } = useUserRoleHelper();
 
   const isCustodianCurrentUser = custodian?.user?.email === user?.email;
 
@@ -44,6 +44,14 @@ export default function AgreementStatusCard({
     }
 
     return `/receipts?receiptId=${receiptId}`;
+  }
+
+  /**
+   * If user is BASE and he/she is not custodian
+   * of the asset/kit then he/she is not allowed to view th status at all
+   * */
+  if (isBase && !isCustodianCurrentUser) {
+    return null;
   }
 
   return (

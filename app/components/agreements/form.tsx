@@ -167,7 +167,7 @@ export const AgreementForm = ({
         <Switch
           name="signatureRequired"
           required={false}
-          disabled={disabled}
+          disabled={disabled || !canUpdateAgreementFile}
           defaultChecked={signatureRequired}
         />
       </FormRow>

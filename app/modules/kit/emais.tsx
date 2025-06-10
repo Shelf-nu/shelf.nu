@@ -6,12 +6,14 @@ export function kitCustodyAssignedWithAgreementEmailText({
   kitId,
   custodyId,
   signatureRequired,
+  orgName,
 }: {
   kitName: string;
   assignerName: string;
   kitId: string;
   custodyId: string;
   signatureRequired: boolean;
+  orgName: string;
 }) {
   return `Howdy,
   
@@ -23,6 +25,8 @@ ${SERVER_URL}/sign/kit-custody/${custodyId}
   
 To view the kit, please click the link below:
 ${SERVER_URL}/kits/${kitId}
+
+Workspace: ${orgName}
   
 Thanks,
 The Shelf Team

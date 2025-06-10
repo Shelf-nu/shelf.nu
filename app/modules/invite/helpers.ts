@@ -97,12 +97,14 @@ export const assetCustodyAssignedWithAgreementEmailText = ({
   assetId,
   custodyId,
   signatureRequired,
+  orgName,
 }: {
   assetName: string;
   assignerName: string;
   assetId: string;
   custodyId: string;
   signatureRequired: boolean;
+  orgName: string;
 }) => `Howdy,
 
 ${assignerName} has assigned you as custodian for ${assetName}.
@@ -113,6 +115,8 @@ ${SERVER_URL}/sign/${custodyId}
 
 To view the asset, please click the link below:
 ${SERVER_URL}/assets/${assetId}
+
+Workspace: ${orgName}
 
 Thanks,
 The Shelf Team
