@@ -371,8 +371,7 @@ export default function AddKitsToBooking() {
    */
   useEffect(() => {
     /**
-     * We are setting the default items here, so we do not have to
-     * set the kits again if there are any changes in the bookingKitIds
+     * We are setting the default items here from the server data. This runs only once on mount
      */
     setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
 
@@ -413,13 +412,7 @@ export default function AddKitsToBooking() {
     >
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
-          <TabsTrigger
-            className="flex-1 gap-x-2"
-            value="assets"
-            // onClick={() => {
-            //   setSelectedBulkItems([]);
-            // }}
-          >
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
             Assets{" "}
             {totalAssetsSelected > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">

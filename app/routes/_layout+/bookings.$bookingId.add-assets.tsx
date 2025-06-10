@@ -412,13 +412,9 @@ export default function AddAssetsToNewBooking() {
   useEffect(
     function updateDefaultSelectedItems() {
       /**
-       * We are setting the default items here, so we do not have to
-       * set the assets again if there are any items already present
+       * We are setting the default items here from the server data. This runs only once on mount
        */
-
-      // if (!selectedBulkItems.length) {
       setSelectedBulkItems(bookingAssets);
-      // }
     },
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
