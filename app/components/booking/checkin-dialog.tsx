@@ -22,6 +22,7 @@ type CheckinDialogProps = {
   disabled?: ButtonProps["disabled"];
   booking: Pick<Booking, "id" | "name"> & {
     to: string | Date;
+    from: string | Date;
   };
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
@@ -49,6 +50,11 @@ export default function CheckinDialog({
     );
   }
 
+  /**
+   * We have to make sure the current time is before the `from` date of the booking. See details: https://github.com/Shelf-nu/shelf.nu/issues/1839
+   */
+  const currentTimeIsBeforeFrom = new Date() < new Date(booking.from);
+
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -62,20 +68,43 @@ export default function CheckinDialog({
           <AlertDialogTitle>Early Check-in Warning</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogDescription>
-          You are checking in the booking more than 15 minutes before the end
-          date. If you proceed, the end date will be adjusted to now:{" "}
-          <span className="font-bold text-gray-700">
-            <DateS date={new Date()} includeTime />
-          </span>
-          .
-          <br />
-          <br />
-          Do you want to adjust the end date or keep the original date?
+          {currentTimeIsBeforeFrom ? (
+            <>
+              You are checking in the booking more than 15 minutes before the
+              end date, however you are not allowed to adjust the end date
+              because the current time(
+              <span className="font-bold text-gray-700">
+                <DateS date={new Date()} includeTime />
+              </span>
+              ) is before the start date(
+              <span className="font-bold text-gray-700">
+                <DateS date={booking.from} includeTime />
+              </span>
+              ) of the booking.
+            </>
+          ) : (
+            <>
+              You are checking in the booking more than 15 minutes before the
+              end date. If you proceed, the end date will be adjusted to now:{" "}
+              <span className="font-bold text-gray-700">
+                <DateS date={new Date()} includeTime />
+              </span>
+              .
+              <br />
+              <br />
+              Do you want to adjust the end date or keep the original date?
+            </>
+          )}
         </AlertDialogDescription>
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button disabled={disabled} variant="secondary">
+            <Button
+              disabled={disabled}
+              variant="secondary"
+              type="button"
+              className={currentTimeIsBeforeFrom ? "flex-1" : ""}
+            >
               Cancel
             </Button>
           </AlertDialogCancel>
@@ -86,22 +115,23 @@ export default function CheckinDialog({
             disabled={disabled}
             className="flex-1"
             type="submit"
-            variant="secondary"
+            variant={currentTimeIsBeforeFrom ? "primary" : "secondary"}
             name="checkinIntentChoice"
             value={CheckinIntentEnum["without-adjusted-date"]}
           >
-            Don't Adjust Date
+            {currentTimeIsBeforeFrom ? "Check In" : "Don't Adjust Date"}
           </Button>
-
-          <Button
-            disabled={disabled}
-            className="flex-1"
-            type="submit"
-            name="checkinIntentChoice"
-            value={CheckinIntentEnum["with-adjusted-date"]}
-          >
-            Adjust Date
-          </Button>
+          {!currentTimeIsBeforeFrom && (
+            <Button
+              disabled={disabled}
+              className="flex-1"
+              type="submit"
+              name="checkinIntentChoice"
+              value={CheckinIntentEnum["with-adjusted-date"]}
+            >
+              Adjust Date
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
