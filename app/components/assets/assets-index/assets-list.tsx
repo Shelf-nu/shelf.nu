@@ -163,7 +163,6 @@ const ListAssetContent = ({
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"
           )}
-          // to={`/assets/${item.id}`}
         >
           <div className="flex items-center gap-3">
             <div className="relative flex size-14 shrink-0 items-center justify-center">
