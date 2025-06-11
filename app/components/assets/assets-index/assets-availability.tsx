@@ -63,6 +63,7 @@ export default function AssetsAvailability() {
             end: booking.to!,
             extendedProps: {
               id: b.id,
+              name: b.name,
               status: b.status,
               title: b.name,
               description: b.description,
