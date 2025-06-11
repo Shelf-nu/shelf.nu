@@ -18,7 +18,12 @@ export function getCookie(name: string, headers: Headers) {
 
 /**
  * Parse a cookie from a request
- *
+ * This function takes a cookie object and a request, and attempts to parse the cookie from the request headers.
+ * If the cookie is not found or cannot be parsed, it returns null.
+ * If the cookie is successfully parsed, it returns the parsed value.
+ * @param cookie - The cookie object to parse
+ * @param request - The request object containing headers
+ * @returns The parsed cookie value or null if parsing fails
  */
 export async function parseCookie<T>(
   cookie: Cookie,
@@ -92,7 +97,18 @@ export async function initializePerPageCookieOnLayout(request: Request) {
   return cookie;
 }
 
-/** ASSET FILTER COOKIE - SIMPLE MODE */
+/**
+ * Index FILTER COOKIE
+ * This cookie is used to store the current search params for an index page.
+ * It is used to persist filters across page loads and sessions.
+ * It is created with a 1 year max age and is stored in the root path of the organization.
+ * The cookie is created with the organization ID and filter name to avoid conflicts between different organizations.
+ *
+ * @param orgId - The organization ID to create the cookie for
+ * @param name - The name of the filter to create the cookie for
+ * @param path - The path to set the cookie for, typically the root of the organization
+ * @returns A cookie object that can be used to serialize and parse the filter data
+ */
 export const createFilterCookie = ({
   orgId,
   name,
@@ -110,6 +126,14 @@ export const createFilterCookie = ({
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
+/**
+ * Gets and validates filters from request parameters
+ * Ensures URL parameters match the expected filter format
+ * @param request - The incoming request
+ * @param organizationId - The organization ID for the request
+ * @param cookie - The cookie configuration containing name and path
+ * @returns Object containing filters, serialized cookie, and redirect status
+ */
 export async function getFiltersFromRequest(
   request: Request,
   organizationId: string,
