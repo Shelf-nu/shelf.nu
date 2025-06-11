@@ -103,7 +103,8 @@ export const AssetsList = ({
       className={tw(
         "flex flex-col",
         modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
-        wrapperClassName
+        wrapperClassName,
+        isSwappingMode && "overflow-hidden"
       )}
     >
       <When truthy={!!isSwappingMode}>
@@ -112,7 +113,7 @@ export const AssetsList = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ delay: 0.2 }}
-          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gray-25/95 pt-[200px]"
+          className="absolute inset-0 z-[100] flex flex-col items-center  bg-gray-25/95 pt-[30vh]"
         >
           <Spinner />
           <p className="mt-2">Changing mode...</p>
