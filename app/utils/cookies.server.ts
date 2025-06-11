@@ -103,6 +103,7 @@ export async function initializePerPageCookieOnLayout(request: Request) {
  * It is used to persist filters across page loads and sessions.
  * It is created with a 1 year max age and is stored in the root path of the organization.
  * The cookie is created with the organization ID and filter name to avoid conflicts between different organizations.
+ * IMPORTANT: When using this to add new cookies, make sure to update ALLOWED_FILTER_PATHNAMES in useSearchParams hook
  *
  * @param orgId - The organization ID to create the cookie for
  * @param name - The name of the filter to create the cookie for

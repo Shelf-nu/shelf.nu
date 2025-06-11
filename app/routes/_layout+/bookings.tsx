@@ -211,7 +211,6 @@ export default function BookingsIndexPage({
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
-
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
   const organization = useCurrentOrganization();
 
