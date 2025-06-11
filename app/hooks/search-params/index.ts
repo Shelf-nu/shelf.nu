@@ -260,11 +260,13 @@ export function deleteKeysInSearchParams(
  * @param {string} cookieName - The name of the cookie to update.
  * @param {string[]} keys - Array of keys (strings) to be deleted from the cookie search parameters.
  * @param {URLSearchParams} cookieSearchParams - URLSearchParams object representing the parameters extracted from cookies.
+ * @param {string} [cookiePath] - Optional cookie path. If not provided, will be determined from pathname.
  */
 export function destroyCookieValues(
   cookieName: string,
   keys: string[],
-  cookieSearchParams: URLSearchParams
+  cookieSearchParams: URLSearchParams,
+  cookiePath?: string
 ) {
   // Always remove excluded keys and the specifically requested keys
   keys.forEach((key) => {
@@ -276,9 +278,22 @@ export function destroyCookieValues(
     cookieSearchParams.delete(key);
   });
 
-  // Set the cleaned cookie
-  Cookies.set(cookieName, cookieSearchParams.toString(), {
-    path: "/assets",
+  const finalCookieValue = cookieSearchParams.toString();
+
+  // Determine the correct path if not provided
+  let path = cookiePath;
+  if (!path) {
+    // Extract path from current location
+    const currentPath = window.location.pathname
+      .replace(/^\//, "")
+      .split("/")[0];
+    path =
+      currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+  }
+
+  // Set the cleaned cookie with the correct path
+  Cookies.set(cookieName, finalCookieValue, {
+    path,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     expires: 365, // 1 year
@@ -300,17 +315,25 @@ export function useClearValueFromParams(...keys: string[]): Function {
   const location = useLocation();
 
   function clearValuesFromParams() {
-    if (
-      isPageWithCookieFilters &&
-      currentOrganization &&
-      modeIsAdvanced !== null // Can be null if the view is not the asset index
-    ) {
+    if (isPageWithCookieFilters && currentOrganization) {
+      // For asset pages, use the actual modeIsAdvanced value
+      // For other pages (like bookings), default to false (non-advanced mode)
+      const effectiveModeIsAdvanced = isAssetIndexPage
+        ? modeIsAdvanced || false
+        : false;
+
       const cookieName = getCookieName(
         currentOrganization.id,
-        modeIsAdvanced,
+        effectiveModeIsAdvanced,
         location.pathname
       );
-      destroyCookieValues(cookieName, keys, cookieSearchParams);
+
+      // Determine the correct cookie path based on the current page
+      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
+      const cookiePath =
+        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+
+      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -338,20 +361,31 @@ export function useCookieDestroy() {
    * @param {string[]} keys - Array of keys (strings) to be removed from the cookies.
    */
   function _destroyCookieValues(keys: string[]) {
-    // Check if the current page is the asset index page
+    // Check if the current page supports cookie filters
     if (
       isPageWithCookieFilters &&
       currentOrganization &&
-      currentOrganization?.id &&
-      modeIsAdvanced !== null // Can be null if the view is not the asset index
+      currentOrganization?.id
     ) {
+      // For asset pages, use the actual modeIsAdvanced value
+      // For other pages (like bookings), default to false (non-advanced mode)
+      const effectiveModeIsAdvanced = isAssetIndexPage
+        ? modeIsAdvanced || false
+        : false;
+
       const cookieName = getCookieName(
         currentOrganization.id,
-        modeIsAdvanced,
+        effectiveModeIsAdvanced,
         location.pathname
       );
+
+      // Determine the correct cookie path based on the current page
+      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
+      const cookiePath =
+        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
-      destroyCookieValues(cookieName, keys, cookieSearchParams);
+      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
     }
   }
 
@@ -384,20 +418,31 @@ export function useCookieDestroyGeneric(defaultCookieName?: string) {
     // Determine which cookie name to use (priority: customCookieName > defaultCookieName > standard logic)
     let targetCookieName = customCookieName || defaultCookieName;
 
-    if (
-      !targetCookieName &&
-      isPageWithCookieFilters &&
-      modeIsAdvanced !== null
-    ) {
+    if (!targetCookieName && isPageWithCookieFilters) {
+      // For asset pages, use the actual modeIsAdvanced value
+      // For other pages (like bookings), default to false (non-advanced mode)
+      const effectiveModeIsAdvanced = isAssetIndexPage
+        ? modeIsAdvanced || false
+        : false;
       targetCookieName = getCookieName(
         currentOrganization.id,
-        modeIsAdvanced,
+        effectiveModeIsAdvanced,
         location.pathname
       );
     }
 
     if (targetCookieName) {
-      destroyCookieValues(targetCookieName, keys, cookieSearchParams);
+      // Determine the correct cookie path based on the current page
+      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
+      const cookiePath =
+        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+
+      destroyCookieValues(
+        targetCookieName,
+        keys,
+        cookieSearchParams,
+        cookiePath
+      );
     }
   }
 
