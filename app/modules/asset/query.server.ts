@@ -1208,6 +1208,7 @@ export const assetQueryFragment = Prisma.sql`
     a."categoryId" AS "assetCategoryId",
     k.id AS "kitId",
     k.name AS "kitName",
+    k.status AS "kitStatus",
     c.id AS "categoryId",
     c.name AS "categoryName",
     c.color AS "categoryColor",
@@ -1221,6 +1222,7 @@ export const assetQueryFragment = Prisma.sql`
         WHEN cu.id IS NOT NULL THEN
           jsonb_build_object(
             'name', tm.name,
+            'signatureStatus', cu."signatureStatus",
             'custodian', jsonb_build_object(
               'name', tm.name,
               'user', CASE 
@@ -1346,7 +1348,7 @@ export const assetReturnFragment = Prisma.sql`
         'valuation', aq."assetValue",
         'availableToBook', aq."assetAvailableToBook",
         'kitId', aq."assetKitId",
-        'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
+        'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
         'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
         'tags', aq.tags,
         'location', jsonb_build_object('name', aq."locationName"),

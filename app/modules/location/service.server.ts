@@ -97,6 +97,7 @@ export async function getLocation(
                 include: {
                   category: true,
                   tags: true,
+                  kit: { select: { id: true, name: true, status: true } },
                 },
                 skip,
                 take,

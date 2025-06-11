@@ -27,6 +27,7 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -207,6 +208,7 @@ const ListAssetContent = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />

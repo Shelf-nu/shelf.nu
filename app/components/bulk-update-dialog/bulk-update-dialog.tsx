@@ -24,6 +24,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "../shared/hover-card";
+import When from "../when/when";
 
 /**
  * Type of the dialog
@@ -148,7 +149,7 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    * Description for the dialog content
    * @default `Adjust the ${type} of selected (${itemsSelected}) assets.`
    */
-  description?: string;
+  description?: React.ReactNode;
   /**
    * URL of your action handler
    * @example /api/assets/update-bulk-location
@@ -174,6 +175,11 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    * If `true` then the dialog will not close after the success of dialog action.
    */
   skipCloseOnSuccess?: boolean;
+
+  /**
+   * If `true` then the title and description of dialog will be hidden
+   */
+  hideHeader?: boolean;
 };
 
 /** This component is basically the body of the Dialog */
@@ -191,6 +197,7 @@ const BulkUpdateDialogContent = forwardRef<
     actionUrl,
     arrayFieldId,
     skipCloseOnSuccess = false,
+    hideHeader = false,
   },
   ref
 ) {
@@ -277,14 +284,17 @@ const BulkUpdateDialogContent = forwardRef<
                 <Icon icon={type} />
               </div>
             ) : null}
-            <div className={tw("mb-5", type === "cancel" && "mt-5")}>
-              <h4>{title}</h4>
-              <p>
-                {description
-                  ? description
-                  : `Adjust the ${type} of selected (${totalItemsSelected}) assets.`}
-              </p>
-            </div>
+
+            <When truthy={!hideHeader}>
+              <div className={tw("mb-5", type === "cancel" && "mt-5")}>
+                <h4>{title}</h4>
+                <p>
+                  {description
+                    ? description
+                    : `Adjust the ${type} of selected (${totalItemsSelected}) assets.`}
+                </p>
+              </div>
+            </When>
           </div>
         }
       >

@@ -1,5 +1,10 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustodySignatureStatus,
+  CustomFieldType,
+  KitStatus,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -9,6 +14,7 @@ import { json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import AgreementStatusCard from "~/components/assets/agreement-status-card";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { Switch } from "~/components/forms/switch";
@@ -253,6 +259,13 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
   } = useLoaderData<typeof loader>();
+
+  const isInsideKit =
+    !!asset.kit && asset.kit.status === KitStatus.SIGNATURE_PENDING;
+  const signUrl = `/sign${isInsideKit ? "/kit-custody" : ""}/${
+    isInsideKit ? asset.kit?.custody?.id : asset.custody?.id
+  }`;
+
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -519,16 +532,44 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: asset?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-          />
+          {asset.custody &&
+          asset.custody?.agreement &&
+          asset.custody.agreement?.signatureRequired ? (
+            <AgreementStatusCard
+              signUrl={signUrl}
+              kit={
+                asset.kit &&
+                (asset.kit.status === KitStatus.SIGNATURE_PENDING ||
+                  asset.kit.status === KitStatus.IN_CUSTODY)
+                  ? asset.kit
+                  : undefined
+              }
+              custodian={asset.custody.custodian}
+              agreementName={asset.custody?.agreement?.name ?? ""}
+              receiptId={
+                asset.custodyReceipts.length
+                  ? asset.custodyReceipts[0].id
+                  : null
+              }
+              isSignaturePending={
+                asset.custody?.signatureStatus ===
+                CustodySignatureStatus.PENDING
+              }
+            />
+          ) : null}
+
+          <When truthy={asset.status === AssetStatus.IN_CUSTODY}>
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: asset?.custody?.custodian?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+            />
+          </When>
 
           {asset && (
             <QrPreview

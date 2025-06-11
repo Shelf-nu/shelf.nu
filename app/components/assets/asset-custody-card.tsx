@@ -16,11 +16,12 @@ import { Card } from "../shared/card";
  * It can be either a card showing custody via a booking or custody via a long term checkout
  */
 export function CustodyCard({
+  className,
   booking,
   hasPermission,
   custody,
-  className,
 }: {
+  className?: string;
   booking:
     | {
         id: string;
@@ -49,7 +50,6 @@ export function CustodyCard({
       > | null;
     };
   } | null;
-  className?: string;
 }) {
   const { roles } = useUserRoleHelper();
   const canViewTeamMemberUsers = userHasPermission({

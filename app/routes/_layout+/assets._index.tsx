@@ -192,7 +192,7 @@ export function shouldRevalidate({
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   /**
-   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * If we are toggling the sidebar, no need to revalidate this loader.
    * Revalidation happens in _layout
    */
   if (actionResult?.isTogglingSidebar) {

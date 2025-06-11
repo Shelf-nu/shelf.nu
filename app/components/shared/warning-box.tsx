@@ -5,7 +5,7 @@ export function WarningBox({
   children,
   ...rest
 }: {
-  children: JSX.Element | JSX.Element[] | string;
+  children: React.ReactNode;
   [key: string]: any;
 }) {
   const [visible, setVisible] = useState(true);

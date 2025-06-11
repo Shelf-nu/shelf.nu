@@ -34,6 +34,7 @@ import {
 } from "~/modules/asset/service.server";
 
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -256,6 +257,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               id: true,
             },
           },
+          kit: { select: { id: true, name: true, status: true } },
         },
       })
       .catch((cause) => {
@@ -509,6 +511,7 @@ const RowComponent = ({
       location: true;
       category: true;
       tags: true;
+      kit: { select: { id: true; name: true; status: true } };
     };
   }>;
 }) => {
@@ -537,8 +540,10 @@ const RowComponent = ({
                 {item.title}
               </p>
               <AssetStatusBadge
+                kit={item?.kit}
                 status={item.status}
                 availableToBook={item.availableToBook}
+                shareAgreementUrl={getShareAgreementUrl(item)}
               />
             </div>
           </div>

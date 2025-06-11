@@ -87,6 +87,7 @@ export type FailureReason = {
     | "Note"
     // Other kinds of errors
     | "DB"
+    | "Storage"
     | "Request validation"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
@@ -94,7 +95,9 @@ export type FailureReason = {
     | "Image Import"
     | "Image Cache"
     | "Asset Reminder"
-    | "Asset Scheduler"; // Error related to the image import
+    | "Asset Scheduler" // Error related to the image import
+    | "Custody Agreement"
+    | "Custody Receipt";
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

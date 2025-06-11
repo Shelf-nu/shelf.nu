@@ -57,6 +57,7 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
 
       return auth;
     },
+    getOptionalSession: () => session.get(authSessionKey),
     setSession: (auth: any) => {
       session.set(authSessionKey, auth);
     },
@@ -89,7 +90,12 @@ export const server = await createHonoServer({
     server.use(
       `/${process.env.URL_SHORTENER}/:path*`,
       urlShortener({
-        excludePaths: ["/file-assets", "/healthcheck", "/static"],
+        excludePaths: [
+          "/file-assets",
+          "/healthcheck",
+          "/static",
+          "/sign/:templateId",
+        ],
       })
     );
 
@@ -155,6 +161,7 @@ export const server = await createHonoServer({
           "/qr/:path*",
           "/qr/:path*/contact-owner",
           "/qr/:path*/not-logged-in",
+          "/sign/:templateId",
         ],
       })
     );
@@ -182,6 +189,16 @@ declare module "@remix-run/node" {
      * @returns The session
      */
     getSession(): SessionData["auth"];
+    /**
+     * Get the current session
+     *
+     * If the user is not logged in it will just return undefined and not throw an error.
+     * Doing the change in above `getSession` function will require updated in all over the codebase because the
+     * session can be undefined.
+     *
+     * @returns The session | undefined
+     */
+    getOptionalSession(): SessionData["auth"] | undefined;
     /**
      * Set the session to the session storage
      *

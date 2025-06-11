@@ -77,6 +77,7 @@ export default function SettingsPage() {
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
   return (
     <>
       <Header hidePageDescription />
