@@ -24,7 +24,10 @@ import {
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  getFiltersFromRequest,
+  updateCookieWithPerPage,
+} from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -1337,9 +1340,19 @@ export async function getBookingsFilterData({
   canSeeAllBookings: boolean;
   organizationId: Organization["id"];
 }) {
+  const {
+    filters,
+    redirectNeeded,
+    serializedCookie: filtersCookie,
+  } = await getFiltersFromRequest(request, organizationId, {
+    name: "bookingFilter",
+    path: "/bookings",
+  });
+
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status, teamMemberIds } =
     getParamsValues(searchParams);
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -1397,6 +1410,9 @@ export async function getBookingsFilterData({
     orderBy,
     orderDirection,
     selfServiceData,
+    filtersCookie,
+    filters,
+    redirectNeeded,
   };
 }
 
