@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
@@ -90,12 +90,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       selfServiceData,
       searchParams,
       cookie,
+      filtersCookie,
+      filters,
+      redirectNeeded,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings,
       organizationId,
       userId,
     });
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/bookings?${cookieParams.toString()}`);
+    }
 
     const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
       getBookings({
@@ -157,6 +165,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         headers: [
           setCookie(await userPrefs.serialize(cookie)),
           setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ...(filtersCookie ? [setCookie(filtersCookie)] : []),
         ],
       }
     );
@@ -202,7 +211,6 @@ export default function BookingsIndexPage({
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
-
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
   const organization = useCurrentOrganization();
 

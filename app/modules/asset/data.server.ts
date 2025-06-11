@@ -64,7 +64,10 @@ export async function simpleModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getFiltersFromRequest(request, organizationId);
+  } = await getFiltersFromRequest(request, organizationId, {
+    name: "assetFilter",
+    path: "/assets",
+  });
 
   if (filters && redirectNeeded) {
     const cookieParams = new URLSearchParams(filters);
