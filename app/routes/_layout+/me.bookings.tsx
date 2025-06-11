@@ -11,7 +11,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings";
+import BookingsIndexPage from "./bookings._index";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
