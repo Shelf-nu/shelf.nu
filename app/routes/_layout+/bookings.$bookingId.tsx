@@ -48,6 +48,7 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -428,6 +429,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       select: { id: true, status: true },
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
+    const { bufferStartTime } =
+      await getBookingSettingsForOrganization(organizationId);
     switch (intent) {
       case "save": {
         const hints = getHints(request);
@@ -438,6 +441,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             hints,
             workingHours,
+            bufferStartTime,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -491,6 +495,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
+            bufferStartTime,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -752,6 +757,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ExtendBookingSchema({
             workingHours,
             timeZone: hints.timeZone,
+            bufferStartTime,
           }),
           {
             additionalData: { userId, organizationId },

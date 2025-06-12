@@ -3,17 +3,19 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type {
   NewBookingActionReturnType,
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
 import { useHints } from "~/utils/client-hints";
+
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-
 import { tw } from "~/utils/tw";
 import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
@@ -25,8 +27,6 @@ import { Card } from "../../shared/card";
 
 type NewBookingFormData = {
   booking: {
-    startDate: string;
-    endDate: string;
     custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     assetIds?: string[] | null;
   };
@@ -40,16 +40,10 @@ type NewBookingFormData = {
 
 export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
-  const {
-    startDate,
-    endDate: incomingEndDate,
-    custodianRef,
-    assetIds,
-  } = booking;
+  const { custodianRef, assetIds } = booking;
 
   const { teamMembers, userId, currentOrganization } =
     useLoaderData<NewBookingLoaderReturnType>();
-  const [endDate, setEndDate] = useState(incomingEndDate);
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
@@ -58,8 +52,14 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours(currentOrganization.id);
-
   const { workingHours } = workingHoursData;
+
+  const { startDate, endDate: defaultEndDate } =
+    getBookingDefaultStartEndTimes(workingHours);
+
+  const [endDate, setEndDate] = useState(defaultEndDate);
+
+  const { bufferStartTime } = useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -67,6 +67,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       hints,
       action: "new",
       workingHours: workingHours,
+      bufferStartTime,
     })
   );
 
@@ -86,11 +87,11 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   useEffect(
     function updateEndDate() {
-      if (incomingEndDate) {
-        setEndDate(incomingEndDate);
+      if (defaultEndDate) {
+        setEndDate(defaultEndDate);
       }
     },
-    [incomingEndDate]
+    [defaultEndDate]
   );
 
   /** This handles server side errors in case client side validation fails */
