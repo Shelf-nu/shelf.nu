@@ -15,10 +15,12 @@ declare global {
   var __transporter__: nodemailer.Transporter;
 }
 
+/** We store the port so we can then dynamically set the value of the secure field */
+const port = SMTP_PORT || 465;
 const transporterSettings = {
   host: SMTP_HOST,
-  port: SMTP_PORT || 465,
-  secure: SMTP_PORT == 465, // true for 465, false for other ports
+  port,
+  secure: port === 465, // true for 465, false for other ports
   auth: {
     user: SMTP_USER,
     pass: SMTP_PWD,
@@ -28,6 +30,8 @@ const transporterSettings = {
     rejectUnauthorized: true,
   },
 };
+
+console.log(transporterSettings);
 
 // this is needed because in development we don't want to restart
 // the server with every change, but we want to make sure we don't
