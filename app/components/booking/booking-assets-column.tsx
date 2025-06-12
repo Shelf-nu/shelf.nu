@@ -7,6 +7,7 @@ import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingI
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
+import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
 import BulkListHeader from "../list/bulk-actions/bulk-list-header";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
@@ -124,6 +125,7 @@ export function BookingAssetsColumn() {
 
             <When truthy={canSeeActions}>
               <div className="flex items-center gap-2">
+                <ListBulkActionsDropdown />
                 <Button
                   icon="scan"
                   variant="secondary"
