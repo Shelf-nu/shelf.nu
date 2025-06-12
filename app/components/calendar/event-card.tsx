@@ -33,22 +33,18 @@ export default function EventCard({ event }: EventCardProps) {
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "inline-block size-full whitespace-normal bg-transparent lg:truncate"
+            "flex size-full whitespace-normal bg-transparent lg:truncate",
+            event.extendedProps?.className
           )}
           style={{ color: bookingStatusColorMap[booking.status] }}
         >
-          {viewType == "dayGridMonth" && (
+          {viewType === "dayGridMonth" && (
             <When truthy={_isOneDayEvent}>
               <div className="fc-daygrid-event-dot inline-block" />
             </When>
           )}
-          <DateS
-            date={booking.start}
-            options={{
-              timeStyle: "short",
-            }}
-          />{" "}
-          | {event.title}
+          <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
+          {event.title}
         </div>
       </HoverCardTrigger>
 

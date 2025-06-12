@@ -13,7 +13,6 @@ export function getStatusClasses(
     "!font-normal",
     "py-[2px] px-[5px]",
     "hover:cursor-pointer",
-    "max-h-[24px]",
     "truncate",
   ];
   if (oneDayEvent) {

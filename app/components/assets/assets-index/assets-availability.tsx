@@ -9,10 +9,14 @@ import EventCard from "~/components/calendar/event-card";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -27,6 +31,13 @@ export default function AssetsAvailability() {
   const [calendarView, setCalendarView] = useState(
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
+
+  const { roles } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings,
+  });
 
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
@@ -45,49 +56,61 @@ export default function AssetsAvailability() {
     }));
 
     const events = items
-      .map((asset) => [
-        ...asset.bookings.map((b) => {
-          const booking = b as Booking & {
-            custodianUser?: User;
-            custodianTeamMember?: TeamMember;
-          };
+      .map((asset) => {
+        if (!asset.bookings) {
+          return [];
+        }
 
-          const custodianName = booking?.custodianUser
-            ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
-            : booking.custodianTeamMember?.name;
+        return [
+          ...asset.bookings.map((b) => {
+            const booking = b as Booking & {
+              custodianUser?: User;
+              custodianTeamMember?: TeamMember;
+            };
 
-          return {
-            title: booking.name,
-            resourceId: asset.id,
-            start: booking.from!,
-            end: booking.to!,
-            extendedProps: {
-              id: b.id,
-              name: b.name,
-              status: b.status,
-              title: b.name,
-              description: b.description,
-              start: b.from,
-              end: b.to,
-              custodian: {
-                name: custodianName,
-                user: booking.custodianUser
-                  ? {
-                      id: booking.custodianUserId,
-                      firstName: booking.custodianUser?.firstName,
-                      lastName: booking.custodianUser?.lastName,
-                      profilePicture: booking.custodianUser?.profilePicture,
-                    }
-                  : undefined,
+            const custodianName = booking?.custodianUser
+              ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+              : booking.custodianTeamMember?.name;
+
+            let title = booking.name;
+            if (canSeeAllCustody) {
+              title += ` | ${custodianName}`;
+            }
+
+            return {
+              title,
+              resourceId: asset.id,
+              start: booking.from!,
+              end: booking.to!,
+              extendedProps: {
+                id: b.id,
+                name: b.name,
+                status: b.status,
+                title: b.name,
+                description: b.description,
+                start: b.from,
+                end: b.to,
+                custodian: {
+                  name: custodianName,
+                  user: booking.custodianUser
+                    ? {
+                        id: booking.custodianUserId,
+                        firstName: booking.custodianUser?.firstName,
+                        lastName: booking.custodianUser?.lastName,
+                        profilePicture: booking.custodianUser?.profilePicture,
+                      }
+                    : undefined,
+                },
+                className: "h-full px-2",
               },
-            },
-          };
-        }),
-      ])
+            };
+          }),
+        ];
+      })
       .flat();
 
     return { resources, events };
-  }, [items]);
+  }, [canSeeAllCustody, items]);
 
   function handleNavigation(navigateTo: "prev" | "today" | "next") {
     const calendarApi = calendarRef.current?.getApi();
@@ -232,14 +255,12 @@ export default function AssetsAvailability() {
                 </div>
               </div>
             }
-            resourceAreaHeaderClassNames={() => [
-              "text-md font-semibold text-gray-900",
-            ]}
+            resourceAreaHeaderClassNames="text-md font-semibold text-gray-900"
             slotLabelFormat={[
               { month: "long", year: "numeric" }, // top level of text
               { weekday: "short", day: "2-digit" }, // lower level of text
             ]}
-            slotLabelClassNames={() => ["font-normal text-gray-600"]}
+            slotLabelClassNames="font-normal text-gray-600"
             slotMinWidth={100}
             resourceLabelContent={({ resource }) => (
               <div className="flex items-center gap-2 px-2">
