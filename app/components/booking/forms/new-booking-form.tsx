@@ -53,13 +53,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-
-  const { startDate, endDate: defaultEndDate } =
-    getBookingDefaultStartEndTimes(workingHours);
+  const { bufferStartTime } = useBookingSettings();
+  const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
+    workingHours,
+    bufferStartTime
+  );
 
   const [endDate, setEndDate] = useState(defaultEndDate);
-
-  const { bufferStartTime } = useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",

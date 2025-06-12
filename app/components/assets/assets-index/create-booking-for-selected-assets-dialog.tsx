@@ -33,8 +33,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
     BookingFormSchema({ action: "new", workingHours, bufferStartTime })
   );
 
-  const { startDate, endDate: defaultEndDate } =
-    getBookingDefaultStartEndTimes(workingHours);
+  const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
+    workingHours,
+    bufferStartTime
+  );
   const [endDate, setEndDate] = useState(defaultEndDate);
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
 

@@ -1,3 +1,4 @@
+import { addHours } from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
@@ -87,7 +88,6 @@ export function normalizeWorkingHoursForValidation(
     return undefined;
   }
 }
-
 interface NextWorkingDayResult {
   startTime: Date;
   endTime: Date;
@@ -99,12 +99,20 @@ interface NextWorkingDayResult {
  * If no working day is found within 14 days, it defaults to tomorrow's 9 AM - 6 PM.
  * @param currentDate - The date from which to start searching for the next working day.
  * @param workingHours - The working hours data containing weekly schedules and overrides.
+ * @param bufferStartTime - Buffer time in hours from current time.
  * @returns An object containing the start and end times of the next working day.
  */
 function findNextWorkingDay(
   currentDate: Date,
-  workingHours: WorkingHoursData
+  workingHours: WorkingHoursData,
+  bufferStartTime: number
 ): NextWorkingDayResult {
+  // Calculate buffer expiry time (current time + buffer hours)
+  const bufferExpiryTime =
+    bufferStartTime > 0 ? addHours(currentDate, bufferStartTime) : currentDate;
+  // Remove seconds and milliseconds
+  bufferExpiryTime.setSeconds(0, 0);
+
   // Start checking from tomorrow
   const searchDate = new Date(currentDate);
   searchDate.setDate(searchDate.getDate() + 1);
@@ -145,11 +153,54 @@ function findNextWorkingDay(
         .split(":")
         .map(Number);
 
-      const startTime = new Date(checkDate);
-      startTime.setHours(openHours, openMinutes, 0, 0);
+      const workingDayStart = new Date(checkDate);
+      workingDayStart.setHours(openHours, openMinutes, 0, 0);
 
-      const endTime = new Date(checkDate);
-      endTime.setHours(closeHours, closeMinutes, 0, 0);
+      const workingDayEnd = new Date(checkDate);
+      workingDayEnd.setHours(closeHours, closeMinutes, 0, 0);
+
+      // Use whichever is later: buffer expiry time or working day start
+      const startTime =
+        bufferExpiryTime > workingDayStart ? bufferExpiryTime : workingDayStart;
+
+      // If start time is beyond this working day's end, find next working day for end time
+      let endTime = workingDayEnd;
+      if (startTime >= workingDayEnd) {
+        // Find working hours for the start time's date
+        const startDateString = startTime.toISOString().split("T")[0];
+        const startDayOfWeek = startTime.getDay().toString();
+
+        // Check for override on start date
+        const startDayOverride = workingHours.overrides.find((override) => {
+          const overrideDate = new Date(override.date)
+            .toISOString()
+            .split("T")[0];
+          return overrideDate === startDateString;
+        });
+
+        let startDaySchedule: DaySchedule | null = null;
+        if (startDayOverride) {
+          startDaySchedule = {
+            isOpen: startDayOverride.isOpen,
+            openTime: startDayOverride.openTime || undefined,
+            closeTime: startDayOverride.closeTime || undefined,
+          };
+        } else {
+          startDaySchedule =
+            workingHours.weeklySchedule[startDayOfWeek] || null;
+        }
+
+        if (startDaySchedule?.isOpen && startDaySchedule.closeTime) {
+          const [startDayCloseHours, startDayCloseMinutes] =
+            startDaySchedule.closeTime.split(":").map(Number);
+          endTime = new Date(startTime);
+          endTime.setHours(startDayCloseHours, startDayCloseMinutes, 0, 0);
+        } else {
+          // Fallback to 6 PM on start date
+          endTime = new Date(startTime);
+          endTime.setHours(18, 0, 0, 0);
+        }
+      }
 
       return { startTime, endTime };
     }
@@ -164,7 +215,18 @@ function findNextWorkingDay(
   fallbackEnd.setDate(fallbackEnd.getDate() + 1);
   fallbackEnd.setHours(18, 0, 0, 0);
 
-  return { startTime: fallbackStart, endTime: fallbackEnd };
+  // Use whichever is later: buffer expiry time or fallback start
+  const finalStartTime =
+    bufferExpiryTime > fallbackStart ? bufferExpiryTime : fallbackStart;
+
+  // If start time is beyond fallback end, set end to start day's 6 PM
+  let finalEndTime = fallbackEnd;
+  if (finalStartTime >= fallbackEnd) {
+    finalEndTime = new Date(finalStartTime);
+    finalEndTime.setHours(18, 0, 0, 0);
+  }
+
+  return { startTime: finalStartTime, endTime: finalEndTime };
 }
 
 interface DefaultTimesResult {
@@ -173,20 +235,23 @@ interface DefaultTimesResult {
 }
 
 /**
- * Calculates default start and end times for bookings based on working hours data.
+ * Calculates default start and end times for bookings based on working hours data and buffer time.
  * If working hours are disabled or not provided, it falls back to the original logic.
  * If working hours are enabled, it checks today's schedule and overrides to determine the next available booking time.
+ * Buffer time is applied from current time - the start time will be whichever is later: buffer expiry or next available working time.
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
+ * @param bufferStartTime - Buffer time in hours from current time. If 0, uses 10-minute default.
  * @returns An object containing the start and end dates formatted for date input values.
  */
 export function getBookingDefaultStartEndTimes(
-  workingHoursData?: WorkingHoursData | null
+  workingHoursData: WorkingHoursData | null | undefined,
+  bufferStartTime: number
 ): DefaultTimesResult {
   const now = new Date();
 
   // If no working hours data or working hours are disabled, use the original logic
   if (!workingHoursData || !workingHoursData.enabled) {
-    return getOriginalDefaultTimes(now);
+    return getOriginalDefaultTimes(now, bufferStartTime);
   }
 
   // Get today's date and schedule
@@ -228,23 +293,51 @@ export function getBookingDefaultStartEndTimes(
     currentTimeString < todaySchedule.closeTime;
 
   if (isCurrentlyInWorkingHours && todaySchedule.closeTime) {
-    // We're in working hours - start 10 minutes from now, end at closing time
-    const startDateTime = new Date(now);
-    startDateTime.setMinutes(now.getMinutes() + 10, 0);
+    // We're in working hours - use whichever is later: buffer expiry or 10 minutes from now
+    let earliestStartTime: Date;
+
+    if (bufferStartTime > 0) {
+      // Use buffer time from current time
+      earliestStartTime = addHours(now, bufferStartTime);
+    } else {
+      // Use original 10-minute logic when buffer is 0
+      earliestStartTime = new Date(now);
+      earliestStartTime.setMinutes(now.getMinutes() + 10, 0);
+    }
+
+    // Remove seconds and milliseconds
+    earliestStartTime.setSeconds(0, 0);
 
     const [closeHours, closeMinutes] = todaySchedule.closeTime
       .split(":")
       .map(Number);
-    const endDateTime = new Date(now);
+    let endDateTime = new Date(now);
     endDateTime.setHours(closeHours, closeMinutes, 0, 0);
 
+    // If start time is beyond today's close time, find next working day
+    if (earliestStartTime >= endDateTime) {
+      const nextWorkingDay = findNextWorkingDay(
+        earliestStartTime,
+        workingHoursData,
+        0
+      );
+      return {
+        startDate: dateForDateTimeInputValue(nextWorkingDay.startTime),
+        endDate: dateForDateTimeInputValue(nextWorkingDay.endTime),
+      };
+    }
+
     return {
-      startDate: dateForDateTimeInputValue(startDateTime),
+      startDate: dateForDateTimeInputValue(earliestStartTime),
       endDate: dateForDateTimeInputValue(endDateTime),
     };
   } else {
     // We're outside working hours - find the next working day
-    const nextWorkingDay = findNextWorkingDay(now, workingHoursData);
+    const nextWorkingDay = findNextWorkingDay(
+      now,
+      workingHoursData,
+      bufferStartTime
+    );
 
     return {
       startDate: dateForDateTimeInputValue(nextWorkingDay.startTime),
@@ -253,25 +346,44 @@ export function getBookingDefaultStartEndTimes(
   }
 }
 
-function getOriginalDefaultTimes(now: Date): DefaultTimesResult {
-  // Original logic for backward compatibility
-  const startDateTime = new Date(now);
-  startDateTime.setMinutes(now.getMinutes() + 10, 0); // Reset seconds
+function getOriginalDefaultTimes(
+  now: Date,
+  bufferStartTime: number
+): DefaultTimesResult {
+  // Original logic for backward compatibility with buffer support
+  let startDateTime: Date;
+
+  if (bufferStartTime > 0) {
+    // Use buffer time from current time
+    startDateTime = addHours(now, bufferStartTime);
+  } else {
+    // Use original 10-minute logic when buffer is 0
+    startDateTime = new Date(now);
+    startDateTime.setMinutes(now.getMinutes() + 10, 0);
+  }
+
+  // Remove seconds and milliseconds
+  startDateTime.setSeconds(0, 0);
 
   const startDate = dateForDateTimeInputValue(startDateTime);
 
   let endDate: string;
 
+  // Use the start time for end date logic, not the original current time
+  const referenceTime = startDateTime;
+
   if (
-    now.getHours() >= 18 ||
-    (now.getHours() === 17 && now.getMinutes() > 49)
+    referenceTime.getHours() >= 18 ||
+    (referenceTime.getHours() === 17 && referenceTime.getMinutes() > 49)
   ) {
-    const endDateTime = new Date(now);
+    // If start time is after 6 PM (or close to it), set end to 6 PM next day
+    const endDateTime = new Date(referenceTime);
     endDateTime.setDate(endDateTime.getDate() + 1);
     endDateTime.setHours(18, 0, 0, 0);
     endDate = dateForDateTimeInputValue(endDateTime);
   } else {
-    const endDateTime = new Date(now);
+    // If start time is before 6 PM, set end to 6 PM same day
+    const endDateTime = new Date(referenceTime);
     endDateTime.setHours(18, 0, 0, 0);
     endDate = dateForDateTimeInputValue(endDateTime);
   }
