@@ -23,44 +23,162 @@ export const DATE_FORMAT_OPTIONS = {
   minute: "2-digit",
 } as const;
 
-export default function EventCard({ event }: EventCardProps) {
+export default function renderEventCard({ event }: EventCardProps) {
   const viewType = event._context.calendarApi.view.type;
   const booking = event.extendedProps as CalendarExtendedProps;
   const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
+
+  // Ref callback to set up scroll tracking
+  const triggerRefCallback = (element: HTMLDivElement | null) => {
+    if (!element) return;
+
+    // Clean up previous setup if it exists
+    const existingCleanup = (element as any)._cleanup;
+    if (existingCleanup) {
+      existingCleanup();
+    }
+
+    // Find the .fc-scroller container (the actual scrolling element)
+    const fcScroller = element.closest(".fc-scroller") as Element;
+
+    if (!fcScroller) {
+      console.log("No .fc-scroller found");
+      return;
+    }
+
+    // Store original position relative to the container when not scrolled
+    let originalOffsetLeft: number;
+    let elementWidth: number;
+
+    const initializePosition = () => {
+      // Reset any existing transforms to get true original position
+      const currentTransform = element.style.transform;
+      element.style.transform = "";
+
+      const elementRect = element.getBoundingClientRect();
+      const containerRect = fcScroller.getBoundingClientRect();
+
+      originalOffsetLeft =
+        elementRect.left - containerRect.left + fcScroller.scrollLeft;
+      elementWidth = elementRect.width;
+
+      // Restore transform if it existed
+      element.style.transform = currentTransform;
+
+      console.log(
+        `Initialized - Original offset: ${originalOffsetLeft}px, Width: ${elementWidth}px`
+      );
+    };
+
+    // Initialize on first load
+    setTimeout(initializePosition, 0);
+
+    // Function to update position based on scroll
+    const updatePosition = () => {
+      if (originalOffsetLeft === undefined) return;
+
+      const containerRect = fcScroller.getBoundingClientRect();
+      const containerWidth = containerRect.width;
+      const scrollLeft = fcScroller.scrollLeft;
+      const buffer = 8;
+
+      // Calculate where element would be without any transform
+      const currentLeft = originalOffsetLeft - scrollLeft;
+      const currentRight = currentLeft + elementWidth;
+
+      // Check if element would be clipped (with buffer)
+      const clippedLeft = currentLeft < buffer;
+      const clippedRight = currentRight > containerWidth - buffer;
+
+      let translateX = 0;
+
+      if (clippedLeft && !clippedRight) {
+        // Clipped on left, move right
+        translateX = buffer - currentLeft;
+      } else if (clippedRight && !clippedLeft) {
+        // Clipped on right, move left
+        translateX = containerWidth - buffer - currentRight;
+      } else if (clippedLeft && clippedRight) {
+        // Wider than container, keep left edge visible
+        translateX = buffer - currentLeft;
+      }
+
+      // Apply or reset transform
+      if (clippedLeft || clippedRight) {
+        element.style.transform = `translateX(${translateX}px)`;
+        element.style.position = "relative";
+        element.style.zIndex = "10";
+
+        const direction = clippedLeft ? "left" : "right";
+        console.log(
+          `Clipped on: ${direction}, translateX: ${translateX.toFixed(1)}px`
+        );
+      } else {
+        element.style.transform = "";
+        element.style.position = "";
+        element.style.zIndex = "";
+      }
+    };
+
+    // Set up scroll event listener
+    const scrollHandler = () => {
+      requestAnimationFrame(updatePosition);
+    };
+
+    fcScroller.addEventListener("scroll", scrollHandler, { passive: true });
+
+    // Initial position check
+    updatePosition();
+
+    // Cleanup function
+    const cleanup = () => {
+      fcScroller.removeEventListener("scroll", scrollHandler);
+      element.style.transform = "";
+      element.style.position = "";
+      element.style.zIndex = "";
+    };
+
+    // Store cleanup function
+    (element as any)._cleanup = cleanup;
+  };
 
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "flex size-full whitespace-normal bg-transparent lg:truncate",
+            "flex size-full items-center gap-1 whitespace-normal bg-transparent lg:truncate",
             event.extendedProps?.className
           )}
           style={{ color: bookingStatusColorMap[booking.status] }}
         >
-          {viewType === "dayGridMonth" && (
-            <When truthy={_isOneDayEvent}>
-              <div className="fc-daygrid-event-dot inline-block" />
-            </When>
-          )}
-          <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
-          {event.title}
+          <div
+            ref={triggerRefCallback}
+            className="inline-flex items-center gap-1 whitespace-nowrap"
+          >
+            {viewType === "dayGridMonth" && (
+              <When truthy={_isOneDayEvent}>
+                <div className="fc-daygrid-event-dot inline-block" />
+              </When>
+            )}
+            <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
+            {event.title}
+          </div>
         </div>
       </HoverCardTrigger>
-
       <HoverCardPortal>
         <HoverCardContent
           className="pointer-events-none z-[99999] md:w-96"
           side="top"
+          sideOffset={8}
+          collisionPadding={16}
         >
           <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
             <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
             <ArrowRightIcon className="size-3 text-gray-600" />
             <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
           </div>
-
           <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
-
           <div className="mb-3 flex items-center gap-2">
             <BookingStatusBadge
               status={booking.status}
@@ -68,7 +186,6 @@ export default function EventCard({ event }: EventCardProps) {
             />
             <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
-
           {booking.description ? (
             <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
               {booking.description}

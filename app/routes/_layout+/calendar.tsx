@@ -11,7 +11,8 @@ import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
-import EventCard from "~/components/calendar/event-card";
+
+import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
@@ -360,7 +361,7 @@ export default function Calendar() {
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
               windowResize={handleWindowResize}
-              eventContent={EventCard}
+              eventContent={renderEventCard}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",

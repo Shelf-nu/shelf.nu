@@ -5,7 +5,7 @@ import type { Booking, TeamMember, User } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
-import EventCard from "~/components/calendar/event-card";
+import renderEventCard from "~/components/calendar/event-card";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
@@ -295,7 +295,7 @@ export default function AssetsAvailability() {
                 </div>
               </div>
             )}
-            eventContent={EventCard}
+            eventContent={renderEventCard}
             eventClassNames={(eventInfo) => {
               const viewType = eventInfo.view.type;
               const isOneDay = isOneDayEvent(
