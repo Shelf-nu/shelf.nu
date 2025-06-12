@@ -11,7 +11,7 @@ import { Spinner } from "~/components/shared/spinner";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { CreateOverrideFormSchema } from "~/modules/working-hours/zod-utils";
-import type { ActionData } from "~/routes/_layout+/settings.working-hours";
+import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
 import { useHints } from "~/utils/client-hints";
 import { getTodayInUserTimezone } from "~/utils/date-fns";
 
@@ -76,7 +76,9 @@ export const WorkingHoursOverrideForm = ({
   onSuccess,
   onCancel,
 }: WorkingHoursOverrideFormProps) => {
-  const fetcher = useFetcher<ActionData>({ key: "workingHoursOverride" });
+  const fetcher = useFetcher<BookingSettingsActionData>({
+    key: "workingHoursOverride",
+  });
   const disabled = useDisabled(fetcher);
   const zo = useZorm("WorkingHoursOverrideForm", CreateOverrideFormSchema);
   const { timeZone } = useHints();

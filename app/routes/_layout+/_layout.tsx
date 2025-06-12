@@ -26,6 +26,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { config } from "~/config/shelf.config";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
@@ -126,6 +127,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user,
         organizations,
         currentOrganizationId: organizationId,
+        bookingSettings: await getBookingSettingsForOrganization(
+          currentOrganization.id
+        ),
         currentOrganization,
         currentOrganizationUserRoles: user?.userOrganizations.find(
           (userOrg) => userOrg.organization.id === organizationId

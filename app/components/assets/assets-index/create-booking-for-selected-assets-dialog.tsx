@@ -12,6 +12,7 @@ import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -43,6 +44,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
 
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
+  const { bufferStartTime } = useBookingSettings();
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({ action: "new", workingHours })
