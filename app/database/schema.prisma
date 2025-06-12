@@ -788,6 +788,8 @@ model Booking {
 
   assets Asset[]
 
+  changes BookingChange[]
+
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
@@ -805,6 +807,43 @@ model Booking {
   @@index([custodianUserId])
   @@index([organizationId])
 }
+
+model BookingChange {
+  id String @id @default(cuid())
+  
+  // Reference to the booking that changed
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  
+  // Change metadata
+  changeType ChangeType
+  changedBy  String?    // User ID who made the change, if available
+  userAgent  String?    // For web requests
+  ipAddress  String?    // For audit purposes
+  
+  // Full snapshots of the booking state
+  bookingBefore Json?   // Null for CREATE operations
+  bookingAfter  Json    // The state after the change
+  
+  // Specific fields that changed (for quick filtering)
+  changedFields String[] // ["name", "status", "from", "to", "assets"]
+  
+  // Metadata
+  createdAt DateTime @default(now())
+  
+  @@index([bookingId, createdAt])
+  @@index([changeType, createdAt])
+  @@index([changedBy, createdAt])
+}
+
+enum ChangeType {
+  CREATE
+  UPDATE
+  DELETE
+  ASSET_ADDED
+  ASSET_REMOVED
+}
+
 
 model Kit {
   id String @id @default(cuid())
