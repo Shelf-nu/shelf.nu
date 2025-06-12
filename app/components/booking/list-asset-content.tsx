@@ -13,6 +13,7 @@ import { Button } from "../shared/button";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
+import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import { Badge } from "../shared/badge";
 import When from "../when/when";
 
@@ -75,6 +76,10 @@ export default function ListAssetContent({
 
   return (
     <>
+      <When truthy={!isKitAsset} fallback={<Td> </Td>}>
+        <BulkListItemCheckbox item={item} />
+      </When>
+
       <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
         {isKitAsset && (
           <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />

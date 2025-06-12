@@ -7,6 +7,7 @@ import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingI
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
+import BulkListHeader from "../list/bulk-actions/bulk-list-header";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
@@ -160,6 +161,7 @@ export function BookingAssetsColumn() {
               <>
                 <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
+                    <BulkListHeader itemsKey="paginatedItems" />
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>
@@ -187,17 +189,15 @@ export function BookingAssetsColumn() {
                             assets={item.assets as AssetWithBooking[]}
                           />
                         );
-                      } else {
-                        // Individual asset
-                        const asset = item.assets[0];
-                        return (
-                          <ListItem key={`asset-${asset.id}`} item={asset}>
-                            <ListAssetContent
-                              item={asset as AssetWithBooking}
-                            />
-                          </ListItem>
-                        );
                       }
+
+                      // Individual asset
+                      const asset = item.assets[0];
+                      return (
+                        <ListItem key={`asset-${asset.id}`} item={asset}>
+                          <ListAssetContent item={asset as AssetWithBooking} />
+                        </ListItem>
+                      );
                     })}
                   </tbody>
                 </Table>

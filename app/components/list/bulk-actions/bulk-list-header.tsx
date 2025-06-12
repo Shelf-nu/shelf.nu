@@ -11,12 +11,19 @@ import { Th } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
-import type { IndexResponse } from "..";
+import type { ListItemData } from "../list-item";
+
+type BulkListHeaderProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
+  itemsKey?: string;
+};
 
 export default function BulkListHeader({
+  itemsKey = "items" as const,
   ...rest
-}: {} & React.ThHTMLAttributes<HTMLTableCellElement>) {
-  const { items } = useLoaderData<IndexResponse>();
+}: BulkListHeaderProps) {
+  const loaderData = useLoaderData<Record<string, ListItemData[]>>();
+  const items = loaderData[itemsKey];
+
   const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();
 

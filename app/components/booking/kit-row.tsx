@@ -12,6 +12,7 @@ import { Td } from "../table";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
+import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import When from "../when/when";
 
 type KitRowProps = {
@@ -44,6 +45,8 @@ export default function KitRow({
   return (
     <React.Fragment>
       <ListItem item={kit} className="pseudo-border-bottom bg-gray-50">
+        <BulkListItemCheckbox item={kit} bulkItems={assets} />
+
         <Td className="max-w-full">
           <div className="flex items-center gap-3">
             <KitImage
