@@ -5,7 +5,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
