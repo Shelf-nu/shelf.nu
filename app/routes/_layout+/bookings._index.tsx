@@ -192,10 +192,10 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   nextUrl,
   defaultShouldRevalidate,
 }) => {
-  /** Dont revalidate on add-assets route */
-  const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
+  /** Don't revalidate on manage-assets route */
+  const isManageAssetsRoute = nextUrl.pathname.includes("manage-assets");
 
-  if (isAddAssetsRoute || actionResult?.isTogglingSidebar) {
+  if (isManageAssetsRoute || actionResult?.isTogglingSidebar) {
     return false;
   }
   return defaultShouldRevalidate;
