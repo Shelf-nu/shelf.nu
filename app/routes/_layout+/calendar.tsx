@@ -1,24 +1,23 @@
 import { useState, useRef, useCallback } from "react";
-import type { EventHoveringArg } from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import type { BookingStatus } from "@prisma/client";
-import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 
+import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
+import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
-import { ButtonGroup } from "~/components/shared/button-group";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -28,8 +27,9 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   getStatusClasses,
+  handleEventMouseEnter,
+  handleEventMouseLeave,
   isOneDayEvent,
-  statusClassesOnHover,
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -41,7 +41,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export function links() {
   return [{ rel: "stylesheet", href: calendarStyles }];
@@ -135,22 +134,9 @@ export default function Calendar() {
   const [calendarView, setCalendarView] = useState(
     isMd ? "dayGridMonth" : "listWeek"
   );
-  const disabledButtonStyles =
-    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
+
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
-
-  const handleNavigation = (navigateTo: "prev" | "today" | "next") => {
-    const calendarApi = calendarRef.current?.getApi();
-    if (navigateTo == "prev") {
-      calendarApi?.prev();
-    } else if (navigateTo == "next") {
-      calendarApi?.next();
-    } else if (navigateTo == "today") {
-      calendarApi?.gotoDate(new Date());
-    }
-    updateTitle();
-  };
 
   const updateTitle = (viewMode = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
@@ -200,30 +186,6 @@ export default function Calendar() {
     [ripple]
   );
 
-  const handleEventMouseEnter = (info: EventHoveringArg) => {
-    const viewType = info.view.type;
-    if (viewType != "dayGridMonth") return;
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
-    const className = "bookingId-" + info.event._def.extendedProps.id;
-    const elements = document.getElementsByClassName(className);
-    for (let i = 0; i < elements.length; i++) {
-      const element = elements[i] as HTMLElement;
-      element.classList.add(statusClassesOnHover[statusClass]);
-    }
-  };
-
-  const handleEventMouseLeave = (info: EventHoveringArg) => {
-    const viewType = info.view.type;
-    if (viewType != "dayGridMonth") return;
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
-    const className = "bookingId-" + info.event._def.extendedProps.id;
-    const elements = document.getElementsByClassName(className);
-    for (let i = 0; i < elements.length; i++) {
-      const element = elements[i] as HTMLElement;
-      element.classList.remove(statusClassesOnHover[statusClass]);
-    }
-  };
-
   const handleWindowResize = () => {
     const calendar = calendarRef?.current?.getApi();
     if (calendar) {
@@ -271,70 +233,21 @@ export default function Calendar() {
           </div>
 
           <div className="flex items-center">
-            <div className="mr-4">
-              <ButtonGroup>
-                <Button
-                  variant="secondary"
-                  className="border-r p-[0.75em] text-gray-500"
-                  onClick={() => handleNavigation("prev")}
-                  aria-label="Previous month"
-                >
-                  <ChevronLeftIcon />
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
-                  onClick={() => handleNavigation("today")}
-                >
-                  Today
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="p-[0.75em] text-gray-500"
-                  onClick={() => handleNavigation("next")}
-                  aria-label="Next month"
-                >
-                  <ChevronRightIcon />
-                </Button>
-              </ButtonGroup>
-            </div>
+            <CalendarNavigation
+              calendarRef={calendarRef}
+              updateTitle={() => updateTitle(calendarView)}
+            />
 
             {isMd ? (
-              <ButtonGroup>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleViewChange("dayGridMonth")}
-                  className={tw(
-                    calendarView === "dayGridMonth"
-                      ? `${disabledButtonStyles}`
-                      : ""
-                  )}
-                >
-                  Month
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleViewChange("timeGridWeek")}
-                  className={tw(
-                    calendarView === "timeGridWeek"
-                      ? `${disabledButtonStyles}`
-                      : ""
-                  )}
-                >
-                  Week
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleViewChange("timeGridDay")}
-                  className={tw(
-                    calendarView === "timeGridDay"
-                      ? `${disabledButtonStyles}`
-                      : ""
-                  )}
-                >
-                  Day
-                </Button>
-              </ButtonGroup>
+              <ViewButtonGroup
+                views={[
+                  { label: "Month", value: "dayGridMonth" },
+                  { label: "Week", value: "timeGridWeek" },
+                  { label: "Day", value: "timeGridDay" },
+                ]}
+                currentView={calendarView}
+                onViewChange={handleViewChange}
+              />
             ) : null}
           </div>
         </div>
@@ -358,8 +271,8 @@ export default function Calendar() {
               dayMaxEvents={3}
               dayMaxEventRows={4}
               moreLinkClick="popover"
-              eventMouseEnter={handleEventMouseEnter}
-              eventMouseLeave={handleEventMouseLeave}
+              eventMouseEnter={handleEventMouseEnter("dayGridMonth")}
+              eventMouseLeave={handleEventMouseLeave("dayGridMonth")}
               windowResize={handleWindowResize}
               eventContent={renderEventCard}
               eventTimeFormat={{

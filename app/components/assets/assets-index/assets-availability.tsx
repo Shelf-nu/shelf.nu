@@ -1,25 +1,25 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
-import type { Booking, TeamMember, User } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { ClientOnly } from "remix-utils/client-only";
+import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
+import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { Button } from "~/components/shared/button";
-import { ButtonGroup } from "~/components/shared/button-group";
-import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import {
+  getStatusClasses,
+  handleEventMouseEnter,
+  handleEventMouseLeave,
+  isOneDayEvent,
+} from "~/utils/calendar";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
-import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
+import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 export default function AssetsAvailability() {
   const { items, modelName, totalItems, perPage } =
@@ -31,99 +31,7 @@ export default function AssetsAvailability() {
   const [calendarView, setCalendarView] = useState(
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
-
-  const { roles } = useUserRoleHelper();
-  const organization = useCurrentOrganization();
-  const canSeeAllCustody = userHasCustodyViewPermission({
-    roles,
-    organization: organization as OrganizationPermissionSettings,
-  });
-
-  const disabledButtonStyles =
-    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
-
-  const { resources, events } = useMemo(() => {
-    const resources = items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      extendedProps: {
-        mainImage: item.mainImage,
-        thumbnailImage: item.thumbnailImage,
-        mainImageExpiration: item.mainImageExpiration,
-        status: item.status,
-        availableToBook: item.availableToBook,
-      },
-    }));
-
-    const events = items
-      .map((asset) => {
-        if (!asset.bookings) {
-          return [];
-        }
-
-        return [
-          ...asset.bookings.map((b) => {
-            const booking = b as Booking & {
-              custodianUser?: User;
-              custodianTeamMember?: TeamMember;
-            };
-
-            const custodianName = booking?.custodianUser
-              ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
-              : booking.custodianTeamMember?.name;
-
-            let title = booking.name;
-            if (canSeeAllCustody) {
-              title += ` | ${custodianName}`;
-            }
-
-            return {
-              title,
-              resourceId: asset.id,
-              start: booking.from!,
-              end: booking.to!,
-              extendedProps: {
-                id: b.id,
-                name: b.name,
-                status: b.status,
-                title: b.name,
-                description: b.description,
-                start: b.from,
-                end: b.to,
-                custodian: {
-                  name: custodianName,
-                  user: booking.custodianUser
-                    ? {
-                        id: booking.custodianUserId,
-                        firstName: booking.custodianUser?.firstName,
-                        lastName: booking.custodianUser?.lastName,
-                        profilePicture: booking.custodianUser?.profilePicture,
-                      }
-                    : undefined,
-                },
-                className: "h-full px-2",
-              },
-            };
-          }),
-        ];
-      })
-      .flat();
-
-    return { resources, events };
-  }, [canSeeAllCustody, items]);
-
-  function handleNavigation(navigateTo: "prev" | "today" | "next") {
-    const calendarApi = calendarRef.current?.getApi();
-    if (navigateTo == "prev") {
-      calendarApi?.prev();
-    } else if (navigateTo == "next") {
-      calendarApi?.next();
-    } else if (navigateTo == "today") {
-      calendarApi?.gotoDate(new Date());
-    }
-
-    updateTitle();
-  }
+  const { resources, events } = useAssetAvailabilityData();
 
   function handleViewChange(view: string) {
     setCalendarView(view);
@@ -148,71 +56,23 @@ export default function AssetsAvailability() {
         </div>
 
         <div className="flex items-center">
-          <div className="mr-4">
-            <ButtonGroup>
-              <Button
-                variant="secondary"
-                className="border-r p-[0.7em] text-gray-500"
-                onClick={() => handleNavigation("prev")}
-                aria-label="Previous month"
-              >
-                <ChevronLeftIcon className="size-4" />
-              </Button>
-              <Button
-                variant="secondary"
-                className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
-                onClick={() => handleNavigation("today")}
-                tooltip={"Go to today"}
-              >
-                Today
-              </Button>
-              <Button
-                variant="secondary"
-                className="p-[0.7em] text-gray-500"
-                onClick={() => handleNavigation("next")}
-                aria-label="Next month"
-              >
-                <ChevronRightIcon className="size-4" />
-              </Button>
-            </ButtonGroup>
-          </div>
+          <CalendarNavigation
+            calendarRef={calendarRef}
+            updateTitle={updateTitle}
+          />
 
           {isMd ? (
-            <ButtonGroup>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("resourceTimelineMonth")}
-                className={tw(
-                  calendarView === "resourceTimelineMonth"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Month
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("resourceTimelineWeek")}
-                className={tw(
-                  calendarView === "resourceTimelineWeek"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Week
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handleViewChange("resourceTimelineDay")}
-                className={tw(
-                  calendarView === "resourceTimelineDay"
-                    ? `${disabledButtonStyles}`
-                    : ""
-                )}
-              >
-                Day
-              </Button>
-            </ButtonGroup>
+            <>
+              <ViewButtonGroup
+                views={[
+                  { label: "Month", value: "resourceTimelineMonth" },
+                  { label: "Week", value: "resourceTimelineWeek" },
+                  { label: "Day", value: "resourceTimelineDay" },
+                ]}
+                currentView={calendarView}
+                onViewChange={handleViewChange}
+              />
+            </>
           ) : null}
         </div>
       </div>
@@ -230,6 +90,8 @@ export default function AssetsAvailability() {
               minute: "2-digit",
               meridiem: "short",
             }}
+            eventMouseEnter={handleEventMouseEnter("resourceTimelineMonth")}
+            eventMouseLeave={handleEventMouseLeave("resourceTimelineMonth")}
             resourceOrder="none"
             plugins={[resourceTimelinePlugin]}
             schedulerLicenseKey={FULL_CALENDAR_LICENSE_KEY}

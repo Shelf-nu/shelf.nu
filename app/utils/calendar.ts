@@ -1,3 +1,5 @@
+import type { EventHoveringArg } from "@fullcalendar/core";
+import type FullCalendar from "@fullcalendar/react";
 import type { BookingStatus } from "@prisma/client";
 
 export function getStatusClasses(
@@ -111,3 +113,48 @@ export function isOneDayEvent(
 
   return isSameDay;
 }
+
+/**
+ * Handles the mouse enter event for calendar events.
+ * It applies a hover effect based on the event's status and the allowed view type.
+ * @param allowedViewType - The view type(s) where the hover effect should be applied.
+ */
+export const handleEventMouseEnter =
+  (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (Array.isArray(allowedViewType)) {
+      if (!allowedViewType.includes(viewType)) return;
+    } else {
+      if (viewType !== allowedViewType) return;
+    }
+
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.classList.add(statusClassesOnHover[statusClass]);
+    }
+  };
+
+/**
+ * Handles the mouse leave event for calendar events.
+ * It removes the hover effect based on the event's status and the allowed view type.
+ * @param allowedViewType - The view type(s) where the hover effect should be removed.
+ */
+export const handleEventMouseLeave =
+  (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (Array.isArray(allowedViewType)) {
+      if (!allowedViewType.includes(viewType)) return;
+    } else {
+      if (viewType !== allowedViewType) return;
+    }
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.classList.remove(statusClassesOnHover[statusClass]);
+    }
+  };

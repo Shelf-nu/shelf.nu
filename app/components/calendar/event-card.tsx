@@ -42,13 +42,14 @@ export default function renderEventCard({ event }: EventCardProps) {
     const fcScroller = element.closest(".fc-scroller") as Element;
 
     if (!fcScroller) {
-      console.log("No .fc-scroller found");
       return;
     }
 
     // Store original position relative to the container when not scrolled
     let originalOffsetLeft: number;
     let elementWidth: number;
+    let originalParentOffsetLeft: number;
+    let parentWidth: number;
 
     const initializePosition = () => {
       // Reset any existing transforms to get true original position
@@ -57,17 +58,17 @@ export default function renderEventCard({ event }: EventCardProps) {
 
       const elementRect = element.getBoundingClientRect();
       const containerRect = fcScroller.getBoundingClientRect();
+      const parentRect = element.parentElement!.getBoundingClientRect();
 
       originalOffsetLeft =
         elementRect.left - containerRect.left + fcScroller.scrollLeft;
       elementWidth = elementRect.width;
+      originalParentOffsetLeft =
+        parentRect.left - containerRect.left + fcScroller.scrollLeft;
+      parentWidth = parentRect.width;
 
       // Restore transform if it existed
       element.style.transform = currentTransform;
-
-      console.log(
-        `Initialized - Original offset: ${originalOffsetLeft}px, Width: ${elementWidth}px`
-      );
     };
 
     // Initialize on first load
@@ -75,7 +76,11 @@ export default function renderEventCard({ event }: EventCardProps) {
 
     // Function to update position based on scroll
     const updatePosition = () => {
-      if (originalOffsetLeft === undefined) return;
+      if (
+        originalOffsetLeft === undefined ||
+        originalParentOffsetLeft === undefined
+      )
+        return;
 
       const containerRect = fcScroller.getBoundingClientRect();
       const containerWidth = containerRect.width;
@@ -86,7 +91,11 @@ export default function renderEventCard({ event }: EventCardProps) {
       const currentLeft = originalOffsetLeft - scrollLeft;
       const currentRight = currentLeft + elementWidth;
 
-      // Check if element would be clipped (with buffer)
+      // Calculate parent boundaries (where they would be without any transform)
+      const parentLeft = originalParentOffsetLeft - scrollLeft;
+      const parentRight = parentLeft + parentWidth;
+
+      // Check if element would be clipped by scroll container (with buffer)
       const clippedLeft = currentLeft < buffer;
       const clippedRight = currentRight > containerWidth - buffer;
 
@@ -103,16 +112,24 @@ export default function renderEventCard({ event }: EventCardProps) {
         translateX = buffer - currentLeft;
       }
 
+      // Apply parent div boundary constraints using original positions
+      if (translateX !== 0) {
+        // Calculate the maximum translation allowed within parent bounds
+        const maxTranslateLeft = parentLeft - currentLeft; // How far left we can go
+        const maxTranslateRight = parentRight - currentRight; // How far right we can go
+
+        // Clamp translateX to stay within parent bounds
+        translateX = Math.max(
+          maxTranslateLeft,
+          Math.min(maxTranslateRight, translateX)
+        );
+      }
+
       // Apply or reset transform
-      if (clippedLeft || clippedRight) {
+      if ((clippedLeft || clippedRight) && translateX !== 0) {
         element.style.transform = `translateX(${translateX}px)`;
         element.style.position = "relative";
         element.style.zIndex = "10";
-
-        const direction = clippedLeft ? "left" : "right";
-        console.log(
-          `Clipped on: ${direction}, translateX: ${translateX.toFixed(1)}px`
-        );
       } else {
         element.style.transform = "";
         element.style.position = "";
@@ -147,7 +164,7 @@ export default function renderEventCard({ event }: EventCardProps) {
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "flex size-full items-center gap-1 whitespace-normal bg-transparent lg:truncate",
+            "!hover:bg-purple-100 flex size-full items-center gap-1 whitespace-normal bg-transparent lg:truncate",
             event.extendedProps?.className
           )}
           style={{ color: bookingStatusColorMap[booking.status] }}
