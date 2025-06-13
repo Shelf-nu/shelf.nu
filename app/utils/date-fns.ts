@@ -81,30 +81,6 @@ export function formatDatesForICal(date: Date, hints: ClientHint) {
   return formatLocalDate(date, dateTimeFormat);
 }
 
-export function getBookingDefaultStartEndTimes() {
-  const now = new Date();
-
-  /** Add 10 minutes to current time */
-  const startDate = dateForDateTimeInputValue(
-    new Date(now.setMinutes(now.getMinutes() + 10, 0))
-  );
-
-  let endDate;
-  /** If its already after 6pm, set it to 6pm tomorrow */
-  if (
-    now.getHours() >= 18 ||
-    (now.getHours() === 17 && now.getMinutes() > 49)
-  ) {
-    now.setDate(now.getDate() + 1);
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  } else {
-    /** Set to 6pm today */
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  }
-
-  return { startDate, endDate };
-}
-
 export function getWeekNumber(currentDate: Date) {
   const start = new Date(currentDate.getFullYear(), 0, 1);
   const diff = currentDate.getTime() - start.getTime();

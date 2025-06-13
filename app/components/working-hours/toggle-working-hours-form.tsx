@@ -2,7 +2,6 @@ import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { useDisabled } from "~/hooks/use-disabled";
 import { WorkingHoursToggleSchema } from "~/modules/working-hours/zod-utils";
-import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import { Switch } from "../forms/switch";
 import { Card } from "../shared/card";
@@ -18,7 +17,7 @@ export function EnableWorkingHoursForm({
   const fetcher = useFetcher();
   const zo = useZorm("EnableWorkingHoursForm", WorkingHoursToggleSchema);
   return (
-    <Card className={tw("my-0")}>
+    <Card>
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
