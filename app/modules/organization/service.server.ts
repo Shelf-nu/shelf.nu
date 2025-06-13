@@ -179,6 +179,12 @@ export async function createOrganization({
           weeklySchedule: getDefaultWeeklySchedule(),
         },
       },
+
+      bookingSettings: {
+        create: {
+          bufferStartTime: 0,
+        },
+      },
     } satisfies Prisma.OrganizationCreateInput;
 
     const org = await db.organization.create({ data });
