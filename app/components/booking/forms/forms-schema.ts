@@ -1,5 +1,5 @@
 import { BookingStatus } from "@prisma/client";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addHours } from "date-fns";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
@@ -90,9 +90,13 @@ function validateWorkingHours(
 }
 
 /**
- * Validates if a date is in the future
+ * Validates if a date is in the future with buffer time
  */
-function validateFutureDate(date: Date, timeZone?: string): ValidationResult {
+function validateFutureDate(
+  date: Date,
+  bufferStartTime: number,
+  timeZone?: string
+): ValidationResult {
   let now: Date;
   if (timeZone) {
     now = new Date(
@@ -104,8 +108,21 @@ function validateFutureDate(date: Date, timeZone?: string): ValidationResult {
     now = new Date();
   }
 
-  if (date <= now) {
-    return { isValid: false, message: "Start date must be in the future" };
+  // Only apply buffer if bufferStartTime is greater than 0
+  const hasBuffer = bufferStartTime > 0;
+  const minimumTime = hasBuffer ? addHours(now, bufferStartTime) : now;
+
+  if (date <= minimumTime) {
+    if (hasBuffer) {
+      return {
+        isValid: false,
+        message: `Start date must be at least ${bufferStartTime} hour${
+          bufferStartTime !== 1 ? "s" : ""
+        } from now`,
+      };
+    } else {
+      return { isValid: false, message: "Start date must be in the future" };
+    }
   }
 
   return { isValid: true };
@@ -116,7 +133,9 @@ interface BookingFormSchemaParams {
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
   workingHours: any; // Accept any type, normalize internally
+  bufferStartTime: number; // Required buffer parameter
 }
+
 /**
  * Returns a Zod validation schema for the booking form based on the action and booking status.
  *
@@ -143,6 +162,7 @@ export function BookingFormSchema({
   action,
   status,
   workingHours: rawWorkingHours,
+  bufferStartTime,
 }: BookingFormSchemaParams) {
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -175,11 +195,15 @@ export function BookingFormSchema({
     endDate: z.coerce.date().optional(),
   });
 
-  // Create enhanced date schemas with working hours validation
+  // Create enhanced date schemas with working hours and buffer validation
   const createValidatedStartDateSchema = () =>
     z.coerce.date().superRefine((data, ctx) => {
-      // 1. Validate future date
-      const futureValidation = validateFutureDate(data, hints?.timeZone);
+      // 1. Validate future date with buffer
+      const futureValidation = validateFutureDate(
+        data,
+        bufferStartTime,
+        hints?.timeZone
+      );
       if (!futureValidation.isValid) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -272,16 +296,14 @@ export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
 
 interface ExtendBookingSchemaParams {
   workingHours?: any;
-}
-
-interface ExtendBookingSchemaParams {
-  workingHours?: any;
   timeZone?: string;
+  bufferStartTime: number; // Required buffer parameter
 }
 
 export function ExtendBookingSchema({
   workingHours: rawWorkingHours,
   timeZone,
+  bufferStartTime,
 }: ExtendBookingSchemaParams) {
   // Transform and validate working hours data (same as BookingFormSchema)
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -299,8 +321,12 @@ export function ExtendBookingSchema({
         return;
       }
 
-      // 1. Validate future date using existing function
-      const futureValidation = validateFutureDate(dateTime, timeZone);
+      // 1. Validate future date with buffer using existing function
+      const futureValidation = validateFutureDate(
+        dateTime,
+        bufferStartTime,
+        timeZone
+      );
       if (!futureValidation.isValid) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -31,7 +31,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Ensure the requested org matches the user's current org
     if (paramOrgId !== organizationId) {
-      throw new Error("Organization access denied");
+      throw new ShelfError({
+        cause: null,
+        message: "Organization access denied",
+        label: "Working hours",
+      });
     }
 
     const workingHours = await getWorkingHoursForOrganization(organizationId);

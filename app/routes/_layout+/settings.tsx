@@ -59,9 +59,7 @@ export default function SettingsPage() {
   const { _isPersonalOrg } = useLoaderData<typeof loader>();
   let items = [
     { to: "general", content: "General" },
-    ...(!_isPersonalOrg
-      ? [{ to: "working-hours", content: "Working hours" }]
-      : []),
+    ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
   ];
@@ -71,7 +69,7 @@ export default function SettingsPage() {
   if (isBaseOrSelfService) {
     items = items.filter(
       (item) =>
-        !["custom-fields", "team", "general", "working-hours"].includes(item.to)
+        !["custom-fields", "team", "general", "bookings"].includes(item.to)
     );
   }
 

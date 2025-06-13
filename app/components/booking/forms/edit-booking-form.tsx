@@ -4,6 +4,7 @@ import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -101,6 +102,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
+  const { bufferStartTime } = useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -109,6 +111,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,
+      bufferStartTime,
     })
   );
 
