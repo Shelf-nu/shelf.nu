@@ -3,7 +3,7 @@ import type { BookingStatus, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import { tw } from "~/utils/tw";
 import KitImage from "../kits/kit-image";
 import { ListItem } from "../list/list-item";
