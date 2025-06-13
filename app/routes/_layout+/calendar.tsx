@@ -26,6 +26,7 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  getCalendarTitleAndSubtitle,
   getStatusClasses,
   handleEventMouseEnter,
   handleEventMouseLeave,
@@ -89,14 +90,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       title: `Calendar`,
     };
 
-    const currentDate = new Date();
-    const currentMonth = currentDate.toLocaleString("default", {
-      month: "long",
-    });
-    const currentYear = currentDate.getFullYear();
-
-    const title = `${currentMonth} ${currentYear}`;
-
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
 
@@ -110,9 +103,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       userId,
     });
 
-    return json(
-      data({ header, title, ...teamMembersData, currentOrganization })
-    );
+    return json(data({ header, ...teamMembersData, currentOrganization }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -127,10 +118,15 @@ export default function Calendar() {
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
-  const [calendarTitle, setCalendarTitle] = useState<string>();
-  const [calendarSubtitle, setCalendarSubtitle] = useState(
-    isMd ? undefined : `${startingDay} - ${endingDay}`
-  );
+
+  const [calendarHeader, setCalendarHeader] = useState<{
+    title?: string;
+    subtitle?: string;
+  }>({
+    title: "",
+    subtitle: isMd ? undefined : `${startingDay} - ${endingDay}`,
+  });
+
   const [calendarView, setCalendarView] = useState(
     isMd ? "dayGridMonth" : "listWeek"
   );
@@ -138,40 +134,12 @@ export default function Calendar() {
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
 
-  const updateTitle = (viewMode = calendarView) => {
+  function updateTitle(viewType = calendarView) {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      const currentDate = calendarApi.getDate();
-      const currentMonth = currentDate.toLocaleString("default", {
-        month: "long",
-      });
-      const currentYear = currentDate.getFullYear();
-
-      let mainTitle = `${currentMonth} ${currentYear}`;
-      let subtitle = "";
-
-      if (viewMode === "timeGridWeek") {
-        const [startingDay, endingDay] =
-          getWeekStartingAndEndingDates(currentDate);
-        mainTitle = `${currentMonth} ${currentYear}`;
-        subtitle = `Week ${startingDay} - ${endingDay}`;
-      } else if (viewMode === "timeGridDay") {
-        const formattedDate = currentDate.toLocaleDateString("default", {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        });
-        const weekday = currentDate.toLocaleDateString("default", {
-          weekday: "long",
-        });
-        mainTitle = formattedDate;
-        subtitle = weekday;
-      }
-
-      setCalendarTitle(mainTitle);
-      setCalendarSubtitle(subtitle);
+      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
     }
-  };
+  }
 
   const toggleLoader = useCallback(
     (state: boolean) => {
@@ -223,8 +191,8 @@ export default function Calendar() {
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
           <div className="flex items-center gap-2">
             <TitleContainer
-              calendarTitle={calendarTitle}
-              calendarSubtitle={calendarSubtitle}
+              calendarTitle={calendarHeader.title}
+              calendarSubtitle={calendarHeader.subtitle}
               calendarView={calendarView}
             />
             <div ref={ripple} className="mr-3 flex justify-center">

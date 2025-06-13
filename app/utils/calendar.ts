@@ -1,6 +1,6 @@
-import type { EventHoveringArg } from "@fullcalendar/core";
-import type FullCalendar from "@fullcalendar/react";
+import type { CalendarApi, EventHoveringArg } from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
+import { getWeekStartingAndEndingDates } from "./date-fns";
 
 export function getStatusClasses(
   status: BookingStatus,
@@ -85,6 +85,7 @@ export function getStatusClasses(
   }
   return [...classes, ...statusClasses];
 }
+
 export const statusClassesOnHover: Record<BookingStatus, string> = {
   DRAFT: "md:!bg-gray-100",
   ARCHIVED: "md:!bg-gray-100",
@@ -158,3 +159,45 @@ export const handleEventMouseLeave =
       element.classList.remove(statusClassesOnHover[statusClass]);
     }
   };
+
+/**
+ * This function returns the title and subtitle for the calendar
+ * based on the current view type.
+ *
+ * @param viewType - The type of the calendar view (e.g., resourceTimelineWeek, timeGridWeek)
+ * @param calendar - The CalendarApi instance to get the current date.
+ */
+export function getCalendarTitleAndSubtitle({
+  viewType,
+  calendarApi,
+}: {
+  viewType: string;
+  calendarApi: CalendarApi;
+}) {
+  const currentDate = calendarApi.getDate();
+  const currentMonth = currentDate.toLocaleString("default", { month: "long" });
+  const currentYear = currentDate.getFullYear();
+
+  let title = `${currentMonth} ${currentYear}`;
+  let subtitle = "";
+
+  if (viewType.endsWith("Week")) {
+    const [startingDay, endingDay] = getWeekStartingAndEndingDates(currentDate);
+
+    title = `${currentMonth} ${currentYear}`;
+    subtitle = `Week ${startingDay} - ${endingDay}`;
+  } else if (viewType.endsWith("Day")) {
+    const formattedDate = currentDate.toLocaleDateString("default", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const weekday = currentDate.toLocaleDateString("default", {
+      weekday: "long",
+    });
+    title = formattedDate;
+    subtitle = weekday;
+  }
+
+  return { title, subtitle };
+}

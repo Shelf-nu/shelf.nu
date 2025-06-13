@@ -5,17 +5,20 @@ import { useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
+import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { Button } from "~/components/shared/button";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
+  getCalendarTitleAndSubtitle,
   getStatusClasses,
   handleEventMouseEnter,
   handleEventMouseLeave,
   isOneDayEvent,
 } from "~/utils/calendar";
+import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -27,7 +30,16 @@ export default function AssetsAvailability() {
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
   const { isMd } = useViewportHeight();
-  const [calendarTitle, setCalendarTitle] = useState<string>();
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+
+  const [calendarHeader, setCalendarHeader] = useState<{
+    title?: string;
+    subtitle?: string;
+  }>({
+    title: "",
+    subtitle: isMd ? undefined : `${startingDay} - ${endingDay}`,
+  });
+
   const [calendarView, setCalendarView] = useState(
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
@@ -37,42 +49,41 @@ export default function AssetsAvailability() {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
     calendarApi?.changeView(view);
-
-    updateTitle();
+    updateTitle(view);
   }
 
-  function updateTitle() {
+  const updateTitle = (viewType = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarTitle(calendarApi.view.title);
+      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
     }
-  }
+  };
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
-        <div className="flex items-center gap-2">
-          <h3>{calendarTitle ?? calendarRef?.current?.getApi()?.view.title}</h3>
-        </div>
+        <TitleContainer
+          calendarTitle={calendarHeader.title}
+          calendarSubtitle={calendarHeader.subtitle}
+          calendarView={calendarView}
+        />
 
         <div className="flex items-center">
           <CalendarNavigation
             calendarRef={calendarRef}
-            updateTitle={updateTitle}
+            updateTitle={() => updateTitle(calendarView)}
           />
 
           {isMd ? (
-            <>
-              <ViewButtonGroup
-                views={[
-                  { label: "Month", value: "resourceTimelineMonth" },
-                  { label: "Week", value: "resourceTimelineWeek" },
-                  { label: "Day", value: "resourceTimelineDay" },
-                ]}
-                currentView={calendarView}
-                onViewChange={handleViewChange}
-              />
-            </>
+            <ViewButtonGroup
+              views={[
+                { label: "Month", value: "resourceTimelineMonth" },
+                { label: "Week", value: "resourceTimelineWeek" },
+                { label: "Day", value: "resourceTimelineDay" },
+              ]}
+              currentView={calendarView}
+              onViewChange={handleViewChange}
+            />
           ) : null}
         </div>
       </div>
