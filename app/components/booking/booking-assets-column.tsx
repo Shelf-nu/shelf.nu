@@ -163,7 +163,16 @@ export function BookingAssetsColumn() {
               <>
                 <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
-                    <BulkListHeader itemsKey="paginatedItems" />
+                    <BulkListHeader
+                      itemsGetter={(data) =>
+                        data.paginatedItems
+                          .map((item) => [
+                            item,
+                            ...(item?.type === "kit" ? item.assets : []),
+                          ])
+                          .flat()
+                      }
+                    />
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>

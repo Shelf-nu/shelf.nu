@@ -131,7 +131,7 @@ export default function KitRow({
 
       {/* Add a separator row after the kit assets */}
       <tr className="kit-separator h-1 bg-gray-100">
-        <td colSpan={4} className="h-1 p-0"></td>
+        <td colSpan={5} className="h-1 p-0"></td>
       </tr>
     </React.Fragment>
   );
