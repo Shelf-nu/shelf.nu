@@ -30,7 +30,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.add-kits";
+import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.manage-kits";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import type {
   AssetFromQr,

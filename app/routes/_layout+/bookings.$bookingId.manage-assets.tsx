@@ -342,7 +342,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert,
-     * so we have to redirect to add-kits url
+     * so we have to redirect to manage-kits url
      */
     if (redirectTo) {
       return redirect(redirectTo);
@@ -395,7 +395,7 @@ export default function AddAssetsToNewBooking() {
 
   const manageKitsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/add-kits?${new URLSearchParams({
+      `/bookings/${booking.id}/manage-kits?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),
