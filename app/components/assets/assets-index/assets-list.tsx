@@ -39,6 +39,7 @@ import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
 import AssetsAvailability from "./assets-availability";
 import { AssetIndexFilters } from "./filters";
+import { CategoryBadge } from "../category-badge";
 
 export const AssetsList = ({
   customEmptyState,
@@ -227,15 +228,7 @@ const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

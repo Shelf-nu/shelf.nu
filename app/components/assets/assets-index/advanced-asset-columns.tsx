@@ -50,6 +50,7 @@ import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
 // eslint-disable-next-line import/no-cycle
 import { ListItemTagsColumn } from "./assets-list";
+import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
   column,
@@ -348,15 +349,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      {category ? (
-        <Badge color={category.color} withDot={false}>
-          {category.name}
-        </Badge>
-      ) : (
-        <Badge color={"#808080"} withDot={false}>
-          {"Uncategorized"}
-        </Badge>
-      )}
+      <CategoryBadge category={category} />
     </Td>
   );
 }

@@ -4,7 +4,7 @@ import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { Badge } from "../shared/badge";
+import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
@@ -121,15 +121,7 @@ const Row = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color={"#808080"} withDot={false}>
-            {"Uncategorized"}
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
     </>
   );
