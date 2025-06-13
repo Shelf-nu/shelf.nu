@@ -13,7 +13,7 @@ import { Button } from "../shared/button";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
-import { Badge } from "../shared/badge";
+import { CategoryBadge } from "../assets/category-badge";
 import When from "../when/when";
 
 type ListAssetContentProps = {
@@ -140,11 +140,7 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : null}
+        <CategoryBadge category={category} />
       </Td>
       <Td
         className={tw(

@@ -68,6 +68,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { CategoryBadge } from "~/components/assets/category-badge";
 
 type LoaderData = typeof loader;
 
@@ -811,15 +812,7 @@ const RowComponent = ({
 
       {/* Category */}
       <Td className={allowCursor}>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

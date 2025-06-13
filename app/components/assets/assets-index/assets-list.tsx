@@ -20,6 +20,7 @@ import {
 import { Th, Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -36,7 +37,9 @@ import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
+import AssetsAvailability from "./assets-availability";
 import { AssetIndexFilters } from "./filters";
+import { CategoryBadge } from "../category-badge";
 
 export const AssetsList = ({
   customEmptyState,
@@ -49,6 +52,8 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
+  const [searchParams] = useSearchParams();
+  const view = searchParams.get("view") ?? "table";
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
 
@@ -63,10 +68,6 @@ export const AssetsList = ({
   const isSwappingMode = modeFetcher?.formData;
   const columns = useAssetIndexColumns();
   const { isBase } = useUserRoleHelper();
-  const searchParams: string[] = ["category", "tag", "location"];
-  if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
-  }
 
   const headerChildren = modeIsSimple ? (
     <>
@@ -123,22 +124,31 @@ export const AssetsList = ({
       {!isMd && !modeIsSimple ? (
         <AdvancedModeMobileFallback />
       ) : (
-        <ListContentWrapper>
+        <ListContentWrapper className="md:mt-0">
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          <List
-            title="Assets"
-            ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-            customPagination={<AssetIndexPagination />}
-            bulkActions={
-              disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
-            }
-            customEmptyStateContent={
-              customEmptyState ? customEmptyState : undefined
-            }
-            headerChildren={headerChildren}
-          />
+          {view === "availability" ? (
+            <>
+              <AssetsAvailability />
+              <AssetIndexPagination />
+            </>
+          ) : (
+            <List
+              title="Assets"
+              ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+              customPagination={<AssetIndexPagination />}
+              bulkActions={
+                disableBulkActions || isBase ? undefined : (
+                  <BulkActionsDropdown />
+                )
+              }
+              customEmptyStateContent={
+                customEmptyState ? customEmptyState : undefined
+              }
+              headerChildren={headerChildren}
+            />
+          )}
         </ListContentWrapper>
       )}
     </div>
@@ -218,15 +228,7 @@ const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

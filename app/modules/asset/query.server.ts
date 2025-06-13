@@ -1182,123 +1182,195 @@ export function generateCustomFieldSelect(
 }
 
 // 3. Data
-export const assetQueryFragment = Prisma.sql`
-  SELECT 
-    a.id AS "assetId",
+
+// TypeScript types for options
+export type AssetQueryOptions = {
+  withBookings?: boolean;
+};
+
+export type AssetReturnOptions = {
+  withBookings?: boolean;
+};
+
+// Convert to functions that accept options
+export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
+  const { withBookings = false } = options;
+
+  const bookingsSelect = withBookings
+    ? Prisma.sql`,
     (
-      SELECT q.id
-      FROM public."Qr" q
-      WHERE q."assetId" = a.id
-      LIMIT 1
-    ) AS "qrId",
-    a.title AS "assetTitle",
-    a.description AS "assetDescription",
-    a."createdAt" AS "assetCreatedAt",
-    a."updatedAt" AS "assetUpdatedAt",
-    a."userId" AS "assetUserId",
-    a."mainImage" AS "assetMainImage",
-    a."thumbnailImage" AS "assetThumbnailImage",
-    a."mainImageExpiration" AS "assetMainImageExpiration",
-    a."locationId" AS "assetLocationId",
-    a."organizationId" AS "assetOrganizationId",
-    a.status AS "assetStatus",
-    a.value AS "assetValue",
-    a."availableToBook" AS "assetAvailableToBook",
-    a."kitId" AS "assetKitId",
-    a."categoryId" AS "assetCategoryId",
-    k.id AS "kitId",
-    k.name AS "kitName",
-    c.id AS "categoryId",
-    c.name AS "categoryName",
-    c.color AS "categoryColor",
-    CASE 
-      WHEN l.name IS NOT NULL THEN l.name
-      ELSE NULL
-    END AS "locationName",
-    COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
-    COALESCE(
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', bk.id,
+            'name', bk.name,
+            'status', bk.status,
+            'from', bk."from",
+            'to', bk."to",
+            'description', bk.description,
+            'custodianTeamMember', CASE 
+              WHEN bk."custodianTeamMemberId" IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', ctm.id,
+                  'name', ctm.name,
+                  'user', CASE 
+                    WHEN ctm."userId" IS NOT NULL THEN
+                      jsonb_build_object(
+                        'id', ctmu.id,
+                        'firstName', ctmu."firstName",
+                        'lastName', ctmu."lastName",
+                        'email', ctmu.email,
+                        'profilePicture', ctmu."profilePicture"
+                      )
+                    ELSE NULL
+                  END
+                )
+              ELSE NULL
+            END,
+            'custodianUser', CASE 
+              WHEN bk."custodianUserId" IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', cu.id,
+                  'firstName', cu."firstName",
+                  'lastName', cu."lastName",
+                  'email', cu.email,
+                  'profilePicture', cu."profilePicture"
+                )
+              ELSE NULL
+            END
+          )
+        ),
+        '[]'::jsonb
+      )
+      FROM public."_AssetToBooking" atb
+      JOIN public."Booking" bk ON atb."B" = bk.id
+      LEFT JOIN public."TeamMember" ctm ON bk."custodianTeamMemberId" = ctm.id
+      LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
+      LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
+      WHERE 
+        atb."A" = a.id 
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+    ) AS bookings`
+    : Prisma.sql``;
+
+  return Prisma.sql`
+    SELECT 
+      a.id AS "assetId",
+      (
+        SELECT q.id
+        FROM public."Qr" q
+        WHERE q."assetId" = a.id
+        LIMIT 1
+      ) AS "qrId",
+      a.title AS "assetTitle",
+      a.description AS "assetDescription",
+      a."createdAt" AS "assetCreatedAt",
+      a."updatedAt" AS "assetUpdatedAt",
+      a."userId" AS "assetUserId",
+      a."mainImage" AS "assetMainImage",
+      a."thumbnailImage" AS "assetThumbnailImage",
+      a."mainImageExpiration" AS "assetMainImageExpiration",
+      a."locationId" AS "assetLocationId",
+      a."organizationId" AS "assetOrganizationId",
+      a.status AS "assetStatus",
+      a.value AS "assetValue",
+      a."availableToBook" AS "assetAvailableToBook",
+      a."kitId" AS "assetKitId",
+      a."categoryId" AS "assetCategoryId",
+      k.id AS "kitId",
+      k.name AS "kitName",
+      c.id AS "categoryId",
+      c.name AS "categoryName",
+      c.color AS "categoryColor",
       CASE 
-        WHEN cu.id IS NOT NULL THEN
-          jsonb_build_object(
-            'name', tm.name,
-            'custodian', jsonb_build_object(
-              'name', tm.name,
-              'user', CASE 
-                WHEN u.id IS NOT NULL THEN
-                  jsonb_build_object(
-                    'id', u.id,
-                    'firstName', u."firstName",
-                    'lastName', u."lastName",
-                    'profilePicture', u."profilePicture",
-                    'email', u.email
-                  )
-                ELSE NULL
-              END
-            )
-          )
-        WHEN b.id IS NOT NULL THEN
-          jsonb_build_object(
-            'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
-            'custodian', jsonb_build_object(
-              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
-              'user', CASE 
-                WHEN bu.id IS NOT NULL THEN
-                  jsonb_build_object(
-                    'id', u.id,
-                    'firstName', bu."firstName",
-                    'lastName', bu."lastName",
-                    'profilePicture', bu."profilePicture",
-                    'email', bu.email
-                  )
-                ELSE NULL
-              END
-            )
-          )
+        WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
-      END,
-      NULL
-    ) AS custody,
-    (
-      SELECT jsonb_agg(
-        jsonb_build_object(
-          'id', acfv.id,
-          'value', acfv.value,
-          'customField', jsonb_build_object(
-            'id', cf.id,
-            'name', cf.name,
-            'helpText', cf."helpText",
-            'required', cf.required,
-            'type', cf.type,
-            'options', cf.options,
-            'categories', (
-              SELECT jsonb_agg(jsonb_build_object('id', cat.id, 'name', cat.name))
-              FROM public."_CategoryToCustomField" ccf
-              JOIN public."Category" cat ON ccf."A" = cat.id
-              WHERE ccf."B" = cf.id
+      END AS "locationName",
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
+      COALESCE(
+        CASE 
+          WHEN cu.id IS NOT NULL THEN
+            jsonb_build_object(
+              'name', tm.name,
+              'custodian', jsonb_build_object(
+                'name', tm.name,
+                'user', CASE 
+                  WHEN u.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', u.id,
+                      'firstName', u."firstName",
+                      'lastName', u."lastName",
+                      'profilePicture', u."profilePicture",
+                      'email', u.email
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          WHEN b.id IS NOT NULL THEN
+            jsonb_build_object(
+              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+              'custodian', jsonb_build_object(
+                'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+                'user', CASE 
+                  WHEN bu.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', u.id,
+                      'firstName', bu."firstName",
+                      'lastName', bu."lastName",
+                      'profilePicture', bu."profilePicture",
+                      'email', bu.email
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          ELSE NULL
+        END,
+        NULL
+      ) AS custody,
+      (
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'id', acfv.id,
+            'value', acfv.value,
+            'customField', jsonb_build_object(
+              'id', cf.id,
+              'name', cf.name,
+              'helpText', cf."helpText",
+              'required', cf.required,
+              'type', cf.type,
+              'options', cf.options,
+              'categories', (
+                SELECT jsonb_agg(jsonb_build_object('id', cat.id, 'name', cat.name))
+                FROM public."_CategoryToCustomField" ccf
+                JOIN public."Category" cat ON ccf."A" = cat.id
+                WHERE ccf."B" = cf.id
+              )
             )
           )
         )
-      )
-      FROM public."AssetCustomFieldValue" acfv
-      JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-      WHERE acfv."assetId" = a.id AND cf.active = true
-    ) AS "customFields",
-    (
-      SELECT jsonb_build_object(
-        'id', ar.id,
-        'name', ar.name,
-        'message', ar.message,
-        'alertDateTime', ar."alertDateTime"
-      )
-      FROM public."AssetReminder" ar
-      WHERE 
-        ar."assetId" = a.id 
-        AND ar."alertDateTime" >= NOW() AT TIME ZONE 'UTC'
-      ORDER BY 
-        ar."alertDateTime" ASC
-      LIMIT 1
-    ) AS upcomingReminder
-`;
+        FROM public."AssetCustomFieldValue" acfv
+        JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
+        WHERE acfv."assetId" = a.id AND cf.active = true
+      ) AS "customFields",
+      (
+        SELECT jsonb_build_object(
+          'id', ar.id,
+          'name', ar.name,
+          'message', ar.message,
+          'alertDateTime', ar."alertDateTime"
+        )
+        FROM public."AssetReminder" ar
+        WHERE 
+          ar."assetId" = a.id 
+          AND ar."alertDateTime" >= NOW() AT TIME ZONE 'UTC'
+        ORDER BY 
+          ar."alertDateTime" ASC
+        LIMIT 1
+      ) AS upcomingReminder${bookingsSelect}
+  `;
+};
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
@@ -1323,38 +1395,49 @@ export const assetQueryJoins = Prisma.sql`
 
 /**
  * Returns SQL fragment for building assets array, ensuring proper handling of empty results
+ * @param {AssetReturnOptions} options - Options for the return fragment
+ * @param {boolean} options.withBookings - Whether to include bookings in the result
  * @returns Prisma.Sql fragment that safely handles no results
  */
-export const assetReturnFragment = Prisma.sql`
-  COALESCE(
-    json_agg(
-      jsonb_build_object(
-        'id', aq."assetId",
-        'qrId', aq."qrId",
-        'title', aq."assetTitle",
-        'description', aq."assetDescription",
-        'createdAt', aq."assetCreatedAt",
-        'updatedAt', aq."assetUpdatedAt",
-        'userId', aq."assetUserId", 
-        'mainImage', aq."assetMainImage",
-        'thumbnailImage', aq."assetThumbnailImage",
-        'mainImageExpiration', aq."assetMainImageExpiration",
-        'categoryId', aq."assetCategoryId",
-        'locationId', aq."assetLocationId",
-        'organizationId', aq."assetOrganizationId",
-        'status', aq."assetStatus",
-        'valuation', aq."assetValue",
-        'availableToBook', aq."assetAvailableToBook",
-        'kitId', aq."assetKitId",
-        'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
-        'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
-        'tags', aq.tags,
-        'location', jsonb_build_object('name', aq."locationName"),
-        'custody', aq.custody,
-        'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-        'upcomingReminder', aq.upcomingReminder
-      )
-    ) FILTER (WHERE aq."assetId" IS NOT NULL),
-    '[]'
-  ) AS assets
-`;
+export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
+  const { withBookings = false } = options;
+
+  const bookingsField = withBookings
+    ? Prisma.sql`,
+        'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  return Prisma.sql`
+    COALESCE(
+      json_agg(
+        jsonb_build_object(
+          'id', aq."assetId",
+          'qrId', aq."qrId",
+          'title', aq."assetTitle",
+          'description', aq."assetDescription",
+          'createdAt', aq."assetCreatedAt",
+          'updatedAt', aq."assetUpdatedAt",
+          'userId', aq."assetUserId", 
+          'mainImage', aq."assetMainImage",
+          'thumbnailImage', aq."assetThumbnailImage",
+          'mainImageExpiration', aq."assetMainImageExpiration",
+          'categoryId', aq."assetCategoryId",
+          'locationId', aq."assetLocationId",
+          'organizationId', aq."assetOrganizationId",
+          'status', aq."assetStatus",
+          'valuation', aq."assetValue",
+          'availableToBook', aq."assetAvailableToBook",
+          'kitId', aq."assetKitId",
+          'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
+          'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
+          'tags', aq.tags,
+          'location', jsonb_build_object('name', aq."locationName"),
+          'custody', aq.custody,
+          'customFields', COALESCE(aq."customFields", '[]'::jsonb),
+          'upcomingReminder', aq.upcomingReminder${bookingsField}
+        )
+      ) FILTER (WHERE aq."assetId" IS NOT NULL),
+      '[]'
+    ) AS assets
+  `;
+};

@@ -1,4 +1,6 @@
+import type { CalendarApi, EventHoveringArg } from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
+import { getWeekStartingAndEndingDates } from "./date-fns";
 
 export function getStatusClasses(
   status: BookingStatus,
@@ -13,7 +15,6 @@ export function getStatusClasses(
     "!font-normal",
     "py-[2px] px-[5px]",
     "hover:cursor-pointer",
-    "max-h-[24px]",
     "truncate",
   ];
   if (oneDayEvent) {
@@ -84,6 +85,7 @@ export function getStatusClasses(
   }
   return [...classes, ...statusClasses];
 }
+
 export const statusClassesOnHover: Record<BookingStatus, string> = {
   DRAFT: "md:!bg-gray-100",
   ARCHIVED: "md:!bg-gray-100",
@@ -111,4 +113,91 @@ export function isOneDayEvent(
     start.getDate() === end.getDate();
 
   return isSameDay;
+}
+
+/**
+ * Handles the mouse enter event for calendar events.
+ * It applies a hover effect based on the event's status and the allowed view type.
+ * @param allowedViewType - The view type(s) where the hover effect should be applied.
+ */
+export const handleEventMouseEnter =
+  (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (Array.isArray(allowedViewType)) {
+      if (!allowedViewType.includes(viewType)) return;
+    } else {
+      if (viewType !== allowedViewType) return;
+    }
+
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.classList.add(statusClassesOnHover[statusClass]);
+    }
+  };
+
+/**
+ * Handles the mouse leave event for calendar events.
+ * It removes the hover effect based on the event's status and the allowed view type.
+ * @param allowedViewType - The view type(s) where the hover effect should be removed.
+ */
+export const handleEventMouseLeave =
+  (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    const viewType = info.view.type;
+    if (Array.isArray(allowedViewType)) {
+      if (!allowedViewType.includes(viewType)) return;
+    } else {
+      if (viewType !== allowedViewType) return;
+    }
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.classList.remove(statusClassesOnHover[statusClass]);
+    }
+  };
+
+/**
+ * This function returns the title and subtitle for the calendar
+ * based on the current view type.
+ *
+ * @param viewType - The type of the calendar view (e.g., resourceTimelineWeek, timeGridWeek)
+ * @param calendar - The CalendarApi instance to get the current date.
+ */
+export function getCalendarTitleAndSubtitle({
+  viewType,
+  calendarApi,
+}: {
+  viewType: string;
+  calendarApi: CalendarApi;
+}) {
+  const currentDate = calendarApi.getDate();
+  const currentMonth = currentDate.toLocaleString("default", { month: "long" });
+  const currentYear = currentDate.getFullYear();
+
+  let title = `${currentMonth} ${currentYear}`;
+  let subtitle = "";
+
+  if (viewType.endsWith("Week")) {
+    const [startingDay, endingDay] = getWeekStartingAndEndingDates(currentDate);
+
+    title = `${currentMonth} ${currentYear}`;
+    subtitle = `Week ${startingDay} - ${endingDay}`;
+  } else if (viewType.endsWith("Day")) {
+    const formattedDate = currentDate.toLocaleDateString("default", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const weekday = currentDate.toLocaleDateString("default", {
+      weekday: "long",
+    });
+    title = formattedDate;
+    subtitle = weekday;
+  }
+
+  return { title, subtitle };
 }

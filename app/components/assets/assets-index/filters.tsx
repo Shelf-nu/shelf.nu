@@ -19,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { AssetsIndexViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
   title: "Name",
@@ -32,12 +33,12 @@ export function AssetIndexFilters({
   disableTeamMemberFilter?: boolean;
 }) {
   /** Used for filtering based on user type */
-  const searchParams: string[] = ["category", "tag", "location"];
+  const filterParams: string[] = ["category", "tag", "location"];
   if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
+    filterParams.push("teamMember");
   }
-  const hasFiltersToClear = useSearchParamHasValue(...searchParams);
-  const clearFilters = useClearValueFromParams(...searchParams);
+  const hasFiltersToClear = useSearchParamHasValue(...filterParams);
+  const clearFilters = useClearValueFromParams(...filterParams);
   const { roles } = useUserRoleHelper();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
@@ -54,10 +55,14 @@ export function AssetIndexFilters({
         slots={{
           "left-of-search": <StatusFilter statusItems={AssetStatus} />,
           "right-of-search": (
-            <SortBy
-              sortingOptions={ASSET_SORTING_OPTIONS}
-              defaultSortingBy="createdAt"
-            />
+            <div className="flex items-center gap-2">
+              <SortBy
+                sortingOptions={ASSET_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+              />
+
+              <AssetsIndexViewToggle />
+            </div>
           ),
         }}
       >
@@ -76,7 +81,6 @@ export function AssetIndexFilters({
               <div className="text-gray-500"> | </div>
             </div>
           ) : null}
-
           <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
             <DynamicDropdown
               trigger={
@@ -176,6 +180,7 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
+        "right-of-search": <AssetsIndexViewToggle modeIsSimple={false} />,
       }}
       searchClassName="leading-5"
     >

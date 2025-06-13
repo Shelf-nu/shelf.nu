@@ -1970,12 +1970,14 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
-              user: {
-                id: booking.custodianUserId,
-                firstName: booking.custodianUser?.firstName,
-                lastName: booking.custodianUser?.lastName,
-                profilePicture: booking.custodianUser?.profilePicture,
-              },
+              user: booking.custodianUser
+                ? {
+                    id: booking.custodianUserId,
+                    firstName: booking.custodianUser?.firstName,
+                    lastName: booking.custodianUser?.lastName,
+                    profilePicture: booking.custodianUser?.profilePicture,
+                  }
+                : undefined,
             },
           },
         };
