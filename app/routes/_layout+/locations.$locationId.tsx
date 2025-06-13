@@ -246,7 +246,7 @@ export default function LocationPage() {
                     Scan
                   </Button>
                   <Button
-                    to="manage-assets"
+                    to="add-assets"
                     variant="primary"
                     width="full"
                     className="whitespace-nowrap"
