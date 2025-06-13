@@ -144,8 +144,10 @@ async function generateThumbnailIfMissing(asset: {
   }
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
+  const authSesssion = context.getSession();
+  const { userId } = authSesssion;
 
   try {
     const { assetId, mainImage } = parseData(
@@ -184,7 +186,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           new ShelfError({
             cause: error,
             message: `Failed to refresh main image URL for asset ${assetId}`,
-            additionalData: { assetId, mainImagePath },
+            additionalData: { assetId, mainImagePath, userId },
             label: "Assets",
           })
         );
@@ -208,7 +210,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             new ShelfError({
               cause: error,
               message: `Failed to refresh thumbnail URL for asset ${assetId}`,
-              additionalData: { assetId, thumbnailPath },
+              additionalData: { assetId, thumbnailPath, userId },
               label: "Assets",
             })
           );
@@ -246,6 +248,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         cause,
         message: "Error refreshing image.",
         label: "Assets",
+        additionalData: {
+          userId,
+          assetId: url.searchParams.get("assetId"),
+          mainImage: url.searchParams.get("mainImage"),
+        },
       })
     );
 
