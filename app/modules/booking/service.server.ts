@@ -2531,15 +2531,17 @@ export async function getAvailableAssetsIdsForBooking(
   try {
     const selectedAssets = await db.asset.findMany({
       where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
+      select: { status: true, id: true, kitId: true },
     });
-    if (selectedAssets.some((asset) => asset.kit)) {
+
+    if (selectedAssets.some((asset) => asset.kitId)) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
         label: "Booking",
       });
     }
+
     return selectedAssets.map((asset) => asset.id);
   } catch (cause: ShelfError | any) {
     throw new ShelfError({
