@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   disabledBulkItemsAtom,
+  removeSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
@@ -32,6 +33,7 @@ export default function BulkListItemCheckbox({
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const removeSelectedBulkItems = useSetAtom(removeSelectedBulkItemsAtom);
 
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -47,7 +49,18 @@ export default function BulkListItemCheckbox({
     if (disabled) return;
 
     if (bulkItems && bulkItems.length > 0) {
-      setSelectedBulkItems([...bulkItems, item]);
+      const itemsToSet = [...bulkItems, item];
+
+      const itemsExists = selectedBulkItems.some((item) =>
+        itemsToSet.some((bulkItem) => bulkItem.id === item.id)
+      );
+
+      /** If the selected items already exists, then remove them */
+      if (itemsExists) {
+        removeSelectedBulkItems(itemsToSet);
+      } else {
+        setSelectedBulkItems([...bulkItems, item]);
+      }
     } else {
       setSelectedBulkItem(item);
     }

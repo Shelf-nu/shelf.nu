@@ -47,7 +47,7 @@ export default function BulkRemoveAssetAndKitDialog() {
               variant="primary"
               width="full"
               disabled={disabled}
-              className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
+              className="border-error-600 bg-error-600 hover:border-error-800 hover:!bg-error-800"
             >
               Confirm
             </Button>

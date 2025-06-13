@@ -53,28 +53,7 @@ export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
         !disabledItems.some((disabledItem) => disabledItem.id === item.id)
     );
 
-    /* We have to remove the existing and add new ones */
-    set(selectedBulkItemsAtom, (prev) => {
-      /** If filteredUpdate is empty, that means that user is unselecting all items */
-      if (filteredUpdate.length === 0) {
-        return [];
-      }
-
-      const existingItems = prev.filter((item) =>
-        filteredUpdate.some((updatedItem) => updatedItem.id === item.id)
-      );
-
-      // /** Remove if there are any existing */
-      if (existingItems.length > 0) {
-        return prev.filter(
-          (item) =>
-            !existingItems.some((updatedItem) => updatedItem.id === item.id)
-        );
-      }
-
-      /* Add the new items from the update */
-      return [...prev, ...filteredUpdate];
-    });
+    set(selectedBulkItemsAtom, filteredUpdate);
   }
 );
 
@@ -86,5 +65,20 @@ export const setDisabledBulkItemsAtom = atom<null, ListItemData[][], void>(
   null,
   (_, set, update) => {
     set(disabledBulkItemsAtom, update);
+  }
+);
+
+/**
+ * Remove the items from selectedBulkItemsAtom
+ */
+export const removeSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
+  null,
+  (_, set, update) => {
+    set(selectedBulkItemsAtom, (prev) =>
+      prev.filter(
+        (prevItem) =>
+          !update.some((updateItem) => updateItem.id === prevItem.id)
+      )
+    );
   }
 );
