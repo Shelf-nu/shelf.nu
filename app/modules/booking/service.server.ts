@@ -915,14 +915,37 @@ export async function updateBookingAssets({
   assetIds: Asset["id"][];
 }) {
   try {
-    return await db.booking.update({
-      where: { id, organizationId },
-      data: {
-        assets: {
-          connect: assetIds.map((id) => ({ id })),
+    const booking = await db.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id, organizationId },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
         },
-      },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      /**
+       *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
+       */
+      if (
+        b.status === BookingStatus.ONGOING ||
+        b.status === BookingStatus.OVERDUE
+      ) {
+        await db.asset.updateMany({
+          where: { id: { in: assetIds }, organizationId },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+      }
+      return b;
     });
+
+    return booking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -2508,15 +2531,17 @@ export async function getAvailableAssetsIdsForBooking(
   try {
     const selectedAssets = await db.asset.findMany({
       where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
+      select: { status: true, id: true, kitId: true },
     });
-    if (selectedAssets.some((asset) => asset.kit)) {
+
+    if (selectedAssets.some((asset) => asset.kitId)) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
         label: "Booking",
       });
     }
+
     return selectedAssets.map((asset) => asset.id);
   } catch (cause: ShelfError | any) {
     throw new ShelfError({
