@@ -16,7 +16,7 @@ declare global {
 }
 
 /** We store the port so we can then dynamically set the value of the secure field */
-const port = SMTP_PORT || 465;
+const port = parseInt(SMTP_PORT) || 465;
 const transporterSettings = {
   host: SMTP_HOST,
   port,
