@@ -42,7 +42,7 @@ declare global {
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
-      SMTP_PORT: number;
+      SMTP_PORT: string;
       SMTP_USER: string;
       SMTP_FROM: string;
       MAINTENANCE_MODE: string;
