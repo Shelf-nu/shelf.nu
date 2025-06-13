@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { CalendarIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useWorkingHours } from "~/hooks/use-working-hours";
@@ -35,6 +36,7 @@ export default function ExtendBookingDialog({
   const hints = useHints();
   const { currentOrganization } = useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { bufferStartTime } = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
 
@@ -43,6 +45,7 @@ export default function ExtendBookingDialog({
     ExtendBookingSchema({
       timeZone: hints.timeZone,
       workingHours: workingHoursData.workingHours,
+      bufferStartTime,
     })
   );
 

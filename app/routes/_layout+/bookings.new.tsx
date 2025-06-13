@@ -12,15 +12,14 @@ import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
-
 import { createBooking } from "~/modules/booking/service.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
-import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -115,12 +114,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
     const hints = getHints(request);
     const workingHours = await getWorkingHoursForOrganization(organizationId);
+    const { bufferStartTime } =
+      await getBookingSettingsForOrganization(organizationId);
     const payload = parseData(
       formData,
       BookingFormSchema({
         hints,
         action: "new",
         workingHours,
+        bufferStartTime,
       }),
       {
         additionalData: { userId, organizationId },
@@ -221,7 +223,8 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();
-  const { startDate, endDate } = getBookingDefaultStartEndTimes();
+  // const workingHoursData = useWorkingHours(currentOrganization.id);
+
   const user = useUserData();
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
@@ -242,8 +245,6 @@ export default function NewBooking() {
       <div>
         <NewBookingForm
           booking={{
-            startDate,
-            endDate,
             assetIds,
             custodianRef,
           }}
