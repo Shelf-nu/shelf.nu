@@ -44,11 +44,11 @@ export default function KitRow({
 
   return (
     <React.Fragment>
-      <ListItem item={kit} className="pseudo-border-bottom bg-gray-50">
+      <ListItem item={kit} className="relative bg-gray-50">
         <BulkListItemCheckbox item={kit} bulkItems={assets} />
 
-        <Td className="max-w-full">
-          <div className="flex items-center gap-3">
+        <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
+          <div className="flex items-center gap-3 p-4 md:justify-normal md:px-6">
             <KitImage
               kit={{
                 image: kit.image,
@@ -75,6 +75,7 @@ export default function KitRow({
             </div>
           </div>
         </Td>
+
         <When truthy={isOverlapping} fallback={<Td> </Td>}>
           <Td>
             <AvailabilityBadge
