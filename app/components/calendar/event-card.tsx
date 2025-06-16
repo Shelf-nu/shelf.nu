@@ -212,7 +212,7 @@ export default function renderEventCard({ event }: EventCardProps) {
       <HoverCardPortal>
         <HoverCardContent
           className="pointer-events-none z-[99999] md:w-96"
-          side="left"
+          side="top"
           sideOffset={8}
           collisionPadding={16}
         >
