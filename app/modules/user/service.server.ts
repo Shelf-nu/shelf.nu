@@ -53,7 +53,9 @@ export async function getUserByID<T extends Prisma.UserInclude | undefined>(
   try {
     const user = await db.user.findUniqueOrThrow({
       where: { id },
-      include: { ...include },
+      include: {
+        ...include,
+      },
     });
 
     return user as UserWithInclude<T>;

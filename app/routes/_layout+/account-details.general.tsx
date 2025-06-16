@@ -1,5 +1,9 @@
 import type { User } from "@prisma/client";
-import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 
 import { useActionData, useNavigation } from "@remix-run/react";
@@ -44,6 +48,11 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { getConfiguredSSODomains } from "~/utils/sso.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
@@ -325,10 +334,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
-export function loader() {
-  const title = "Account Details";
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.userData,
+      action: PermissionAction.read,
+    });
 
-  return json(data({ title }));
+    const title = "Account Details";
+
+    return json(data({ title }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
