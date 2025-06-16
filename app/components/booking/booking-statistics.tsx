@@ -1,14 +1,6 @@
-import type { Category } from "@prisma/client";
-import { Badge } from "../shared/badge";
-import { GrayBadge } from "../shared/gray-badge";
+import { CategoriesWithViewMore } from "../category/categories-with-view-more";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Separator } from "../shared/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../shared/tooltip";
 
 export function BookingStatistics({
   duration,
@@ -70,67 +62,10 @@ export function BookingStatistics({
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Categories</span>
           <div className="text-right">
-            {allCategories.length === 0 ? (
-              "No categories"
-            ) : (
-              <ListItemCategoriesColumn categories={allCategories} />
-            )}
+            <CategoriesWithViewMore categories={allCategories} />
           </div>
         </div>
       </div>
     </div>
   );
 }
-
-const SHOW_CATEGORIES_COUNT = 2;
-
-export const ListItemCategoriesColumn = ({
-  categories,
-}: {
-  categories: Pick<Category, "id" | "name" | "color">[] | undefined;
-}) => {
-  // Filter out any null/undefined categories first
-  const filteredCategories = categories?.filter(Boolean) || [];
-
-  // Show only the first 3 categories
-  const visibleCategories = filteredCategories.slice(0, SHOW_CATEGORIES_COUNT);
-  const remainingCategories = filteredCategories.slice(SHOW_CATEGORIES_COUNT);
-
-  return filteredCategories.length > 0 ? (
-    <div className="text-right">
-      {visibleCategories.map((category) => (
-        <Badge
-          key={category.id}
-          color={category.color}
-          withDot={false}
-          className="mb-2 ml-2"
-        >
-          {category.name}
-        </Badge>
-      ))}
-      {remainingCategories.length > 0 ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <GrayBadge className="ml-2">{`+${
-                filteredCategories.length - SHOW_CATEGORIES_COUNT
-              }`}</GrayBadge>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-72">
-              {remainingCategories.map((category) => (
-                <Badge
-                  key={category.id}
-                  color={category.color}
-                  withDot={false}
-                  className="mb-2 mr-2"
-                >
-                  {category.name}
-                </Badge>
-              ))}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
-    </div>
-  ) : null;
-};

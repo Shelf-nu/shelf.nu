@@ -14,6 +14,7 @@ import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
   getCalendarTitleAndSubtitle,
   getStatusClasses,
+  handleEventClick,
   handleEventMouseEnter,
   handleEventMouseLeave,
   isOneDayEvent,
@@ -23,6 +24,7 @@ import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
+import { CategoryBadge } from "../category-badge";
 
 export default function AssetsAvailability() {
   const { items, modelName, totalItems, perPage } =
@@ -103,6 +105,7 @@ export default function AssetsAvailability() {
             }}
             eventMouseEnter={handleEventMouseEnter("resourceTimelineMonth")}
             eventMouseLeave={handleEventMouseLeave("resourceTimelineMonth")}
+            eventClick={handleEventClick}
             resourceOrder="none"
             plugins={[resourceTimelinePlugin]}
             schedulerLicenseKey={FULL_CALENDAR_LICENSE_KEY}
@@ -121,14 +124,36 @@ export default function AssetsAvailability() {
                       <span className="text-gray-400">out of {totalItems}</span>
                     </p>
                   ) : (
-                    <span>
-                      {totalItems} {items.length > 1 ? plural : singular}
-                    </span>
+                    <p>
+                      <span>
+                        {totalItems} {items.length === 1 ? singular : plural}
+                      </span>
+                    </p>
                   )}
                 </div>
               </div>
             }
             resourceAreaHeaderClassNames="text-md font-semibold text-gray-900"
+            views={{
+              resourceTimelineMonth: {
+                slotLabelFormat: [
+                  { month: "long", year: "numeric" }, // top level: "January 2024"
+                  { weekday: "short", day: "2-digit" }, // bottom level: "Mon 15"
+                ],
+              },
+              resourceTimelineWeek: {
+                slotLabelFormat: [
+                  { weekday: "long", month: "short", day: "numeric" }, // top level: "Monday, Jan 15"
+                  { hour: "numeric", meridiem: "short" }, // bottom level: "2 PM"
+                ],
+              },
+              resourceTimelineDay: {
+                slotLabelFormat: [
+                  { weekday: "short", month: "short", day: "numeric" }, // "Mon, Jan 15"
+                  { hour: "numeric", minute: "2-digit", meridiem: "short" },
+                ], // "2:30 PM"
+              },
+            }}
             slotLabelFormat={[
               { month: "long", year: "numeric" }, // top level of text
               { weekday: "short", day: "2-digit" }, // lower level of text
@@ -161,10 +186,15 @@ export default function AssetsAvailability() {
                       {resource.title}
                     </Button>
                   </div>
-                  <AssetStatusBadge
-                    status={resource.extendedProps?.status}
-                    availableToBook={resource.extendedProps?.availableToBook}
-                  />
+                  <div className="flex items-center gap-2">
+                    <AssetStatusBadge
+                      status={resource.extendedProps?.status}
+                      availableToBook={resource.extendedProps?.availableToBook}
+                    />
+                    <CategoryBadge
+                      category={resource.extendedProps?.category}
+                    />
+                  </div>
                 </div>
               </div>
             )}

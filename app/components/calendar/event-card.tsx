@@ -1,6 +1,8 @@
 import type { EventContentArg } from "@fullcalendar/core";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
+import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import { ArrowRightIcon } from "lucide-react";
+
 import { type CalendarExtendedProps } from "~/routes/_layout+/calendar";
 import { bookingStatusColorMap } from "~/utils/bookings";
 import { isOneDayEvent } from "~/utils/calendar";
@@ -142,7 +144,27 @@ export default function renderEventCard({ event }: EventCardProps) {
       requestAnimationFrame(updatePosition);
     };
 
+    // Set up resize observer to detect layout changes
+    const resizeObserver = new ResizeObserver(() => {
+      // Reinitialize position when layout changes
+      setTimeout(() => {
+        initializePosition();
+        updatePosition();
+      }, 0);
+    });
+
     fcScroller.addEventListener("scroll", scrollHandler, { passive: true });
+    resizeObserver.observe(fcScroller);
+
+    // Also listen for window resize
+    const windowResizeHandler = () => {
+      setTimeout(() => {
+        initializePosition();
+        updatePosition();
+      }, 50);
+    };
+
+    window.addEventListener("resize", windowResizeHandler);
 
     // Initial position check
     updatePosition();
@@ -150,6 +172,8 @@ export default function renderEventCard({ event }: EventCardProps) {
     // Cleanup function
     const cleanup = () => {
       fcScroller.removeEventListener("scroll", scrollHandler);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", windowResizeHandler);
       element.style.transform = "";
       element.style.position = "";
       element.style.zIndex = "";
@@ -158,20 +182,19 @@ export default function renderEventCard({ event }: EventCardProps) {
     // Store cleanup function
     (element as any)._cleanup = cleanup;
   };
-
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
         <div
           className={tw(
-            "!hover:bg-purple-100 flex size-full items-center gap-1 whitespace-normal bg-transparent lg:truncate",
+            "!hover:bg-purple-100 flex items-center gap-1 whitespace-normal bg-transparent lg:truncate",
             event.extendedProps?.className
           )}
           style={{ color: bookingStatusColorMap[booking.status] }}
         >
           <div
             ref={triggerRefCallback}
-            className="inline-flex items-center gap-1 whitespace-nowrap"
+            className="inner-event-card-wrapper inline-flex items-center gap-1 whitespace-nowrap"
           >
             {viewType === "dayGridMonth" && (
               <When truthy={_isOneDayEvent}>
@@ -180,13 +203,16 @@ export default function renderEventCard({ event }: EventCardProps) {
             )}
             <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
             {event.title}
+            <ExternalLinkIcon
+              className={tw("external-link-icon mt-px", "hidden")}
+            />
           </div>
         </div>
       </HoverCardTrigger>
       <HoverCardPortal>
         <HoverCardContent
           className="pointer-events-none z-[99999] md:w-96"
-          side="top"
+          side="left"
           sideOffset={8}
           collisionPadding={16}
         >

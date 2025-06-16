@@ -28,6 +28,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   getCalendarTitleAndSubtitle,
   getStatusClasses,
+  handleEventClick,
   handleEventMouseEnter,
   handleEventMouseLeave,
   isOneDayEvent,
@@ -241,6 +242,7 @@ export default function Calendar() {
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter("dayGridMonth")}
               eventMouseLeave={handleEventMouseLeave("dayGridMonth")}
+              eventClick={handleEventClick}
               windowResize={handleWindowResize}
               eventContent={renderEventCard}
               eventTimeFormat={{

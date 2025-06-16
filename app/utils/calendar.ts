@@ -1,4 +1,8 @@
-import type { CalendarApi, EventHoveringArg } from "@fullcalendar/core";
+import type {
+  CalendarApi,
+  EventClickArg,
+  EventHoveringArg,
+} from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
@@ -122,7 +126,51 @@ export function isOneDayEvent(
  */
 export const handleEventMouseEnter =
   (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    // Show the new tab icon on hover
+    const newTabIcon = info.el?.querySelector(
+      ".external-link-icon"
+    ) as HTMLElement | null;
+    if (newTabIcon) {
+      newTabIcon.classList.remove("hidden");
+      newTabIcon.classList.add("inline-block");
+    }
+
+    const parent = info.el?.parentElement;
     const viewType = info.view.type;
+
+    // Handle text truncation by removing right constraint
+    if (
+      parent &&
+      info.el &&
+      ["dayGridMonth", "resourceTimelineMonth"].includes(viewType)
+    ) {
+      // Store original right style for restoration later
+      const originalRight = parent.style.right;
+      const innerWrapper = info.el.querySelector(
+        ".inner-event-card-wrapper"
+      ) as HTMLElement;
+      (info.el as any)._originalRight = originalRight;
+
+      // Check if the element is likely truncated by comparing scroll width vs client width
+      const isLikelyTruncated = innerWrapper?.clientWidth > info.el.clientWidth;
+
+      if (isLikelyTruncated) {
+        /** We handle it different per view */
+        if (viewType === "dayGridMonth") {
+          parent.style.width = innerWrapper.clientWidth + "px";
+          parent.style.zIndex = "1000"; // Ensure it shows above other elements
+          parent.style.overflow = "visible"; // Allow it to expand beyond its container
+        } else {
+          // Remove the right constraint to allow full expansion
+          parent.style.right = "auto";
+          // Add a higher z-index to ensure it shows above other elements
+          parent.style.zIndex = "1000";
+          // Ensure it can expand beyond its container
+          parent.style.overflow = "visible";
+        }
+      }
+    }
+
     if (Array.isArray(allowedViewType)) {
       if (!allowedViewType.includes(viewType)) return;
     } else {
@@ -132,6 +180,7 @@ export const handleEventMouseEnter =
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
+
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
       element.classList.add(statusClassesOnHover[statusClass]);
@@ -145,12 +194,40 @@ export const handleEventMouseEnter =
  */
 export const handleEventMouseLeave =
   (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
+    // Show the new tab icon on hover
+    const newTabIcon = info.el?.querySelector(
+      ".external-link-icon"
+    ) as HTMLElement | null;
+    if (newTabIcon) {
+      newTabIcon.classList.add("hidden");
+      newTabIcon.classList.remove("inline-block");
+    }
+
     const viewType = info.view.type;
+    const parent = info.el?.parentElement;
+    // Restore original right constraint
+    if (parent && info.el) {
+      const originalRight = (info.el as any)._originalRight;
+      if (originalRight !== undefined) {
+        // Clean up
+        if (viewType === "dayGridMonth") {
+          parent.style.removeProperty("width");
+          parent.style.removeProperty("zIndex");
+          parent.style.removeProperty("overflow");
+        } else {
+          parent.style.right = originalRight;
+          parent.style.zIndex = "";
+          parent.style.overflow = "";
+        }
+      }
+    }
+
     if (Array.isArray(allowedViewType)) {
       if (!allowedViewType.includes(viewType)) return;
     } else {
       if (viewType !== allowedViewType) return;
     }
+
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -159,6 +236,22 @@ export const handleEventMouseLeave =
       element.classList.remove(statusClassesOnHover[statusClass]);
     }
   };
+
+/**
+ * Handles the click event on calendar events.
+ * It prevents the default action and opens the event URL in a new tab.
+ *
+ * @param info - The event click argument containing information about the clicked event.
+ */
+export function handleEventClick(info: EventClickArg) {
+  info.jsEvent.preventDefault();
+  const event = info.event;
+  window.open(
+    event.url || `/bookings/${event.id}`,
+    "_blank",
+    "noopener,noreferrer"
+  );
+}
 
 /**
  * This function returns the title and subtitle for the calendar

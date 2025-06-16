@@ -27,6 +27,7 @@ export function useAssetAvailabilityData() {
         mainImageExpiration: item.mainImageExpiration,
         status: item.status,
         availableToBook: item.availableToBook,
+        category: item.category,
       },
     }));
 
@@ -55,6 +56,7 @@ export function useAssetAvailabilityData() {
             return {
               title,
               resourceId: asset.id,
+              url: `/bookings/${booking.id}`,
               start: booking.from!,
               end: booking.to!,
               classNames: [

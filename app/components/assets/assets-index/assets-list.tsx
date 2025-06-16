@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import { KitIcon } from "~/components/icons/library";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -20,10 +19,10 @@ import {
 import { Th, Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
-import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -52,10 +51,9 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const [searchParams] = useSearchParams();
-  const view = searchParams.get("view") ?? "table";
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
+  const isAvailabilityView = useIsAvailabilityView();
 
   const { isMd } = useViewportHeight();
   const fetchers = useFetchers();
@@ -104,6 +102,7 @@ export const AssetsList = ({
       className={tw(
         "flex flex-col",
         modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
+        isAvailabilityView ? "pb-3" : "",
         wrapperClassName,
         isSwappingMode && "overflow-hidden"
       )}
@@ -128,7 +127,7 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {view === "availability" ? (
+          {isMd && isAvailabilityView ? (
             <>
               <AssetsAvailability />
               <AssetIndexPagination />

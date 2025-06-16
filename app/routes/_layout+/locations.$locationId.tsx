@@ -25,7 +25,6 @@ import { SortBy } from "~/components/list/filters/sort-by";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
 import { MapPlaceholder } from "~/components/location/map-placeholder";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -327,7 +326,7 @@ const ListAssetContent = ({
   item,
 }: {
   item: Asset & {
-    category?: Category;
+    category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
   };

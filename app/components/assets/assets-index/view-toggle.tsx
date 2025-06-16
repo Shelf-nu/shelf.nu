@@ -2,6 +2,8 @@ import { CalendarIcon } from "@radix-ui/react-icons";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { useSearchParams } from "~/hooks/search-params";
+import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
 
 export function AssetsIndexViewToggle({
@@ -9,13 +11,13 @@ export function AssetsIndexViewToggle({
 }: {
   modeIsSimple?: boolean;
 }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const view = searchParams.get("view") ?? "table";
+  const { isMd } = useViewportHeight();
+  const [, setSearchParams] = useSearchParams();
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
-  const isAvailabilityView = view === "availability";
+  const isAvailabilityView = useIsAvailabilityView();
 
-  return (
+  return isMd ? (
     <div className="flex items-start gap-2">
       <ButtonGroup>
         <Button
@@ -61,5 +63,5 @@ export function AssetsIndexViewToggle({
         </Button>
       </ButtonGroup>
     </div>
-  );
+  ) : null;
 }
