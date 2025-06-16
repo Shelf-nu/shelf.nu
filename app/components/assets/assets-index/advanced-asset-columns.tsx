@@ -10,7 +10,6 @@ import {
 import { Link, useLoaderData } from "@remix-run/react";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import {

@@ -28,6 +28,7 @@ export function AssetsIndexViewToggle({
             !isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
+          disabled={!isAvailabilityView}
           type="button"
           onClick={() => {
             setSearchParams((prev) => {
@@ -48,6 +49,7 @@ export function AssetsIndexViewToggle({
             isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
+          disabled={isAvailabilityView}
           type={"button"}
           onClick={() => {
             setSearchParams((prev) => {
