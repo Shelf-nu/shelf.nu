@@ -12,7 +12,7 @@ export function CalendarNavigation({
 }) {
   function handleCalendarNavigation(navigateTo: "prev" | "today" | "next") {
     const calendarApi = calendarRef.current?.getApi();
-    if (navigateTo == "prev") {
+    if (navigateTo === "prev") {
       calendarApi?.prev();
     } else if (navigateTo == "next") {
       calendarApi?.next();
