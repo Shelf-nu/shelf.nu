@@ -4,7 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
 import { EmptyState } from "../list/empty-state";
@@ -28,7 +28,7 @@ export function BookingAssetsColumn() {
 
   const manageAssetsUrl = useMemo(
     () =>
-      `add-assets?${new URLSearchParams({
+      `manage-assets?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),

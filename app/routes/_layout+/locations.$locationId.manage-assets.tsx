@@ -25,14 +25,12 @@ import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset/service.server";
-
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { getShareAgreementUrl } from "~/utils/asset";
 import { ShelfError, makeShelfError } from "~/utils/error";

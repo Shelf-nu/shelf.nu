@@ -280,7 +280,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id: bookingId, organizationId },
-        select: { id: true, status: true },
+        select: {
+          id: true,
+          status: true,
+          /** We need to get the original assets that were part of the booking before the update so we can compare */
+          assets: {
+            select: { id: true },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -311,24 +318,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           : "Changing of assets is not allowed for current status of booking.",
       });
     }
+    // Get existing asset IDs from the booking
+    const existingAssetIds = booking.assets.map((asset) => asset.id);
 
-    /** We only update the booking if there are assets to add */
-    if (assetIds.length > 0) {
-      /** We update the booking with the new assets */
+    // Filter out existing assets to get only newly added ones
+    const newAssetIds = assetIds.filter(
+      (assetId) => !existingAssetIds.includes(assetId)
+    );
+
+    /** We only update the booking if there are NEW assets to add */
+    if (newAssetIds.length > 0) {
+      /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds,
+        assetIds: newAssetIds, // Only the newly added assets
       });
 
-      /** We create notes for the assets that were added */
+      /** We create notes for the newly added assets */
       await createNotes({
         content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
           b.name
         }](/bookings/${b.id})**.`,
         type: "UPDATE",
         userId: authSession.userId,
-        assetIds,
+        assetIds: newAssetIds,
       });
     }
 
@@ -345,7 +359,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert,
-     * so we have to redirect to add-kits url
+     * so we have to redirect to manage-kits url
      */
     if (redirectTo) {
       return redirect(redirectTo);
@@ -398,7 +412,7 @@ export default function AddAssetsToNewBooking() {
 
   const manageKitsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/add-kits?${new URLSearchParams({
+      `/bookings/${booking.id}/manage-kits?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),

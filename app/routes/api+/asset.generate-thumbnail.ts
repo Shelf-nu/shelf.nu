@@ -12,9 +12,10 @@ import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
-
+  const authSession = context.getSession();
+  const { userId } = authSession;
   try {
     const { assetId } = parseData(
       url.searchParams,
@@ -40,7 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         new ShelfError({
           cause: null,
           message: `Asset not found for thumbnail generation: ${assetId}`,
-          additionalData: { assetId },
+          additionalData: { assetId, userId },
           label: "Assets",
         })
       );
@@ -85,7 +86,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             new ShelfError({
               cause: error,
               message: `Failed to refresh thumbnail URL for asset ${assetId}`,
-              additionalData: { assetId, thumbnailPath },
+              additionalData: { assetId, thumbnailPath, userId },
               label: "Assets",
             })
           );
@@ -201,7 +202,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         new ShelfError({
           cause: null,
           message: `Asset was deleted during thumbnail generation: ${assetId}`,
-          additionalData: { assetId },
+          additionalData: { assetId, userId },
           label: "Assets",
         })
       );
@@ -254,7 +255,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cause,
       message: "Error generating thumbnail.",
       label: "Assets",
-      additionalData: { assetId: url.searchParams.get("assetId") || "unknown" },
+      additionalData: {
+        assetId: url.searchParams.get("assetId") || "unknown",
+        userId,
+      },
     });
 
     // Log the error for debugging

@@ -242,8 +242,8 @@ export function useSidebarNavItems() {
           to: "/settings/general",
         },
         {
-          title: "Working hours",
-          to: "/settings/working-hours",
+          title: "Bookings",
+          to: "/settings/bookings",
           hidden: isPersonalOrganization,
         },
         {

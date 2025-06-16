@@ -51,6 +51,7 @@ export type FailureReason = {
     | "Asset Index Settings"
     | "Auth"
     | "Booking"
+    | "Booking Settings"
     | "Category"
     | "Crop image"
     | "CSV"

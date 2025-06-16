@@ -6,11 +6,19 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import {
+  BufferSettings,
+  BufferSettingsSchema,
+} from "~/components/booking/buffer/buffer-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
+import {
+  getBookingSettingsForOrganization,
+  updateBookingSettings,
+} from "~/modules/booking-settings/service.server";
 import {
   createWorkingHoursOverride,
   deleteWorkingHoursOverride,
@@ -59,17 +67,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const workingHours = await getWorkingHoursForOrganization(organizationId);
+    const [bookingSettings, workingHours] = await Promise.all([
+      getBookingSettingsForOrganization(organizationId),
+      getWorkingHoursForOrganization(organizationId),
+    ]);
+
     const header: HeaderData = {
-      title: "Working hours",
-      subHeading:
-        "Manage your workspace's working hours. This will allow you to limit when bookings' start and end times and dates.",
+      title: "Bookings settings",
     };
 
     return json(
       data({
         header,
         organization: currentOrganization,
+        bookingSettings,
         workingHours,
       })
     );
@@ -80,7 +91,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => "Working hours",
+  breadcrumb: () => "Bookings",
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -89,7 +100,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const ErrorBoundary = () => <ErrorContent />;
 
-export type ActionData = typeof action;
+export type BookingSettingsActionData = typeof action;
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -109,6 +120,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (
       !intent ||
       ![
+        "updateBuffer",
         "toggle",
         "updateSchedule",
         "createOverride",
@@ -124,6 +136,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     switch (intent) {
+      case "updateBuffer": {
+        const { bufferStartTime } = parseData(formData, BufferSettingsSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          bufferStartTime,
+        });
+
+        return json(data({ success: true }), { status: 200 });
+      }
       case "toggle": {
         // Only use parseData for simple fields without numeric keys
         const { enableWorkingHours } = parseData(
@@ -264,12 +292,29 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 export default function GeneralPage() {
-  const { header } = useLoaderData<typeof loader>();
-  const { workingHours } = useLoaderData<typeof loader>();
+  const { workingHours, bookingSettings } = useLoaderData<typeof loader>();
 
   return (
     <>
-      <EnableWorkingHoursForm enabled={workingHours.enabled} header={header} />
+      {/* Buffer settings form */}
+      <BufferSettings
+        header={{
+          title: "Minimum notice period",
+          subHeading:
+            "Set how far in advance users must reserve assets before their checkout time. This prevents last-minute bookings and ensures proper asset availability.",
+        }}
+        defaultValue={bookingSettings.bufferStartTime}
+      />
+
+      {/* Enable working hours form */}
+      <EnableWorkingHoursForm
+        enabled={workingHours.enabled}
+        header={{
+          title: "Working hours",
+          subHeading:
+            "Manage your workspace's working hours. This will allow you to limit when bookings' start and end times and dates.",
+        }}
+      />
       {/* New weekly schedule form - only show if working hours are enabled */}
       {workingHours.enabled && (
         <WeeklyScheduleForm

@@ -46,7 +46,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
-import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
+import type { AssetWithBooking } from "./bookings.$bookingId.manage-assets";
 
 const AssignCustodySchema = z.object({
   custodian: stringToJSONSchema.pipe(

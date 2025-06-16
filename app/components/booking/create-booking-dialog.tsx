@@ -4,7 +4,6 @@ import { useLoaderData } from "@remix-run/react";
 import { CalendarRangeIcon } from "lucide-react";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";
-import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 import { NewBookingForm } from "./forms/new-booking-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -33,8 +32,6 @@ export default function CreateBookingDialog({
   const [searchParams] = useSearchParams();
 
   const assetIds = searchParams.getAll("assetId");
-
-  const { startDate, endDate } = getBookingDefaultStartEndTimes();
 
   function openDialog() {
     setIsDialogOpen(true);
@@ -74,8 +71,6 @@ export default function CreateBookingDialog({
 
             <NewBookingForm
               booking={{
-                startDate,
-                endDate,
                 assetIds: assetIds.length ? assetIds : undefined,
                 custodianRef,
               }}

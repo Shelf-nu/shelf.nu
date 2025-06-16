@@ -501,6 +501,7 @@ model Organization {
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
   workingHours WorkingHours? 
+  bookingSettings BookingSettings?
 
   // Permissions configuration
   // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
@@ -509,6 +510,7 @@ model Organization {
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
+  // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
@@ -873,6 +875,26 @@ model Booking {
   @@index([custodianUserId])
   @@index([organizationId])
 }
+
+
+model BookingSettings {
+  id String @id @default(cuid())
+  
+  bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
+  
+  // Relationships
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String       @unique
+  
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Index for foreign key
+  @@index([organizationId])
+}
+
+
 
 model Kit {
   id String @id @default(cuid())

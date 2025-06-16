@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import {
   useLoaderData,
+  useLocation,
   // eslint-disable-next-line no-restricted-imports
   useSearchParams as remixUseSearchParams,
 } from "@remix-run/react";
@@ -8,10 +9,7 @@ import Cookies from "js-cookie";
 
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
-import {
-  useAssetIndexViewState,
-  useIsAssetIndexPage,
-} from "../use-asset-index-view-state";
+import { useAssetIndexViewState } from "../use-asset-index-view-state";
 import { useCurrentOrganization } from "../use-current-organization";
 
 export const SEARCH_PARAMS_KEYS_TO_EXCLUDE = [
@@ -45,6 +43,68 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
   return searchParams.toString();
 }
 
+// Allowed pathnames for cookie naming
+export const ALLOWED_FILTER_PATHNAMES = {
+  assets: "assetFilter",
+  bookings: "bookingFilter",
+} as const;
+
+type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
+type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
+
+/**
+ * Helper function to extract and validate pathname for cookie naming
+ * @param pathname - The current pathname (e.g., "/assets", "/bookings")
+ * @returns The validated cookie name suffix, or "assetFilter" as fallback
+ */
+export function getValidatedPathname(pathname: string): CookieNameSuffix {
+  // Strip leading slash and get the first segment
+  const cleanPath = pathname
+    .replace(/^\//, "")
+    .split("/")[0] as AllowedPathname;
+
+  // Check if it's an allowed pathname and return the corresponding value
+  if (cleanPath in ALLOWED_FILTER_PATHNAMES) {
+    return ALLOWED_FILTER_PATHNAMES[cleanPath];
+  }
+
+  // Fallback to "assetFilter" if pathname is not in allowed list
+  return "assetFilter";
+}
+
+/**
+ * Helper function to get the appropriate cookie name based on organization, mode, and pathname
+ * @param organizationId - The organization ID
+ * @param modeIsAdvanced - Whether advanced mode is enabled
+ * @param pathname - The current pathname (e.g., "/assets", "/bookings")
+ * @returns The appropriate cookie name
+ */
+export function getCookieName(
+  organizationId: string,
+  modeIsAdvanced: boolean,
+  pathname: string
+): string {
+  if (modeIsAdvanced) {
+    return `${organizationId}_advancedAssetFilter`;
+  }
+
+  const validatedPathname = getValidatedPathname(pathname);
+  return `${organizationId}_${validatedPathname}`;
+}
+
+/**
+ * Custom hook to check if the current page supports cookie filters
+ * @returns boolean indicating if the current page is in ALLOWED_FILTER_PATHNAMES
+ */
+export function useIsPageWithCookieFilters(): boolean {
+  const location = useLocation();
+
+  // Strip leading slash and get the first segment
+  const cleanPath = location.pathname.replace(/^\//, "").split("/")[0];
+
+  // Check if it's one of the allowed filter pathnames
+  return cleanPath in ALLOWED_FILTER_PATHNAMES;
+}
 /**
  * Get the types from the ReturnType of the original useSearchParams hook
  */
@@ -60,11 +120,11 @@ export const useSearchParams = (): [
 ] => {
   const [searchParams, setSearchParams] = remixUseSearchParams();
   const { destroyCookieValues } = useCookieDestroy();
-  const isAssetIndexPage = useIsAssetIndexPage();
+  const isPageWithCookieFilters = useIsPageWithCookieFilters();
   const currentOrganization = useCurrentOrganization();
 
   /** In those cases, we return the default searchParams and setSearchParams as we dont need to handle cookies */
-  if (!isAssetIndexPage || !currentOrganization) {
+  if (!isPageWithCookieFilters || !currentOrganization) {
     return [searchParams, setSearchParams];
   }
 
@@ -123,16 +183,18 @@ type SetSearchParams = (
  */
 export function useAssetIndexCookieSearchParams() {
   const assetIndexData = useLoaderData<AssetIndexLoaderData>();
-  const isAssetIndexPage = useIsAssetIndexPage();
+  const isPageWithCookieFilters = useIsPageWithCookieFilters();
 
-  if (!assetIndexData || !isAssetIndexPage) {
+  if (!assetIndexData || !isPageWithCookieFilters) {
     return new URLSearchParams();
   }
 
   const { filters } = assetIndexData;
   // Ensure we're passing a string to URLSearchParams constructor
   const cookieSearchParams = new URLSearchParams(
-    isAssetIndexPage && filters && filters !== "" ? filters.toString() : ""
+    isPageWithCookieFilters && filters && filters !== ""
+      ? filters.toString()
+      : ""
   );
 
   return cookieSearchParams;
@@ -162,14 +224,14 @@ export function checkValueInCookie(
 export function useSearchParamHasValue(...keys: string[]): boolean {
   const [searchParams] = useSearchParams();
   const cookieSearchParams = useAssetIndexCookieSearchParams();
-  const isAssetIndexPage = useIsAssetIndexPage();
+  const isPageWithCookieFilters = useIsPageWithCookieFilters();
   const hasValue = useMemo(
     () => keys.map((key) => searchParams.has(key)).some(Boolean),
     [keys, searchParams]
   );
 
   const hasValueInCookie =
-    isAssetIndexPage && checkValueInCookie(keys, cookieSearchParams);
+    isPageWithCookieFilters && checkValueInCookie(keys, cookieSearchParams);
 
   return hasValue || hasValueInCookie;
 }
@@ -195,20 +257,17 @@ export function deleteKeysInSearchParams(
 /**
  * Function to delete specific keys from the cookie search parameters and update the cookie.
  *
- * @param {string} organizationId - The organization ID used to name the cookie.
+ * @param {string} cookieName - The name of the cookie to update.
  * @param {string[]} keys - Array of keys (strings) to be deleted from the cookie search parameters.
  * @param {URLSearchParams} cookieSearchParams - URLSearchParams object representing the parameters extracted from cookies.
+ * @param {string} [cookiePath] - Optional cookie path. If not provided, will be determined from pathname.
  */
 export function destroyCookieValues(
-  organizationId: string,
+  cookieName: string,
   keys: string[],
   cookieSearchParams: URLSearchParams,
-  modeIsAdvanced: boolean
+  cookiePath?: string
 ) {
-  const cookieName = modeIsAdvanced
-    ? `${organizationId}_advancedAssetFilter`
-    : `${organizationId}_assetFilter`;
-
   // Always remove excluded keys and the specifically requested keys
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
@@ -219,9 +278,22 @@ export function destroyCookieValues(
     cookieSearchParams.delete(key);
   });
 
-  // Set the cleaned cookie
-  Cookies.set(cookieName, cookieSearchParams.toString(), {
-    path: "/assets",
+  const finalCookieValue = cookieSearchParams.toString();
+
+  // Determine the correct path if not provided
+  let path = cookiePath;
+  if (!path) {
+    // Extract path from current location
+    const currentPath = window.location.pathname
+      .replace(/^\//, "")
+      .split("/")[0];
+    path =
+      currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+  }
+
+  // Set the cleaned cookie with the correct path
+  Cookies.set(cookieName, finalCookieValue, {
+    path,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     expires: 365, // 1 year
@@ -239,19 +311,29 @@ export function useClearValueFromParams(...keys: string[]): Function {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
   const { isAssetIndexPage, modeIsAdvanced } = useAssetIndexViewState();
+  const isPageWithCookieFilters = useIsPageWithCookieFilters();
+  const location = useLocation();
 
   function clearValuesFromParams() {
-    if (
-      isAssetIndexPage &&
-      currentOrganization &&
-      modeIsAdvanced !== null // Can be null if the view is not the asset index
-    ) {
-      destroyCookieValues(
+    if (isPageWithCookieFilters && currentOrganization) {
+      // For asset pages, use the actual modeIsAdvanced value
+      // For other pages (like bookings), default to false (non-advanced mode)
+      const effectiveModeIsAdvanced = isAssetIndexPage
+        ? modeIsAdvanced || false
+        : false;
+
+      const cookieName = getCookieName(
         currentOrganization.id,
-        keys,
-        cookieSearchParams,
-        modeIsAdvanced
+        effectiveModeIsAdvanced,
+        location.pathname
       );
+
+      // Determine the correct cookie path based on the current page
+      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
+      const cookiePath =
+        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+
+      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -260,6 +342,7 @@ export function useClearValueFromParams(...keys: string[]): Function {
 
   return clearValuesFromParams;
 }
+
 /**
  * Custom hook to provide a handler for destroying specific keys from cookies if on the asset index page.
  *
@@ -269,6 +352,8 @@ export function useCookieDestroy() {
   const cookieSearchParams = useAssetIndexCookieSearchParams();
   const currentOrganization = useCurrentOrganization();
   const { isAssetIndexPage, modeIsAdvanced } = useAssetIndexViewState();
+  const isPageWithCookieFilters = useIsPageWithCookieFilters();
+  const location = useLocation();
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
@@ -276,20 +361,31 @@ export function useCookieDestroy() {
    * @param {string[]} keys - Array of keys (strings) to be removed from the cookies.
    */
   function _destroyCookieValues(keys: string[]) {
-    // Check if the current page is the asset index page
+    // Check if the current page supports cookie filters
     if (
-      isAssetIndexPage &&
+      isPageWithCookieFilters &&
       currentOrganization &&
-      currentOrganization?.id &&
-      modeIsAdvanced !== null // Can be null if the view is not the asset index
+      currentOrganization?.id
     ) {
-      // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
-      destroyCookieValues(
+      // For asset pages, use the actual modeIsAdvanced value
+      // For other pages (like bookings), default to false (non-advanced mode)
+      const effectiveModeIsAdvanced = isAssetIndexPage
+        ? modeIsAdvanced || false
+        : false;
+
+      const cookieName = getCookieName(
         currentOrganization.id,
-        keys,
-        cookieSearchParams,
-        modeIsAdvanced
+        effectiveModeIsAdvanced,
+        location.pathname
       );
+
+      // Determine the correct cookie path based on the current page
+      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
+      const cookiePath =
+        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+
+      // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
+      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
     }
   }
 
