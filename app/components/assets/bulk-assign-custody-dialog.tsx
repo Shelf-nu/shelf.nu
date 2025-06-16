@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
@@ -28,6 +29,9 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<typeof loader>();
+
+  const user = useUserData();
+  const currentTeamMember = teamMembers.find((tm) => tm.userId === user?.id);
 
   const [hasCustodianSelected, setHasCustodianSelected] =
     useState(isSelfService); // If self-service, we assume the custodian is already selected
@@ -60,11 +64,11 @@ export default function BulkAssignCustodyDialog() {
               <DynamicSelect
                 hidden={isSelfService}
                 defaultValue={
-                  isSelfService && teamMembers?.length > 0
+                  isSelfService && currentTeamMember
                     ? JSON.stringify({
-                        id: teamMembers[0].id,
-                        name: resolveTeamMemberName(teamMembers[0]),
-                        email: teamMembers[0]?.user?.email,
+                        id: currentTeamMember.id,
+                        name: resolveTeamMemberName(currentTeamMember),
+                        email: currentTeamMember.user?.email,
                       })
                     : undefined
                 }

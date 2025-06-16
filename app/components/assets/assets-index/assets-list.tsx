@@ -208,6 +208,7 @@ const ListAssetContent = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={item?.kit}
                   shareAgreementUrl={getShareAgreementUrl(item)}
                   status={item.status}
                   availableToBook={item.availableToBook}

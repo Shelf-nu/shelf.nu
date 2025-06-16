@@ -22,6 +22,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   assetCustodyAssignedEmailText,
@@ -385,6 +386,9 @@ export default function Custody() {
   const [hasCustodianSelected, setHasCustodianSelected] =
     useState(isSelfService); // If self-service, we assume the custodian is already selected
 
+  const user = useUserData();
+  const currentTeamMember = teamMembers.find((tm) => tm.userId === user?.id);
+
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
@@ -408,10 +412,11 @@ export default function Custody() {
           <DynamicSelect
             hidden={isSelfService}
             defaultValue={
-              isSelfService
+              isSelfService && currentTeamMember
                 ? JSON.stringify({
-                    id: teamMembers[0].id,
-                    name: resolveTeamMemberName(teamMembers[0]),
+                    id: currentTeamMember.id,
+                    name: resolveTeamMemberName(currentTeamMember),
+                    email: currentTeamMember.user?.email,
                   })
                 : undefined
             }

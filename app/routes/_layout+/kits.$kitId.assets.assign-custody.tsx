@@ -39,6 +39,7 @@ import { WarningBox } from "~/components/shared/warning-box";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { kitCustodyAssignedWithAgreementEmailText } from "~/modules/kit/emais";
@@ -450,6 +451,9 @@ export default function GiveKitCustody() {
   const { kit, teamMembers } = useLoaderData<typeof loader>();
   const { isSelfService } = useUserRoleHelper();
 
+  const user = useUserData();
+  const currentTeamMember = teamMembers.find((tm) => tm.userId === user?.id);
+
   const [hasCustodianSelected, setHasCustodianSelected] =
     useState(isSelfService); // If self-service, we assume the custodian is already selected
   const submit = useSubmit();
@@ -501,10 +505,11 @@ export default function GiveKitCustody() {
             showSearch={!isSelfService}
             disabled={disabled || isSelfService}
             defaultValue={
-              isSelfService
+              isSelfService && currentTeamMember
                 ? JSON.stringify({
-                    id: teamMembers[0].id,
-                    name: resolveTeamMemberName(teamMembers[0]),
+                    id: currentTeamMember.id,
+                    name: resolveTeamMemberName(currentTeamMember),
+                    email: currentTeamMember.user?.email,
                   })
                 : undefined
             }
