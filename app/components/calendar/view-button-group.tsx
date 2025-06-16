@@ -31,6 +31,7 @@ export const ViewButtonGroup = ({
           variant={"secondary"}
           onClick={() => onViewChange(value)}
           className={tw(currentView === value ? `${disabledButtonStyles}` : "")}
+          disabled={currentView === value}
         >
           {label}
         </Button>
