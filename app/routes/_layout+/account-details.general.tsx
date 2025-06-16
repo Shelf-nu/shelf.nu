@@ -1,4 +1,3 @@
-import type { User } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -6,47 +5,44 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 
-import { useActionData, useNavigation } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
-import { useZorm } from "react-zorm";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
-import { Form } from "~/components/custom-form";
-import FormRow from "~/components/forms/form-row";
-import Input from "~/components/forms/input";
-import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
+import { createChangeEmailSchema } from "~/components/user/change-email";
 import {
-  ChangeEmailForm,
-  createChangeEmailSchema,
-} from "~/components/user/change-email";
+  UserDetailsForm,
+  UserDetailsFormSchema,
+} from "~/components/user/details-form";
 import PasswordResetForm from "~/components/user/password-reset-form";
-import ProfilePicture from "~/components/user/profile-picture";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
+import {
+  UserContactDetailsForm,
+  UserContactDetailsFormSchema,
+} from "~/components/user/user-contact-form";
 import {
   changeEmailAddressHtmlEmail,
   changeEmailAddressTextEmail,
 } from "~/emails/change-user-email-address";
 
 import { sendEmail } from "~/emails/mail.server";
-import { useUserData } from "~/hooks/use-user-data";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import {
   getUserByID,
+  getUserWithContact,
   updateProfilePicture,
   updateUser,
   updateUserEmail,
 } from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
+import type { UpdateUserContactPayload } from "~/modules/user-contact/service.server";
+import { updateUserContact } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
-import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -54,19 +50,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { getConfiguredSSODomains } from "~/utils/sso.server";
-import { zodFieldIsRequired } from "~/utils/zod";
-
-const UpdateFormSchema = z.object({
-  email: z
-    .string()
-    .email("Please enter a valid email.")
-    .transform((email) => email.toLowerCase()),
-  username: z
-    .string()
-    .min(4, { message: "Must be at least 4 characters long" }),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
-});
 
 // First we define our intent schema
 const IntentSchema = z.object({
@@ -76,6 +59,7 @@ const IntentSchema = z.object({
     "deleteUser",
     "initiateEmailChange",
     "verifyEmailChange",
+    "updateUserContact",
   ]),
 });
 
@@ -85,8 +69,12 @@ const ActionSchemas = {
     type: z.literal("resetPassword"),
   }),
 
-  updateUser: UpdateFormSchema.extend({
+  updateUser: UserDetailsFormSchema.extend({
     type: z.literal("updateUser"),
+  }),
+
+  updateUserContact: UserContactDetailsFormSchema.extend({
+    type: z.literal("updateUserContact"),
   }),
 
   deleteUser: z.object({
@@ -111,6 +99,8 @@ const ActionSchemas = {
 function getActionSchema(intent: z.infer<typeof IntentSchema>["intent"]) {
   return ActionSchemas[intent].extend({ intent: z.literal(intent) });
 }
+
+export type UserPageActionData = typeof action;
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -168,6 +158,31 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "User updated",
           message: "Your settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      case "updateUserContact": {
+        if (payload.type !== "updateUserContact")
+          throw new Error("Invalid payload type");
+
+        const updateUserContactPayload: UpdateUserContactPayload = {
+          userId,
+          phone: payload.phone,
+          street: payload.street,
+          city: payload.city,
+          stateProvince: payload.stateProvince,
+          zipPostalCode: payload.zipPostalCode,
+          countryRegion: payload.countryRegion,
+        };
+
+        await updateUserContact(updateUserContactPayload);
+
+        sendNotification({
+          title: "Contact details updated",
+          message: "Your contact information has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -346,8 +361,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const title = "Account Details";
+    const user = await getUserWithContact(userId);
 
-    return json(data({ title }));
+    return json(data({ title, user }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -363,165 +379,33 @@ export const handle = {
 };
 
 export default function UserPage() {
-  const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
-  const transition = useNavigation();
-  const disabled = isFormProcessing(transition.state);
-  const data = useActionData<typeof action>();
-  const user = useUserData() as unknown as User;
-  const usernameError =
-    getValidationErrors<typeof UpdateFormSchema>(data?.error)?.username
-      ?.message || zo.errors.username()?.message;
-  const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
+  const { user } = useLoaderData<typeof loader>();
 
   return (
-    <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
-      <div className=" mb-6">
-        <h3 className="text-text-lg font-semibold">My details</h3>
-        <p className="text-sm text-gray-600">
-          Update your photo and personal details here.
-        </p>
-      </div>
-      <Form
-        method="post"
-        ref={zo.ref}
-        className=""
-        replace
-        encType="multipart/form-data"
-      >
-        <FormRow
-          rowLabel={"Full name"}
-          className="border-t"
-          required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
-        >
-          <div className="flex gap-6">
-            <Input
-              label="First name"
-              type="text"
-              name={zo.fields.firstName()}
-              defaultValue={user?.firstName || undefined}
-              error={zo.errors.firstName()?.message}
-              required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
-            />
-            <Input
-              label="Last name"
-              type="text"
-              name={zo.fields.lastName()}
-              defaultValue={user?.lastName || undefined}
-              error={zo.errors.lastName()?.message}
-              required={zodFieldIsRequired(UpdateFormSchema.shape.lastName)}
-            />
-          </div>
-        </FormRow>
-
-        <FormRow
-          rowLabel="Email address"
-          className="relative"
-          required={zodFieldIsRequired(
-            UpdateFormSchema.shape.email._def.schema
-          )}
-        >
-          {/* Actial field used for resetting pwd and updating user */}
-          <input
-            type="hidden"
-            name={zo.fields.email()}
-            value={user?.email}
-            className="hidden w-full"
-          />
-          {/* Just previews the email address */}
-          <Input
-            label={zo.fields.email()}
-            icon="mail"
-            hideLabel={true}
-            placeholder="zaans@huisje.com"
-            type="text"
-            value={user?.email}
-            className="w-full"
-            disabled={true}
-            title="To change your email address, please contact support."
-            required={zodFieldIsRequired(
-              UpdateFormSchema.shape.email._def.schema
-            )}
-          />
-          <ChangeEmailForm currentEmail={user?.email} />
-        </FormRow>
-
-        <FormRow
-          rowLabel="Username"
-          required={zodFieldIsRequired(UpdateFormSchema.shape.username)}
-        >
-          <Input
-            label="Username"
-            hideLabel={true}
-            addOn="shelf.nu/"
-            type="text"
-            name={zo.fields.username()}
-            defaultValue={user?.username || undefined}
-            error={usernameError}
-            className="w-full"
-            inputClassName="flex-1"
-            required={zodFieldIsRequired(UpdateFormSchema.shape.username)}
-          />
-        </FormRow>
-
-        <FormRow
-          rowLabel="Profile picture"
-          // subHeading="This will be displayed on your profile."
-          className="border-t"
-        >
-          <div className="flex gap-3">
-            <ProfilePicture />
-            <div>
-              <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
-              <Input
-                disabled={disabled}
-                accept={ACCEPT_SUPPORTED_IMAGES}
-                name="profile-picture"
-                type="file"
-                onChange={validateFile}
-                label={"profile-picture"}
-                hideLabel
-                error={fileError}
-                className="mt-2"
-                inputClassName="border-0 shadow-none p-0 rounded-none"
-              />
-            </div>
-          </div>
-        </FormRow>
-
-        <div className="mt-4 text-right">
-          <input type="hidden" name="type" value="updateUser" />
-          <Button
-            disabled={disabled}
-            type="submit"
-            name="intent"
-            value="updateUser"
-          >
-            Save
-          </Button>
+    <div className="mb-2.5 flex flex-col justify-between gap-3">
+      <UserDetailsForm user={user} />
+      <UserContactDetailsForm user={user} />
+      <Card className="my-0">
+        <div className="mb-6">
+          <h3 className="text-text-lg font-semibold">Password</h3>
+          <p className="text-sm text-gray-600">Update your password here.</p>
         </div>
-      </Form>
-
-      <div className=" my-6">
-        <h3 className="text-text-lg font-semibold">Password</h3>
-        <p className="text-sm text-gray-600">Update your password here</p>
-      </div>
-      <div>
-        <p>Need to reset your password?</p>
-        <p>
-          Click below to start the reset process. You'll be logged out and
-          redirected to our password reset page.
-        </p>
-      </div>
-      <PasswordResetForm />
-
-      <div className="my-6">
+        <div>
+          <p>Need to reset your password?</p>
+          <p>
+            Click below to start the reset process. You'll be logged out and
+            redirected to our password reset page.
+          </p>
+        </div>
+        <PasswordResetForm />
+      </Card>
+      <Card className="my-0">
         <h3 className="text-text-lg font-semibold">Delete account</h3>
         <p className="text-sm text-gray-600">
           Send a request to delete your account.
         </p>
         <RequestDeleteUser />
-      </div>
+      </Card>
     </div>
   );
 }

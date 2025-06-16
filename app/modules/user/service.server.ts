@@ -40,6 +40,8 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
+import { USER_CONTACT_SELECT } from "../user-contact/constants";
+import { getUserContactById } from "../user-contact/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -65,6 +67,53 @@ export async function getUserByID<T extends Prisma.UserInclude | undefined>(
       title: "User not found",
       message: "The user you are trying to access does not exist.",
       additionalData: { id, include },
+      label,
+    });
+  }
+}
+
+export async function getUserWithContact<T extends Prisma.UserInclude>(
+  id: string,
+  include?: T
+) {
+  type ReturnType = Prisma.UserGetPayload<{
+    include: T & { contact: true };
+  }> & {
+    contact: NonNullable<
+      Prisma.UserContactGetPayload<{
+        select: typeof USER_CONTACT_SELECT;
+      }>
+    >; // Guarantee contact is never null
+  };
+
+  try {
+    const user = await db.user.findUniqueOrThrow({
+      where: { id },
+      include: {
+        ...include,
+        contact: {
+          select: USER_CONTACT_SELECT,
+        },
+      },
+    });
+
+    // If contact exists, return user as-is
+    if (user.contact) {
+      return user as ReturnType;
+    }
+
+    // If no contact, create it and attach to user object
+    const contact = await getUserContactById(id);
+
+    return {
+      ...user,
+      contact,
+    } as ReturnType;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to retrieve user with contact information",
+      additionalData: { id },
       label,
     });
   }

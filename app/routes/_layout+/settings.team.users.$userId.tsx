@@ -16,6 +16,7 @@ import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
+import { getUserContactById } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -67,6 +68,8 @@ export const loader = async ({
       },
     });
 
+    const userContact = await getUserContactById(user.id);
+
     const userName =
       (user.firstName ? user.firstName.trim() : "") +
       " " +
@@ -80,7 +83,10 @@ export const loader = async ({
         isPersonalOrg: currentOrganization.type === "PERSONAL",
         orgName: currentOrganization.name,
         header,
-        user,
+        user: {
+          ...user,
+          contact: userContact,
+        },
         userName,
       })
     );
@@ -118,6 +124,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const { user } = useLoaderData<typeof loader>();
+  const { contact } = user;
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -150,7 +157,22 @@ export default function UserPage() {
             </Badge>
           ),
         }}
-        subHeading={user.email}
+        subHeading={
+          <div>
+            <span>
+              {user.email} &bull; {contact.phone} &bull;{" "}
+              {[
+                contact.street,
+                contact.city,
+                contact.stateProvince,
+                contact.zipPostalCode,
+                contact.countryRegion,
+              ]
+                .filter(Boolean)
+                .join(", ") || "No address provided"}
+            </span>
+          </div>
+        }
       />
 
       <When truthy={userOrgRole !== "Owner"}>

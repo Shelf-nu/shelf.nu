@@ -4,7 +4,7 @@ import { Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
-import { getUserByID } from "~/modules/user/service.server";
+import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -14,7 +14,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserWithContact(userId);
 
     const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
 
@@ -37,7 +37,7 @@ export function meta({ data }: MetaArgs<typeof loader>) {
 
 export default function Me() {
   const { user } = useLoaderData<typeof loader>();
-
+  const { contact } = user;
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -57,7 +57,22 @@ export default function Me() {
             />
           ),
         }}
-        subHeading={user.email}
+        subHeading={
+          <div>
+            <span>
+              {user.email} &bull; {contact.phone} &bull;{" "}
+              {[
+                contact.street,
+                contact.city,
+                contact.stateProvince,
+                contact.zipPostalCode,
+                contact.countryRegion,
+              ]
+                .filter(Boolean)
+                .join(", ") || "No address provided"}
+            </span>
+          </div>
+        }
       />
       <HorizontalTabs items={TABS} />
       <Outlet />
