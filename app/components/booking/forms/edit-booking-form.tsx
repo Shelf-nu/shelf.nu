@@ -43,6 +43,7 @@ type BookingFlags = {
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
   hasAssetsInCustody: boolean;
+  hasAssetsWithSignaturePending: boolean;
 };
 
 type BookingFormData = {
@@ -252,10 +253,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 isLoadingWorkingHours ||
                 bookingFlags?.hasUnavailableAssets ||
                 bookingFlags?.hasCheckedOutAssets ||
-                bookingFlags?.hasAssetsInCustody
+                bookingFlags?.hasAssetsInCustody ||
+                bookingFlags?.hasAssetsWithSignaturePending
                   ? {
                       reason: bookingFlags?.hasAssetsInCustody
                         ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                        : bookingFlags?.hasAssetsWithSignaturePending
+                        ? "Some assets in this booking are pending signature. You need to resolve that before you can check-out"
                         : isProcessing || isLoadingWorkingHours
                         ? undefined
                         : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { KitStatus } from "@prisma/client";
 import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -84,19 +85,15 @@ function ConditionalDropdown() {
    * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
    */
   const allAssetsAreInCustody =
-    allSelected ||
-    selectedAssets.every((asset) => asset.status === "IN_CUSTODY");
+    allSelected || selectedAssets.every((asset) => !!asset.custody);
 
   const allAssetsAreAvailable =
-    allSelected ||
-    selectedAssets.every((asset) => asset.status === "AVAILABLE");
+    allSelected || selectedAssets.every((asset) => !asset.custody);
 
-  const someAssetCheckedOut = selectedAssets.some(
-    (asset) => asset.status === "CHECKED_OUT"
-  );
+  const someAssetCheckedOut = selectedAssets.some((asset) => !!asset.custody);
 
   const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+    (asset) => asset?.kit && asset.kit.status !== KitStatus.AVAILABLE
   );
 
   const selfUserCustody = selectedAssets.some(
@@ -251,7 +248,7 @@ function ConditionalDropdown() {
                     disableReleaseCustody
                       ? {
                           reason: someAssetPartOfUnavailableKit
-                            ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
+                            ? "The custody of this asset has been assigned via a Kit, so you cannot currently release its custody individually. If you want to make it available again, without affecting the Kit custody, you need to remove this asset from the kit from the kit page."
                             : disableReleaseCustody
                             ? "Self service can only release their own custody."
                             : "Some of the selected assets are not in custody.",
