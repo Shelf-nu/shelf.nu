@@ -92,3 +92,79 @@
 .fc-timegrid-more-link {
   box-shadow: 0 0 0 1px theme("colors.gray.300") !important;
 }
+/* FullCalendar List Week View Mobile Fixes - Mobile Only */
+
+/* Fix the core issue: override whitespace-nowrap in list view */
+.fc-listWeek-view .inner-event-card-wrapper {
+  @apply !whitespace-normal break-words leading-relaxed;
+}
+
+/* Change from inline-flex to flex and allow wrapping */
+.fc-listWeek-view .inner-event-card-wrapper.inline-flex {
+  @apply !flex flex-wrap items-start gap-1;
+}
+
+/* Ensure the outer container also allows normal wrapping */
+.fc-listWeek-view .fc-event-title > div {
+  @apply !whitespace-normal break-words;
+}
+
+/* Make sure the table respects cell widths */
+.fc-list-table {
+  @apply w-full;
+}
+
+/* Make the graphic column shrink to content - proper table approach */
+.fc-list-event-graphic {
+  width: 1% !important;
+  @apply whitespace-nowrap px-1;
+}
+
+/* Handle the time column - let it also shrink to content */
+.fc-list-event-time {
+  width: 1% !important;
+  @apply pr-2 break-words whitespace-nowrap align-top text-sm;
+}
+
+/* Handle the main content column - takes remaining space */
+.fc-list-event-title {
+  width: auto !important;
+  @apply break-words whitespace-normal leading-relaxed align-top pl-2 text-sm;
+}
+
+/* Set the table headers to match - let them shrink too */
+.fc-list-table thead th:nth-child(2) {
+  width: 1% !important;
+  @apply p-0 whitespace-nowrap;
+}
+
+.fc-list-table thead th:first-child {
+  width: 1% !important;
+  @apply whitespace-nowrap;
+}
+
+/* Ensure list events don't have problematic borders */
+.fc-list-event {
+  @apply !border-l-0 !border-r-0;
+}
+
+/* Ensure text breaks properly */
+.fc-listWeek-view .inner-event-card-wrapper span {
+  @apply break-words;
+}
+
+/* Very small screens - just adjust text size */
+@media (max-width: 480px) {
+  .fc-list-event-time {
+    @apply text-xs;
+  }
+
+  .fc-list-event-title {
+    @apply text-xs;
+  }
+
+  /* Even smaller gaps */
+  .fc-listWeek-view .inner-event-card-wrapper {
+    @apply gap-0.5;
+  }
+}

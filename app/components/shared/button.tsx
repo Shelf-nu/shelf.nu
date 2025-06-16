@@ -4,6 +4,12 @@ import { Link, type LinkProps } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { IconType } from "./icons-map";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./tooltip";
 import Icon from "../icons/icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
@@ -44,6 +50,7 @@ export interface CommonButtonProps {
   disabled?: DisabledProp;
   label?: string; // Add label here since it's used in BookLink
   id?: string; // Add id as an optional prop since some buttons might need it
+  tooltip?: string; // Tooltip text for the button
 }
 
 /**
@@ -172,6 +179,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       onlyNewTabIconOnHover = false,
       error,
       hideErrorText = false,
+      tooltip,
       ...props
     },
     ref
@@ -260,6 +268,36 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       );
     }
 
+    if (tooltip) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Component
+                {...props}
+                className={finalStyles}
+                prefetch={
+                  isLinkProps(props) ? props.prefetch ?? "none" : undefined
+                }
+                ref={ref}
+                disabled={isDisabled}
+                /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
+                {...(isDisabled && {
+                  onClick: (e: React.MouseEvent) => e.preventDefault(),
+                  onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+                })}
+              >
+                {buttonContent}
+              </Component>
+            </TooltipTrigger>
+
+            <TooltipContent side="top" className="max-w-[400px]">
+              <p className="text-sm">{tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
     // Render normal button
     return (
       <>

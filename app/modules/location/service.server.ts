@@ -94,9 +94,20 @@ export async function getLocation(
                 },
               },
               assets: {
-                include: {
-                  category: true,
-                  tags: true,
+                select: {
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                  tags: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
                 },
                 skip,
                 take,

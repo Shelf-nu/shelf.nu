@@ -74,6 +74,9 @@ export async function simpleModeLoader({
     return redirect(`/assets?${cookieParams.toString()}`);
   }
 
+  const searchParams = getCurrentSearchParams(request);
+  const view = searchParams.get("view") ?? "table";
+
   /** Query tierLimit, assets & Asset index settings */
   let [
     tierLimit,
@@ -103,6 +106,26 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
+      extraInclude:
+        view === "availability"
+          ? {
+              bookings: {
+                where: {
+                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                },
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  from: true,
+                  to: true,
+                  description: true,
+                  custodianTeamMember: true,
+                  custodianUser: true,
+                },
+              },
+            }
+          : undefined,
       isSelfService,
       userId,
     }),
@@ -215,6 +238,7 @@ export async function advancedModeLoader({
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
+  const view = searchParams.get("view") ?? "table";
 
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
@@ -262,6 +286,7 @@ export async function advancedModeLoader({
       organizationId,
       filters,
       settings,
+      getBookings: view === "availability",
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({

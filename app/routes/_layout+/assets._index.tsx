@@ -28,6 +28,7 @@ import {
   getAssetIndexSettings,
 } from "~/modules/asset-index-settings/service.server";
 import assetCss from "~/styles/assets.css?url";
+import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
@@ -45,6 +46,7 @@ export type AssetIndexLoaderData = typeof loader;
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
+  { rel: "stylesheet", href: calendarStyles },
 ];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -192,7 +194,7 @@ export function shouldRevalidate({
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
   /**
-   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * If we are toggling the sidebar, no need to revalidate this loader.
    * Revalidation happens in _layout
    */
   if (actionResult?.isTogglingSidebar) {

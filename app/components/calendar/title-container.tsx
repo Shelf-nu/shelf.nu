@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 
 type TitleContainerProps = {
@@ -15,7 +14,6 @@ export default function TitleContainer({
   calendarSubtitle,
   calendarView,
 }: TitleContainerProps) {
-  const { title } = useLoaderData<{ title: string }>();
   const { isMd } = useViewportHeight();
 
   const titleToRender = useMemo(() => {
@@ -23,15 +21,20 @@ export default function TitleContainer({
       return calendarTitle;
     }
 
-    return title;
-  }, [calendarTitle, title]);
+    const currentDate = new Date();
+    const currentMonth = currentDate.toLocaleString("default", {
+      month: "long",
+    });
+    const currentYear = currentDate.getFullYear();
+    return `${currentMonth} ${currentYear}`;
+  }, [calendarTitle]);
 
   return (
     <div className={className}>
       <div className="text-left font-sans text-lg font-semibold leading-[20px] ">
         {titleToRender}
       </div>
-      {!isMd || calendarView == "timeGridWeek" ? (
+      {!isMd || calendarView.endsWith("Week") ? (
         <div className="text-gray-600">{calendarSubtitle}</div>
       ) : null}
     </div>

@@ -4,9 +4,15 @@ import { tw } from "~/utils/tw";
 type GrayBadgeProps = PropsWithChildren<{
   className?: string;
   style?: React.CSSProperties;
-}>;
+}> &
+  React.HTMLAttributes<HTMLSpanElement>;
 
-export function GrayBadge({ className, style, children }: GrayBadgeProps) {
+export function GrayBadge({
+  className,
+  style,
+  children,
+  ...rest
+}: GrayBadgeProps) {
   return (
     <span
       className={tw(
@@ -14,6 +20,7 @@ export function GrayBadge({ className, style, children }: GrayBadgeProps) {
         className
       )}
       style={style}
+      {...rest}
     >
       {children}
     </span>
