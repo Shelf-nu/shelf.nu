@@ -482,6 +482,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters = "",
   takeAll = false,
   assetIds,
+  getBookings = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -489,6 +490,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
+  getBookings?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -521,7 +523,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 
     const query = Prisma.sql`
       WITH asset_query AS (
-        ${assetQueryFragment}
+        ${assetQueryFragment({
+          withBookings: getBookings,
+        })}
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
@@ -538,7 +542,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment}
+        ${assetReturnFragment({
+          withBookings: getBookings,
+        })}
       FROM sorted_asset_query aq;
     `;
 

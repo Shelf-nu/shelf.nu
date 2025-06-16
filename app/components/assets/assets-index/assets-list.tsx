@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import { KitIcon } from "~/components/icons/library";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -23,6 +22,7 @@ import When from "~/components/when/when";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -36,7 +36,9 @@ import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
+import AssetsAvailability from "./assets-availability";
 import { AssetIndexFilters } from "./filters";
+import { CategoryBadge } from "../category-badge";
 
 export const AssetsList = ({
   customEmptyState,
@@ -51,6 +53,7 @@ export const AssetsList = ({
 }) => {
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
+  const isAvailabilityView = useIsAvailabilityView();
 
   const { isMd } = useViewportHeight();
   const fetchers = useFetchers();
@@ -63,10 +66,6 @@ export const AssetsList = ({
   const isSwappingMode = modeFetcher?.formData;
   const columns = useAssetIndexColumns();
   const { isBase } = useUserRoleHelper();
-  const searchParams: string[] = ["category", "tag", "location"];
-  if (!disableTeamMemberFilter) {
-    searchParams.push("teamMember");
-  }
 
   const headerChildren = modeIsSimple ? (
     <>
@@ -103,6 +102,7 @@ export const AssetsList = ({
       className={tw(
         "flex flex-col",
         modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2",
+        isAvailabilityView ? "pb-3" : "",
         wrapperClassName,
         isSwappingMode && "overflow-hidden"
       )}
@@ -123,22 +123,31 @@ export const AssetsList = ({
       {!isMd && !modeIsSimple ? (
         <AdvancedModeMobileFallback />
       ) : (
-        <ListContentWrapper>
+        <ListContentWrapper className="md:mt-0">
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          <List
-            title="Assets"
-            ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
-            customPagination={<AssetIndexPagination />}
-            bulkActions={
-              disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
-            }
-            customEmptyStateContent={
-              customEmptyState ? customEmptyState : undefined
-            }
-            headerChildren={headerChildren}
-          />
+          {isMd && isAvailabilityView ? (
+            <>
+              <AssetsAvailability />
+              <AssetIndexPagination />
+            </>
+          ) : (
+            <List
+              title="Assets"
+              ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
+              customPagination={<AssetIndexPagination />}
+              bulkActions={
+                disableBulkActions || isBase ? undefined : (
+                  <BulkActionsDropdown />
+                )
+              }
+              customEmptyStateContent={
+                customEmptyState ? customEmptyState : undefined
+              }
+              headerChildren={headerChildren}
+            />
+          )}
         </ListContentWrapper>
       )}
     </div>
@@ -218,15 +227,7 @@ const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

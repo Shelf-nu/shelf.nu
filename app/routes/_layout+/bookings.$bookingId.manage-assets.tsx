@@ -26,6 +26,7 @@ import {
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -38,7 +39,6 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 
@@ -686,15 +686,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}
