@@ -1070,6 +1070,16 @@ export async function softDeleteUser(id: User["id"]) {
           firstName: "Deleted",
           lastName: "User",
           deletedAt: new Date(),
+          contact: {
+            update: {
+              phone: "",
+              street: "",
+              city: "",
+              stateProvince: "",
+              zipPostalCode: "",
+              countryRegion: "",
+            },
+          },
         },
       });
     });
