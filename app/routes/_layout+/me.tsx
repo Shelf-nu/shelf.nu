@@ -4,6 +4,8 @@ import { Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
+import { Button } from "~/components/shared/button";
+import { UserSubheading } from "~/components/user/user-subheading";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -37,7 +39,6 @@ export function meta({ data }: MetaArgs<typeof loader>) {
 
 export default function Me() {
   const { user } = useLoaderData<typeof loader>();
-  const { contact } = user;
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -56,25 +57,20 @@ export default function Me() {
               className="mr-4 size-14 rounded"
             />
           ),
+          "right-of-title": (
+            <Button
+              variant="secondary"
+              icon="pen"
+              to={`/account-details/general`}
+              className={"ml-auto"}
+            >
+              Edit
+            </Button>
+          ),
         }}
-        subHeading={
-          <div>
-            <span>
-              {user.email} &bull; {contact.phone} &bull;{" "}
-              {[
-                contact.street,
-                contact.city,
-                contact.stateProvince,
-                contact.zipPostalCode,
-                contact.countryRegion,
-              ]
-                .filter(Boolean)
-                .join(", ") || "No address provided"}
-            </span>
-          </div>
-        }
+        subHeading={<UserSubheading user={user} />}
       />
-      <HorizontalTabs items={TABS} />
+      <HorizontalTabs items={TABS} className="mb-0" />
       <Outlet />
     </>
   );

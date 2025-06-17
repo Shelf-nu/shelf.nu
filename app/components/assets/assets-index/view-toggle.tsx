@@ -3,6 +3,7 @@ import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { useSearchParams } from "~/hooks/search-params";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
+import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { tw } from "~/utils/tw";
 
@@ -16,8 +17,11 @@ export function AssetsIndexViewToggle({
   const disabledButtonStyles =
     "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
   const isAvailabilityView = useIsAvailabilityView();
+  const isUserPage = useIsUserAssetsPage();
 
-  return isMd ? (
+  const shouldShowAvailabilityView = !isUserPage && isMd && isAvailabilityView;
+
+  return shouldShowAvailabilityView ? (
     <div className="flex items-start gap-2">
       <ButtonGroup>
         <Button

@@ -37,7 +37,9 @@ export function UserContactDetailsForm({
       <div className="mb-6">
         <h3 className="text-text-lg font-semibold">Contact Information</h3>
         <p className="text-sm text-gray-600">
-          Update your contact details and address information here.
+          Update your contact details and address information here. This
+          information will be visible to other users within your workspace and
+          may be used for communication purposes.
         </p>
       </div>
       <Form method="post" ref={zo.ref} className="" replace>
