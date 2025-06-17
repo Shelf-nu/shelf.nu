@@ -221,6 +221,8 @@ model Tag {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
+  bookings Booking[]
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -477,18 +479,18 @@ model Organization {
 
   // Not required. It will only be created for orgs that need sso
   // We can know if an org has SSO by checking the ssoDetailsId
-  enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
-  ssoDetailsId String?
-  ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
-  workingHours WorkingHours? 
+  enabledSso      Boolean          @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
+  ssoDetailsId    String?
+  ssoDetails      SsoDetails?      @relation(fields: [ssoDetailsId], references: [id])
+  workingHours    WorkingHours?
   bookingSettings BookingSettings?
 
   // Permissions configuration
   // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
-  selfServiceCanSeeCustody Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeCustody  Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
   selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
-  baseUserCanSeeCustody   Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
-  baseUserCanSeeBookings  Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+  baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
@@ -513,7 +515,6 @@ model Organization {
   @@index([userId])
   @@index([ssoDetailsId])
 }
-
 
 model UserOrganization {
   id String @id @default(cuid())
@@ -790,6 +791,8 @@ model Booking {
 
   assets Asset[]
 
+  tags Tag[]
+
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
@@ -808,25 +811,22 @@ model Booking {
   @@index([organizationId])
 }
 
-
 model BookingSettings {
   id String @id @default(cuid())
-  
+
   bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
-  
+
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String       @unique
-  
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   // Index for foreign key
   @@index([organizationId])
 }
-
-
 
 model Kit {
   id String @id @default(cuid())
@@ -908,27 +908,27 @@ model AssetReminder {
 
 model WorkingHours {
   id String @id @default(cuid())
-  
+
   // Global enable/disable for the organization
   enabled Boolean @default(false)
-  
+
   // Weekly schedule stored as JSON for better performance
   // Format: { "0": { "isOpen": true, "openTime": "09:00", "closeTime": "17:00" }, ... }
   // Keys are day numbers (0=Sunday, 1=Monday, etc.)
   // Times are stored in "HH:MM" format (24-hour) in UTC
   weeklySchedule Json @default("{\"0\":{\"isOpen\":false},\"1\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"2\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"3\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"4\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"5\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"6\":{\"isOpen\":false}}")
-  
+
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String       @unique
-  
+
   // Only overrides need separate table for better querying
   overrides WorkingHoursOverride[]
-  
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   // Index for foreign key
   @@index([organizationId])
 }
@@ -936,21 +936,21 @@ model WorkingHours {
 // Keep overrides separate for efficient date-based queries
 model WorkingHoursOverride {
   id String @id @default(cuid())
-  
-  date DateTime @db.Date
-  isOpen Boolean @default(false)
-  
+
+  date   DateTime @db.Date
+  isOpen Boolean  @default(false)
+
   // Times stored in "HH:MM" format (24-hour) in UTC
   openTime  String? // Format: "09:00"
   closeTime String? // Format: "17:00"
-  reason String?
-  
+  reason    String?
+
   workingHours   WorkingHours @relation(fields: [workingHoursId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   workingHoursId String
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([workingHoursId, date])
   @@index([workingHoursId, date])
   @@index([date, isOpen])
