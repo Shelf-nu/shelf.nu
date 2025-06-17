@@ -41,7 +41,10 @@ import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
-import { getUserContactById } from "../user-contact/service.server";
+import {
+  getUserContactById,
+  updateUserContactInfo,
+} from "../user-contact/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -266,14 +269,22 @@ export async function createUserFromSSO(
     firstName: string;
     lastName: string;
     groups: string[];
+    contactInfo?: {
+      phone?: string;
+      street?: string;
+      city?: string;
+      stateProvince?: string;
+      zipPostalCode?: string;
+      countryRegion?: string;
+    };
   }
 ) {
   try {
     const { email, userId } = authSession;
-    const { firstName, lastName, groups } = userData;
+    const { firstName, lastName, groups, contactInfo } = userData;
     const emailDomain = email.split("@")[1];
 
-    // Create user with personal workspace - all users get this now
+    // Create user with personal workspace
     const user = await createUser({
       email,
       firstName,
@@ -283,15 +294,19 @@ export async function createUserFromSSO(
       isSSO: true,
     });
 
-    // Find organizations that match this domain - handles multiple domains per org
+    // Update contact information if provided
+    if (contactInfo) {
+      await updateUserContactInfo(userId, contactInfo);
+    }
+
+    // Rest of the existing SSO logic for organizations...
     const organizations = await getOrganizationsBySsoDomain(emailDomain);
     const roles = [];
-    // For each matching organization, handle SCIM access if configured
+
     for (const org of organizations) {
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
 
-      // Check if this organization uses SCIM (has group mappings)
       const hasGroupMappings = !!(
         ssoDetails.adminGroupId ||
         ssoDetails.baseUserGroupId ||
@@ -329,7 +344,6 @@ export async function createUserFromSSO(
       });
     }
 
-    // Return the user and first matching org (if any)
     return { user, org: organizations[0] || null };
   } catch (cause: any) {
     throw new ShelfError({
@@ -453,6 +467,14 @@ export async function updateUserFromSSO(
     firstName: string;
     lastName: string;
     groups: string[];
+    contactInfo?: {
+      phone?: string;
+      street?: string;
+      city?: string;
+      stateProvince?: string;
+      zipPostalCode?: string;
+      countryRegion?: string;
+    };
   }
 ): Promise<{
   user: User;
@@ -460,7 +482,7 @@ export async function updateUserFromSSO(
   transitions: UserOrgTransition[];
 }> {
   const { email, userId } = authSession;
-  const { firstName, lastName, groups } = userData;
+  const { firstName, lastName, groups, contactInfo } = userData;
   const emailDomain = email.split("@")[1];
 
   try {
@@ -475,17 +497,22 @@ export async function updateUserFromSSO(
       });
     }
 
-    // Find organizations that match this user's email domain
-    // getOrganizationsBySsoDomain now handles multiple domains per org
+    // Update contact information if provided
+    if (contactInfo) {
+      await updateUserContactInfo(userId, contactInfo);
+    }
+
+    // Rest of the existing SSO organization logic...
     const domainOrganizations = await getOrganizationsBySsoDomain(emailDomain);
     const existingUserOrganizations = user.userOrganizations;
 
     const transitions: UserOrgTransition[] = [];
     const desiredRoles = [];
+
     for (const org of domainOrganizations) {
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
-      // Check if this organization uses SCIM (has group mappings)
+
       const hasGroupMappings = !!(
         ssoDetails.adminGroupId ||
         ssoDetails.baseUserGroupId ||
@@ -493,18 +520,16 @@ export async function updateUserFromSSO(
       );
 
       if (hasGroupMappings) {
-        // Get desired role based on user's groups. BEcause we are updating the user, we are returning null if group is not found. That will just skip it.
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
-        // Find if user already has access to this org
         const existingOrgAccess = existingUserOrganizations.find(
           (uo) => uo.organization.id === org.id
         );
-        /** If the role exists, add it to the array */
+
         if (desiredRole) {
           desiredRoles.push(desiredRole);
         }
+
         if (existingOrgAccess) {
-          // Handle transition for existing access
           const transition = await handleSCIMTransition(
             userId,
             org,
@@ -513,14 +538,12 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
         } else if (desiredRole) {
-          // User doesn't have access but should - grant it
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
             roles: [desiredRole],
           });
 
-          // Create team member for the new organization access
           await createTeamMember({
             name: `${firstName} ${lastName}`,
             organizationId: org.id,
@@ -537,6 +560,7 @@ export async function updateUserFromSSO(
         }
       }
     }
+
     if (desiredRoles.length === 0) {
       throw new ShelfError({
         cause: null,
@@ -548,7 +572,6 @@ export async function updateUserFromSSO(
       });
     }
 
-    // Return first org with SCIM access for redirect
     const firstScimOrg = domainOrganizations.find(
       (org) =>
         org.ssoDetails &&

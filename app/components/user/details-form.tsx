@@ -43,6 +43,11 @@ export function UserDetailsForm({
   const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   const disabled = useDisabled();
+  const isDisabled =
+    disabled ||
+    (user.sso && {
+      reason: "You cannot edit your details when using SSO.",
+    });
   return (
     <Card className="my-0">
       <div className="mb-6">
@@ -73,6 +78,7 @@ export function UserDetailsForm({
               required={zodFieldIsRequired(
                 UserDetailsFormSchema.shape.firstName
               )}
+              disabled={isDisabled}
             />
             <Input
               label="Last name"
@@ -83,6 +89,7 @@ export function UserDetailsForm({
               required={zodFieldIsRequired(
                 UserDetailsFormSchema.shape.lastName
               )}
+              disabled={isDisabled}
             />
           </div>
         </FormRow>
@@ -134,6 +141,7 @@ export function UserDetailsForm({
             className="w-full"
             inputClassName="flex-1"
             required={zodFieldIsRequired(UserDetailsFormSchema.shape.username)}
+            disabled={isDisabled}
           />
         </FormRow>
 
@@ -165,7 +173,7 @@ export function UserDetailsForm({
         <div className="text-right">
           <input type="hidden" name="type" value="updateUser" />
           <Button
-            disabled={disabled}
+            disabled={isDisabled}
             type="submit"
             name="intent"
             value="updateUser"

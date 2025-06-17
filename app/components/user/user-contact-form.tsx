@@ -28,6 +28,11 @@ export function UserContactDetailsForm({
   const zo = useZorm("UserContactDetailsForm", UserContactDetailsFormSchema);
   const actionData = useActionData<UserPageActionData>();
   const disabled = useDisabled();
+  const isDisabled =
+    disabled ||
+    (user.sso && {
+      reason: "You cannot edit your details when using SSO.",
+    });
   const validationErrors = getValidationErrors<
     typeof UserContactDetailsFormSchema
   >(actionData?.error);
@@ -63,6 +68,7 @@ export function UserContactDetailsForm({
             required={zodFieldIsRequired(
               UserContactDetailsFormSchema.shape.phone
             )}
+            disabled={isDisabled}
           />
         </FormRow>
 
@@ -86,6 +92,7 @@ export function UserContactDetailsForm({
             required={zodFieldIsRequired(
               UserContactDetailsFormSchema.shape.street
             )}
+            disabled={isDisabled}
           />
         </FormRow>
 
@@ -105,6 +112,7 @@ export function UserContactDetailsForm({
             required={zodFieldIsRequired(
               UserContactDetailsFormSchema.shape.city
             )}
+            disabled={isDisabled}
           />
         </FormRow>
 
@@ -130,6 +138,7 @@ export function UserContactDetailsForm({
               required={zodFieldIsRequired(
                 UserContactDetailsFormSchema.shape.stateProvince
               )}
+              disabled={isDisabled}
             />
             <Input
               label="ZIP/Postal Code"
@@ -146,6 +155,7 @@ export function UserContactDetailsForm({
               required={zodFieldIsRequired(
                 UserContactDetailsFormSchema.shape.zipPostalCode
               )}
+              disabled={isDisabled}
             />
           </div>
         </FormRow>
@@ -172,13 +182,14 @@ export function UserContactDetailsForm({
             required={zodFieldIsRequired(
               UserContactDetailsFormSchema.shape.countryRegion
             )}
+            disabled={isDisabled}
           />
         </FormRow>
 
         <div className="text-right">
           <input type="hidden" name="type" value="updateUserContact" />
           <Button
-            disabled={disabled}
+            disabled={isDisabled}
             type="submit"
             name="intent"
             value="updateUserContact"

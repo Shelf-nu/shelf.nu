@@ -385,27 +385,33 @@ export default function UserPage() {
     <div className="mb-2.5 flex flex-col justify-between gap-3">
       <UserDetailsForm user={user} />
       <UserContactDetailsForm user={user} />
-      <Card className="my-0">
-        <div className="mb-6">
-          <h3 className="text-text-lg font-semibold">Password</h3>
-          <p className="text-sm text-gray-600">Update your password here.</p>
-        </div>
-        <div>
-          <p>Need to reset your password?</p>
-          <p>
-            Click below to start the reset process. You'll be logged out and
-            redirected to our password reset page.
-          </p>
-        </div>
-        <PasswordResetForm />
-      </Card>
-      <Card className="my-0">
-        <h3 className="text-text-lg font-semibold">Delete account</h3>
-        <p className="text-sm text-gray-600">
-          Send a request to delete your account.
-        </p>
-        <RequestDeleteUser />
-      </Card>
+      {!user.sso && (
+        <>
+          <Card className="my-0">
+            <div className="mb-6">
+              <h3 className="text-text-lg font-semibold">Password</h3>
+              <p className="text-sm text-gray-600">
+                Update your password here.
+              </p>
+            </div>
+            <div>
+              <p>Need to reset your password?</p>
+              <p>
+                Click below to start the reset process. You'll be logged out and
+                redirected to our password reset page.
+              </p>
+            </div>
+            <PasswordResetForm />
+          </Card>
+          <Card className="my-0">
+            <h3 className="text-text-lg font-semibold">Delete account</h3>
+            <p className="text-sm text-gray-600">
+              Send a request to delete your account.
+            </p>
+            <RequestDeleteUser />
+          </Card>
+        </>
+      )}
     </div>
   );
 }

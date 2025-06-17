@@ -60,3 +60,33 @@ export async function updateUserContact(payload: UpdateUserContactPayload) {
     });
   }
 }
+
+/**
+ * Updates user contact information, filtering out empty values
+ */
+export async function updateUserContactInfo(
+  userId: string,
+  contactInfo: {
+    phone?: string;
+    street?: string;
+    city?: string;
+    stateProvince?: string;
+    zipPostalCode?: string;
+    countryRegion?: string;
+  }
+) {
+  // Filter out empty strings and undefined values
+  const filteredContactInfo = Object.fromEntries(
+    Object.entries(contactInfo).filter(
+      ([_, value]) => value && value.trim() !== ""
+    )
+  );
+
+  // Only update if we have contact information to set
+  if (Object.keys(filteredContactInfo).length > 0) {
+    await updateUserContact({
+      userId,
+      ...filteredContactInfo,
+    });
+  }
+}
