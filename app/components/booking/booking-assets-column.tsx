@@ -8,10 +8,12 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.man
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
 import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
+import type { LoaderData } from "../list/bulk-actions/bulk-list-header";
 import BulkListHeader from "../list/bulk-actions/bulk-list-header";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
+import ListTitle from "../list/list-title";
 import { Button } from "../shared/button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Th } from "../table";
@@ -19,7 +21,7 @@ import { BookingPagination } from "./booking-pagination";
 import When from "../when/when";
 
 export function BookingAssetsColumn() {
-  const { userId, booking, paginatedItems, totalPaginationItems } =
+  const { userId, booking, paginatedItems } =
     useLoaderData<BookingPageLoaderData>();
 
   const hasItems = paginatedItems?.length > 0;
@@ -106,6 +108,12 @@ export function BookingAssetsColumn() {
     !isBaseOrSelfService ||
     (isBaseOrSelfService && booking?.custodianUser?.id === userId);
 
+  function itemsGetter(data: LoaderData) {
+    return data.paginatedItems
+      .map((item) => [item, ...(item?.type === "kit" ? item.assets : [])])
+      .flat();
+  }
+
   return (
     <div className="flex-1">
       <div className="w-full">
@@ -113,15 +121,12 @@ export function BookingAssetsColumn() {
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* This is a fake table header */}
-          <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
-            <div>
-              <div className=" text-md font-semibold text-gray-900">
-                Assets & Kits
-              </div>
-              <div>
-                <span>{totalPaginationItems} items</span>
-              </div>
-            </div>
+          <div className="-mx-4 flex justify-between border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
+            <ListTitle
+              title="Assets & Kits"
+              hasBulkActions
+              itemsGetter={itemsGetter}
+            />
 
             <When truthy={canSeeActions}>
               <div className="flex items-center gap-2">
@@ -163,16 +168,7 @@ export function BookingAssetsColumn() {
               <>
                 <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
-                    <BulkListHeader
-                      itemsGetter={(data) =>
-                        data.paginatedItems
-                          .map((item) => [
-                            item,
-                            ...(item?.type === "kit" ? item.assets : []),
-                          ])
-                          .flat()
-                      }
-                    />
+                    <BulkListHeader itemsGetter={itemsGetter} />
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>

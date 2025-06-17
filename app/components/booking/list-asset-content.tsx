@@ -9,12 +9,12 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.man
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
+import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
-import { CategoryBadge } from "../assets/category-badge";
 import When from "../when/when";
 
 type ListAssetContentProps = {
@@ -86,7 +86,7 @@ export default function ListAssetContent({
         )}
         <div
           className={tw(
-            "flex justify-between gap-3 p-4 md:justify-normal md:px-6",
+            "flex justify-between gap-3 py-4 md:justify-normal md:pr-6",
             isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
           )}
         >

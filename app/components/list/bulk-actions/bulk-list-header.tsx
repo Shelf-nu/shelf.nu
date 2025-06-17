@@ -13,7 +13,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
 import type { ListItemData } from "../list-item";
 
-type LoaderData = Record<string, ListItemData[]>;
+export type LoaderData = Record<string, ListItemData[]>;
 
 type BulkListHeaderProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
   /**

@@ -192,7 +192,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     // Execute all necessary queries in parallel
-    const [teamMembersData, assetDetails, totalAssets, bookingFlags, kits] =
+    const [teamMembersData, assetDetails, bookingFlags, kits] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -239,13 +239,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   : {}),
               },
             },
-          },
-        }),
-
-        /** Count all assets in the booking */
-        db.asset.count({
-          where: {
-            id: { in: booking.assets.map((a) => a.id) },
           },
         }),
 
@@ -314,7 +307,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         paginatedItems: enrichedPaginatedItems,
         page,
-        totalItems: totalAssets,
+        totalItems: totalPaginationItems,
         totalPaginationItems,
         perPage,
         totalPages,

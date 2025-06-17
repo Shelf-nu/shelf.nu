@@ -48,7 +48,7 @@ export default function KitRow({
         <BulkListItemCheckbox item={kit} bulkItems={assets} />
 
         <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
-          <div className="flex items-center gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3 py-4 md:justify-normal md:pr-6">
             <KitImage
               kit={{
                 image: kit.image,
