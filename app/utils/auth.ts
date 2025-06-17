@@ -28,7 +28,7 @@ export function createSSOFormData(
   formData.append("groups", JSON.stringify(groups || []));
 
   // Contact information - map from SSO field names to our schema
-  formData.append("phone", customClaims.phone || "");
+  formData.append("phone", customClaims.mobilephone || "");
   formData.append("streetAddress", customClaims.streetAddress || "");
   formData.append("city", customClaims.city || "");
   formData.append("stateProvince", customClaims.stateProvince || "");

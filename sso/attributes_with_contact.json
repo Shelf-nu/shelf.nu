@@ -1,8 +1,5 @@
 {
   "keys": {
-    "email": {
-      "name": "mail"
-    },
     "firstName": {
       "name": "firstname"
     },
@@ -13,7 +10,7 @@
       "name": "groups",
       "array": true
     },
-    "phone": {
+    "mobilephone": {
       "name": "mobilephone"
     },
     "streetAddress": {

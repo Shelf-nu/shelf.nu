@@ -73,12 +73,12 @@ If you would like to sync contact information, you will have to inform your acco
 | ------------- | -------------------- | -------- |
 | firstname     | `user.givenname`     | yes      |
 | lastname      | `user.surname`       | yes      |
-| phone         | `user.mobilephone`   | no       |
+| mobilephone   | `user.mobilephone`   | no       |
 | streetaddress | `user.streetaddress` | no       |
 | city          | `user.city`          | no       |
 | stateprovince | `user.state`         | no       |
 | postalcode    | `user.postalcode`    | no       |
-| country       | `user.city`          | no       |
+| country       | `user.country`       | no       |
 
 Example of adding a claim for `firstname`:
 
