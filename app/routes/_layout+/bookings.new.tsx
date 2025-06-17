@@ -15,6 +15,7 @@ import { useUserData } from "~/hooks/use-user-data";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -66,14 +67,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /**
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
-    const teamMembersData = await getTeamMemberForCustodianFilter({
-      organizationId,
-      getAll:
-        searchParams.has("getAll") &&
-        hasGetAllValue(searchParams, "teamMember"),
-      filterByUserId: isSelfServiceOrBase, // Self service or base users can only create bookings for themselves so we always filter by userId
-      userId,
-    });
+    const [teamMembersData, tags] = await Promise.all([
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: isSelfServiceOrBase, // Self service or base users can only create bookings for themselves so we always filter by userId
+        userId,
+      }),
+
+      db.tag.findMany({ where: { organizationId } }),
+    ]);
 
     return json(
       data({
@@ -83,6 +88,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfServiceOrBase,
         ...teamMembersData,
         assetIds: assetIds.length ? assetIds : undefined,
+        tags,
+        totalTags: tags.length,
       }),
       {
         headers: [
@@ -129,7 +136,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian, assetIds, description } = payload;
+    const {
+      name,
+      custodian,
+      assetIds,
+      description,
+      tags: commaSeparatedTags,
+    } = payload;
 
     /**
      * Validate if the user is self user and is assigning the booking to
@@ -166,6 +179,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     ).toJSDate();
 
+    const tags = buildTagsSet(commaSeparatedTags).set;
+
     const booking = await createBooking({
       booking: {
         from,
@@ -176,6 +191,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         description: description ?? null,
         organizationId,
         creatorId: authSession.userId,
+        tags,
       },
       assetIds: assetIds?.length ? assetIds : [],
       hints: getClientHint(request),

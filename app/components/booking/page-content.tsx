@@ -48,6 +48,7 @@ export function BookingPageContent() {
             assetsCount={assetsCount}
             totalValue={totalValue}
             allCategories={allCategories}
+            tags={booking.tags}
           />
         </Card>
       </div>

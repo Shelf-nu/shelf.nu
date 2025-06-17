@@ -26,6 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -108,34 +109,37 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/bookings?${cookieParams.toString()}`);
     }
 
-    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
-      getBookings({
-        organizationId,
-        page,
-        perPage,
-        search,
-        userId: userId,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
+    const [{ bookings, bookingCount }, teamMembersData, tags] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId: userId,
+          ...(status && {
+            // If status is in the params, we filter based on it
+            statuses: [status],
+          }),
+          custodianTeamMemberIds: teamMemberIds,
+          ...selfServiceData,
+          orderBy,
+          orderDirection,
         }),
-        custodianTeamMemberIds: teamMemberIds,
-        ...selfServiceData,
-        orderBy,
-        orderDirection,
-      }),
 
-      // team members/custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
-        userId,
-      }),
-    ]);
+        // team members/custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+          userId,
+        }),
+
+        db.tag.findMany({ where: { organizationId } }),
+      ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -163,6 +167,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         ...teamMembersData,
         isSelfServiceOrBase,
+        tags,
+        totalTags: tags.length,
       }),
       {
         headers: [

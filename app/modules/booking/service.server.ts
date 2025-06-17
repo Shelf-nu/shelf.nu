@@ -177,7 +177,7 @@ export async function createBooking({
     | "organizationId"
     | "from"
     | "to"
-  > & { custodianTeamMemberId: string };
+  > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
    * Asset IDs that are connected to the booking
@@ -227,6 +227,12 @@ export async function createBooking({
     if (booking.custodianUserId) {
       dataToCreate.custodianUser = {
         connect: { id: booking.custodianUserId },
+      };
+    }
+
+    if (booking.tags.length > 0) {
+      dataToCreate.tags = {
+        connect: booking.tags,
       };
     }
 
