@@ -294,3 +294,35 @@ export function getCalendarTitleAndSubtitle({
 
   return { title, subtitle };
 }
+
+export const scrollToNow = () => {
+  setTimeout(() => {
+    const nowIndicator = document.querySelector(
+      ".fc-timeline-now-indicator-line"
+    ) as HTMLElement;
+
+    if (nowIndicator) {
+      const scroller = nowIndicator.closest(".fc-scroller") as HTMLElement;
+
+      if (scroller) {
+        const scrollerRect = scroller.getBoundingClientRect();
+        const indicatorRect = nowIndicator.getBoundingClientRect();
+
+        // Check if the now indicator is visible in the horizontal scroll area
+        const isVisible =
+          indicatorRect.left >= scrollerRect.left &&
+          indicatorRect.right <= scrollerRect.right;
+
+        if (!isVisible) {
+          // Calculate scroll position to center the now indicator in the view
+          const scrollLeft = nowIndicator.offsetLeft - scroller.clientWidth / 2;
+
+          scroller.scrollTo({
+            left: Math.max(0, scrollLeft),
+            behavior: "smooth",
+          });
+        }
+      }
+    }
+  }, 500);
+};
