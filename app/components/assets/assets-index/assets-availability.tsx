@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
 import { useLoaderData } from "@remix-run/react";
@@ -26,9 +26,10 @@ import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
 import { CategoryBadge } from "../category-badge";
+import { useHydrated } from "remix-utils/use-hydrated";
 
 export default function AssetsAvailability() {
-  const { items, modelName, totalItems, perPage } =
+  const { items, modelName, totalItems, perPage, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
@@ -46,7 +47,9 @@ export default function AssetsAvailability() {
   const [calendarView, setCalendarView] = useState(
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
-  const { resources, events } = useAssetAvailabilityData();
+
+  const { resources, events } = useAssetAvailabilityData(items);
+
   function handleViewChange(view: string) {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
@@ -60,6 +63,32 @@ export default function AssetsAvailability() {
       setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
     }
   };
+  const isHydrated = useHydrated();
+
+  useEffect(() => {
+    if (isHydrated && calendarRef.current) {
+      const timer = setTimeout(() => {
+        const calendarApi = calendarRef.current?.getApi();
+        if (calendarApi && resources && resources.length > 0) {
+          try {
+            // More aggressive fix - force multiple recalculations
+            calendarApi.updateSize();
+            setTimeout(() => {
+              calendarApi.changeView(calendarView);
+              // Force another updateSize after view change
+              setTimeout(() => calendarApi.updateSize(), 50);
+            }, 50);
+
+            console.log("Applied delayed nowIndicator workaround");
+          } catch (error) {
+            console.warn("Failed to apply delayed workaround:", error);
+          }
+        }
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }
+  }, [isHydrated, resources, calendarView]);
 
   return (
     <div>
@@ -95,7 +124,7 @@ export default function AssetsAvailability() {
           <FullCalendar
             ref={calendarRef}
             height="auto"
-            timeZone="local"
+            timeZone={timeZone}
             nowIndicator
             slotEventOverlap
             eventTimeFormat={{
