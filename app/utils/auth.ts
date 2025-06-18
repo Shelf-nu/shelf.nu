@@ -8,7 +8,6 @@ export function createSSOFormData(
 ): FormData {
   const user = supabaseSession?.user;
   const customClaims = user?.user_metadata?.custom_claims || {};
-  console.log(customClaims);
   const formData = new FormData();
 
   // Core fields
