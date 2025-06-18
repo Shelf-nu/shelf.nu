@@ -266,6 +266,7 @@ export async function updateBasicBooking({
   custodianUserId,
   description,
   organizationId,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -279,7 +280,9 @@ export async function updateBasicBooking({
     | "organizationId"
   >
 > &
-  Pick<Booking, "id" | "organizationId">) {
+  Pick<Booking, "id" | "organizationId"> & {
+    tags: { id: string }[];
+  }) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -303,6 +306,10 @@ export async function updateBasicBooking({
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     /** Booking update is not allowed for these type of status */
@@ -374,6 +381,7 @@ export async function updateBasicBooking({
         });
       }
     }
+
     return await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
@@ -404,6 +412,7 @@ export async function reserveBooking({
   organizationId,
   hints,
   isSelfServiceOrBase,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -420,6 +429,7 @@ export async function reserveBooking({
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
     isSelfServiceOrBase: boolean;
+    tags: { id: string }[];
   }) {
   try {
     const bookingFound = await db.booking
@@ -469,6 +479,10 @@ export async function reserveBooking({
       status: BookingStatus.RESERVED,
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     dataToUpdate.from = from;

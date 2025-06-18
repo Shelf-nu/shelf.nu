@@ -10,9 +10,11 @@ export interface TagSuggestion {
 export const TagsAutocomplete = ({
   existingTags,
   suggestions,
+  disabled = false,
 }: {
   existingTags: Tag[];
   suggestions: TagSuggestion[];
+  disabled?: boolean;
 }) => {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
@@ -45,8 +47,10 @@ export const TagsAutocomplete = ({
         type="hidden"
         name="tags"
         value={selected.map((tag) => tag.value).join(",")}
+        disabled={disabled}
       />
       <ReactTags
+        isDisabled={disabled}
         labelText="Select tags"
         selected={selected}
         suggestions={suggestions}

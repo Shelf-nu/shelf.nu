@@ -37,6 +37,7 @@ export function BookingPageContent() {
               startDate: dateForDateTimeInputValue(new Date(booking.from!)),
               endDate: dateForDateTimeInputValue(new Date(booking.to!)),
               custodianRef: custodian?.id || "", // We have an old bug that some users dont have a teamMember attached to them. This is a safety just so the UI doesnt break until we solve the data
+              tags: booking.tags,
             }}
           />
         </Card>

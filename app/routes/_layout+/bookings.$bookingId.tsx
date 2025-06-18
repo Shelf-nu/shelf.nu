@@ -51,6 +51,7 @@ import {
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
@@ -128,12 +129,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     // Get the booking with basic asset information
-    const booking = await getBooking({
-      id: bookingId,
-      organizationId: organizationId,
-      userOrganizations,
-      request,
-    });
+    const [booking, tags] = await Promise.all([
+      getBooking({
+        id: bookingId,
+        organizationId: organizationId,
+        userOrganizations,
+        request,
+      }),
+      db.tag.findMany({ where: { organizationId } }),
+    ]);
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
@@ -328,6 +332,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         /** Assets inside the booking without kits */
         assetsCount: individualAssets.length,
         allCategories,
+        tags,
+        totalTags: tags.length,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -463,6 +469,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }).toJSDate()
           : undefined;
 
+        const tags = buildTagsSet(payload.tags).set;
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -472,6 +480,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           to: formattedTo,
           custodianUserId: payload.custodian?.userId,
           custodianTeamMemberId: payload.custodian?.id,
+          tags,
         });
 
         sendNotification({
@@ -504,6 +513,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
+        const tags = buildTagsSet(payload.tags).set;
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
@@ -528,6 +538,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: payload.custodian?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
+          tags,
         });
 
         sendNotification({
