@@ -12,6 +12,7 @@ import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
+import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import {
@@ -191,7 +192,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     // Execute all necessary queries in parallel
-    const [teamMembersData, assetDetails, totalAssets, bookingFlags, kits] =
+    const [teamMembersData, assetDetails, bookingFlags, kits] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -238,13 +239,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   : {}),
               },
             },
-          },
-        }),
-
-        /** Count all assets in the booking */
-        db.asset.count({
-          where: {
-            id: { in: booking.assets.map((a) => a.id) },
           },
         }),
 
@@ -313,7 +307,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         paginatedItems: enrichedPaginatedItems,
         page,
-        totalItems: totalAssets,
+        totalItems: totalPaginationItems,
         totalPaginationItems,
         perPage,
         totalPages,
@@ -383,6 +377,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "removeKit",
           "revert-to-draft",
           "extend-booking",
+          "bulk-remove-asset-or-kit",
         ]),
         nameChangeOnly: z
           .string()
@@ -408,6 +403,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.update,
+      "bulk-remove-asset-or-kit": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -783,6 +779,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return json(data({ success: true }));
+      }
+      case "bulk-remove-asset-or-kit": {
+        const { assetOrKitIds } = parseData(
+          formData,
+          BulkRemoveAssetsAndKitSchema
+        );
+
+        /**
+         * From frontend, we get both assetIds and kitIds,
+         * here we are separating them
+         * */
+        const assetIds = await db.asset.findMany({
+          where: { id: { in: assetOrKitIds } },
+          select: { id: true },
+        });
+
+        const kitIds = await db.kit.findMany({
+          where: { id: { in: assetOrKitIds } },
+          select: { id: true },
+        });
+
+        const b = await removeAssets({
+          booking: { id, assetIds: assetIds.map((a) => a.id) },
+          kitIds: kitIds.map((k) => k.id),
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          userId,
+          organizationId,
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Your kit has been removed from the booking",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking: b, success: true }), { headers });
       }
       default: {
         checkExhaustiveSwitch(intent);
