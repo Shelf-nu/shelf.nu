@@ -208,10 +208,17 @@ model Category {
   @@index([userId])
 }
 
+enum TagUseFor {
+  ASSET
+  BOOKING
+}
+
 model Tag {
   id          String  @id @default(cuid())
   name        String
   description String?
+
+  useFor TagUseFor[]
 
   //relations
   assets Asset[]
