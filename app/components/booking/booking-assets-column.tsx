@@ -126,6 +126,7 @@ export function BookingAssetsColumn() {
               title="Assets & Kits"
               hasBulkActions
               itemsGetter={itemsGetter}
+              disableSelectAllItems
             />
 
             <When truthy={canSeeActions}>
