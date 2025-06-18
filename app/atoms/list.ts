@@ -67,3 +67,18 @@ export const setDisabledBulkItemsAtom = atom<null, ListItemData[][], void>(
     set(disabledBulkItemsAtom, update);
   }
 );
+
+/**
+ * Remove the items from selectedBulkItemsAtom
+ */
+export const removeSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
+  null,
+  (_, set, update) => {
+    set(selectedBulkItemsAtom, (prev) =>
+      prev.filter(
+        (prevItem) =>
+          !update.some((updateItem) => updateItem.id === prevItem.id)
+      )
+    );
+  }
+);
