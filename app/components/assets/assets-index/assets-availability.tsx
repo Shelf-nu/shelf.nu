@@ -18,6 +18,7 @@ import {
   handleEventMouseEnter,
   handleEventMouseLeave,
   isOneDayEvent,
+  scrollToNow,
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
@@ -46,7 +47,6 @@ export default function AssetsAvailability() {
     isMd ? "resourceTimelineMonth" : "resourceTimelineWeek"
   );
   const { resources, events } = useAssetAvailabilityData();
-
   function handleViewChange(view: string) {
     setCalendarView(view);
     const calendarApi = calendarRef.current?.getApi();
@@ -96,8 +96,8 @@ export default function AssetsAvailability() {
             ref={calendarRef}
             height="auto"
             timeZone="local"
-            slotEventOverlap
             nowIndicator
+            slotEventOverlap
             eventTimeFormat={{
               hour: "numeric",
               minute: "2-digit",
@@ -212,6 +212,7 @@ export default function AssetsAvailability() {
                 viewType
               );
             }}
+            datesSet={scrollToNow}
           />
         )}
       </ClientOnly>
