@@ -28,8 +28,8 @@ import {
   getDomainUrl,
   getStripePricesAndProducts,
   createStripeCheckoutSession,
-  createStripeCustomer,
   getStripeCustomer,
+  getOrCreateCustomerId,
 } from "~/utils/stripe.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
@@ -50,11 +50,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
     ]);
 
     /** Get the Stripe customer */
-    const customer = user.customerId
-      ? ((await getStripeCustomer(
-          user.customerId
-        )) as CustomerWithSubscriptions)
-      : null;
+    const customer = (await getStripeCustomer(
+      await getOrCreateCustomerId(user)
+    )) as CustomerWithSubscriptions;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
@@ -107,26 +105,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
       });
 
-    /**
-     * We create the stripe customer on onboarding,
-     * however we keep this to double check in case something went wrong
-     */
-    const customerId = user.customerId
-      ? user.customerId
-      : await createStripeCustomer({
-          email,
-          name: `${user.firstName} ${user.lastName}`,
-          userId,
-        });
-
-    if (!customerId) {
-      throw new ShelfError({
-        cause: null,
-        message: "No customer ID found for user",
-        additionalData: { userId },
-        label: "Subscription",
-      });
-    }
+    const customerId = await getOrCreateCustomerId({
+      id: userId,
+      email,
+      ...user,
+    });
 
     const stripeRedirectUrl = await createStripeCheckoutSession({
       userId,
