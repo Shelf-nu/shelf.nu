@@ -166,7 +166,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
       case "updateUserContact": {
         if (payload.type !== "updateUserContact")
-          throw new Error("Invalid payload type");
+          throw new ShelfError({
+            cause: null,
+            message: "Invalid payload type",
+            label: "User",
+          });
 
         const updateUserContactPayload: UpdateUserContactPayload = {
           userId,
