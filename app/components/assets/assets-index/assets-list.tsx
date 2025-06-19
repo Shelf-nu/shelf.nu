@@ -53,20 +53,19 @@ export const AssetsList = ({
 }) => {
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
-  const isAvailabilityView = useIsAvailabilityView();
-
+  const { isAvailabilityView, shouldShowAvailabilityView } =
+    useIsAvailabilityView();
+  const columns = useAssetIndexColumns();
   const { isMd } = useViewportHeight();
+  const isUserPage = useIsUserAssetsPage();
+  const { isBase } = useUserRoleHelper();
   const fetchers = useFetchers();
+
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
   );
-  const isUserPage = useIsUserAssetsPage();
-  // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
-  const columns = useAssetIndexColumns();
-  const { isBase } = useUserRoleHelper();
-
   const headerChildren = modeIsSimple ? (
     <>
       <Th>Category</Th>
@@ -127,7 +126,7 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {isMd && isAvailabilityView ? (
+          {isAvailabilityView && shouldShowAvailabilityView ? (
             <>
               <AssetsAvailability />
               <AssetIndexPagination />

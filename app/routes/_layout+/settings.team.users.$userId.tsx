@@ -12,10 +12,12 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
+import { getUserContactById } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -67,6 +69,8 @@ export const loader = async ({
       },
     });
 
+    const userContact = await getUserContactById(user.id);
+
     const userName =
       (user.firstName ? user.firstName.trim() : "") +
       " " +
@@ -80,7 +84,10 @@ export const loader = async ({
         isPersonalOrg: currentOrganization.type === "PERSONAL",
         orgName: currentOrganization.name,
         header,
-        user,
+        user: {
+          ...user,
+          contact: userContact,
+        },
         userName,
       })
     );
@@ -150,7 +157,7 @@ export default function UserPage() {
             </Badge>
           ),
         }}
-        subHeading={user.email}
+        subHeading={<UserSubheading user={user} />}
       />
 
       <When truthy={userOrgRole !== "Owner"}>
@@ -171,7 +178,7 @@ export default function UserPage() {
         </AbsolutePositionedHeaderActions>
       </When>
 
-      <HorizontalTabs items={TABS} />
+      <HorizontalTabs items={TABS} className="mb-0" />
 
       <Outlet />
     </>

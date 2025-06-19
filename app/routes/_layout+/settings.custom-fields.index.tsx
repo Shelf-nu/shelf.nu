@@ -10,6 +10,7 @@ import { List } from "~/components/list";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -170,7 +171,7 @@ function TeamMemberRow({
       <Td>
         <ItemsWithViewMore
           items={item.categories}
-          emptyMessage="No categories"
+          emptyMessage={<GrayBadge>All</GrayBadge>}
           renderItem={(category) => (
             <CategoryBadge
               category={category}

@@ -351,7 +351,7 @@ SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
   ({ className, ...props }, ref) => {
-    const isAvailabilityView = useIsAvailabilityView();
+    const { isAvailabilityView } = useIsAvailabilityView();
     return (
       <main
         ref={ref}
