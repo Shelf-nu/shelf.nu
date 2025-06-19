@@ -206,7 +206,11 @@ export const handleEventMouseLeave =
     const viewType = info.view.type;
     const parent = info.el?.parentElement;
     // Restore original right constraint
-    if (parent && info.el) {
+    if (
+      parent &&
+      info.el &&
+      ["dayGridMonth", "resourceTimelineMonth"].includes(viewType)
+    ) {
       const originalRight = (info.el as any)._originalRight;
       if (originalRight !== undefined) {
         // Clean up

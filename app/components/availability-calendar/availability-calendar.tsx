@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import type { CustomContentGenerator, EventInput } from "@fullcalendar/core";
 import FullCalendar from "@fullcalendar/react";
+import type {
+  ResourceInput,
+  ResourceLabelContentArg,
+} from "@fullcalendar/resource/index.js";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
 import { useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
@@ -8,7 +13,6 @@ import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
-import { Button } from "~/components/shared/button";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
   getCalendarTitleAndSubtitle,
@@ -21,16 +25,20 @@ import {
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
-import { AssetImage } from "../asset-image";
-import { AssetStatusBadge } from "../asset-status-badge";
-import { useAssetAvailabilityData } from "./use-asset-availability-data";
-import { CategoryBadge } from "../category-badge";
-import { useCalendarNowIndicatorFix } from "./use-calendar-now-indicator-fix";
+import { useCalendarNowIndicatorFix } from "../assets/assets-index/use-calendar-now-indicator-fix";
 
 const DEFAULT_CALENDAR_VIEW = "resourceTimelineDay";
 const TARGET_CALENDAR_VIEW = "resourceTimelineMonth";
 
-export default function AssetsAvailability() {
+export default function AvailabilityCalendar({
+  resources,
+  events,
+  resourceLabelContent,
+}: {
+  resources: ResourceInput[];
+  events: EventInput[];
+  resourceLabelContent: CustomContentGenerator<ResourceLabelContentArg>;
+}) {
   const { items, modelName, totalItems, perPage, timeZone } =
     useLoaderData<AssetIndexLoaderData>();
   const { singular, plural } = modelName;
@@ -46,8 +54,6 @@ export default function AssetsAvailability() {
   });
 
   const [calendarView, setCalendarView] = useState(TARGET_CALENDAR_VIEW);
-
-  const { resources, events } = useAssetAvailabilityData(items);
 
   const updateTitle = (viewType = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
@@ -186,46 +192,7 @@ export default function AssetsAvailability() {
               ]}
               slotLabelClassNames="font-normal text-gray-600"
               slotMinWidth={100}
-              resourceLabelContent={({ resource }) => (
-                <div className="flex items-center gap-2 px-2">
-                  <AssetImage
-                    asset={{
-                      id: resource.id,
-                      mainImage: resource.extendedProps?.mainImage,
-                      thumbnailImage: resource.extendedProps?.thumbnailImage,
-                      mainImageExpiration:
-                        resource.extendedProps?.mainImageExpiration,
-                    }}
-                    alt={resource.title}
-                    className="size-14 rounded border object-cover"
-                    withPreview
-                  />
-                  <div className="flex flex-col gap-1">
-                    <div className="min-w-0 flex-1 truncate">
-                      <Button
-                        to={`/assets/${resource.id}`}
-                        variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
-                        target={"_blank"}
-                        onlyNewTabIconOnHover={true}
-                      >
-                        {resource.title}
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <AssetStatusBadge
-                        status={resource.extendedProps?.status}
-                        availableToBook={
-                          resource.extendedProps?.availableToBook
-                        }
-                      />
-                      <CategoryBadge
-                        category={resource.extendedProps?.category}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              resourceLabelContent={resourceLabelContent}
               eventContent={renderEventCard}
               eventClassNames={(eventInfo) => {
                 const viewType = eventInfo.view.type;
