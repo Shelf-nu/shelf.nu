@@ -88,13 +88,8 @@ export async function getLocation(
         include: include
           ? include
           : {
-              image: {
-                select: {
-                  updatedAt: true,
-                },
-              },
               assets: {
-                select: {
+                include: {
                   category: {
                     select: {
                       id: true,
