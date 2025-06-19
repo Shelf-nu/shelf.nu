@@ -24,6 +24,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
 import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
@@ -39,6 +40,7 @@ import {
 import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -73,6 +75,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
     const view = searchParams.get("view") ?? "table";
+    const {
+      filters,
+      redirectNeeded,
+      serializedCookie: filtersCookie,
+    } = await getFiltersFromRequest(request, organizationId, {
+      name: "kitFilter",
+      path: "/kits",
+    });
+
+    /** We only do that when we are on the index page */
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/kits?${cookieParams.toString()}`);
+    }
+
     let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
@@ -164,7 +181,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
         },
-      })
+      }),
+      {
+        headers: [...(filtersCookie ? [setCookie(filtersCookie)] : [])],
+      }
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -175,6 +195,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
+
+export const handle = {
+  name: "kits.index",
+};
 
 export default function KitsIndexPage() {
   const { items } = useLoaderData<typeof loader>();
@@ -283,7 +307,9 @@ export default function KitsIndexPage() {
                 </div>
               )}
             />
-            <Pagination />
+            <Card className="-mt-2 border-t-0 py-0">
+              <Pagination />
+            </Card>
           </>
         ) : (
           <List
