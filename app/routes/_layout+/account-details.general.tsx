@@ -107,6 +107,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.userData,
+      action: PermissionAction.update,
+    });
+
     // First parse just the intent
     const { intent } = parseData(
       await request.clone().formData(),
