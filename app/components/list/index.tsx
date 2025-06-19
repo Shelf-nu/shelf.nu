@@ -1,16 +1,9 @@
 import type { ReactNode } from "react";
 import React from "react";
 import { useLoaderData } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
-import {
-  selectedBulkItemsAtom,
-  selectedBulkItemsCountAtom,
-  setSelectedBulkItemsAtom,
-} from "~/atoms/list";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
 import { EmptyState } from "./empty-state";
@@ -18,9 +11,9 @@ import { EmptyState } from "./empty-state";
 import { ListHeader } from "./list-header";
 import type { ListItemData } from "./list-item";
 import { ListItem } from "./list-item";
+import ListTitle from "./list-title";
 import { Pagination } from "./pagination";
 import { ExportAssetsButton } from "../assets/assets-index/export-assets-button";
-import { Button } from "../shared/button";
 import { Table } from "../table";
 import When from "../when/when";
 
@@ -111,28 +104,11 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   }: ListProps,
   ref
 ) {
-  const { items, totalItems, perPage, modelName } =
-    useLoaderData<IndexResponse>();
-  const { singular, plural } = modelName;
+  const { items } = useLoaderData<IndexResponse>();
   const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
-  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
-  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
 
-  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const { modeIsAdvanced } = useAssetIndexViewState();
-
-  const hasSelectedItems = selectedBulkItemsCount > 0;
-
-  /**
-   * We can select all the incoming items and we can add ALL_SELECTED_KEY
-   * in the selected items. We check in backend for this ALL_SELECTED_KEY, if it is selected
-   * then we do operation on all items of organization
-   */
-  function handleSelectAllItems() {
-    setSelectedBulkItems([...items, { id: ALL_SELECTED_KEY }]);
-  }
 
   const isUserPage = useIsUserAssetsPage();
 
@@ -160,67 +136,11 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
             )}
           >
             <div>
-              <div>
-                <h5 className="text-left capitalize">{title || plural}</h5>
-                <div className="h-7">
-                  {!!bulkActions && hasSelectedItems ? (
-                    <div className="flex items-start gap-2">
-                      <Button
-                        onClick={() => setSelectedBulkItems([])}
-                        variant="secondary"
-                        className="p-1 text-[14px]"
-                      >
-                        <span className="block size-2">
-                          <svg
-                            width="100%"
-                            height="100%"
-                            viewBox="0 0 10 10"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              d="M9 1 1 9m0-8 8 8"
-                              stroke="currentColor"
-                              strokeWidth={1.333}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                      </Button>
-                      {hasSelectedAllItems
-                        ? totalItems
-                        : selectedBulkItemsCount}{" "}
-                      selected
-                      {!disableSelectAllItems &&
-                        !hasSelectedAllItems &&
-                        selectedBulkItemsCount < totalItems && (
-                          <Button
-                            onClick={handleSelectAllItems}
-                            variant="block-link"
-                          >
-                            Select all {totalItems} entries
-                          </Button>
-                        )}
-                    </div>
-                  ) : (
-                    <div>
-                      {perPage < totalItems ? (
-                        <p>
-                          {items.length} {items.length > 1 ? plural : singular}{" "}
-                          <span className="text-gray-400">
-                            out of {totalItems}
-                          </span>
-                        </p>
-                      ) : (
-                        <span>
-                          {totalItems} {items.length > 1 ? plural : singular}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ListTitle
+                title={title}
+                disableSelectAllItems={disableSelectAllItems}
+                hasBulkActions={!!bulkActions}
+              />
             </div>
             <div className="flex items-center gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>

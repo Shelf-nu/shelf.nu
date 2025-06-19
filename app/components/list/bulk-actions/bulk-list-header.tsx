@@ -11,12 +11,42 @@ import { Th } from "~/components/table";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { tw } from "~/utils/tw";
-import type { IndexResponse } from "..";
+import type { ListItemData } from "../list-item";
+
+export type LoaderData = Record<string, ListItemData[]>;
+
+type BulkListHeaderProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
+  /**
+   *
+   * This function is used to retrieve the items to be added in bulk-items when "Select All" is clicked.
+   * It is useful when the loader data structure is different from the default one.
+   * For example, the loader data on booking page is structured as:
+   *
+   * ```javascript
+   * {
+   *  paginatedItems: [
+   *    { type: "kit", assets: [...] },
+   *    { type: "asset", ... },
+   *  ]
+   * }
+   * ```
+   *
+   * @param data Loader data containing items
+   * @returns An array of ListItemData to be used in the header
+   */
+  itemsGetter?: (data: LoaderData) => ListItemData[];
+};
 
 export default function BulkListHeader({
+  itemsGetter,
   ...rest
-}: {} & React.ThHTMLAttributes<HTMLTableCellElement>) {
-  const { items } = useLoaderData<IndexResponse>();
+}: BulkListHeaderProps) {
+  const loaderData = useLoaderData<Record<string, ListItemData[]>>();
+  const items =
+    typeof itemsGetter === "function"
+      ? itemsGetter(loaderData)
+      : loaderData.items;
+
   const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();
 
