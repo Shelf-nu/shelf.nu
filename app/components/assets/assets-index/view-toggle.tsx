@@ -5,7 +5,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { tw } from "~/utils/tw";
 
-export function AssetsIndexViewToggle({
+export function AvailabilityViewToggle({
   modeIsSimple = true,
 }: {
   modeIsSimple?: boolean;
