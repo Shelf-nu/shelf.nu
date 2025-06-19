@@ -2,6 +2,7 @@ import type {
   Organization,
   Prisma,
   Tag,
+  TagUseFor,
   TeamMember,
   User,
 } from "@prisma/client";
@@ -68,14 +69,17 @@ export async function createTag({
   description,
   userId,
   organizationId,
+  useFor,
 }: Pick<Tag, "description" | "name" | "organizationId"> & {
   userId: User["id"];
+  useFor: TagUseFor[];
 }) {
   try {
     return await db.tag.create({
       data: {
         name: loadash.trim(name),
         description,
+        useFor,
         user: {
           connect: {
             id: userId,
@@ -220,7 +224,10 @@ export async function updateTag({
   organizationId,
   name,
   description,
-}: Pick<Tag, "id" | "organizationId" | "name" | "description">) {
+  useFor,
+}: Pick<Tag, "id" | "organizationId" | "name" | "description"> & {
+  useFor?: TagUseFor[];
+}) {
   try {
     return await db.tag.update({
       where: {
@@ -230,6 +237,9 @@ export async function updateTag({
       data: {
         name: loadash.trim(name),
         description,
+        useFor: {
+          set: useFor,
+        },
       },
     });
   } catch (cause) {

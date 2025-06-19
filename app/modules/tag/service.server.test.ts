@@ -25,6 +25,7 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: "test_tag",
+        useFor: ["ASSET"],
       });
       expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
     });
@@ -35,6 +36,7 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: " test_tag ",
+        useFor: ["ASSET"],
       });
       expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
     });

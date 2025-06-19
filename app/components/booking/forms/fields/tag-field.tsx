@@ -1,8 +1,7 @@
 import type { Tag } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import FormRow from "~/components/forms/form-row";
-import { InnerLabel } from "~/components/forms/inner-label";
-import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
+import MultiSelect from "~/components/multi-select/multi-select";
 import { tw } from "~/utils/tw";
 
 type TagFieldProps = {
@@ -28,15 +27,18 @@ export default function TagField({
       rowLabel="Tags"
       className={tw("mobile-styling-only border-b-0 p-0", className)}
     >
-      <InnerLabel>Tags</InnerLabel>
-
-      <TagsAutocomplete
-        disabled={disabled}
-        existingTags={existingTags.map((tag) => ({
+      <MultiSelect
+        className="w-full"
+        label="Tags"
+        items={tagsSuggestions}
+        defaultSelected={existingTags.map((tag) => ({
           label: tag.name,
           value: tag.id,
         }))}
-        suggestions={tagsSuggestions}
+        labelKey="label"
+        valueKey="value"
+        name="tags"
+        disabled={disabled}
       />
     </FormRow>
   );
