@@ -76,7 +76,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export default function MyBookings() {
-  return <BookingsIndexPage disableBulkActions className="!mt-0" />;
+  return <BookingsIndexPage disableBulkActions />;
 }
 
 export const handle = {

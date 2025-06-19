@@ -35,6 +35,7 @@ export enum PermissionEntity {
   scan = "scan",
   custody = "custody",
   assetReminders = "assetReminders",
+  userData = "user-data", // This is for the user to load their own data.
 }
 
 //this will come from DB eventually
@@ -69,6 +70,10 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -102,5 +107,9 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
 };

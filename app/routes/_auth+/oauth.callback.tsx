@@ -11,6 +11,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { createSSOFormData } from "~/utils/auth";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -45,6 +46,13 @@ const CallbackSchema = z.object({
     .default([]),
   refreshToken: z.string().min(1),
   redirectTo: z.string().optional(),
+  // Contact information fields
+  phone: z.string().optional(),
+  streetAddress: z.string().optional(),
+  city: z.string().optional(),
+  stateProvince: z.string().optional(),
+  postalCode: z.string().optional(),
+  country: z.string().optional(),
 });
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -70,12 +78,32 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { refreshToken, redirectTo, firstName, lastName, groups } =
-          parseData(await request.formData(), CallbackSchema);
+        const {
+          refreshToken,
+          redirectTo,
+          firstName,
+          lastName,
+          groups,
+          phone,
+          streetAddress,
+          city,
+          stateProvince,
+          postalCode,
+          country,
+        } = parseData(await request.formData(), CallbackSchema);
 
         // We should not trust what is sent from the client
         // https://github.com/rphlmr/supa-fly-stack/issues/45
         const authSession = await refreshAccessToken(refreshToken);
+        // Package contact information
+        const contactInfo = {
+          phone,
+          street: streetAddress, // Map to our field name
+          city,
+          stateProvince,
+          zipPostalCode: postalCode, // Map to our field name
+          countryRegion: country, // Map to our field name
+        };
 
         /**
          * This resolves the correct org we should redirect the user to
@@ -89,6 +117,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           firstName,
           lastName,
           groups,
+          contactInfo,
         });
 
         // Set the auth session and redirect to the assets page
@@ -145,25 +174,14 @@ export default function LoginCallback() {
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
         const refreshToken = supabaseSession?.refresh_token;
-        const user = supabaseSession?.user;
 
         if (!refreshToken) return;
 
-        const formData = new FormData();
-
-        formData.append("refreshToken", refreshToken);
-        formData.append("redirectTo", redirectTo);
-        formData.append(
-          "firstName",
-          user?.user_metadata?.custom_claims.firstName || ""
+        const formData = createSSOFormData(
+          supabaseSession,
+          refreshToken,
+          redirectTo
         );
-        formData.append(
-          "lastName",
-          user?.user_metadata?.custom_claims.lastName || ""
-        );
-
-        const groups = user?.user_metadata?.custom_claims.groups;
-        formData.append("groups", JSON.stringify(groups || []));
 
         fetcher.submit(formData, { method: "post" });
       }

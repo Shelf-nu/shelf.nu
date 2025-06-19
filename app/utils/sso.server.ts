@@ -46,11 +46,20 @@ export async function resolveUserAndOrgForSsoCallback({
   firstName,
   lastName,
   groups,
+  contactInfo,
 }: {
   authSession: AuthSession;
   firstName: string;
   lastName: string;
   groups: string[];
+  contactInfo?: {
+    phone?: string;
+    street?: string;
+    city?: string;
+    stateProvince?: string;
+    zipPostalCode?: string;
+    countryRegion?: string;
+  };
 }) {
   try {
     // First check if user exists
@@ -81,6 +90,7 @@ export async function resolveUserAndOrgForSsoCallback({
         firstName,
         lastName,
         groups,
+        contactInfo,
       });
       return { user: response.user, org: response.org };
     }
@@ -91,6 +101,7 @@ export async function resolveUserAndOrgForSsoCallback({
         firstName,
         lastName,
         groups,
+        contactInfo,
       });
       return { user: response.user, org: response.org };
     } catch (createError) {

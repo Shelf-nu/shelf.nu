@@ -9,6 +9,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -167,7 +168,10 @@ function TeamMemberRow({
         </Link>
       </Td>
       <Td>
-        <CategoriesWithViewMore categories={item.categories} />
+        <CategoriesWithViewMore
+          categories={item.categories}
+          emptyState={<GrayBadge>All</GrayBadge>}
+        />
       </Td>
       <Td>
         <span className="text-text-sm font-medium capitalize text-gray-600">

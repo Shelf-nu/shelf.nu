@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet, useRouteLoaderData } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
@@ -6,21 +6,41 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { data } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 
 export const handle = {
   breadcrumb: () => <Link to="/account-details">Account Details</Link>,
 };
 
-export function loader() {
-  const title = "Account Details";
-  const subHeading = "Manage your preferences here.";
-  const header = {
-    title,
-    subHeading,
-  };
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.userData,
+      action: PermissionAction.read,
+    });
 
-  return json(data({ header }));
+    const title = "Account Details";
+    const subHeading = "Manage your preferences here.";
+    const header = {
+      title,
+      subHeading,
+    };
+
+    return json(data({ header }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

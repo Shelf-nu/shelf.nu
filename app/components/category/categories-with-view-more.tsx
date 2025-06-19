@@ -1,3 +1,4 @@
+import React from "react";
 import type { Category } from "@prisma/client";
 import { tw } from "~/utils/tw";
 import { CategoryBadge } from "../assets/category-badge";
@@ -13,9 +14,11 @@ export const CategoriesWithViewMore = ({
   showCount = 2,
   categories,
   className,
+  emptyState = "No categories",
 }: {
   showCount?: number;
   categories: Pick<Category, "id" | "name" | "color">[] | undefined;
+  emptyState?: string | React.ReactNode;
   className?: string;
 }) => {
   // Filter out any null/undefined categories first
@@ -56,6 +59,6 @@ export const CategoriesWithViewMore = ({
       ) : null}
     </div>
   ) : (
-    <div>No categories</div>
+    <div>{emptyState}</div>
   );
 };
