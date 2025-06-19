@@ -45,6 +45,7 @@
     "@fullcalendar/daygrid": "^6.1.17",
     "@fullcalendar/list": "^6.1.17",
     "@fullcalendar/react": "^6.1.17",
+    "@fullcalendar/resource": "^6.1.17",
     "@fullcalendar/resource-timeline": "^6.1.17",
     "@fullcalendar/timegrid": "^6.1.17",
     "@markdoc/markdoc": "^0.4.0",
