@@ -1036,6 +1036,11 @@ export async function updateProfilePicture({
 export async function softDeleteUser(id: User["id"]) {
   try {
     const user = await getUserByID(id, {
+      contact: {
+        select: {
+          id: true,
+        },
+      },
       userOrganizations: {
         include: {
           organization: {
@@ -1093,18 +1098,14 @@ export async function softDeleteUser(id: User["id"]) {
           firstName: "Deleted",
           lastName: "User",
           deletedAt: new Date(),
-          contact: {
-            update: {
-              phone: "",
-              street: "",
-              city: "",
-              stateProvince: "",
-              zipPostalCode: "",
-              countryRegion: "",
-            },
-          },
         },
       });
+      if (user.contact) {
+        /** Delete the user contact info */
+        await tx.userContact.delete({
+          where: { id: user.contact.id },
+        });
+      }
     });
 
     /**
