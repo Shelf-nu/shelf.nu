@@ -7,6 +7,7 @@ import type {
   Kit,
   User,
   UserOrganization,
+  Tag,
 } from "@prisma/client";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
@@ -1393,7 +1394,7 @@ export async function getBookingsFilterData({
   });
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status, teamMemberIds } =
+  const { page, perPageParam, search, status, teamMemberIds, tags } =
     getParamsValues(searchParams);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1456,6 +1457,7 @@ export async function getBookingsFilterData({
     filtersCookie,
     filters,
     redirectNeeded,
+    tags,
   };
 }
 
@@ -1481,6 +1483,7 @@ export async function getBookings(params: {
   orderBy?: string;
   orderDirection?: SortingDirection;
   kitId?: string;
+  tags?: Tag["id"][];
 }) {
   const {
     organizationId,
@@ -1500,6 +1503,7 @@ export async function getBookings(params: {
     orderBy = "from",
     orderDirection = "asc",
     kitId,
+    tags,
   } = params;
 
   try {
@@ -1612,6 +1616,10 @@ export async function getBookings(params: {
       where.assets = {
         some: { kitId },
       };
+    }
+
+    if (tags?.length) {
+      where.tags = { some: { id: { in: tags } } };
     }
 
     const [bookings, bookingCount] = await Promise.all([

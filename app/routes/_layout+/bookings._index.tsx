@@ -96,6 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       filtersCookie,
       filters,
       redirectNeeded,
+      tags: filterTags,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings,
@@ -125,6 +126,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           ...selfServiceData,
           orderBy,
           orderDirection,
+          tags: filterTags,
         }),
 
         // team members/custodian
@@ -329,6 +331,21 @@ export default function BookingsIndexPage({
               placeholder="Search team members"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", queryKey: "name" }}
+              label="Filter by tag"
+              initialDataKey="tags"
+              countKey="totalTags"
+              withoutValueItem={{
+                id: "untagged",
+                name: "Without tag",
+              }}
             />
           </When>
         </Filters>
