@@ -46,3 +46,4 @@ desktop-app/portable
 # VitePress
 docs/.vitepress/cache
 docs/.vitepress/dist
+.vercel
