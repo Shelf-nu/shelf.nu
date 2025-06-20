@@ -96,3 +96,11 @@
 .dark .vp-doc a.vp-external-link-icon {
   color: #ff8a50;
 }
+
+/* Override hero image size at larger screens */
+@media (min-width: 960px) {
+  .VPHero .image-src {
+    max-width: 520px !important;
+    max-height: 520px !important;
+  }
+}

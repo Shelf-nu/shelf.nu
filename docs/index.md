@@ -6,7 +6,7 @@ hero:
   text: "Documentation"
   tagline: "Open source asset management platform"
   image:
-    src: https://raw.githubusercontent.com/Shelf-nu/shelf.nu/main/public/static/images/readme-cover.jpg
+    src: https://cdn.prod.website-files.com/641c35b7e5057648c76fa79f/664deb3a00954d2c1d19280e_implement_asset_registry.jpeg
     alt: Shelf.nu
   actions:
     - theme: brand

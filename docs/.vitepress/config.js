@@ -66,6 +66,10 @@ export default {
           { text: "GitHub", link: "https://github.com/Shelf-nu/shelf.nu" },
           { text: "Discord", link: "https://discord.gg/gdPMsSzqCS" },
           { text: "Website", link: "https://shelf.nu" },
+          {
+            text: "Knowledge base",
+            link: "https://www.shelf.nu/knowledge-base",
+          },
         ],
       },
     ],
