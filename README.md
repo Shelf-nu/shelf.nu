@@ -15,7 +15,7 @@ Shelf 🏷️ is a cutting-edge, open-source asset management platform designed 
 <div align="center" justify="center">
 <a href="https://www.shelf.nu/?ref=github" target="_blank"><b>Website</b></a> •
 <a href="https://github.com/Shelf-nu/shelf.nu/tree/main/docs" target="_blank"><b>Documentation</b></a> •
-<a href="https://discord.gg/gdPMsSzqCS" target="_blank"><b>Community</b></a> •
+<a href="https://discord.gg/8he9W7aTJu" target="_blank"><b>Community</b></a> •
 <a href="https://twitter.com/ShelfQR/?ref=github" target="_blank"><b>Twitter</b></a> •
 
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)

@@ -460,7 +460,7 @@ After successful deployment:
 
 ## Getting Help 💬
 
-- 💬 **[Discord Community](https://discord.gg/gdPMsSzqCS)** - Get help from other users
+- 💬 **[Discord Community](https://discord.gg/8he9W7aTJu)** - Get help from other users
 - 📖 **[Fly.io Docs](https://fly.io/docs/)** - Official Fly.io documentation
 - 🐛 **[GitHub Issues](https://github.com/Shelf-nu/shelf.nu/issues)** - Report deployment issues
 - 📧 **[Fly.io Support](https://fly.io/docs/getting-help/)** - Fly.io specific support

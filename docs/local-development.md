@@ -451,7 +451,7 @@ Once you're comfortable with local development:
 
 1. **Explore the codebase** - Look at existing routes and components
 2. **Read the other docs** - Check out [hooks](./hooks.md), [error handling](./handling-errors.md), etc.
-3. **Join the community** - [Discord](https://discord.gg/gdPMsSzqCS) for questions
+3. **Join the community** - [Discord](https://discord.gg/8he9W7aTJu) for questions
 4. **Contribute** - See [CONTRIBUTING.md](../CONTRIBUTING.md)
 5. **Deploy** - Check out [Deployment Guide](./deployment.md) when ready
 
@@ -459,7 +459,7 @@ Once you're comfortable with local development:
 
 ## Getting Help 💬
 
-- 💬 **[Discord Community](https://discord.gg/gdPMsSzqCS)** - Chat with other developers
+- 💬 **[Discord Community](https://discord.gg/8he9W7aTJu)** - Chat with other developers
 - 📖 **[Documentation](./README.md)** - Browse all guides
 - 🐛 **[GitHub Issues](https://github.com/Shelf-nu/shelf.nu/issues)** - Report bugs or request features
 - 🐦 **[Twitter](https://twitter.com/ShelfQR)** - Follow for updates
