@@ -120,7 +120,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {
-      where.useFor = { hasSome: [TagUseFor.ALL, modelFilters.useFor] };
+      where.useFor = { has: modelFilters.useFor };
     }
 
     const queryData = (await db[name].dynamicFindMany({

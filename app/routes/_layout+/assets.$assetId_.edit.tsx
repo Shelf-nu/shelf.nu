@@ -78,7 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           category: asset.categoryId,
           location: asset.locationId,
         },
-        tagUseFor: [TagUseFor.ALL, TagUseFor.ASSET],
+        tagUseFor: TagUseFor.ASSET,
       });
 
     const searchParams = getCurrentSearchParams(request);

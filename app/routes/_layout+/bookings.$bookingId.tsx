@@ -140,7 +140,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       db.tag.findMany({
         where: {
           organizationId,
-          useFor: { hasSome: [TagUseFor.ALL, TagUseFor.BOOKING] },
+          useFor: { has: TagUseFor.BOOKING },
         },
       }),
     ]);

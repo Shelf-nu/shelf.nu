@@ -65,7 +65,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getAllEntriesForCreateAndEdit({
         organizationId,
         request,
-        tagUseFor: [TagUseFor.ALL, TagUseFor.ASSET],
+        tagUseFor: TagUseFor.ASSET,
       });
 
     const searchParams = getCurrentSearchParams(request);

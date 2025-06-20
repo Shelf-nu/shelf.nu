@@ -1298,7 +1298,7 @@ export async function getAllEntriesForCreateAndEdit({
     tag?: string | null;
     location?: string | null;
   };
-  tagUseFor?: TagUseFor[];
+  tagUseFor?: TagUseFor;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const categorySelected =
@@ -1341,11 +1341,7 @@ export async function getAllEntriesForCreateAndEdit({
       db.tag.findMany({
         where: {
           organizationId,
-          useFor: tagUseFor
-            ? {
-                hasSome: tagUseFor,
-              }
-            : undefined,
+          useFor: tagUseFor ? { has: tagUseFor } : undefined,
         },
       }),
 
