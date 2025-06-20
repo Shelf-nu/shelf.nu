@@ -20,6 +20,7 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -94,17 +95,29 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
 
-    const teamMembersData = await getTeamMemberForCustodianFilter({
-      organizationId,
-      selectedTeamMembers: teamMemberIds,
-      getAll:
-        searchParams.has("getAll") &&
-        hasGetAllValue(searchParams, "teamMember"),
-      filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
-      userId,
-    });
+    const [teamMembersData, tags] = await Promise.all([
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
+        userId,
+      }),
 
-    return json(data({ header, ...teamMembersData, currentOrganization }));
+      db.tag.findMany({ where: { organizationId } }),
+    ]);
+
+    return json(
+      data({
+        header,
+        ...teamMembersData,
+        currentOrganization,
+        tags,
+        totalTags: tags.length,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

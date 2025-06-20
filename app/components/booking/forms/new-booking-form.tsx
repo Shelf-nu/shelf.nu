@@ -3,6 +3,7 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useWorkingHours } from "~/hooks/use-working-hours";
@@ -42,8 +43,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const { teamMembers, userId, currentOrganization } =
+  const { teamMembers, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
+
+  const tagsSuggestions = tags.map((tag) => ({
+    label: tag.name,
+    value: tag.id,
+  }));
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
@@ -145,6 +151,12 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                     validationErrors?.custodian?.message ||
                     zo.errors.custodian()?.message
                   }
+                />
+              </Card>
+              <Card className="m-0 overflow-visible">
+                <TagsAutocomplete
+                  existingTags={[]}
+                  suggestions={tagsSuggestions}
                 />
               </Card>
               <Card className="m-0">

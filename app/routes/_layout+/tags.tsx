@@ -15,10 +15,12 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
+import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
@@ -65,6 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
+      request,
     });
     const totalPages = Math.ceil(totalTags / perPage);
 
@@ -163,7 +166,11 @@ export default function CategoriesPage() {
         </Button>
       </Header>
       <ListContentWrapper>
-        <Filters />
+        <Filters
+          slots={{
+            "right-of-search": <TagUseForFilter />,
+          }}
+        />
         <Outlet />
         <List
           bulkActions={
@@ -173,6 +180,7 @@ export default function CategoriesPage() {
           headerChildren={
             <>
               <Th>Description</Th>
+              <Th>Use for</Th>
               <Th>Actions</Th>
             </>
           }
@@ -185,7 +193,7 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name">;
+  item: Pick<Tag, "id" | "description" | "name" | "useFor">;
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
@@ -200,6 +208,15 @@ const TagItem = ({
           charactersPerLine={60}
         />
       ) : null}
+    </Td>
+    <Td>
+      <div className="flex items-center gap-2">
+        {item.useFor && item.useFor.length > 0
+          ? item.useFor.map((useFor) => (
+              <GrayBadge key={useFor}>{useFor}</GrayBadge>
+            ))
+          : null}
+      </div>
     </Td>
     <Td className="text-left">
       <Button

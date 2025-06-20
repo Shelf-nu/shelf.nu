@@ -49,6 +49,7 @@ export default function BulkAssignTagsDialog() {
         name: "tag",
         queryKey: "name",
         queryValue: "",
+        useFor: "ASSET",
       },
       {
         method: "GET",

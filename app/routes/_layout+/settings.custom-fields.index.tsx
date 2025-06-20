@@ -2,11 +2,12 @@ import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
-import { CategoriesWithViewMore } from "~/components/category/categories-with-view-more";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
+import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -168,9 +169,16 @@ function TeamMemberRow({
         </Link>
       </Td>
       <Td>
-        <CategoriesWithViewMore
-          categories={item.categories}
-          emptyState={<GrayBadge>All</GrayBadge>}
+        <ItemsWithViewMore
+          items={item.categories}
+          emptyMessage={<GrayBadge>All</GrayBadge>}
+          renderItem={(category) => (
+            <CategoryBadge
+              category={category}
+              className="mb-2 mr-2"
+              key={category.id}
+            />
+          )}
         />
       </Td>
       <Td>

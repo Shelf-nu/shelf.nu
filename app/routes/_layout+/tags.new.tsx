@@ -1,10 +1,12 @@
+import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
+import MultiSelect from "~/components/multi-select/multi-select";
 
 import { Button } from "~/components/shared/button";
 
@@ -24,6 +26,10 @@ import { zodFieldIsRequired } from "~/utils/zod";
 export const NewTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
+  useFor: z
+    .string()
+    .transform((value) => value.split(","))
+    .pipe(z.array(z.nativeEnum(TagUseFor)).default([])),
 });
 
 const title = "New Tag";
@@ -44,7 +50,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ header }));
+    return json(
+      data({
+        header,
+        tagUseFor: Object.values(TagUseFor).map((useFor) => ({
+          label: useFor,
+          value: useFor,
+        })),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -95,6 +109,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function NewTag() {
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
+  const { tagUseFor } = useLoaderData<typeof loader>();
+
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
@@ -127,6 +143,14 @@ export default function NewTag() {
               data-test-id="tagDescription"
               className="mb-4 lg:mb-0"
               required={zodFieldIsRequired(NewTagFormSchema.shape.description)}
+            />
+
+            <MultiSelect
+              name="useFor"
+              items={tagUseFor}
+              labelKey="label"
+              valueKey="value"
+              label="Use for"
             />
           </div>
 
