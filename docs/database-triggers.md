@@ -40,7 +40,7 @@ ORDER BY event_object_table, trigger_name;
 **Event**: `AFTER INSERT`  
 **Function**: `create_user_contact_on_user_insert()`
 
-**Migration File**: [`20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table`](../app/database/migrations/20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table/migration.sql)
+**Migration File**: [`20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table`](https://github.com/Shelf-nu/shelf.nu/tree/main/app/database/migrations/20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table/migration.sql)
 
 **What it does**:
 

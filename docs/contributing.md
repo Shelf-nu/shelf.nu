@@ -1,3 +1,8 @@
+---
+title: Contributing to Shelf.nu
+description: How to contribute to the Shelf.nu project
+---
+
 # Contribute to Shelf
 
 We really appreciate your interest to contribute to Shelf! Any kind of contribution is highly appreciated, not only coding ☺️.

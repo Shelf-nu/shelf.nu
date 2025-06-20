@@ -23,6 +23,9 @@
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
     "start": "NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
+    "docs:dev": "vitepress dev docs --port 5173",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs --port 5174",
     "test": "vitest",
     "test:cov": "vitest --coverage",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
@@ -174,6 +177,7 @@
     "vite": "^5.4.19",
     "vite-plugin-cjs-interop": "^2.1.0",
     "vite-tsconfig-paths": "^4.3.2",
+    "vitepress": "^1.6.3",
     "vitest": "^2.1.9"
   },
   "engines": {

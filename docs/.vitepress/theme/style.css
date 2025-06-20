@@ -1,0 +1,106 @@
+:root {
+  /* Hero title colors */
+  --vp-home-hero-name-color: #ef6820;
+  --vp-home-hero-name-background: linear-gradient(120deg, #ef6820 30%, #ff8a50);
+
+  /* Brand colors - these control links and UI elements */
+  --vp-c-brand-1: #ef6820; /* Primary brand color */
+  --vp-c-brand-2: #ff8a50; /* Lighter brand color */
+  --vp-c-brand-3: #d55a1a; /* Darker brand color */
+
+  /* Button colors */
+  --vp-button-brand-border: #ef6820;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: #ef6820;
+  --vp-button-brand-hover-border: #d55a1a;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: #d55a1a;
+}
+
+/* DON'T override text colors - let VitePress handle light/dark mode */
+/* --vp-c-text-1 and --vp-c-text-2 removed to preserve dark mode */
+
+/* Content links */
+.vp-doc a {
+  color: #ef6820;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all 0.25s;
+}
+
+.vp-doc a:hover {
+  color: #d55a1a;
+  border-bottom-color: #d55a1a;
+}
+
+/* Dark mode link colors */
+.dark .vp-doc a {
+  color: #ff8a50;
+}
+
+.dark .vp-doc a:hover {
+  color: #ef6820;
+  border-bottom-color: #ef6820;
+}
+
+/* Navigation links */
+.VPNavBarMenuLink:hover {
+  color: #ef6820 !important;
+}
+
+.dark .VPNavBarMenuLink:hover {
+  color: #ff8a50 !important;
+}
+
+/* Sidebar links */
+.VPSidebarItem.is-link:hover .text {
+  color: #ef6820 !important;
+}
+
+.dark .VPSidebarItem.is-link:hover .text {
+  color: #ff8a50 !important;
+}
+
+/* Table links */
+.vp-doc table a {
+  color: #ef6820;
+  font-weight: 500;
+}
+
+.vp-doc table a:hover {
+  color: #d55a1a;
+}
+
+.dark .vp-doc table a {
+  color: #ff8a50;
+}
+
+.dark .vp-doc table a:hover {
+  color: #ef6820;
+}
+
+/* Code links */
+.vp-doc code a {
+  color: #ef6820;
+}
+
+.dark .vp-doc code a {
+  color: #ff8a50;
+}
+
+/* External link icon */
+.vp-doc a.vp-external-link-icon {
+  color: #ef6820;
+}
+
+.dark .vp-doc a.vp-external-link-icon {
+  color: #ff8a50;
+}
+
+/* Override hero image size at larger screens */
+@media (min-width: 960px) {
+  .VPHero .image-src {
+    max-width: 520px !important;
+    max-height: 520px !important;
+  }
+}
