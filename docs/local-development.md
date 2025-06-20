@@ -12,8 +12,6 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 
 ---
 
-testchangge
-
 ## Development Setup 🚀
 
 ### 1. Clone & Install Dependencies
@@ -86,8 +84,8 @@ npm run setup
 npm run dev
 ```
 
-**With SSL enabled:** Your app will be available at: `https://localhost:3000` 🔒  
-**Without SSL:** Your app will be available at: `http://localhost:3000` 🎉
+**With SSL enabled:** Your app will be available at: **https://localhost:3000** 🔒  
+**Without SSL:** Your app will be available at: **http://localhost:3000** 🎉
 
 ---
 
@@ -454,7 +452,7 @@ Once you're comfortable with local development:
 1. **Explore the codebase** - Look at existing routes and components
 2. **Read the other docs** - Check out [hooks](./hooks.md), [error handling](./handling-errors.md), etc.
 3. **Join the community** - [Discord](https://discord.gg/8he9W7aTJu) for questions
-4. **Contribute** - See [CONTRIBUTING.md](./contributing.md)
+4. **Contribute** - See [CONTRIBUTING.md](../CONTRIBUTING.md)
 5. **Deploy** - Check out [Deployment Guide](./deployment.md) when ready
 
 ---
