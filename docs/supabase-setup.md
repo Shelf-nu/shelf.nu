@@ -325,7 +325,7 @@ Your app should connect to Supabase successfully!
 ### Getting Help
 
 - 💬 [Join our Discord](https://discord.gg/8he9W7aTJu)
-- 📖 [Browse all documentation](../README.md)
+- 📖 [Browse all documentation](docs/README.md)
 - 🐛 [Report issues on GitHub](https://github.com/Shelf-nu/shelf.nu/issues)
 
 ---
