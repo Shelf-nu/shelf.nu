@@ -20,6 +20,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
+import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
@@ -66,6 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
+      request,
     });
     const totalPages = Math.ceil(totalTags / perPage);
 
@@ -164,7 +166,11 @@ export default function CategoriesPage() {
         </Button>
       </Header>
       <ListContentWrapper>
-        <Filters />
+        <Filters
+          slots={{
+            "right-of-search": <TagUseForFilter />,
+          }}
+        />
         <Outlet />
         <List
           bulkActions={
