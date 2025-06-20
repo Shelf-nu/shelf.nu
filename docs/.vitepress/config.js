@@ -59,7 +59,7 @@ export default {
     // Navigation bar
     nav: [
       { text: "Home", link: "/" },
-      { text: "Getting Started", link: "/local-development" },
+      { text: "Docs", link: "/local-development" },
       {
         text: "Links",
         items: [
@@ -151,6 +151,15 @@ export default {
               },
             ],
           },
+        ],
+      },
+      {
+        text: "📋 Project Info",
+        collapsed: true,
+        items: [
+          { text: "Contributing Guide", link: "/contributing" },
+          { text: "Code of Conduct", link: "/code-of-conduct" },
+          { text: "License", link: "/license" },
         ],
       },
     ],
