@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -137,7 +137,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userOrganizations,
         request,
       }),
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          useFor: { hasSome: [TagUseFor.ALL, TagUseFor.BOOKING] },
+        },
+      }),
     ]);
 
     /** For self service & base users, we only allow them to read their own bookings */

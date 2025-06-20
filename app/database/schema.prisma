@@ -218,7 +218,7 @@ model Tag {
   name        String
   description String?
 
-  useFor TagUseFor[]
+  useFor TagUseFor[] @default([ASSET])
 
   //relations
   assets Asset[]

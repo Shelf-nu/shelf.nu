@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -77,7 +78,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         userId,
       }),
 
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          useFor: { hasSome: [TagUseFor.ALL, TagUseFor.BOOKING] },
+        },
+      }),
     ]);
 
     return json(

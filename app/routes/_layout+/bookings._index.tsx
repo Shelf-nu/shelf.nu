@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -138,7 +138,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           userId,
         }),
 
-        db.tag.findMany({ where: { organizationId } }),
+        db.tag.findMany({
+          where: {
+            organizationId,
+            useFor: { hasSome: [TagUseFor.ALL, TagUseFor.BOOKING] },
+          },
+        }),
       ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);

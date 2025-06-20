@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect, redirectDocument } from "@remix-run/node";
 import { useAtomValue } from "jotai";
@@ -64,6 +65,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getAllEntriesForCreateAndEdit({
         organizationId,
         request,
+        tagUseFor: [TagUseFor.ALL, TagUseFor.ASSET],
       });
 
     const searchParams = getCurrentSearchParams(request);
