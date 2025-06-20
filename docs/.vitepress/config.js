@@ -91,7 +91,6 @@ export default {
         collapsed: true,
         items: [
           { text: "App Configuration", link: "/app-configuration" },
-          { text: "Error Handling", link: "/handling-errors" },
           { text: "URL Shortener", link: "/url-shortener" },
         ],
       },
@@ -107,7 +106,10 @@ export default {
       {
         text: "🛠️ Development",
         collapsed: true,
-        items: [{ text: "Utility Hooks", link: "/hooks" }],
+        items: [
+          { text: "Error Handling", link: "/handling-errors" },
+          { text: "Utility Hooks", link: "/hooks" },
+        ],
       },
       {
         text: "📊 Advanced Features",
@@ -116,24 +118,22 @@ export default {
           {
             text: "Advanced Asset Index",
             link: "/advanced-index/",
-            items: [
-              {
-                text: "Filtering Guide",
-                link: "/advanced-index/advanced-filtering-guide",
-              },
-              {
-                text: "Sorting Guide",
-                link: "/advanced-index/advanced-sorting-guide",
-              },
-              {
-                text: "Natural Sorting",
-                link: "/advanced-index/natural-sorting-explanation",
-              },
-              {
-                text: "Index Settings",
-                link: "/advanced-index/asset-index-settings",
-              },
-            ],
+          },
+          {
+            text: "Filtering Guide",
+            link: "/advanced-index/advanced-filtering-guide",
+          },
+          {
+            text: "Sorting Guide",
+            link: "/advanced-index/advanced-sorting-guide",
+          },
+          {
+            text: "Natural Sorting",
+            link: "/advanced-index/natural-sorting-explanation",
+          },
+          {
+            text: "Index Settings",
+            link: "/advanced-index/asset-index-settings",
           },
         ],
       },
@@ -144,16 +144,14 @@ export default {
           {
             text: "Single Sign-On Setup",
             link: "/sso/",
-            items: [
-              {
-                text: "Google Workspace",
-                link: "/sso/providers/google-workspace",
-              },
-              {
-                text: "Microsoft Entra",
-                link: "/sso/providers/microsoft-entra",
-              },
-            ],
+          },
+          {
+            text: "Google Workspace",
+            link: "/sso/providers/google-workspace",
+          },
+          {
+            text: "Microsoft Entra",
+            link: "/sso/providers/microsoft-entra",
           },
         ],
       },
