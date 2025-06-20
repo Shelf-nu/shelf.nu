@@ -90,7 +90,7 @@ export default {
         text: "⚙️ Configuration",
         collapsed: true,
         items: [
-          { text: "App Configuration", link: "/shelf.config.ts" },
+          { text: "App Configuration", link: "/app-configuration" },
           { text: "Error Handling", link: "/handling-errors" },
           { text: "URL Shortener", link: "/url-shortener" },
         ],
