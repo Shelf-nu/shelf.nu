@@ -243,6 +243,7 @@ export default function Calendar() {
               height="auto"
               firstDay={1}
               timeZone="local"
+              nowIndicator
               headerToolbar={false}
               events={{
                 url: "/calendar/events",

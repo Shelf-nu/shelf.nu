@@ -75,6 +75,7 @@ model User {
   tierId            TierId             @default(free)
   tier              Tier               @relation(fields: [tierId], references: [id])
   assetReminders    AssetReminder[]
+  contact UserContact?
 
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
@@ -87,6 +88,34 @@ model User {
   // Index for foreign key
   @@index([tierId])
 }
+
+model UserContact {
+  id String @id @default(cuid())
+  
+  phone         String?
+  street        String?
+  city          String?
+  stateProvince String?
+  zipPostalCode String?
+  countryRegion String?
+  
+  // Relationships
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @unique 
+  
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Indexes for efficient querying
+  @@index([userId]) // Foreign key index
+  @@index([phone]) // For phone number lookups
+  @@index([city, stateProvince]) // For location-based queries
+  @@index([countryRegion]) // For country-based filtering
+  @@index([zipPostalCode]) // For postal code searches
+  @@index([city, countryRegion]) // For city within country queries
+}
+
 
 model Asset {
   id                  String      @id @default(cuid())

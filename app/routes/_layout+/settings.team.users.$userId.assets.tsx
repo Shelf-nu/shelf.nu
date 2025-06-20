@@ -53,7 +53,6 @@ export default function UserAssetsPage() {
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}
-      wrapperClassName="pt-0 [&>div]:md:mt-0"
     />
   );
 }

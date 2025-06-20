@@ -34,7 +34,7 @@ type ItemsWithViewMoreProps<T> = MergedProps<T> & {
   items: T[];
   showCount?: number;
   className?: string;
-  emptyMessage?: string;
+  emptyMessage?: string | React.ReactNode;
 };
 
 export default function ItemsWithViewMore<T>({

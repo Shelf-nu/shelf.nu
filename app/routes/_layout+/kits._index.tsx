@@ -1,8 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  LinksFunction,
+} from "@remix-run/node";
+import { Link, useLoaderData } from "@remix-run/react";
+import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
+import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
+import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -15,20 +22,25 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { Pagination } from "~/components/list/pagination";
 import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
+import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -43,6 +55,12 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 
+export type KitIndexLoaderData = typeof loader;
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: calendarStyles },
+];
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -56,6 +74,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
+    const view = searchParams.get("view") ?? "table";
+    const {
+      filters,
+      redirectNeeded,
+      serializedCookie: filtersCookie,
+    } = await getFiltersFromRequest(request, organizationId, {
+      name: "kitFilter",
+      path: "/kits",
+    });
+
+    /** We only do that when we are on the index page */
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/kits?${cookieParams.toString()}`);
+    }
 
     let [
       { kits, totalKits, perPage, page, totalPages, search },
@@ -68,7 +101,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           qrCodes: { select: { id: true } },
           assets: {
-            select: { id: true, availableToBook: true, status: true },
+            select: {
+              id: true,
+              availableToBook: true,
+              status: true,
+              ...(view === "availability" && {
+                bookings: {
+                  where: {
+                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                  },
+                  select: {
+                    id: true,
+                    name: true,
+                    status: true,
+                    from: true,
+                    to: true,
+                    description: true,
+                    custodianTeamMember: true,
+                    custodianUser: true,
+                  },
+                },
+              }),
+            },
           },
         },
       }),
@@ -127,7 +181,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
         },
-      })
+      }),
+      {
+        headers: [...(filtersCookie ? [setCookie(filtersCookie)] : [])],
+      }
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -139,13 +196,21 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
+export const handle = {
+  name: "kits.index",
+};
+
 export default function KitsIndexPage() {
+  const { items } = useLoaderData<typeof loader>();
   const { roles, isBase } = useUserRoleHelper();
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.create,
   });
+  const { isAvailabilityView, shouldShowAvailabilityView } =
+    useIsAvailabilityView();
+  const { resources, events } = useKitAvailabilityData(items);
 
   const organization = useCurrentOrganization();
 
@@ -175,6 +240,7 @@ export default function KitsIndexPage() {
                 }}
               />
             ),
+            "right-of-search": <AvailabilityViewToggle />,
           }}
         >
           {canReadCustody && (
@@ -198,37 +264,85 @@ export default function KitsIndexPage() {
             />
           )}
         </Filters>
-
-        <List
-          className="overflow-x-visible md:overflow-x-auto"
-          ItemComponent={ListContent}
-          bulkActions={isBase ? undefined : <BulkActionsDropdown />}
-          headerChildren={
-            <>
-              <Th>Description</Th>
-              <Th>Assets</Th>
-              <Th className="flex items-center gap-1 whitespace-nowrap">
-                Custodian{" "}
-                <InfoTooltip
-                  iconClassName="size-4"
-                  content={
-                    <>
-                      <h6>Asset custody</h6>
-                      <p>
-                        This column shows if a user has custody of the asset
-                        either via direct assignment or via a booking. If you
-                        see <GrayBadge>private</GrayBadge> that means you don't
-                        have the permissions to see who has custody of the
-                        asset.
-                      </p>
-                    </>
-                  }
-                />
-              </Th>
-              <Th>Actions</Th>
-            </>
-          }
-        />
+        {isAvailabilityView && shouldShowAvailabilityView ? (
+          <>
+            <AvailabilityCalendar
+              resources={resources}
+              events={events}
+              resourceLabelContent={({ resource }) => (
+                <div className="flex items-center gap-2 px-2">
+                  <KitImage
+                    kit={{
+                      kitId: resource.id,
+                      image: resource.extendedProps?.mainImage,
+                      imageExpiration:
+                        resource.extendedProps?.mainImageExpiration,
+                      alt: resource.title,
+                    }}
+                    alt={resource.title}
+                    className="size-14 rounded border object-cover"
+                    withPreview
+                  />
+                  <div className="flex flex-col gap-1">
+                    <div className="min-w-0 flex-1 truncate">
+                      <Button
+                        to={`/kit/${resource.id}`}
+                        variant="link"
+                        className="text-left font-medium text-gray-900 hover:text-gray-700"
+                        target={"_blank"}
+                        onlyNewTabIconOnHover={true}
+                      >
+                        {resource.title}
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <KitStatusBadge
+                        status={resource.extendedProps?.status}
+                        availableToBook={
+                          resource.extendedProps?.availableToBook
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            />
+            <Card className="-mt-2 border-t-0 py-0">
+              <Pagination />
+            </Card>
+          </>
+        ) : (
+          <List
+            className="overflow-x-visible md:overflow-x-auto"
+            ItemComponent={ListContent}
+            bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            headerChildren={
+              <>
+                <Th>Description</Th>
+                <Th>Assets</Th>
+                <Th className="flex items-center gap-1 whitespace-nowrap">
+                  Custodian{" "}
+                  <InfoTooltip
+                    iconClassName="size-4"
+                    content={
+                      <>
+                        <h6>Asset custody</h6>
+                        <p>
+                          This column shows if a user has custody of the asset
+                          either via direct assignment or via a booking. If you
+                          see <GrayBadge>private</GrayBadge> that means you
+                          don't have the permissions to see who has custody of
+                          the asset.
+                        </p>
+                      </>
+                    }
+                  />
+                </Th>
+                <Th>Actions</Th>
+              </>
+            }
+          />
+        )}
       </ListContentWrapper>
     </>
   );

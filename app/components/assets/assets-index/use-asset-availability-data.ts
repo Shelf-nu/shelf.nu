@@ -1,21 +1,27 @@
 import { useMemo } from "react";
 import type { Booking, TeamMember, User } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import type { SerializeFrom } from "@remix-run/node";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import { useHints } from "~/utils/client-hints";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
-export function useAssetAvailabilityData() {
-  const { items } = useLoaderData<AssetIndexLoaderData>();
+type LoaderData = SerializeFrom<AssetIndexLoaderData>;
+type Items = NonNullable<LoaderData["items"]>;
+
+export function useAssetAvailabilityData(items: Items) {
   const { roles } = useUserRoleHelper();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
     organization: organization as OrganizationPermissionSettings,
   });
+
+  const { timeZone } = useHints();
 
   const { resources, events } = useMemo(() => {
     const resources = items.map((item) => ({
@@ -57,8 +63,8 @@ export function useAssetAvailabilityData() {
               title,
               resourceId: asset.id,
               url: `/bookings/${booking.id}`,
-              start: booking.from!,
-              end: booking.to!,
+              start: toIsoDateTimeToUserTimezone(booking.from!, timeZone),
+              end: toIsoDateTimeToUserTimezone(booking.to!, timeZone),
               classNames: [
                 `bookingId-${booking.id}`,
                 ...getStatusClasses(
@@ -94,7 +100,7 @@ export function useAssetAvailabilityData() {
       .flat();
 
     return { resources, events };
-  }, [canSeeAllCustody, items]);
+  }, [canSeeAllCustody, items, timeZone]);
 
   return {
     resources,

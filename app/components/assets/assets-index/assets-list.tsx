@@ -1,6 +1,6 @@
 import type { Tag } from "@prisma/client";
 
-import { useFetcher, useFetchers } from "@remix-run/react";
+import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { KitIcon } from "~/components/icons/library";
 import { List, type ListProps } from "~/components/list";
@@ -27,6 +27,7 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -36,9 +37,10 @@ import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
-import AssetsAvailability from "./assets-availability";
 import { AssetIndexFilters } from "./filters";
+import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { CategoryBadge } from "../category-badge";
+import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 export const AssetsList = ({
   customEmptyState,
@@ -51,22 +53,23 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
+  const { items } = useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
-  const isAvailabilityView = useIsAvailabilityView();
-
+  const { isAvailabilityView, shouldShowAvailabilityView } =
+    useIsAvailabilityView();
+  const columns = useAssetIndexColumns();
   const { isMd } = useViewportHeight();
+  const isUserPage = useIsUserAssetsPage();
+  const { isBase } = useUserRoleHelper();
   const fetchers = useFetchers();
+  const { resources, events } = useAssetAvailabilityData(items);
+
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
   );
-  const isUserPage = useIsUserAssetsPage();
-  // const isSwappingMode = modeFetcher?.state === "loading";
   const isSwappingMode = modeFetcher?.formData;
-  const columns = useAssetIndexColumns();
-  const { isBase } = useUserRoleHelper();
-
   const headerChildren = modeIsSimple ? (
     <>
       <Th>Category</Th>
@@ -127,9 +130,52 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {isMd && isAvailabilityView ? (
+          {isAvailabilityView && shouldShowAvailabilityView ? (
             <>
-              <AssetsAvailability />
+              <AvailabilityCalendar
+                resources={resources}
+                events={events}
+                resourceLabelContent={({ resource }) => (
+                  <div className="flex items-center gap-2 px-2">
+                    <AssetImage
+                      asset={{
+                        id: resource.id,
+                        mainImage: resource.extendedProps?.mainImage,
+                        thumbnailImage: resource.extendedProps?.thumbnailImage,
+                        mainImageExpiration:
+                          resource.extendedProps?.mainImageExpiration,
+                      }}
+                      alt={resource.title}
+                      className="size-14 rounded border object-cover"
+                      withPreview
+                    />
+                    <div className="flex flex-col gap-1">
+                      <div className="min-w-0 flex-1 truncate">
+                        <Button
+                          to={`/assets/${resource.id}`}
+                          variant="link"
+                          className="text-left font-medium text-gray-900 hover:text-gray-700"
+                          target={"_blank"}
+                          onlyNewTabIconOnHover={true}
+                        >
+                          {resource.title}
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <AssetStatusBadge
+                          status={resource.extendedProps?.status}
+                          availableToBook={
+                            resource.extendedProps?.availableToBook
+                          }
+                        />
+                        <CategoryBadge
+                          category={resource.extendedProps?.category}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              />
               <AssetIndexPagination />
             </>
           ) : (

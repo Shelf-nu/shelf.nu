@@ -1,0 +1,32 @@
+{
+  "keys": {
+    "firstName": {
+      "name": "firstname"
+    },
+    "lastName": {
+      "name": "lastname"
+    },
+    "groups": {
+      "name": "groups",
+      "array": true
+    },
+    "mobilephone": {
+      "name": "mobilephone"
+    },
+    "streetAddress": {
+      "name": "streetaddress"
+    },
+    "city": {
+      "name": "city"
+    },
+    "stateProvince": {
+      "name": "stateprovince"
+    },
+    "postalCode": {
+      "name": "postalcode"
+    },
+    "country": {
+      "name": "country"
+    }
+  }
+}
