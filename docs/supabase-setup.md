@@ -98,7 +98,7 @@ Replace the entire email content with:
 <p>
   To confirm your account, please use the following One Time Password (OTP):
 </p>
-<h2><b>{{ .Token }}</b></h2>
+<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
@@ -115,7 +115,7 @@ Replace the entire email content with:
 
 ```html
 <p>To authenticate, please use the following One Time Password (OTP):</p>
-<h2><b>{{ .Token }}</b></h2>
+<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
@@ -133,7 +133,7 @@ Replace the entire email content with:
 ```html
 <h2>Reset Password</h2>
 <p>To reset your password, please use the following (OTP):</p>
-<h2><b>{{ .Token }}</b></h2>
+<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
@@ -273,14 +273,22 @@ Get a free [MapTiler](https://www.maptiler.com/) account for location features:
 
 1. Sign up at MapTiler
 2. Get your API key
-3. Add to `.env`: `MAPTILER_TOKEN="your-token"`
+3. Add to your `.env` file:
+
+```bash
+MAPTILER_TOKEN="your_token_here"
+```
 
 ### Geocoding
 
 Get a free [Geocode Maps](https://geocode.maps.co/) API key:
 
 1. Sign up for geocoding service
-2. Add to `.env`: `GEOCODE_API_KEY="your-key"`
+2. Add to your `.env` file:
+
+```bash
+GEOCODE_API_KEY="your_key_here"
+```
 
 ---
 
@@ -317,15 +325,15 @@ Your app should connect to Supabase successfully!
 
 ### Common Issues
 
-**Connection Error**: Double-check your database password and connection strings
-**Auth Not Working**: Verify email templates use `{{ .Token }}` instead of URLs
-**File Upload Fails**: Ensure storage buckets exist and have proper policies
+**Connection Error**: Double-check your database password and connection strings  
+**Auth Not Working**: Verify email templates use the escaped token syntax instead of URLs  
+**File Upload Fails**: Ensure storage buckets exist and have proper policies  
 **Email Issues**: Test your SMTP settings with a simple email client first
 
 ### Getting Help
 
 - 💬 [Join our Discord](https://discord.gg/8he9W7aTJu)
-- 📖 [Browse all documentation](docs/README.md)
+- 📖 [Browse all documentation](./README.md)
 - 🐛 [Report issues on GitHub](https://github.com/Shelf-nu/shelf.nu/issues)
 
 ---
