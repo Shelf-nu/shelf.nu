@@ -14,9 +14,14 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 
 ## Development Setup 🚀
 
-### 1. Install Dependencies
+### 1. Clone & Install Dependencies
 
 ```bash
+# Clone the repository
+git clone https://github.com/Shelf-nu/shelf.nu.git
+cd shelf.nu
+
+# Install dependencies
 npm install
 ```
 
