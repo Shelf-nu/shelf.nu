@@ -358,7 +358,7 @@ fly deploy --verbose
 **Authentication Problems:**
 
 - Verify Supabase URL configuration includes your production URLs
-- Check email templates use `{{ .Token }}` format
+- Check email templates use the escaped token format (as shown in Supabase setup)
 - Test SMTP configuration with a simple email
 
 **Performance Issues:**
