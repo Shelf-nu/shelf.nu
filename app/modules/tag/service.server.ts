@@ -2,10 +2,10 @@ import type {
   Organization,
   Prisma,
   Tag,
-  TagUseFor,
   TeamMember,
   User,
 } from "@prisma/client";
+import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -88,7 +88,7 @@ export async function createTag({
       data: {
         name: loadash.trim(name),
         description,
-        useFor,
+        useFor: useFor?.length ? useFor : Object.values(TagUseFor),
         user: {
           connect: {
             id: userId,
@@ -247,7 +247,8 @@ export async function updateTag({
         name: loadash.trim(name),
         description,
         useFor: {
-          set: useFor,
+          /** If user has removed all entries then this tag can be used for all entries */
+          set: useFor?.length ? useFor : Object.values(TagUseFor),
         },
       },
     });

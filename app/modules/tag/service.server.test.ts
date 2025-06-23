@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import { describe, vitest } from "vitest";
 import { ORGANIZATION_ID, USER_ID } from "mocks/user";
 import { db } from "~/database/db.server";
@@ -25,7 +26,7 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: "test_tag",
-        useFor: ["ASSET"],
+        useFor: [TagUseFor.ASSET],
       });
       expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
     });
@@ -36,7 +37,7 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: " test_tag ",
-        useFor: ["ASSET"],
+        useFor: [TagUseFor.ASSET],
       });
       expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
     });

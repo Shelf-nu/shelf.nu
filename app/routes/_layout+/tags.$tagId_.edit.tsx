@@ -29,8 +29,9 @@ export const UpdateTagFormSchema = z.object({
   description: z.string(),
   useFor: z
     .string()
-    .transform((value) => value.split(","))
-    .pipe(z.array(z.nativeEnum(TagUseFor)).default([])),
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value.split(",") : []))
+    .pipe(z.array(z.nativeEnum(TagUseFor)).optional().default([])),
 });
 
 const title = "Edit Tag";
@@ -166,6 +167,11 @@ export default function EditTag() {
               labelKey="label"
               valueKey="value"
               label="Use for"
+              tooltip={{
+                title: "Use for",
+                content:
+                  "When no specific entry is selected, this tag will be assigned all entries.",
+              }}
             />
           </div>
 

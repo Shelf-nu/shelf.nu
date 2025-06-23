@@ -1,8 +1,12 @@
 import React, { useCallback, useMemo, useState } from "react";
+import _ from "lodash";
+import { InfoIcon } from "lucide-react";
 import { ReactTags } from "react-tag-autocomplete";
 import type { Tag } from "react-tag-autocomplete";
 import { tw } from "~/utils/tw";
 import { InnerLabel } from "../forms/inner-label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../shared/tooltip";
+import When from "../when/when";
 
 type MultiSelectProps<T> = {
   className?: string;
@@ -13,6 +17,8 @@ type MultiSelectProps<T> = {
   label?: string;
   defaultSelected?: T[];
   disabled?: boolean;
+  error?: string;
+  tooltip?: { title: string; content: string };
 };
 
 export default function MultiSelect<T>({
@@ -24,6 +30,8 @@ export default function MultiSelect<T>({
   name,
   defaultSelected,
   disabled,
+  error,
+  tooltip,
 }: MultiSelectProps<T>) {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
@@ -71,8 +79,24 @@ export default function MultiSelect<T>({
         disabled={disabled}
       />
 
-      <div className={tw("flex flex-col gap-1", className)}>
-        <InnerLabel>{label}</InnerLabel>
+      <div className={tw("flex min-w-48 flex-col gap-1", className)}>
+        <div className="flex items-center justify-between">
+          <InnerLabel>{label}</InnerLabel>
+
+          <When truthy={!!tooltip}>
+            <Tooltip>
+              <TooltipTrigger>
+                <InfoIcon className="size-4 text-gray-500" />
+              </TooltipTrigger>
+
+              <TooltipContent className="max-w-xs">
+                <h6>{tooltip?.title}</h6>
+                <p className="text-sm text-gray-600">{tooltip?.content}</p>
+              </TooltipContent>
+            </Tooltip>
+          </When>
+        </div>
+
         <ReactTags
           isDisabled={disabled}
           labelText={`Select ${label}`}
@@ -82,7 +106,30 @@ export default function MultiSelect<T>({
           onDelete={onDelete}
           noOptionsText={`No matching ${label}`}
           placeholderText={`Select ${label}`}
+          isInvalid={!!error}
+          renderRoot={({ children, isDisabled }) => (
+            <div
+              className={tw(
+                "relative w-full max-w-full rounded border border-gray-300 px-3.5 py-2 text-base text-gray-900 shadow outline-none placeholder:text-gray-900 focus:border-primary-300 focus:ring-0",
+                isDisabled &&
+                  "cursor-not-allowed border-gray-300 bg-gray-50 placeholder:text-gray-300"
+              )}
+            >
+              {children}
+            </div>
+          )}
+          renderInput={({ ...props }) => (
+            <input
+              {..._.omit(props, ["inputWidth", "classNames"])}
+              className="border-none bg-transparent p-0 outline-none focus:outline-none focus:ring-0"
+              disabled={disabled}
+            />
+          )}
         />
+
+        <When truthy={!!error}>
+          <p className="text-sm text-error-500">{error}</p>
+        </When>
       </div>
     </>
   );

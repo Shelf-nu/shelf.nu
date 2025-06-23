@@ -14,3 +14,6 @@ ALTER TABLE "_BookingToTag" ADD CONSTRAINT "_BookingToTag_A_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "_BookingToTag" ADD CONSTRAINT "_BookingToTag_B_fkey" FOREIGN KEY ("B") REFERENCES "Tag"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Enable RLS
+ALTER TABLE "_BookingToTag" ENABLE row level security;

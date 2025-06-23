@@ -210,7 +210,7 @@ const TagItem = ({
       ) : null}
     </Td>
     <Td>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-32 items-center gap-2">
         {item.useFor && item.useFor.length > 0
           ? item.useFor.map((useFor) => (
               <GrayBadge key={useFor}>{useFor}</GrayBadge>
