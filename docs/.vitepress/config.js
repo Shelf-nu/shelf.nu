@@ -181,7 +181,7 @@ export default {
     // Footer
     footer: {
       message: "Released under the AGPL-3.0 License.",
-      copyright: "Copyright © 2024 Shelf Asset Management Inc.",
+      copyright: "Copyright © 2025 Shelf Asset Management Inc.",
     },
   },
 };
