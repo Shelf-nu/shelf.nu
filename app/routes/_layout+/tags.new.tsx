@@ -1,7 +1,7 @@
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { useActionData, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -9,13 +9,14 @@ import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
 
 import { Button } from "~/components/shared/button";
+import { useDisabled } from "~/hooks/use-disabled";
 
 import { createTag } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       data({
         header,
         tagUseFor: Object.values(TagUseFor).map((useFor) => ({
-          label: useFor,
+          label: formatEnum(useFor),
           value: useFor,
         })),
       })
@@ -112,8 +113,7 @@ export default function NewTag() {
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
   const { tagUseFor } = useLoaderData<typeof loader>();
 
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
 
   return (
@@ -152,6 +152,7 @@ export default function NewTag() {
               labelKey="label"
               valueKey="value"
               label="Use for"
+              placeholder="Select use for"
               tooltip={{
                 title: "Use for",
                 content:
@@ -161,10 +162,15 @@ export default function NewTag() {
           </div>
 
           <div className="flex gap-1">
-            <Button variant="secondary" to="/tags" size="sm">
+            <Button
+              variant="secondary"
+              to="/tags"
+              size="sm"
+              disabled={disabled}
+            >
               Cancel
             </Button>
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" disabled={disabled}>
               Create
             </Button>
           </div>

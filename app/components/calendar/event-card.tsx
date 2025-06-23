@@ -9,6 +9,7 @@ import { isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
 import { DateS } from "../shared/date";
+import { GrayBadge } from "../shared/gray-badge";
 import {
   HoverCard,
   HoverCardContent,
@@ -182,6 +183,7 @@ export default function renderEventCard({ event }: EventCardProps) {
     // Store cleanup function
     (element as any)._cleanup = cleanup;
   };
+
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
@@ -229,6 +231,15 @@ export default function renderEventCard({ event }: EventCardProps) {
             />
             <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {booking.tags && booking.tags.length
+              ? booking.tags.map((tag) => (
+                  <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
+                ))
+              : null}
+          </div>
+
           {booking.description ? (
             <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
               {booking.description}

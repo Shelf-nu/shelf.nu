@@ -1341,7 +1341,7 @@ export async function getAllEntriesForCreateAndEdit({
       db.tag.findMany({
         where: {
           organizationId,
-          useFor: tagUseFor ? { has: tagUseFor } : undefined,
+          OR: [{ useFor: { isEmpty: true } }, { useFor: { has: tagUseFor } }],
         },
       }),
 

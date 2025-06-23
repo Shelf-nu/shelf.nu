@@ -19,6 +19,7 @@ type MultiSelectProps<T> = {
   disabled?: boolean;
   error?: string;
   tooltip?: { title: string; content: string };
+  placeholder?: string;
 };
 
 export default function MultiSelect<T>({
@@ -32,6 +33,7 @@ export default function MultiSelect<T>({
   disabled,
   error,
   tooltip,
+  placeholder,
 }: MultiSelectProps<T>) {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
@@ -105,7 +107,7 @@ export default function MultiSelect<T>({
           onAdd={onAdd}
           onDelete={onDelete}
           noOptionsText={`No matching ${label}`}
-          placeholderText={`Select ${label}`}
+          placeholderText={placeholder}
           isInvalid={!!error}
           renderRoot={({ children, isDisabled }) => (
             <div
@@ -121,7 +123,7 @@ export default function MultiSelect<T>({
           renderInput={({ ...props }) => (
             <input
               {..._.omit(props, ["inputWidth", "classNames"])}
-              className="border-none bg-transparent p-0 outline-none focus:outline-none focus:ring-0"
+              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0"
               disabled={disabled}
             />
           )}

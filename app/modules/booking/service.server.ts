@@ -1619,7 +1619,11 @@ export async function getBookings(params: {
     }
 
     if (tags?.length) {
-      where.tags = { some: { id: { in: tags } } };
+      if (tags.includes("untagged")) {
+        where.tags = { none: {} };
+      } else {
+        where.tags = { some: { id: { in: tags } } };
+      }
     }
 
     const [bookings, bookingCount] = await Promise.all([
@@ -1962,6 +1966,7 @@ export async function getBookingsForCalendar(params: {
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,
+        tags: { select: { id: true, name: true } },
       },
       takeAll: true,
     });
@@ -2007,6 +2012,7 @@ export async function getBookingsForCalendar(params: {
                   }
                 : undefined,
             },
+            tags: booking.tags,
           },
         };
       });

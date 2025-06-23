@@ -3,7 +3,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus, Tag } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
@@ -61,6 +61,7 @@ export type CalendarExtendedProps = {
   start: string;
   end: string;
   custodian: TeamMemberForBadge;
+  tags: Pick<Tag, "id" | "name">[];
 };
 
 // Loader Function to Return Bookings Data

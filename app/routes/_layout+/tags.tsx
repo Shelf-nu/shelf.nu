@@ -40,6 +40,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -211,11 +212,13 @@ const TagItem = ({
     </Td>
     <Td>
       <div className="flex min-w-32 items-center gap-2">
-        {item.useFor && item.useFor.length > 0
-          ? item.useFor.map((useFor) => (
-              <GrayBadge key={useFor}>{useFor}</GrayBadge>
-            ))
-          : null}
+        {item.useFor && item.useFor.length > 0 ? (
+          item.useFor.map((useFor) => (
+            <GrayBadge key={useFor}>{formatEnum(useFor)}</GrayBadge>
+          ))
+        ) : (
+          <GrayBadge>All</GrayBadge>
+        )}
       </div>
     </Td>
     <Td className="text-left">

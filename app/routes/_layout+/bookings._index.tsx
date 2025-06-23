@@ -22,6 +22,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
@@ -127,6 +128,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderBy,
           orderDirection,
           tags: filterTags,
+          extraInclude: {
+            tags: { select: { id: true, name: true } },
+          },
         }),
 
         // team members/custodian
@@ -143,7 +147,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         db.tag.findMany({
           where: {
             organizationId,
-            useFor: { has: TagUseFor.BOOKING },
+            OR: [
+              { useFor: { isEmpty: true } },
+              { useFor: { has: TagUseFor.BOOKING } },
+            ],
           },
         }),
       ]);
@@ -364,6 +371,7 @@ export default function BookingsIndexPage({
 
               <Th>From</Th>
               <Th>To</Th>
+              <Th>Tags</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
             </>
@@ -406,6 +414,7 @@ const ListBookingsContent = ({
       to: true;
       custodianUser: true;
       custodianTeamMember: true;
+      tags: { select: { id: true; name: true } };
     };
   }> & {
     displayFrom?: string[];
@@ -482,6 +491,15 @@ const ListBookingsContent = ({
             <span className="block text-gray-600">{item.displayTo[1]}</span>
           </div>
         ) : null}
+      </Td>
+
+      <Td>
+        <ItemsWithViewMore
+          items={item.tags}
+          idKey="id"
+          labelKey="name"
+          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
+        />
       </Td>
 
       {/* Custodian */}

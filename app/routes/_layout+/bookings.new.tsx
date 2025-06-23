@@ -81,7 +81,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       db.tag.findMany({
         where: {
           organizationId,
-          useFor: { has: TagUseFor.BOOKING },
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: TagUseFor.BOOKING } },
+          ],
         },
       }),
     ]);
