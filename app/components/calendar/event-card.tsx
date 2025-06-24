@@ -8,7 +8,6 @@ import { bookingStatusColorMap } from "~/utils/bookings";
 import { isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
-import { InnerLabel } from "../forms/inner-label";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
 import {
