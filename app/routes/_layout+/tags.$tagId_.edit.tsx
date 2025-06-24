@@ -171,7 +171,7 @@ export default function EditTag() {
               tooltip={{
                 title: "Use for",
                 content:
-                  "When no specific entry is selected, this tag will be assigned all entries.",
+                  "When no specific entry is selected, this tag will be available for all entries.",
               }}
             />
           </div>
