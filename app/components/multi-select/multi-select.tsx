@@ -81,7 +81,7 @@ export default function MultiSelect<T>({
         disabled={disabled}
       />
 
-      <div className={tw("flex min-w-48 flex-col gap-1", className)}>
+      <div className={tw("flex min-w-48 flex-col", className)}>
         <div className="flex items-center justify-between">
           <InnerLabel>{label}</InnerLabel>
 
