@@ -78,7 +78,10 @@ export default function ItemsWithViewMore<T>({
               <GrayBadge>{`+${filteredItems.length - showCount}`}</GrayBadge>
             </TooltipTrigger>
 
-            <TooltipContent side="top" className="max-w-72">
+            <TooltipContent
+              side="top"
+              className="flex max-w-72 flex-wrap items-center gap-2"
+            >
               {remainingItems.map((item) => itemRenderer(item))}
             </TooltipContent>
           </Tooltip>

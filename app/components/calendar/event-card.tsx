@@ -8,6 +8,7 @@ import { bookingStatusColorMap } from "~/utils/bookings";
 import { isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
+import { InnerLabel } from "../forms/inner-label";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
 import {
@@ -232,7 +233,8 @@ export default function renderEventCard({ event }: EventCardProps) {
             <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <p className="mb-1 text-sm font-medium">Tags</p>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             {booking.tags && booking.tags.length
               ? booking.tags.map((tag) => (
                   <GrayBadge key={tag.id}>{tag.name}</GrayBadge>

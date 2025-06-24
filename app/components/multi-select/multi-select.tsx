@@ -112,9 +112,10 @@ export default function MultiSelect<T>({
           renderRoot={({ children, isDisabled }) => (
             <div
               className={tw(
-                "relative w-full max-w-full rounded border border-gray-300 px-3.5 py-2 text-base text-gray-900 shadow outline-none placeholder:text-gray-900 focus:border-primary-300 focus:ring-0",
+                "relative w-full max-w-full rounded border border-gray-300 text-base text-gray-900 shadow outline-none placeholder:text-gray-900 focus:border-primary-300 focus:ring-0",
                 isDisabled &&
-                  "cursor-not-allowed border-gray-300 bg-gray-50 placeholder:text-gray-300"
+                  "cursor-not-allowed border-gray-300 bg-gray-50 placeholder:text-gray-300",
+                selected.length === 0 ? "px-3.5 py-2" : "px-3.5 py-1.5"
               )}
             >
               {children}
@@ -123,7 +124,7 @@ export default function MultiSelect<T>({
           renderInput={({ ...props }) => (
             <input
               {..._.omit(props, ["inputWidth", "classNames"])}
-              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0"
+              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-gray-300"
               disabled={disabled}
             />
           )}

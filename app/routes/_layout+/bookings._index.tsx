@@ -493,7 +493,7 @@ const ListBookingsContent = ({
         ) : null}
       </Td>
 
-      <Td>
+      <Td className="max-w-[auto]">
         <ItemsWithViewMore
           items={item.tags}
           idKey="id"
