@@ -62,6 +62,8 @@ function ConditionalDropdown() {
   const isLoading = isFormProcessing(navigation.state);
   const [isBulkDownloadQrOpen, setIsBulkDownloadQrOpen] = useState(false);
 
+  console.log("Testing something");
+
   const {
     ref: dropdownRef,
     defaultApplied,
