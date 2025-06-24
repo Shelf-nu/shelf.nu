@@ -1,4 +1,4 @@
-import type { BookingStatus, TagUseFor } from "@prisma/client";
+import type { BookingStatus } from "@prisma/client";
 import type {
   SortingDirection,
   SortingOptions,
