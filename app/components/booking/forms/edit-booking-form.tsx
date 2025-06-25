@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus, Tag } from "@prisma/client";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -27,6 +27,7 @@ import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import TagField from "./fields/tag-field";
 import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-positioned-header-actions";
 import { Button } from "../../shared/button";
 import When from "../../when/when";
@@ -55,6 +56,7 @@ type BookingFormData = {
     bookingFlags: BookingFlags;
     description: string | null;
     status: BookingStatus;
+    tags: Pick<Tag, "id" | "name">[];
   };
 
   /**
@@ -75,6 +77,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     bookingFlags,
     description,
     status,
+    tags,
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
@@ -347,10 +350,23 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <div className="w-full lg:w-3/5">
               <div
                 className={tw(
-                  "m-0 h-full",
+                  "m-0 flex h-full flex-col",
                   "[&_.input-wrapper]:h-full [&_label]:h-full [&_textarea]:size-full"
                 )}
               >
+                <TagField
+                  disabled={
+                    disabled ||
+                    isLoadingWorkingHours ||
+                    bookingStatus?.isCompleted ||
+                    bookingStatus?.isCancelled ||
+                    bookingStatus?.isArchived ||
+                    !canSeeActions
+                  }
+                  existingTags={tags}
+                  className="mb-2.5"
+                />
+
                 <DescriptionField
                   description={description || undefined}
                   fieldName={zo.fields.description()}

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -22,10 +22,12 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -95,6 +97,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       filtersCookie,
       filters,
       redirectNeeded,
+      tags: filterTags,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings,
@@ -108,34 +111,49 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/bookings?${cookieParams.toString()}`);
     }
 
-    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
-      getBookings({
-        organizationId,
-        page,
-        perPage,
-        search,
-        userId: userId,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
+    const [{ bookings, bookingCount }, teamMembersData, tags] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId: userId,
+          ...(status && {
+            // If status is in the params, we filter based on it
+            statuses: [status],
+          }),
+          custodianTeamMemberIds: teamMemberIds,
+          ...selfServiceData,
+          orderBy,
+          orderDirection,
+          tags: filterTags,
+          extraInclude: {
+            tags: { select: { id: true, name: true } },
+          },
         }),
-        custodianTeamMemberIds: teamMemberIds,
-        ...selfServiceData,
-        orderBy,
-        orderDirection,
-      }),
 
-      // team members/custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
-        userId,
-      }),
-    ]);
+        // team members/custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+          userId,
+        }),
+
+        db.tag.findMany({
+          where: {
+            organizationId,
+            OR: [
+              { useFor: { isEmpty: true } },
+              { useFor: { has: TagUseFor.BOOKING } },
+            ],
+          },
+        }),
+      ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -163,6 +181,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         ...teamMembersData,
         isSelfServiceOrBase,
+        tags,
+        totalTags: tags.length,
       }),
       {
         headers: [
@@ -319,6 +339,21 @@ export default function BookingsIndexPage({
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
             />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", queryKey: "name" }}
+              label="Filter by tag"
+              initialDataKey="tags"
+              countKey="totalTags"
+              withoutValueItem={{
+                id: "untagged",
+                name: "Without tag",
+              }}
+            />
           </When>
         </Filters>
         <List
@@ -336,6 +371,7 @@ export default function BookingsIndexPage({
 
               <Th>From</Th>
               <Th>To</Th>
+              <Th>Tags</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
             </>
@@ -378,6 +414,7 @@ const ListBookingsContent = ({
       to: true;
       custodianUser: true;
       custodianTeamMember: true;
+      tags: { select: { id: true; name: true } };
     };
   }> & {
     displayFrom?: string[];
@@ -454,6 +491,15 @@ const ListBookingsContent = ({
             <span className="block text-gray-600">{item.displayTo[1]}</span>
           </div>
         ) : null}
+      </Td>
+
+      <Td className="max-w-[auto]">
+        <ItemsWithViewMore
+          items={item.tags}
+          idKey="id"
+          labelKey="name"
+          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
+        />
       </Td>
 
       {/* Custodian */}

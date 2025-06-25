@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import { describe, vitest } from "vitest";
 import { ORGANIZATION_ID, USER_ID } from "mocks/user";
 import { db } from "~/database/db.server";
@@ -25,8 +26,13 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: "test_tag",
+        useFor: [TagUseFor.ASSET],
       });
-      expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
+      expectTagToBeCreated({
+        name: "test_tag",
+        description: "my test tag",
+        useFor: [TagUseFor.ASSET],
+      });
     });
 
     it("should trim tag name", async () => {
@@ -35,8 +41,13 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: " test_tag ",
+        useFor: [TagUseFor.ASSET],
       });
-      expectTagToBeCreated({ name: "test_tag", description: "my test tag" });
+      expectTagToBeCreated({
+        name: "test_tag",
+        description: "my test tag",
+        useFor: [TagUseFor.ASSET],
+      });
     });
   });
 
@@ -70,20 +81,40 @@ describe("tag service", () => {
         id: USER_ID,
       });
     });
+
+    it("should update tag with useFor", async () => {
+      await updateTag({
+        description: "my test tag",
+        organizationId: ORGANIZATION_ID,
+        id: USER_ID,
+        name: "test_tag",
+        useFor: [TagUseFor.ASSET],
+      });
+      expectTagToBeUpdated({
+        name: "test_tag",
+        description: "my test tag",
+        organizationId: ORGANIZATION_ID,
+        id: USER_ID,
+        useFor: [TagUseFor.ASSET],
+      });
+    });
   });
 });
 
 function expectTagToBeCreated({
   name,
   description,
+  useFor,
 }: {
   name: string;
   description: string;
+  useFor: TagUseFor[];
 }): void {
   expect(db.tag.create).toHaveBeenCalledWith({
     data: {
       name,
       description,
+      useFor,
       user: {
         connect: {
           id: USER_ID,
@@ -103,11 +134,13 @@ function expectTagToBeUpdated({
   description,
   id,
   organizationId,
+  useFor,
 }: {
   name: string;
   description: string;
   id: string;
   organizationId: string;
+  useFor?: TagUseFor[];
 }): void {
   expect(db.tag.update).toHaveBeenCalledWith({
     where: {
@@ -117,6 +150,9 @@ function expectTagToBeUpdated({
     data: {
       name,
       description,
+      useFor: {
+        set: useFor,
+      },
     },
   });
 }

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Booking, TeamMember, User } from "@prisma/client";
+import type { Booking, Tag, TeamMember, User } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -48,6 +48,7 @@ export function useAssetAvailabilityData(items: Items) {
             const booking = b as Booking & {
               custodianUser?: User;
               custodianTeamMember?: TeamMember;
+              tags: Pick<Tag, "id" | "name">[];
             };
 
             const custodianName = booking?.custodianUser
@@ -92,6 +93,7 @@ export function useAssetAvailabilityData(items: Items) {
                       }
                     : undefined,
                 },
+                tags: booking.tags,
               },
             };
           }),

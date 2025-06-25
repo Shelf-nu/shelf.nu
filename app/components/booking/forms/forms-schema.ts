@@ -193,6 +193,7 @@ export function BookingFormSchema({
       ),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
+    tags: z.string().optional(),
   });
 
   // Create enhanced date schemas with working hours and buffer validation

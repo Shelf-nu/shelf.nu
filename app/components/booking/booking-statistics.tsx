@@ -1,4 +1,6 @@
-import { CategoriesWithViewMore } from "../category/categories-with-view-more";
+import type { Tag } from "@prisma/client";
+import { CategoryBadge } from "../assets/category-badge";
+import ItemsWithViewMore from "../list/items-with-view-more";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Separator } from "../shared/separator";
 
@@ -9,6 +11,7 @@ export function BookingStatistics({
   assetsCount,
   totalValue,
   allCategories,
+  tags,
 }: {
   duration: string;
   totalAssets: number;
@@ -16,6 +19,7 @@ export function BookingStatistics({
   assetsCount: number;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
+  tags: Pick<Tag, "id" | "name">[];
 }) {
   return (
     <div className="m-0">
@@ -62,7 +66,25 @@ export function BookingStatistics({
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Categories</span>
           <div className="text-right">
-            <CategoriesWithViewMore categories={allCategories} />
+            <ItemsWithViewMore
+              items={allCategories}
+              emptyMessage="No categories"
+              renderItem={(category) => (
+                <CategoryBadge category={category} key={category.id} />
+              )}
+            />
+          </div>
+        </div>
+        <Separator />
+        <div className="flex items-start justify-between">
+          <span className="text-sm text-gray-500">Tags</span>
+          <div className="text-right">
+            <ItemsWithViewMore
+              items={tags}
+              labelKey="name"
+              idKey="id"
+              emptyMessage="No tags"
+            />
           </div>
         </div>
       </div>
