@@ -45,4 +45,10 @@ export interface Config {
    * Disable SSO
    */
   disableSSO: boolean;
+
+  /**
+   * Show the "How did you find us?" field in the onboarding process
+   * This is useful for gathering feedback on how users discover the platform.
+   */
+  showHowDidYouFindUs: boolean;
 }

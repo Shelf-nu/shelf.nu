@@ -743,7 +743,7 @@ export async function updateUser<T extends Prisma.UserInclude>(
 ) {
   /**
    * Remove password from object so we can pass it to prisma user update
-   * Also we remove the email as we dont allow it to be changed for now
+   * Also we remove the email as we don't allow it to be changed for now
    * */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
