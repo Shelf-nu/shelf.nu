@@ -65,7 +65,7 @@ export default function SelectWithSearchParams({
   return (
     <Select
       name={name}
-      defaultValue={selectedValue} 
+      defaultValue={selectedValue}
       onValueChange={handleValueChange}
       disabled={disabled}
     >
