@@ -9,6 +9,7 @@ import { isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
 import { DateS } from "../shared/date";
+import { GrayBadge } from "../shared/gray-badge";
 import {
   HoverCard,
   HoverCardContent,
@@ -182,6 +183,7 @@ export default function renderEventCard({ event }: EventCardProps) {
     // Store cleanup function
     (element as any)._cleanup = cleanup;
   };
+
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
@@ -211,24 +213,40 @@ export default function renderEventCard({ event }: EventCardProps) {
       </HoverCardTrigger>
       <HoverCardPortal>
         <HoverCardContent
-          className="pointer-events-none z-[99999] md:w-96"
+          className="pointer-events-none z-[99999] md:w-auto md:max-w-[450px]"
           side="top"
           sideOffset={8}
           collisionPadding={16}
         >
-          <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
-            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
-            <ArrowRightIcon className="size-3 text-gray-600" />
-            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
-          </div>
-          <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 mt-2 flex items-center gap-2 ">
+            <div className="text-text-md font-medium">{booking.name}</div>
             <BookingStatusBadge
               status={booking.status}
               custodianUserId={booking.custodian.user?.id}
             />
+          </div>
+
+          <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
+            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
+            <ArrowRightIcon className="size-3 text-gray-600" />
+            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
+          </div>
+
+          <p className="mb-1 text-sm font-normal">Custodian:</p>
+          <div className="mb-3 flex items-center gap-2">
             <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
           </div>
+          {booking.tags && booking.tags.length ? (
+            <>
+              <p className="mb-1 text-sm font-normal">Tags:</p>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                {booking.tags.map((tag) => (
+                  <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
+                ))}
+              </div>
+            </>
+          ) : null}
+
           {booking.description ? (
             <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
               {booking.description}

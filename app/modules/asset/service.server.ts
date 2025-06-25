@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  TagUseFor,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -1296,6 +1297,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId,
   request,
   defaults,
+  tagUseFor,
 }: {
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
@@ -1304,6 +1306,7 @@ export async function getAllEntriesForCreateAndEdit({
     tag?: string | null;
     location?: string | null;
   };
+  tagUseFor?: TagUseFor;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const categorySelected =
@@ -1343,7 +1346,12 @@ export async function getAllEntriesForCreateAndEdit({
       db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [{ useFor: { isEmpty: true } }, { useFor: { has: tagUseFor } }],
+        },
+      }),
 
       /** Get the locations */
       db.location.findMany({

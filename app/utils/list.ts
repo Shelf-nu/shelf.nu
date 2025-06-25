@@ -38,6 +38,7 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   tab: searchParams.get("tab") as "assets" | "kits",
   id: searchParams.getAll("id") || [],
   assetKitFilter: searchParams.get("assetKitFilter"),
+  tags: searchParams.getAll("tag") || [],
 });
 
 export const ALL_SELECTED_KEY = "all-selected";

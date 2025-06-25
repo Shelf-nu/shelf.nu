@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { TagUseFor } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -77,6 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           category: asset.categoryId,
           location: asset.locationId,
         },
+        tagUseFor: TagUseFor.ASSET,
       });
 
     const searchParams = getCurrentSearchParams(request);
