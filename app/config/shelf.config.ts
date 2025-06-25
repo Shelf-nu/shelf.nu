@@ -20,4 +20,5 @@ export const config: Config = {
   },
   faviconPath: "/static/favicon.ico",
   emailPrimaryColor: "#EF6820",
+  showHowDidYouFindUs: true,
 };
