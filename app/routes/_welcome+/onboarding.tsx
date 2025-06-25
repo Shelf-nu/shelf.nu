@@ -45,7 +45,7 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
-      referralSource: z.string().optional(),
+      referralSource: z.string().min(5, "Field is required."),
     })
     .superRefine(
       ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
@@ -68,9 +68,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     const user = await getUserByID(userId);
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
-    // if (user.onboarded) {
-    //   return redirect("/assets");
-    // }
+    if (user.onboarded) {
+      return redirect("/assets");
+    }
 
     const authUser = await getAuthUserById(userId);
 
@@ -92,6 +92,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         user,
         userSignedUpWithPassword,
         OnboardingFormSchema,
+        showHowDidYouFindUs: config.showHowDidYouFindUs,
       })
     );
   } catch (cause) {
@@ -209,8 +210,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function Onboarding() {
-  const { user, userSignedUpWithPassword, title, subHeading } =
-    useLoaderData<typeof loader>();
+  const {
+    user,
+    userSignedUpWithPassword,
+    title,
+    subHeading,
+    showHowDidYouFindUs,
+  } = useLoaderData<typeof loader>();
 
   const [searchParams] = useSearchParams();
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
@@ -239,6 +245,7 @@ export default function Onboarding() {
         <div className="md:flex md:gap-6">
           <Input
             label="First name"
+            required
             data-test-id="firstName"
             type="text"
             placeholder="Zaans"
@@ -248,6 +255,7 @@ export default function Onboarding() {
           />
           <Input
             label="Last name"
+            required
             data-test-id="lastName"
             type="text"
             placeholder="Huisje"
@@ -259,6 +267,7 @@ export default function Onboarding() {
           <Input
             label="Username"
             addOn="shelf.nu/"
+            required
             type="text"
             name={zo.fields.username()}
             error={
@@ -274,6 +283,7 @@ export default function Onboarding() {
         {!userSignedUpWithPassword && (
           <>
             <PasswordInput
+              required
               label="Password"
               placeholder="********"
               data-test-id="password"
@@ -285,6 +295,7 @@ export default function Onboarding() {
             />
 
             <PasswordInput
+              required
               label="Confirm password"
               data-test-id="confirmPassword"
               placeholder="********"
@@ -296,10 +307,11 @@ export default function Onboarding() {
           </>
         )}
 
-        <When truthy={config.showHowDidYouFindUs}>
+        <When truthy={showHowDidYouFindUs}>
           <Input
+            required
             label="How did you hear about us?"
-            placeholder="e.g. Twitter, Reddit, etc."
+            placeholder="Twitter, Reddit, ChatGPT, Google, etc..."
             name={zo.fields.referralSource()}
             error={zo.errors.referralSource()?.message}
           />

@@ -18,6 +18,7 @@ declare global {
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
+      SHOW_HOW_DID_YOU_FIND_US: string;
     };
   }
 }
@@ -57,6 +58,7 @@ declare global {
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
+      SHOW_HOW_DID_YOU_FIND_US: string;
     }
   }
 }
@@ -205,6 +207,12 @@ export const MAINTENANCE_MODE =
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const SHOW_HOW_DID_YOU_FIND_US =
+  getEnv("SHOW_HOW_DID_YOU_FIND_US", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
