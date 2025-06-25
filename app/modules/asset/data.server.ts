@@ -122,6 +122,7 @@ export async function simpleModeLoader({
                   description: true,
                   custodianTeamMember: true,
                   custodianUser: true,
+                  tags: { select: { id: true, name: true } },
                 },
               },
             }

@@ -4,11 +4,13 @@ import type {
   Tag,
   TeamMember,
   User,
+  TagUseFor,
 } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -21,10 +23,14 @@ export async function getTags(params: {
   /** Items to be loaded per page */
   perPage?: number;
   search?: string | null;
+  request: Request;
 }) {
-  const { organizationId, page = 1, perPage = 8, search } = params;
+  const { organizationId, page = 1, perPage = 8, search, request } = params;
 
   try {
+    const searchParams = getCurrentSearchParams(request);
+    const useFor = searchParams.get("useFor");
+
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
@@ -37,6 +43,10 @@ export async function getTags(params: {
         contains: search,
         mode: "insensitive",
       };
+    }
+
+    if (useFor) {
+      where.useFor = { has: useFor as TagUseFor };
     }
 
     const [tags, totalTags] = await Promise.all([
@@ -68,14 +78,17 @@ export async function createTag({
   description,
   userId,
   organizationId,
+  useFor,
 }: Pick<Tag, "description" | "name" | "organizationId"> & {
   userId: User["id"];
+  useFor: TagUseFor[];
 }) {
   try {
     return await db.tag.create({
       data: {
         name: loadash.trim(name),
         description,
+        useFor,
         user: {
           connect: {
             id: userId,
@@ -220,7 +233,10 @@ export async function updateTag({
   organizationId,
   name,
   description,
-}: Pick<Tag, "id" | "organizationId" | "name" | "description">) {
+  useFor,
+}: Pick<Tag, "id" | "organizationId" | "name" | "description"> & {
+  useFor?: TagUseFor[];
+}) {
   try {
     return await db.tag.update({
       where: {
@@ -230,6 +246,9 @@ export async function updateTag({
       data: {
         name: loadash.trim(name),
         description,
+        useFor: {
+          set: useFor,
+        },
       },
     });
   } catch (cause) {
