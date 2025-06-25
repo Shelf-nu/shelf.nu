@@ -11,6 +11,7 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import When from "~/components/when/when";
 import { config } from "~/config/shelf.config";
 import { sendEmail } from "~/emails/mail.server";
 import { onboardingEmailText } from "~/emails/onboarding-email";
@@ -67,9 +68,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     const user = await getUserByID(userId);
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
-    if (user.onboarded) {
-      return redirect("/assets");
-    }
+    // if (user.onboarded) {
+    //   return redirect("/assets");
+    // }
 
     const authUser = await getAuthUserById(userId);
 
@@ -295,12 +296,14 @@ export default function Onboarding() {
           </>
         )}
 
-        <Input
-          label="How did you hear about us?"
-          placeholder="e.g. Twitter, Reddit, etc."
-          name={zo.fields.referralSource()}
-          error={zo.errors.referralSource()?.message}
-        />
+        <When truthy={config.showHowDidYouFindUs}>
+          <Input
+            label="How did you hear about us?"
+            placeholder="e.g. Twitter, Reddit, etc."
+            name={zo.fields.referralSource()}
+            error={zo.errors.referralSource()?.message}
+          />
+        </When>
 
         <div>
           <Button
