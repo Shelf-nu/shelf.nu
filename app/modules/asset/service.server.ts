@@ -1309,33 +1309,17 @@ export async function getAllEntriesForCreateAndEdit({
 
   try {
     const [
-      categoryExcludedSelected,
-      selectedCategories,
-      totalCategories,
+      { categories, totalCategories },
       tags,
       locationExcludedSelected,
       selectedLocation,
       totalLocations,
     ] = await Promise.all([
-      /** Get the categories */
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { notIn: categorySelected }
-            : { not: categorySelected },
-        },
-        take: getAllEntries.includes("category") ? undefined : 12,
+      getCategoriesForCreateAndEdit({
+        request,
+        organizationId,
+        defaultCategory: defaults?.category,
       }),
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { in: categorySelected }
-            : categorySelected,
-        },
-      }),
-      db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
       db.tag.findMany({
@@ -1358,7 +1342,7 @@ export async function getAllEntriesForCreateAndEdit({
     ]);
 
     return {
-      categories: [...selectedCategories, ...categoryExcludedSelected],
+      categories,
       totalCategories,
       tags,
       locations: [...selectedLocation, ...locationExcludedSelected],
