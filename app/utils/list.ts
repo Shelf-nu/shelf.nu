@@ -37,6 +37,7 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   teamMemberIds: searchParams.getAll("teamMember") || [],
   tab: searchParams.get("tab") as "assets" | "kits",
   id: searchParams.getAll("id") || [],
+  assetKitFilter: searchParams.get("assetKitFilter"),
   tags: searchParams.getAll("tag") || [],
 });
 

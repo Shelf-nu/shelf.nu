@@ -233,6 +233,7 @@ async function getAssets(params: {
    * - assets that are checkedout
    * */
   hideUnavailableToAddToKit?: boolean;
+  assetKitFilter?: string | null;
 }) {
   let {
     organizationId,
@@ -251,6 +252,7 @@ async function getAssets(params: {
     unhideAssetsBookigIds,
     teamMemberIds,
     extraInclude,
+    assetKitFilter,
   } = params;
 
   try {
@@ -435,6 +437,12 @@ async function getAssets(params: {
           ? [{ custody: null }]
           : []),
       ];
+    }
+
+    if (assetKitFilter === "NOT_IN_KIT") {
+      where.kit = null;
+    } else if (assetKitFilter === "IN_OTHER_KITS") {
+      where.kit = { isNot: null };
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -1428,6 +1436,7 @@ export async function getPaginatedAndFilterableAssets({
     unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
+    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1474,6 +1483,7 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
+      assetKitFilter,
     });
 
     const totalPages = Math.ceil(totalAssets / perPage);
