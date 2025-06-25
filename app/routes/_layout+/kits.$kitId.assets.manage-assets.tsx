@@ -27,6 +27,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
+import SelectWithSearchParams from "~/components/select-with-search-params/select-with-search-params";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -70,6 +71,12 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 type LoaderData = typeof loader;
+
+const ASSET_KIT_FILTERS = [
+  { label: "All assets", value: "ALL" },
+  { label: "Not in any kit", value: "NOT_IN_KIT" },
+  { label: "In other kits", value: "IN_OTHER_KITS" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -494,10 +501,18 @@ export default function ManageAssetsInKit() {
           slots={{
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
             "right-of-search": (
-              <SortBy
-                sortingOptions={ASSET_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-              />
+              <div className="flex items-center gap-2">
+                <SortBy
+                  sortingOptions={ASSET_SORTING_OPTIONS}
+                  defaultSortingBy="createdAt"
+                />
+                <SelectWithSearchParams
+                  name="assetKitFilter"
+                  items={ASSET_KIT_FILTERS}
+                  defaultValue="ALL"
+                  placeholder="Filter by kit"
+                />
+              </div>
             ),
           }}
         ></Filters>
