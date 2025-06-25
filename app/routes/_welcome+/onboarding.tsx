@@ -44,6 +44,7 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
+      referralSource: z.string().optional(),
     })
     .superRefine(
       ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
@@ -135,6 +136,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ...payload,
       id: userId,
       onboarded: true,
+      referralSource: payload.referralSource ?? undefined,
     });
 
     /**
@@ -292,6 +294,14 @@ export default function Onboarding() {
             />
           </>
         )}
+
+        <Input
+          label="How did you hear about us?"
+          placeholder="e.g. Twitter, Reddit, etc."
+          name={zo.fields.referralSource()}
+          error={zo.errors.referralSource()?.message}
+        />
+
         <div>
           <Button
             data-test-id="onboard"
