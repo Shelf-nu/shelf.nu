@@ -2999,3 +2999,54 @@ export async function getEntitiesWithSelectedValues({
     totalLocations,
   };
 }
+
+export async function getCategoriesForCreateAndEdit({
+  organizationId,
+  request,
+  defaultCategory,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultCategory?: string | string[] | null;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaultCategory ?? "";
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  try {
+    const [categoryExcludedSelected, selectedCategories, totalCategories] =
+      await Promise.all([
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { notIn: categorySelected }
+              : { not: categorySelected },
+          },
+          take: getAllEntries.includes("category") ? undefined : 12,
+        }),
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { in: categorySelected }
+              : categorySelected,
+          },
+        }),
+        db.category.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      categories: [...selectedCategories, ...categoryExcludedSelected],
+      totalCategories,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching categories",
+      additionalData: { organizationId, categorySelected },
+      label,
+    });
+  }
+}
