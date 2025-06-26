@@ -7,8 +7,8 @@ import { LocationMarkerIcon } from "~/components/icons/library";
 import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";
 import {
-  getAllEntriesForCreateAndEdit,
   getAsset,
+  getLocationsForCreateAndEdit,
   updateAsset,
 } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -43,12 +43,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const { locations } = await getAllEntriesForCreateAndEdit({
+    const { locations } = await getLocationsForCreateAndEdit({
       organizationId,
       request,
-      defaults: {
-        location: asset.locationId,
-      },
+      defaultLocation: asset.locationId,
     });
 
     return json({

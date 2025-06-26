@@ -25,7 +25,6 @@ import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
-import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -316,10 +315,10 @@ export const AssetForm = ({
           className="border-b-0 py-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
-          <InnerLabel hideLg={true}>Tags</InnerLabel>
           <TagsAutocomplete
             existingTags={tags ?? []}
             suggestions={tagsSuggestions}
+            hideLabel
           />
         </FormRow>
 
