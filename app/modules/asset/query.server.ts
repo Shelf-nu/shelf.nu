@@ -1114,7 +1114,11 @@ export function parseSortingOptions(sortBy: string[]): {
       });
 
       // Apply sort based on custom field type
-      if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
+      if (
+        field.fieldType === "DATE" ||
+        field.fieldType === "BOOLEAN" ||
+        field.fieldType === "AMOUNT"
+      ) {
         // Direct sort for dates and booleans
         orderByParts.push(`${alias} ${field.direction}`);
       } else {

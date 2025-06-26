@@ -333,8 +333,8 @@ function AdvancedSorting() {
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
-    const [name, direction, fieldType] = s.split(":");
-    return { name, direction, fieldType } as Sort;
+    const [name, direction, cfType] = s.split(":");
+    return { name, direction, cfType } as Sort;
   });
   const disabled = useDisabled();
 
