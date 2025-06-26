@@ -25,6 +25,7 @@ export const config: Config = {
   },
   faviconPath: "/static/favicon.ico",
   emailPrimaryColor: "#EF6820",
+  showHowDidYouFindUs: SHOW_HOW_DID_YOU_FIND_US || false,
 };
 ```
 
@@ -55,6 +56,13 @@ enablePremiumFeatures: true;
 ```
 
 You can set this directly in the config file or use the environment variable to have different configurations on different servers.
+
+### showHowDidYouFindUs
+
+Choose whether a open field will be shown on the onboarding page, asking the user to provide info how they found out about shelf.
+
+**Default value:** `false`  
+**Environment variable:** `SHOW_HOW_DID_YOU_FIND_US`
 
 ### freeTrialDays
 
@@ -142,41 +150,6 @@ ENABLE_PREMIUM_FEATURES=false
 FREE_TRIAL_DAYS=14
 DISABLE_SIGNUP=false
 DISABLE_SSO=false
-```
-
-## Use Cases
-
-### Private Instance
-
-```ts
-export const config: Config = {
-  disableSignup: true, // No new registrations
-  enablePremiumFeatures: false, // All features available
-  disableSSO: true, // Only local authentication
-  // ... other settings
-};
-```
-
-### Commercial Instance
-
-```ts
-export const config: Config = {
-  enablePremiumFeatures: true, // Premium features enabled
-  freeTrialDays: 30, // 30-day trial
-  sendOnboardingEmail: true, // Welcome emails
-  // ... other settings
-};
-```
-
-### Development Instance
-
-```ts
-export const config: Config = {
-  enablePremiumFeatures: false, // All features available
-  sendOnboardingEmail: false, // No emails in dev
-  freeTrialDays: 365, // Long trial for testing
-  // ... other settings
-};
 ```
 
 ## Notes
