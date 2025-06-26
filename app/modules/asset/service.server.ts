@@ -1317,33 +1317,15 @@ export async function getAllEntriesForCreateAndEdit({
 
   try {
     const [
-      categoryExcludedSelected,
-      selectedCategories,
-      totalCategories,
+      { categories, totalCategories },
       tags,
-      locationExcludedSelected,
-      selectedLocation,
-      totalLocations,
+      { locations, totalLocations },
     ] = await Promise.all([
-      /** Get the categories */
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { notIn: categorySelected }
-            : { not: categorySelected },
-        },
-        take: getAllEntries.includes("category") ? undefined : 12,
+      getCategoriesForCreateAndEdit({
+        request,
+        organizationId,
+        defaultCategory: defaults?.category,
       }),
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { in: categorySelected }
-            : categorySelected,
-        },
-      }),
-      db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
       db.tag.findMany({
@@ -1357,19 +1339,18 @@ export async function getAllEntriesForCreateAndEdit({
       }),
 
       /** Get the locations */
-      db.location.findMany({
-        where: { organizationId, id: { not: locationSelected } },
-        take: getAllEntries.includes("location") ? undefined : 12,
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+        defaultLocation: defaults?.location,
       }),
-      db.location.findMany({ where: { organizationId, id: locationSelected } }),
-      db.location.count({ where: { organizationId } }),
     ]);
 
     return {
-      categories: [...selectedCategories, ...categoryExcludedSelected],
+      categories,
       totalCategories,
       tags,
-      locations: [...selectedLocation, ...locationExcludedSelected],
+      locations,
       totalLocations,
     };
   } catch (cause) {
@@ -3008,4 +2989,96 @@ export async function getEntitiesWithSelectedValues({
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
   };
+}
+
+export async function getCategoriesForCreateAndEdit({
+  organizationId,
+  request,
+  defaultCategory,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultCategory?: string | string[] | null;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaultCategory ?? "";
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  try {
+    const [categoryExcludedSelected, selectedCategories, totalCategories] =
+      await Promise.all([
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { notIn: categorySelected }
+              : { not: categorySelected },
+          },
+          take: getAllEntries.includes("category") ? undefined : 12,
+        }),
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { in: categorySelected }
+              : categorySelected,
+          },
+        }),
+        db.category.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      categories: [...selectedCategories, ...categoryExcludedSelected],
+      totalCategories,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching categories",
+      additionalData: { organizationId, categorySelected },
+      label,
+    });
+  }
+}
+
+export async function getLocationsForCreateAndEdit({
+  organizationId,
+  request,
+  defaultLocation,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultLocation?: string | null;
+}) {
+  try {
+    const searchParams = getCurrentSearchParams(request);
+    const locationSelected =
+      searchParams.get("location") ?? defaultLocation ?? "";
+    const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+    const [locationExcludedSelected, selectedLocation, totalLocations] =
+      await Promise.all([
+        db.location.findMany({
+          where: { organizationId, id: { not: locationSelected } },
+          take: getAllEntries.includes("location") ? undefined : 12,
+        }),
+        db.location.findMany({
+          where: { organizationId, id: locationSelected },
+        }),
+        db.location.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      locations: [...selectedLocation, ...locationExcludedSelected],
+      totalLocations,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching tags",
+      additionalData: { organizationId, defaultLocation },
+      label,
+    });
+  }
 }

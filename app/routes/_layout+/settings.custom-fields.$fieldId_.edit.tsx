@@ -14,7 +14,7 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getCustomField,
   updateCustomField,
@@ -62,11 +62,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: { categories: { select: { id: true } } },
     });
 
-    const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
+    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
       {
         organizationId,
         request,
-        defaults: { category: customField.categories.map((c) => c.id) },
+        defaultCategory: customField.categories.map((c) => c.id),
       }
     );
 
