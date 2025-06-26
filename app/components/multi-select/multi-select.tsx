@@ -20,6 +20,7 @@ type MultiSelectProps<T> = {
   error?: string;
   tooltip?: { title: string; content: string };
   placeholder?: string;
+  hideLabel?: boolean;
 };
 
 export default function MultiSelect<T>({
@@ -34,6 +35,7 @@ export default function MultiSelect<T>({
   error,
   tooltip,
   placeholder,
+  hideLabel = false,
 }: MultiSelectProps<T>) {
   /* This is a workaround for the SSR issue with react-tag-autocomplete */
   if (typeof document === "undefined") {
@@ -83,7 +85,7 @@ export default function MultiSelect<T>({
 
       <div className={tw("flex min-w-48 flex-col", className)}>
         <div className="flex items-center justify-between">
-          <InnerLabel>{label}</InnerLabel>
+          <InnerLabel hideLg={hideLabel}>{label}</InnerLabel>
 
           <When truthy={!!tooltip}>
             <Tooltip>
