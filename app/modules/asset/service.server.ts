@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  TagUseFor,
   CustodyAgreement,
 } from "@prisma/client";
 import {
@@ -237,6 +238,7 @@ async function getAssets(params: {
    * - assets that are checkedout
    * */
   hideUnavailableToAddToKit?: boolean;
+  assetKitFilter?: string | null;
 }) {
   let {
     organizationId,
@@ -255,6 +257,7 @@ async function getAssets(params: {
     unhideAssetsBookigIds,
     teamMemberIds,
     extraInclude,
+    assetKitFilter,
   } = params;
 
   try {
@@ -441,6 +444,12 @@ async function getAssets(params: {
       ];
     }
 
+    if (assetKitFilter === "NOT_IN_KIT") {
+      where.kit = null;
+    } else if (assetKitFilter === "IN_OTHER_KITS") {
+      where.kit = { isNot: null };
+    }
+
     const [assets, totalAssets] = await Promise.all([
       db.asset.findMany({
         skip,
@@ -487,6 +496,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters = "",
   takeAll = false,
   assetIds,
+  getBookings = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -494,6 +504,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
+  getBookings?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -526,7 +537,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 
     const query = Prisma.sql`
       WITH asset_query AS (
-        ${assetQueryFragment}
+        ${assetQueryFragment({
+          withBookings: getBookings,
+        })}
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
@@ -543,7 +556,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment}
+        ${assetReturnFragment({
+          withBookings: getBookings,
+        })}
       FROM sorted_asset_query aq;
     `;
 
@@ -1287,6 +1302,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId,
   request,
   defaults,
+  tagUseFor,
 }: {
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
@@ -1295,6 +1311,7 @@ export async function getAllEntriesForCreateAndEdit({
     tag?: string | null;
     location?: string | null;
   };
+  tagUseFor?: TagUseFor;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const categorySelected =
@@ -1334,7 +1351,15 @@ export async function getAllEntriesForCreateAndEdit({
       db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            ...(tagUseFor ? [{ useFor: { has: tagUseFor } }] : []),
+          ],
+        },
+      }),
 
       /** Get the locations */
       db.location.findMany({
@@ -1416,6 +1441,7 @@ export async function getPaginatedAndFilterableAssets({
     unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
+    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1462,6 +1488,7 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
+      assetKitFilter,
     });
 
     const totalPages = Math.ceil(totalAssets / perPage);

@@ -82,6 +82,7 @@ export type FailureReason = {
     | "Team Member"
     | "Tier"
     | "User"
+    | "User Contact"
     | "Scanner"
     | "SSO"
     | "Kit"

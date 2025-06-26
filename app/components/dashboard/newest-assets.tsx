@@ -1,11 +1,11 @@
-import type { SerializeFrom } from "@remix-run/node";
+import type { Asset, Category, Kit } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { getShareAgreementUrl } from "~/utils/asset";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { Badge } from "../shared/badge";
+import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
@@ -37,7 +37,23 @@ export default function NewestAssets() {
           <tbody>
             {newAssets.map((asset) => (
               <Tr key={asset.id}>
-                <Row item={asset} />
+                <Row
+                  item={{
+                    ...asset,
+                    category: asset?.category
+                      ? {
+                          id: asset.category.id,
+                          name: asset.category?.name || "Uncategorized",
+                          color: asset.category?.color || "#575757",
+                        }
+                      : null,
+                    mainImageExpiration: asset.mainImageExpiration
+                      ? new Date(asset.mainImageExpiration)
+                      : null,
+                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
+                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
+                  }}
+                />
               </Tr>
             ))}
             {newAssets.length < 5 &&
@@ -62,7 +78,10 @@ export default function NewestAssets() {
 const Row = ({
   item,
 }: {
-  item: SerializeFrom<typeof loader>["newAssets"][number];
+  item: Asset & {
+    category: Pick<Category, "id" | "name" | "color"> | null;
+    kit: Pick<Kit, "id" | "name" | "status"> | null;
+  };
 }) => {
   const { category } = item;
   return (
@@ -111,15 +130,7 @@ const Row = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color={"#808080"} withDot={false}>
-            {"Uncategorized"}
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
     </>
   );

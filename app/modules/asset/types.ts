@@ -12,6 +12,7 @@ import type {
   CustomFieldType,
   AssetReminder,
   Organization,
+  Booking,
   CustodySignatureStatus,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
@@ -155,6 +156,9 @@ export type AdvancedIndexAsset = Pick<
   > & {
     displayDate: string;
   };
+  bookings?: Array<
+    Pick<Booking, "id" | "name" | "from" | "to" | "status" | "description">
+  >;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{

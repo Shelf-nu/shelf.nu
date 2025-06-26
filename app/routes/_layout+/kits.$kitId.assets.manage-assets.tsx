@@ -17,6 +17,7 @@ import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -26,7 +27,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
-import { Badge } from "~/components/shared/badge";
+import SelectWithSearchParams from "~/components/select-with-search-params/select-with-search-params";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -71,6 +72,12 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 type LoaderData = typeof loader;
+
+const ASSET_KIT_FILTERS = [
+  { label: "All assets", value: "ALL" },
+  { label: "Not in any kit", value: "NOT_IN_KIT" },
+  { label: "In other kits", value: "IN_OTHER_KITS" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -499,10 +506,18 @@ export default function ManageAssetsInKit() {
           slots={{
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
             "right-of-search": (
-              <SortBy
-                sortingOptions={ASSET_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-              />
+              <div className="flex items-center gap-2">
+                <SortBy
+                  sortingOptions={ASSET_SORTING_OPTIONS}
+                  defaultSortingBy="createdAt"
+                />
+                <SelectWithSearchParams
+                  name="assetKitFilter"
+                  items={ASSET_KIT_FILTERS}
+                  defaultValue="ALL"
+                  placeholder="Filter by kit"
+                />
+              </div>
             ),
           }}
         ></Filters>
@@ -847,15 +862,7 @@ const RowComponent = ({
 
       {/* Category */}
       <Td className={allowCursor}>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

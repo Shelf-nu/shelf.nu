@@ -20,6 +20,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
+  tags: { select: { id: true, name: true } },
 } as Prisma.BookingInclude;
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {

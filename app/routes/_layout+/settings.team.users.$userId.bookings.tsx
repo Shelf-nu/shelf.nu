@@ -102,5 +102,5 @@ export const handle = {
 };
 
 export default function UserBookingsPage() {
-  return <BookingsIndexPage className="!mt-0" disableBulkActions />;
+  return <BookingsIndexPage disableBulkActions />;
 }

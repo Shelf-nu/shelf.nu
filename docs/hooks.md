@@ -18,18 +18,14 @@ The hook returns an object with two properties:
 
 Here's an example of how to use the `useViewportHeight` hook:
 
-```typescriptreact
-import { useViewportHeight } from './useViewportHeight'; // adjust the path as needed
+```tsx
+import { useViewportHeight } from "./useViewportHeight"; // adjust the path as needed
 
 const MyComponent = () => {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 132 : vh - 167;
 
-  return (
-    <div style={{ height: `${height}px` }}>
-      {/* Your content here */}
-    </div>
-  );
+  return <div style={{ height: `${height}px` }}>{/* Your content here */}</div>;
 };
 ```
 

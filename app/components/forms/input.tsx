@@ -87,7 +87,7 @@ const Input = forwardRef(function Input(
   );
 
   const inputClasses = tw(
-    "w-full max-w-full border border-gray-300 px-[14px] py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500",
+    "w-full max-w-full border border-gray-300 px-[14px] py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500 disabled:placeholder:text-gray-300",
     /** Add some border for error */
     error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : "",
 

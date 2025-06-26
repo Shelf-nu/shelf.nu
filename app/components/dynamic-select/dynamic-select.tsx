@@ -190,7 +190,7 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[14px]  hover:cursor-pointer disabled:opacity-50"
+                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-base  hover:cursor-pointer disabled:opacity-50"
               >
                 <span
                   className={tw(

@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
@@ -27,6 +28,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("tag"),
+    useFor: z.nativeEnum(TagUseFor).optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("category"),
@@ -118,6 +120,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       where.OR.push({
         [queryKey]: { contains: queryValue, mode: "insensitive" },
       });
+    }
+
+    if (modelFilters.name === "tag" && modelFilters.useFor) {
+      where.useFor = { has: modelFilters.useFor };
     }
 
     const queryData = (await db[name].dynamicFindMany({

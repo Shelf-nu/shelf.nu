@@ -10,11 +10,12 @@ import { getShareAgreementUrl } from "~/utils/asset";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
+import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
-import { Badge } from "../shared/badge";
+import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import When from "../when/when";
 
 type ListAssetContentProps = {
@@ -76,13 +77,17 @@ export default function ListAssetContent({
 
   return (
     <>
+      <When truthy={!isKitAsset} fallback={<Td> </Td>}>
+        <BulkListItemCheckbox item={item} />
+      </When>
+
       <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
         {isKitAsset && (
           <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
         )}
         <div
           className={tw(
-            "flex justify-between gap-3 p-4 md:justify-normal md:px-6",
+            "flex justify-between gap-3 py-4 md:justify-normal md:pr-6",
             isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
           )}
         >
@@ -142,11 +147,7 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : null}
+        <CategoryBadge category={category} />
       </Td>
       <Td
         className={tw(

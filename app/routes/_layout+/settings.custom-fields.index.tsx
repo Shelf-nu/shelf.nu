@@ -1,13 +1,16 @@
-import type { Category, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
+import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -32,7 +35,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription.server";
-import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -167,7 +169,17 @@ function TeamMemberRow({
         </Link>
       </Td>
       <Td>
-        <ListItemCategoryColumn categories={item.categories} />
+        <ItemsWithViewMore
+          items={item.categories}
+          emptyMessage={<GrayBadge>All</GrayBadge>}
+          renderItem={(category) => (
+            <CategoryBadge
+              category={category}
+              className="mb-2 mr-2"
+              key={category.id}
+            />
+          )}
+        />
       </Td>
       <Td>
         <span className="text-text-sm font-medium capitalize text-gray-600">
@@ -191,50 +203,3 @@ function TeamMemberRow({
     </>
   );
 }
-
-const ListItemCategoryColumn = ({ categories }: { categories: Category[] }) => {
-  const visibleCategories = categories?.slice(0, 2);
-  const remainingCategories = categories?.slice(2);
-
-  if (!categories || !categories.length) {
-    return "All";
-  }
-
-  return (
-    <div className="">
-      {visibleCategories?.map((category) => (
-        <CategoryBadge key={category.id} className="mr-2">
-          {category.name}
-        </CategoryBadge>
-      ))}
-      {remainingCategories && remainingCategories?.length > 0 ? (
-        <CategoryBadge
-          className="mr-2 w-6 text-center"
-          title={`${remainingCategories?.map((c) => c.name).join(", ")}`}
-        >
-          {`+${categories.length - 2}`}
-        </CategoryBadge>
-      ) : null}
-    </div>
-  );
-};
-
-export const CategoryBadge = ({
-  children,
-  className,
-  title,
-}: {
-  children: string | JSX.Element;
-  className?: string;
-  title?: string;
-}) => (
-  <span
-    className={tw(
-      "inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700",
-      className
-    )}
-    title={title}
-  >
-    {children}
-  </span>
-);

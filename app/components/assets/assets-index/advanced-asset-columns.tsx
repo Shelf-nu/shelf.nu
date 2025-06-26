@@ -11,7 +11,6 @@ import {
 import { Link, useLoaderData } from "@remix-run/react";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import {
@@ -52,6 +51,7 @@ import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
 // eslint-disable-next-line import/no-cycle
 import { ListItemTagsColumn } from "./assets-list";
+import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
   column,
@@ -371,15 +371,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      {category ? (
-        <Badge color={category.color} withDot={false}>
-          {category.name}
-        </Badge>
-      ) : (
-        <Badge color={"#808080"} withDot={false}>
-          {"Uncategorized"}
-        </Badge>
-      )}
+      <CategoryBadge category={category} />
     </Td>
   );
 }

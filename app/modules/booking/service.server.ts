@@ -7,6 +7,7 @@ import type {
   Kit,
   User,
   UserOrganization,
+  Tag,
 } from "@prisma/client";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
@@ -177,7 +178,7 @@ export async function createBooking({
     | "organizationId"
     | "from"
     | "to"
-  > & { custodianTeamMemberId: string };
+  > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
    * Asset IDs that are connected to the booking
@@ -230,6 +231,12 @@ export async function createBooking({
       };
     }
 
+    if (booking.tags.length > 0) {
+      dataToCreate.tags = {
+        connect: booking.tags,
+      };
+    }
+
     return await db.booking.create({
       data: dataToCreate,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -260,6 +267,7 @@ export async function updateBasicBooking({
   custodianUserId,
   description,
   organizationId,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -273,7 +281,9 @@ export async function updateBasicBooking({
     | "organizationId"
   >
 > &
-  Pick<Booking, "id" | "organizationId">) {
+  Pick<Booking, "id" | "organizationId"> & {
+    tags: { id: string }[];
+  }) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -297,6 +307,10 @@ export async function updateBasicBooking({
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     /** Booking update is not allowed for these type of status */
@@ -368,6 +382,7 @@ export async function updateBasicBooking({
         });
       }
     }
+
     return await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
@@ -398,6 +413,7 @@ export async function reserveBooking({
   organizationId,
   hints,
   isSelfServiceOrBase,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -414,6 +430,7 @@ export async function reserveBooking({
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
     isSelfServiceOrBase: boolean;
+    tags: { id: string }[];
   }) {
   try {
     const bookingFound = await db.booking
@@ -463,6 +480,10 @@ export async function reserveBooking({
       status: BookingStatus.RESERVED,
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     dataToUpdate.from = from;
@@ -1373,7 +1394,7 @@ export async function getBookingsFilterData({
   });
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status, teamMemberIds } =
+  const { page, perPageParam, search, status, teamMemberIds, tags } =
     getParamsValues(searchParams);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1436,6 +1457,7 @@ export async function getBookingsFilterData({
     filtersCookie,
     filters,
     redirectNeeded,
+    tags,
   };
 }
 
@@ -1461,6 +1483,7 @@ export async function getBookings(params: {
   orderBy?: string;
   orderDirection?: SortingDirection;
   kitId?: string;
+  tags?: Tag["id"][];
 }) {
   const {
     organizationId,
@@ -1480,6 +1503,7 @@ export async function getBookings(params: {
     orderBy = "from",
     orderDirection = "asc",
     kitId,
+    tags,
   } = params;
 
   try {
@@ -1592,6 +1616,14 @@ export async function getBookings(params: {
       where.assets = {
         some: { kitId },
       };
+    }
+
+    if (tags?.length) {
+      if (tags.includes("untagged")) {
+        where.tags = { none: {} };
+      } else {
+        where.tags = { some: { id: { in: tags } } };
+      }
     }
 
     const [bookings, bookingCount] = await Promise.all([
@@ -1934,6 +1966,7 @@ export async function getBookingsForCalendar(params: {
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,
+        tags: { select: { id: true, name: true } },
       },
       takeAll: true,
     });
@@ -1970,13 +2003,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
-              user: {
-                id: booking.custodianUserId,
-                firstName: booking.custodianUser?.firstName,
-                lastName: booking.custodianUser?.lastName,
-                profilePicture: booking.custodianUser?.profilePicture,
-              },
+              user: booking.custodianUser
+                ? {
+                    id: booking.custodianUserId,
+                    firstName: booking.custodianUser?.firstName,
+                    lastName: booking.custodianUser?.lastName,
+                    profilePicture: booking.custodianUser?.profilePicture,
+                  }
+                : undefined,
             },
+            tags: booking.tags,
           },
         };
       });

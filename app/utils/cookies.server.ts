@@ -2,6 +2,10 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
+import type {
+  ALLOWED_FILTER_PATHNAMES,
+  AllowedPathname,
+} from "~/hooks/search-params";
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
@@ -127,6 +131,13 @@ export const createFilterCookie = ({
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
+type FilterCookieConfig = {
+  [K in AllowedPathname]: {
+    name: (typeof ALLOWED_FILTER_PATHNAMES)[K];
+    path: `/${K}`;
+  };
+}[AllowedPathname];
+
 /**
  * Gets and validates filters from request parameters
  * Ensures URL parameters match the expected filter format
@@ -138,7 +149,7 @@ export const createFilterCookie = ({
 export async function getFiltersFromRequest(
   request: Request,
   organizationId: string,
-  cookie: { name: string; path: string }
+  cookie: FilterCookieConfig
 ) {
   let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");

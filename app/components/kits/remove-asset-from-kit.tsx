@@ -56,7 +56,7 @@ export default function RemoveAssetFromKit({
               <Button variant="secondary">Cancel</Button>
             </AlertDialogCancel>
 
-            <Form method="post">
+            <Form method="post" action={`..`}>
               <input type="hidden" name="assetId" value={asset.id} />
               <Button name="intent" value="removeAsset" disabled={disabled}>
                 Remove
