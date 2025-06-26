@@ -339,22 +339,23 @@ export default function BookingsIndexPage({
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
             />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "tag", queryKey: "name" }}
-              label="Filter by tag"
-              initialDataKey="tags"
-              countKey="totalTags"
-              withoutValueItem={{
-                id: "untagged",
-                name: "Without tag",
-              }}
-            />
           </When>
+
+          <DynamicDropdown
+            trigger={
+              <div className="flex cursor-pointer items-center gap-2">
+                Tags <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "tag", queryKey: "name" }}
+            label="Filter by tag"
+            initialDataKey="tags"
+            countKey="totalTags"
+            withoutValueItem={{
+              id: "untagged",
+              name: "Without tag",
+            }}
+          />
         </Filters>
         <List
           bulkActions={
