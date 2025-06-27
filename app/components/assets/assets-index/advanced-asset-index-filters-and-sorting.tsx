@@ -51,11 +51,16 @@ export function AdvancedFilteringAndSorting() {
   );
 }
 
-const getTriggerClasses = (open: boolean, activeItems: number) =>
+const getTriggerClasses = (
+  open: boolean,
+  activeItems: number,
+  className?: string
+) =>
   tw(
     "font-normal text-gray-500",
     open ? "bg-gray-50" : "",
-    activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
+    activeItems > 0 ? "border-primary bg-primary-25 text-primary" : "",
+    className
   );
 
 function AdvancedFilter() {
@@ -389,7 +394,11 @@ function AdvancedSorting() {
       <PopoverTrigger asChild>
         <Button
           variant="secondary"
-          className={getTriggerClasses(isPopoverOpen, initialSorts.length)}
+          className={getTriggerClasses(
+            isPopoverOpen,
+            initialSorts.length,
+            "w-[180px]"
+          )}
           icon="sort"
         >
           {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
