@@ -16,7 +16,11 @@ import { getQrCodeMaps } from "../qr/service.server";
 
 export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
-    include: { custodianTeamMember: true; custodianUser: true };
+    include: {
+      custodianTeamMember: true;
+      custodianUser: true;
+      tags: { select: { id: true; name: true } };
+    };
   }>;
   assets: (Asset & {
     category: Pick<Category, "name"> | null;
@@ -43,7 +47,11 @@ export async function fetchAllPdfRelatedData(
   request: Request
 ): Promise<PdfDbResult> {
   try {
-    const booking = await getBooking({ id: bookingId, organizationId });
+    const booking = await getBooking({
+      id: bookingId,
+      organizationId,
+      extraInclude: { tags: { select: { id: true, name: true } } },
+    });
 
     if (
       role === OrganizationRoles.SELF_SERVICE &&

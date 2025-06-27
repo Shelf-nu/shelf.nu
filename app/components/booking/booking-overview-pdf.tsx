@@ -10,6 +10,7 @@ import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
+import { GrayBadge } from "../shared/gray-badge";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -237,6 +238,7 @@ const BookingPDFPreview = ({
               {booking?.description}
             </span>
           </div>
+
           <div className="flex p-2">
             <span className="min-w-[150px] text-sm font-medium">
               Total assets value
@@ -245,6 +247,18 @@ const BookingPDFPreview = ({
               {totalValue}
             </span>
           </div>
+
+          <When truthy={booking.tags?.length > 0}>
+            <div className="flex items-center border-t border-gray-300 p-2">
+              <span className="min-w-[150px] text-sm font-medium">Tags</span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {booking.tags.map((tag) => (
+                  <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
+                ))}
+              </div>
+            </div>
+          </When>
         </section>
 
         <table className="w-full border-collapse border border-gray-300">
