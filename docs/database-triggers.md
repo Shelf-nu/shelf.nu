@@ -54,6 +54,136 @@ We have multiple user creation flows throughout the application (registration, i
 
 ---
 
+### `booking_audit_trigger`
+
+**Purpose**: Automatically creates comprehensive audit records for all booking changes, capturing complete snapshots of booking data including relationships.
+
+**Table**: `Booking`  
+**Event**: `AFTER INSERT OR UPDATE OR DELETE`  
+**Function**: `log_booking_changes()`
+
+**Supporting Functions**:
+
+- `get_booking_snapshot()` - Captures complete booking data with all relationships
+- `get_changed_fields()` - Detects which specific fields changed
+
+**What it does**:
+
+- Triggers after any booking is created, updated, or deleted
+- Creates a `BookingChange` record with complete before/after snapshots
+- Captures full user details (creator, custodian user, custodian team member) at the time of change
+- Includes all associated assets with their kit, category, and location relationships
+- Includes all associated tags with their configuration
+- Stores what specific fields changed for efficient querying
+- For DELETE operations, preserves the complete booking state that was deleted
+
+**Why we use it**:
+Bookings are critical business data involving multiple users, valuable assets, and complex relationships. This trigger ensures we have a complete audit trail for compliance, accountability, and debugging purposes. It captures historical context that might be lost if users change names, assets are moved between kits, or relationships are modified after the fact.
+
+---
+
+### `booking_asset_audit_trigger`
+
+**Purpose**: Automatically tracks when assets are added to or removed from bookings.
+
+**Table**: `_AssetToBooking` (Prisma relation table)  
+**Event**: `AFTER INSERT OR DELETE`  
+**Function**: `log_booking_asset_changes()`
+
+**What it does**:
+
+- Triggers when the many-to-many relationship between bookings and assets changes
+- Creates `BookingChange` records with `changeType` of `ASSET_ADDED` or `ASSET_REMOVED`
+- Captures the complete booking state after the asset relationship change
+- Includes full asset details including kit, category, and location information at the time of change
+
+**Why we use it**:
+Asset relationships can change independently of booking updates. This trigger ensures we track these changes separately, which is crucial for understanding kit usage patterns and asset movement history. Since kits connect to bookings through assets, this trigger is essential for kit audit trails.
+
+---
+
+### `booking_tag_audit_trigger`
+
+**Purpose**: Automatically tracks when tags are added to or removed from bookings.
+
+**Table**: `_BookingToTag` (Prisma relation table)  
+**Event**: `AFTER INSERT OR DELETE`  
+**Function**: `log_booking_tag_changes()`
+
+**What it does**:
+
+- Triggers when the many-to-many relationship between bookings and tags changes
+- Creates `BookingChange` records with `changeType` of `TAG_ADDED` or `TAG_REMOVED`
+- Captures the complete booking state after the tag relationship change
+- Includes full tag details including their `useFor` configuration
+
+**Why we use it**:
+Tags are used for categorization and workflow management of bookings. This trigger ensures we maintain a history of how bookings were tagged over time, which is valuable for understanding booking patterns, workflow changes, and organizational processes.
+
+---
+
+## Booking Audit System Overview
+
+The booking audit triggers work together to provide comprehensive change tracking:
+
+### Data Captured
+
+For each booking change, the system captures:
+
+- **Complete booking data**: All booking fields at the time of change
+- **User context**: Full details of creator, custodian user, and custodian team member
+- **Asset relationships**: Complete asset data including kit, category, and location details
+- **Tag relationships**: All associated tags and their configuration
+- **Change metadata**: What changed, when, and what type of change occurred
+
+### Change Types Tracked
+
+- `CREATE` - New booking created
+- `UPDATE` - Booking fields modified
+- `DELETE` - Booking deleted
+- `ASSET_ADDED` - Asset added to booking
+- `ASSET_REMOVED` - Asset removed from booking
+- `TAG_ADDED` - Tag added to booking
+- `TAG_REMOVED` - Tag removed from booking
+
+### Example Audit Data Structure
+
+```json
+{
+  "bookingAfter": {
+    "id": "booking123",
+    "name": "Camera Equipment Rental",
+    "status": "ONGOING",
+    "creator": {
+      "id": "user123",
+      "email": "john.smith@company.com",
+      "firstName": "John",
+      "lastName": "Smith"
+    },
+    "assets": [
+      {
+        "id": "asset1",
+        "title": "Canon EOS R5",
+        "kit": {
+          "id": "kit1",
+          "name": "Camera Kit Pro",
+          "status": "IN_CUSTODY"
+        }
+      }
+    ],
+    "tags": [
+      {
+        "id": "tag1",
+        "name": "High Priority",
+        "useFor": ["BOOKING"]
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## Adding New Triggers
 
 When adding new triggers to the project:

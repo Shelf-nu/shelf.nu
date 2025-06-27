@@ -883,6 +883,8 @@ enum ChangeType {
   DELETE
   ASSET_ADDED
   ASSET_REMOVED
+  TAG_ADDED
+  TAG_REMOVED
 }
 
 
