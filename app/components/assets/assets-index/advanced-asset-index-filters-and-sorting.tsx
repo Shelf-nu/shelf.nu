@@ -59,7 +59,9 @@ const getTriggerClasses = (
   tw(
     "font-normal text-gray-500",
     open ? "bg-gray-50" : "",
-    activeItems > 0 ? "border-primary bg-primary-25 text-primary" : "",
+    activeItems > 0
+      ? "whitespace-nowrap border-primary bg-primary-25 text-primary"
+      : "",
     className
   );
 
@@ -394,11 +396,7 @@ function AdvancedSorting() {
       <PopoverTrigger asChild>
         <Button
           variant="secondary"
-          className={getTriggerClasses(
-            isPopoverOpen,
-            initialSorts.length,
-            "w-[180px]"
-          )}
+          className={getTriggerClasses(isPopoverOpen, initialSorts.length)}
           icon="sort"
         >
           {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
