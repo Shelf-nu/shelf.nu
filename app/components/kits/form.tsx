@@ -67,7 +67,7 @@ export default function KitsForm({
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
       >
-        <AbsolutePositionedHeaderActions className="hidden md:flex">
+        <AbsolutePositionedHeaderActions className="hidden md:mr-4 md:flex">
           <Button type="submit" disabled={disabled || nameErrorMessage}>
             {saveButtonLabel}
           </Button>

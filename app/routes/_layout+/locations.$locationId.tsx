@@ -13,6 +13,7 @@ import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -24,7 +25,6 @@ import { SortBy } from "~/components/list/filters/sort-by";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
 import { MapPlaceholder } from "~/components/location/map-placeholder";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -268,7 +268,7 @@ export default function LocationPage() {
               customEmptyStateContent={{
                 title: "There are currently no assets at the location",
                 text: "Add assets in this location",
-                newButtonRoute: "add-assets",
+                newButtonRoute: "manage-assets",
                 newButtonContent: "Add asset",
               }}
             />
@@ -326,7 +326,7 @@ const ListAssetContent = ({
   item,
 }: {
   item: Asset & {
-    category?: Category;
+    category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
   };
@@ -372,11 +372,7 @@ const ListAssetContent = ({
       </Td>
 
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : null}
+        <CategoryBadge category={category} />
       </Td>
       <Td className="text-left">
         <ListItemTagsColumn tags={tags} />

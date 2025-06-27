@@ -1,5 +1,7 @@
+import { TagUseFor } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
+import { db } from "~/database/db.server";
 import { getBookings } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -26,24 +28,44 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status } =
-      getParamsValues(searchParams);
+    const {
+      page,
+      perPageParam,
+      search,
+      status,
+      tags: filterTags,
+    } = getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { bookings, bookingCount } = await getBookings({
-      organizationId,
-      page,
-      perPage,
-      search,
-      userId,
-      custodianUserId: userId, // Here we just hardcode the userId because only current user can see their own bookings
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+    const [{ bookings, bookingCount }, tags] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId,
+        custodianUserId: userId, // Here we just hardcode the userId because only current user can see their own bookings
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
+        }),
+        tags: filterTags,
+        extraInclude: {
+          tags: { select: { id: true, name: true } },
+        },
       }),
-    });
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: TagUseFor.BOOKING } },
+          ],
+        },
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -67,6 +89,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        tags,
+        totalTags: tags.length,
       })
     );
   } catch (cause) {
@@ -76,7 +100,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export default function MyBookings() {
-  return <BookingsIndexPage disableBulkActions className="!mt-0" />;
+  return <BookingsIndexPage disableBulkActions />;
 }
 
 export const handle = {

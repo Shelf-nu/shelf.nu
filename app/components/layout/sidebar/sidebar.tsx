@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useLocation } from "@remix-run/react";
 import type { VariantProps } from "class-variance-authority";
 import { cva } from "class-variance-authority";
 
@@ -25,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsMobile } from "~/hooks/use-mobile";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -349,16 +350,22 @@ const SidebarRail = forwardRef<
 SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
-  ({ className, ...props }, ref) => (
-    <main
-      ref={ref}
-      className={tw(
-        "h-dvh w-full overflow-auto bg-gray-25 px-4 pb-10",
-        className
-      )}
-      {...props}
-    />
-  )
+  ({ className, ...props }, ref) => {
+    const { isAvailabilityView } = useIsAvailabilityView();
+    const location = useLocation();
+    const isKitIndex = location.pathname.includes("/kits");
+    return (
+      <main
+        ref={ref}
+        className={tw(
+          "h-dvh w-full overflow-auto bg-gray-25 px-4",
+          isAvailabilityView ? (isKitIndex ? "pb-0" : "pb-[46px]") : "pb-10",
+          className
+        )}
+        {...props}
+      />
+    );
+  }
 );
 SidebarInset.displayName = "SidebarInset";
 

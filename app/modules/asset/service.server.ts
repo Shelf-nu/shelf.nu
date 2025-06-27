@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  TagUseFor,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -232,6 +233,7 @@ async function getAssets(params: {
    * - assets that are checkedout
    * */
   hideUnavailableToAddToKit?: boolean;
+  assetKitFilter?: string | null;
 }) {
   let {
     organizationId,
@@ -250,6 +252,7 @@ async function getAssets(params: {
     unhideAssetsBookigIds,
     teamMemberIds,
     extraInclude,
+    assetKitFilter,
   } = params;
 
   try {
@@ -436,6 +439,12 @@ async function getAssets(params: {
       ];
     }
 
+    if (assetKitFilter === "NOT_IN_KIT") {
+      where.kit = null;
+    } else if (assetKitFilter === "IN_OTHER_KITS") {
+      where.kit = { isNot: null };
+    }
+
     const [assets, totalAssets] = await Promise.all([
       db.asset.findMany({
         skip,
@@ -482,6 +491,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters = "",
   takeAll = false,
   assetIds,
+  getBookings = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -489,6 +499,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
+  getBookings?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -521,7 +532,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 
     const query = Prisma.sql`
       WITH asset_query AS (
-        ${assetQueryFragment}
+        ${assetQueryFragment({
+          withBookings: getBookings,
+        })}
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
@@ -538,7 +551,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment}
+        ${assetReturnFragment({
+          withBookings: getBookings,
+        })}
       FROM sorted_asset_query aq;
     `;
 
@@ -1282,6 +1297,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId,
   request,
   defaults,
+  tagUseFor,
 }: {
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
@@ -1290,6 +1306,7 @@ export async function getAllEntriesForCreateAndEdit({
     tag?: string | null;
     location?: string | null;
   };
+  tagUseFor?: TagUseFor;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const categorySelected =
@@ -1300,51 +1317,40 @@ export async function getAllEntriesForCreateAndEdit({
 
   try {
     const [
-      categoryExcludedSelected,
-      selectedCategories,
-      totalCategories,
+      { categories, totalCategories },
       tags,
-      locationExcludedSelected,
-      selectedLocation,
-      totalLocations,
+      { locations, totalLocations },
     ] = await Promise.all([
-      /** Get the categories */
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { notIn: categorySelected }
-            : { not: categorySelected },
-        },
-        take: getAllEntries.includes("category") ? undefined : 12,
+      getCategoriesForCreateAndEdit({
+        request,
+        organizationId,
+        defaultCategory: defaults?.category,
       }),
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { in: categorySelected }
-            : categorySelected,
-        },
-      }),
-      db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            ...(tagUseFor ? [{ useFor: { has: tagUseFor } }] : []),
+          ],
+        },
+      }),
 
       /** Get the locations */
-      db.location.findMany({
-        where: { organizationId, id: { not: locationSelected } },
-        take: getAllEntries.includes("location") ? undefined : 12,
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+        defaultLocation: defaults?.location,
       }),
-      db.location.findMany({ where: { organizationId, id: locationSelected } }),
-      db.location.count({ where: { organizationId } }),
     ]);
 
     return {
-      categories: [...selectedCategories, ...categoryExcludedSelected],
+      categories,
       totalCategories,
       tags,
-      locations: [...selectedLocation, ...locationExcludedSelected],
+      locations,
       totalLocations,
     };
   } catch (cause) {
@@ -1411,6 +1417,7 @@ export async function getPaginatedAndFilterableAssets({
     unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
+    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1457,6 +1464,7 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
+      assetKitFilter,
     });
 
     const totalPages = Math.ceil(totalAssets / perPage);
@@ -2981,4 +2989,96 @@ export async function getEntitiesWithSelectedValues({
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
   };
+}
+
+export async function getCategoriesForCreateAndEdit({
+  organizationId,
+  request,
+  defaultCategory,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultCategory?: string | string[] | null;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaultCategory ?? "";
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  try {
+    const [categoryExcludedSelected, selectedCategories, totalCategories] =
+      await Promise.all([
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { notIn: categorySelected }
+              : { not: categorySelected },
+          },
+          take: getAllEntries.includes("category") ? undefined : 12,
+        }),
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { in: categorySelected }
+              : categorySelected,
+          },
+        }),
+        db.category.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      categories: [...selectedCategories, ...categoryExcludedSelected],
+      totalCategories,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching categories",
+      additionalData: { organizationId, categorySelected },
+      label,
+    });
+  }
+}
+
+export async function getLocationsForCreateAndEdit({
+  organizationId,
+  request,
+  defaultLocation,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultLocation?: string | null;
+}) {
+  try {
+    const searchParams = getCurrentSearchParams(request);
+    const locationSelected =
+      searchParams.get("location") ?? defaultLocation ?? "";
+    const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+    const [locationExcludedSelected, selectedLocation, totalLocations] =
+      await Promise.all([
+        db.location.findMany({
+          where: { organizationId, id: { not: locationSelected } },
+          take: getAllEntries.includes("location") ? undefined : 12,
+        }),
+        db.location.findMany({
+          where: { organizationId, id: locationSelected },
+        }),
+        db.location.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      locations: [...selectedLocation, ...locationExcludedSelected],
+      totalLocations,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching tags",
+      additionalData: { organizationId, defaultLocation },
+      label,
+    });
+  }
 }

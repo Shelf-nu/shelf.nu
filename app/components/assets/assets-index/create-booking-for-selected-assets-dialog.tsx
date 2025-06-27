@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -12,23 +12,34 @@ import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
-  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-
-  const { startDate, endDate: defaultEndDate } =
-    getBookingDefaultStartEndTimes();
-  const [endDate, setEndDate] = useState(defaultEndDate);
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
   const { currentOrganization, teamMembers } =
     useLoaderData<AssetIndexLoaderData>();
+  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { workingHours } = workingHoursData;
+  const { bufferStartTime } = useBookingSettings();
+  const zo = useZorm(
+    "CreateBookingWithAssets",
+    BookingFormSchema({ action: "new", workingHours, bufferStartTime })
+  );
+
+  const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
+    workingHours,
+    bufferStartTime
+  );
+  const [endDate, setEndDate] = useState(defaultEndDate);
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+
   const user = useUserData();
   const defaultTeamMember = isBaseOrSelfService
     ? teamMembers.find((tm) => tm.userId === user!.id)
@@ -41,12 +52,15 @@ export default function CreateBookingForSelectedAssetsDialog() {
     currentUserId: user?.id,
   });
 
-  const workingHoursData = useWorkingHours(currentOrganization.id);
-  const { workingHours } = workingHoursData;
-  const zo = useZorm(
-    "CreateBookingWithAssets",
-    BookingFormSchema({ action: "new", workingHours })
+  useEffect(
+    function updateEndDate() {
+      if (defaultEndDate) {
+        setEndDate(defaultEndDate);
+      }
+    },
+    [defaultEndDate]
   );
+
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}

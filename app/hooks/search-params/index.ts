@@ -47,9 +47,10 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
 export const ALLOWED_FILTER_PATHNAMES = {
   assets: "assetFilter",
   bookings: "bookingFilter",
+  kits: "kitFilter",
 } as const;
 
-type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
+export type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
 type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
 
 /**

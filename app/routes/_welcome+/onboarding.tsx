@@ -11,6 +11,7 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import When from "~/components/when/when";
 import { config } from "~/config/shelf.config";
 import { sendEmail } from "~/emails/mail.server";
 import { onboardingEmailText } from "~/emails/onboarding-email";
@@ -44,6 +45,7 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
+      referralSource: z.string().min(5, "Field is required."),
     })
     .superRefine(
       ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
@@ -90,6 +92,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         user,
         userSignedUpWithPassword,
         OnboardingFormSchema,
+        showHowDidYouFindUs: config.showHowDidYouFindUs,
       })
     );
   } catch (cause) {
@@ -135,6 +138,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ...payload,
       id: userId,
       onboarded: true,
+      referralSource: payload.referralSource ?? undefined,
     });
 
     /**
@@ -206,8 +210,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function Onboarding() {
-  const { user, userSignedUpWithPassword, title, subHeading } =
-    useLoaderData<typeof loader>();
+  const {
+    user,
+    userSignedUpWithPassword,
+    title,
+    subHeading,
+    showHowDidYouFindUs,
+  } = useLoaderData<typeof loader>();
 
   const [searchParams] = useSearchParams();
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
@@ -236,6 +245,7 @@ export default function Onboarding() {
         <div className="md:flex md:gap-6">
           <Input
             label="First name"
+            required
             data-test-id="firstName"
             type="text"
             placeholder="Zaans"
@@ -245,6 +255,7 @@ export default function Onboarding() {
           />
           <Input
             label="Last name"
+            required
             data-test-id="lastName"
             type="text"
             placeholder="Huisje"
@@ -256,6 +267,7 @@ export default function Onboarding() {
           <Input
             label="Username"
             addOn="shelf.nu/"
+            required
             type="text"
             name={zo.fields.username()}
             error={
@@ -271,6 +283,7 @@ export default function Onboarding() {
         {!userSignedUpWithPassword && (
           <>
             <PasswordInput
+              required
               label="Password"
               placeholder="********"
               data-test-id="password"
@@ -282,6 +295,7 @@ export default function Onboarding() {
             />
 
             <PasswordInput
+              required
               label="Confirm password"
               data-test-id="confirmPassword"
               placeholder="********"
@@ -292,6 +306,17 @@ export default function Onboarding() {
             />
           </>
         )}
+
+        <When truthy={showHowDidYouFindUs}>
+          <Input
+            required
+            label="How did you hear about us?"
+            placeholder="Twitter, Reddit, ChatGPT, Google, etc..."
+            name={zo.fields.referralSource()}
+            error={zo.errors.referralSource()?.message}
+          />
+        </When>
+
         <div>
           <Button
             data-test-id="onboard"

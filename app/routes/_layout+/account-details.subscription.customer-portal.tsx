@@ -8,7 +8,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { createBillingPortalSession } from "~/utils/stripe.server";
+import {
+  createBillingPortalSession,
+  getOrCreateCustomerId,
+} from "~/utils/stripe.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -23,9 +26,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     const user = await db.user
-      .findUnique({
+      .findUniqueOrThrow({
         where: { id: authSession.userId },
-        select: { customerId: true },
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true,
+          customerId: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -37,17 +45,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
       });
 
-    if (!user?.customerId) {
-      throw new ShelfError({
-        cause: null,
-        message: "No customer ID found for user",
-        additionalData: { userId },
-        label: "Subscription",
-      });
-    }
+    const customerId = await getOrCreateCustomerId({
+      id: userId,
+      ...user,
+    });
 
     const { url } = await createBillingPortalSession({
-      customerId: user.customerId,
+      customerId,
     });
 
     return redirect(url);

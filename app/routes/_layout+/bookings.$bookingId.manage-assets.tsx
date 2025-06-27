@@ -26,6 +26,7 @@ import {
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -38,7 +39,6 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 
@@ -277,7 +277,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id: bookingId, organizationId },
-        select: { id: true, status: true },
+        select: {
+          id: true,
+          status: true,
+          /** We need to get the original assets that were part of the booking before the update so we can compare */
+          assets: {
+            select: { id: true },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -308,24 +315,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           : "Changing of assets is not allowed for current status of booking.",
       });
     }
+    // Get existing asset IDs from the booking
+    const existingAssetIds = booking.assets.map((asset) => asset.id);
 
-    /** We only update the booking if there are assets to add */
-    if (assetIds.length > 0) {
-      /** We update the booking with the new assets */
+    // Filter out existing assets to get only newly added ones
+    const newAssetIds = assetIds.filter(
+      (assetId) => !existingAssetIds.includes(assetId)
+    );
+
+    /** We only update the booking if there are NEW assets to add */
+    if (newAssetIds.length > 0) {
+      /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds,
+        assetIds: newAssetIds, // Only the newly added assets
       });
 
-      /** We create notes for the assets that were added */
+      /** We create notes for the newly added assets */
       await createNotes({
         content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
           b.name
         }](/bookings/${b.id})**.`,
         type: "UPDATE",
         userId: authSession.userId,
-        assetIds,
+        assetIds: newAssetIds,
       });
     }
 
@@ -342,7 +356,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert,
-     * so we have to redirect to add-kits url
+     * so we have to redirect to manage-kits url
      */
     if (redirectTo) {
       return redirect(redirectTo);
@@ -395,7 +409,7 @@ export default function AddAssetsToNewBooking() {
 
   const manageKitsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/add-kits?${new URLSearchParams({
+      `/bookings/${booking.id}/manage-kits?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),
@@ -672,15 +686,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color="#575757" withDot={false}>
-            Uncategorized
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
 
       {/* Tags */}

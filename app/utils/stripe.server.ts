@@ -231,6 +231,41 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
   return groupedPrices;
 }
 
+/**
+ * We create the stripe customer on onboarding,
+ * however we keep this to double check in case something went wrong
+ * If the customerId is not found, we create a new customer in Stripe
+ * and return the customerId.
+ * @param user - The user object containing id, email, firstName, lastName, and customerId
+ * @returns The customerId of the user in Stripe
+ * @throws ShelfError if no customerId is found for the user
+ */
+export async function getOrCreateCustomerId(
+  user: Pick<User, "id" | "email" | "firstName" | "lastName" | "customerId">
+) {
+  /**
+   * We create the stripe customer on onboarding,
+   * however we keep this to double check in case something went wrong
+   */
+  const customerId = user.customerId
+    ? user.customerId
+    : await createStripeCustomer({
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        userId: user.id,
+      });
+
+  if (!customerId) {
+    throw new ShelfError({
+      cause: null,
+      message: "No customer ID found for user",
+      additionalData: { user },
+      label: "Subscription",
+    });
+  }
+  return customerId;
+}
+
 /** Creates customer entry in stripe */
 export const createStripeCustomer = async ({
   name,

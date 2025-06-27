@@ -88,15 +88,21 @@ export async function getLocation(
         include: include
           ? include
           : {
-              image: {
-                select: {
-                  updatedAt: true,
-                },
-              },
               assets: {
                 include: {
-                  category: true,
-                  tags: true,
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                  tags: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
                 },
                 skip,
                 take,

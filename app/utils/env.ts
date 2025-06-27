@@ -17,6 +17,8 @@ declare global {
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
+      FULL_CALENDAR_LICENSE_KEY: string;
+      SHOW_HOW_DID_YOU_FIND_US: string;
     };
   }
 }
@@ -42,7 +44,7 @@ declare global {
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
-      SMTP_PORT: number;
+      SMTP_PORT: string;
       SMTP_USER: string;
       SMTP_FROM: string;
       MAINTENANCE_MODE: string;
@@ -55,6 +57,8 @@ declare global {
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
       SUPPORT_EMAIL: string;
+      FULL_CALENDAR_LICENSE_KEY: string;
+      SHOW_HOW_DID_YOU_FIND_US: string;
     }
   }
 }
@@ -191,6 +195,10 @@ export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
 });
 
+export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {
+  isSecret: false,
+});
+
 export const MAINTENANCE_MODE =
   getEnv("MAINTENANCE_MODE", {
     isSecret: false,
@@ -199,6 +207,12 @@ export const MAINTENANCE_MODE =
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const SHOW_HOW_DID_YOU_FIND_US =
+  getEnv("SHOW_HOW_DID_YOU_FIND_US", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
@@ -246,5 +260,6 @@ export function getBrowserEnv() {
     URL_SHORTENER,
     FREE_TRIAL_DAYS,
     SUPPORT_EMAIL,
+    FULL_CALENDAR_LICENSE_KEY,
   };
 }

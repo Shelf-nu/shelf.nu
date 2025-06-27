@@ -6,7 +6,6 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-
 import {
   Form,
   useLoaderData,
@@ -229,7 +228,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id: bookingId, organizationId },
-        select: { id: true, status: true },
+        select: {
+          id: true,
+          status: true,
+          assets: {
+            select: { id: true },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -267,26 +272,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       where: { id: { in: kitIds } },
       select: { assets: { select: { id: true } } },
     });
+
     const allSelectedAssetIds = selectedKits.flatMap((k) =>
       k.assets.map((a) => a.id)
     );
 
-    /** We only update the booking if any new kit is added */
-    if (allSelectedAssetIds.length > 0) {
+    // Get existing asset IDs from the booking
+    const existingAssetIds = booking.assets.map((asset) => asset.id);
+
+    // Filter out existing assets to get only newly added ones
+    const newAssetIds = allSelectedAssetIds.filter(
+      (assetId) => !existingAssetIds.includes(assetId)
+    );
+
+    /** We only update the booking if there are NEW assets to add */
+    if (newAssetIds.length > 0) {
+      /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds: allSelectedAssetIds,
+        assetIds: newAssetIds, // Only the newly added assets from kits
       });
 
-      /** We create notes for the assets that were added */
+      /** We create notes for the newly added assets */
       await createNotes({
         content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
           b.name
         }](/bookings/${b.id})**.`,
         type: "UPDATE",
         userId,
-        assetIds: allSelectedAssetIds,
+        assetIds: newAssetIds, // Only the new assets
       });
     }
 
@@ -312,7 +327,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert dialog,
-     * so we have to redirect to add-assets url
+     * so we have to redirect to manage-assets url
      */
     if (redirectTo) {
       return redirect(redirectTo);
@@ -352,7 +367,7 @@ export default function AddKitsToBooking() {
 
   const manageAssetsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/add-assets?${new URLSearchParams({
+      `/bookings/${booking.id}/manage-assets?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),

@@ -190,9 +190,9 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
   return organization.type === OrganizationType.TEAM ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
       <Card className={tw("my-0 w-full", className)}>
-        <div className=" border-b pb-5">
-          <h2 className=" text-[18px] font-semibold">Permissions</h2>
-          <p>
+        <div className="border-b pb-5">
+          <h3 className="text-text-lg font-semibold">Permissions</h3>
+          <p className="text-sm text-gray-600">
             Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
             users.
           </p>

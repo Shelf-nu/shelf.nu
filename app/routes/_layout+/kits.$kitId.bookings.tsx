@@ -1,7 +1,8 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
@@ -43,37 +44,57 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status, teamMemberIds } =
-      getParamsValues(searchParams);
+    const {
+      page,
+      perPageParam,
+      search,
+      status,
+      teamMemberIds,
+      tags: filterTags,
+    } = getParamsValues(searchParams);
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
-    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
-      getBookings({
-        organizationId,
-        page,
-        perPage,
-        search,
-        userId,
-        statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-        ...(!canSeeAllBookings && {
-          // If the user is self service, we only show bookings that belong to that user)
-          custodianUserId: userId,
+    const [{ bookings, bookingCount }, teamMembersData, tags] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId,
+          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+          ...(!canSeeAllBookings && {
+            // If the user is self service, we only show bookings that belong to that user)
+            custodianUserId: userId,
+          }),
+          custodianTeamMemberIds: teamMemberIds,
+          kitId,
+          tags: filterTags,
+          extraInclude: {
+            tags: { select: { id: true, name: true } },
+          },
         }),
-        custodianTeamMemberIds: teamMemberIds,
-        kitId,
-      }),
 
-      // TeamMember data for custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        userId,
-      }),
-    ]);
+        // TeamMember data for custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          userId,
+        }),
+        db.tag.findMany({
+          where: {
+            organizationId,
+            OR: [
+              { useFor: { isEmpty: true } },
+              { useFor: { has: TagUseFor.BOOKING } },
+            ],
+          },
+        }),
+      ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -99,6 +120,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         modelName,
         ...teamMembersData,
+        tags,
+        totalTags: tags.length,
       })
     );
   } catch (cause) {

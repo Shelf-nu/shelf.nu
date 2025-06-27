@@ -1,4 +1,4 @@
-import { format, parseISO } from "date-fns";
+import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "./client-hints";
@@ -79,30 +79,6 @@ export function formatDatesForICal(date: Date, hints: ClientHint) {
   };
 
   return formatLocalDate(date, dateTimeFormat);
-}
-
-export function getBookingDefaultStartEndTimes() {
-  const now = new Date();
-
-  /** Add 10 minutes to current time */
-  const startDate = dateForDateTimeInputValue(
-    new Date(now.setMinutes(now.getMinutes() + 10, 0))
-  );
-
-  let endDate;
-  /** If its already after 6pm, set it to 6pm tomorrow */
-  if (
-    now.getHours() >= 18 ||
-    (now.getHours() === 17 && now.getMinutes() > 49)
-  ) {
-    now.setDate(now.getDate() + 1);
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  } else {
-    /** Set to 6pm today */
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  }
-
-  return { startDate, endDate };
 }
 
 export function getWeekNumber(currentDate: Date) {
@@ -216,6 +192,32 @@ export function adjustDateToUserTimezone(
   try {
     const date = toZonedTime(parseISO(dateString), timeZone);
     return format(date, "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Converts a UTC date (string or Date) to the user's local timezone as an ISO 8601 string.
+ *
+ * @param dateInput - The UTC date string or Date object
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} ISO 8601 string adjusted to the user's timezone (e.g. "2025-06-16T03:41:00-04:00")
+ */
+export function toIsoDateTimeToUserTimezone(
+  dateInput: string | Date,
+  timeZone: string
+): string {
+  if (!dateInput) return "";
+
+  try {
+    const date =
+      typeof dateInput === "string" ? parseISO(dateInput) : dateInput;
+
+    const zonedDate = toZonedTime(date, timeZone);
+
+    // Return ISO 8601 string with timezone offset
+    return formatISO(zonedDate, { representation: "complete" });
   } catch {
     return "";
   }

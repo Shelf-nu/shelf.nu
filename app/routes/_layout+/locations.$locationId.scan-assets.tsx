@@ -26,7 +26,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { action as manageAssetsAction } from "./locations.$locationId.add-assets";
+import { action as manageAssetsAction } from "./locations.$locationId.manage-assets";
 
 export type LoaderData = typeof loader;
 
