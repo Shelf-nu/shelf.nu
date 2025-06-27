@@ -71,6 +71,7 @@ We have multiple user creation flows throughout the application (registration, i
 
 - Triggers after any booking is created, updated, or deleted
 - Creates a `BookingChange` record with complete before/after snapshots
+- Captures both `bookingId` and `organizationId` for secure, fast queries
 - Captures full user details (creator, custodian user, custodian team member) at the time of change
 - Includes all associated assets with their kit, category, and location relationships
 - Includes all associated tags with their configuration
@@ -78,7 +79,7 @@ We have multiple user creation flows throughout the application (registration, i
 - For DELETE operations, preserves the complete booking state that was deleted
 
 **Why we use it**:
-Bookings are critical business data involving multiple users, valuable assets, and complex relationships. This trigger ensures we have a complete audit trail for compliance, accountability, and debugging purposes. It captures historical context that might be lost if users change names, assets are moved between kits, or relationships are modified after the fact.
+Bookings are critical business data involving multiple users, valuable assets, and complex relationships. This trigger ensures we have a complete audit trail for compliance, accountability, and debugging purposes. It captures historical context that might be lost if users change names, assets are moved between kits, or relationships are modified after the fact. The `organizationId` field enables secure, fast queries and prevents cross-organization data access.
 
 ---
 
@@ -94,11 +95,12 @@ Bookings are critical business data involving multiple users, valuable assets, a
 
 - Triggers when the many-to-many relationship between bookings and assets changes
 - Creates `BookingChange` records with `changeType` of `ASSET_ADDED` or `ASSET_REMOVED`
+- Captures both `bookingId` and `organizationId` (looked up from the booking) for secure queries
 - Captures the complete booking state after the asset relationship change
 - Includes full asset details including kit, category, and location information at the time of change
 
 **Why we use it**:
-Asset relationships can change independently of booking updates. This trigger ensures we track these changes separately, which is crucial for understanding kit usage patterns and asset movement history. Since kits connect to bookings through assets, this trigger is essential for kit audit trails.
+Asset relationships can change independently of booking updates. This trigger ensures we track these changes separately, which is crucial for understanding kit usage patterns and asset movement history. Since kits connect to bookings through assets, this trigger is essential for kit audit trails. The `organizationId` ensures these audit records can be queried securely and efficiently.
 
 ---
 
@@ -114,11 +116,12 @@ Asset relationships can change independently of booking updates. This trigger en
 
 - Triggers when the many-to-many relationship between bookings and tags changes
 - Creates `BookingChange` records with `changeType` of `TAG_ADDED` or `TAG_REMOVED`
+- Captures both `bookingId` and `organizationId` (looked up from the booking) for secure queries
 - Captures the complete booking state after the tag relationship change
 - Includes full tag details including their `useFor` configuration
 
 **Why we use it**:
-Tags are used for categorization and workflow management of bookings. This trigger ensures we maintain a history of how bookings were tagged over time, which is valuable for understanding booking patterns, workflow changes, and organizational processes.
+Tags are used for categorization and workflow management of bookings. This trigger ensures we maintain a history of how bookings were tagged over time, which is valuable for understanding booking patterns, workflow changes, and organizational processes. The `organizationId` enables secure, organization-scoped audit queries.
 
 ---
 

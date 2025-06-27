@@ -547,6 +547,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  bookingChanges      BookingChange[]
 
   // Indexes for foreign keys
   @@index([userId])
@@ -856,6 +857,10 @@ model BookingChange {
   bookingId String
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   
+  // Reference to the organization (for security and performance)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  
   // Change metadata
   changeType ChangeType
   changedBy  String?    // User ID who made the change, if available
@@ -872,9 +877,11 @@ model BookingChange {
   // Metadata
   createdAt DateTime @default(now())
   
-  @@index([bookingId, createdAt])
-  @@index([changeType, createdAt])
-  @@index([changedBy, createdAt])
+  // OPTIMAL INDEXES for query patterns
+  @@index([bookingId, organizationId])           // Primary query pattern - FASTEST & SECURE
+  @@index([organizationId, createdAt])           // Recent changes by organization  
+  @@index([organizationId, changeType])          // Changes by type per organization
+  @@index([organizationId, bookingId, createdAt]) // Complete audit trail for specific booking
 }
 
 enum ChangeType {

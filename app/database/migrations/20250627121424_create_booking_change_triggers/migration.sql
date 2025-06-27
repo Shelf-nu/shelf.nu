@@ -179,6 +179,7 @@ BEGIN
         INSERT INTO "BookingChange" (
             id,
             "bookingId",
+            "organizationId",
             "changeType",
             "bookingBefore",
             "bookingAfter",
@@ -187,6 +188,7 @@ BEGIN
         ) VALUES (
             change_id,
             COALESCE(NEW.id, OLD.id),
+            COALESCE(NEW."organizationId", OLD."organizationId"),
             change_type,
             booking_before,
             booking_after,
@@ -206,6 +208,7 @@ DECLARE
     change_type text;
     booking_after jsonb;
     change_id text;
+    org_id text;
 BEGIN
     -- Generate change ID
     SELECT gen_random_uuid()::text INTO change_id;
@@ -214,9 +217,13 @@ BEGIN
         change_type := ''ASSET_ADDED'';
         booking_after := get_booking_snapshot(NEW."B");
         
+        -- Get organizationId from the booking
+        SELECT "organizationId" INTO org_id FROM "Booking" WHERE id = NEW."B";
+        
         INSERT INTO "BookingChange" (
             id,
             "bookingId",
+            "organizationId",
             "changeType",
             "bookingAfter",
             "changedFields",
@@ -224,6 +231,7 @@ BEGIN
         ) VALUES (
             change_id,
             NEW."B",
+            org_id,
             change_type,
             booking_after,
             ARRAY[''assets''],
@@ -234,9 +242,13 @@ BEGIN
         change_type := ''ASSET_REMOVED'';
         booking_after := get_booking_snapshot(OLD."B");
         
+        -- Get organizationId from the booking
+        SELECT "organizationId" INTO org_id FROM "Booking" WHERE id = OLD."B";
+        
         INSERT INTO "BookingChange" (
             id,
             "bookingId",
+            "organizationId",
             "changeType",
             "bookingAfter",
             "changedFields",
@@ -244,6 +256,7 @@ BEGIN
         ) VALUES (
             change_id,
             OLD."B",
+            org_id,
             change_type,
             booking_after,
             ARRAY[''assets''],
@@ -262,6 +275,7 @@ DECLARE
     change_type text;
     booking_after jsonb;
     change_id text;
+    org_id text;
 BEGIN
     -- Generate change ID
     SELECT gen_random_uuid()::text INTO change_id;
@@ -270,9 +284,13 @@ BEGIN
         change_type := ''TAG_ADDED'';
         booking_after := get_booking_snapshot(NEW."B");
         
+        -- Get organizationId from the booking
+        SELECT "organizationId" INTO org_id FROM "Booking" WHERE id = NEW."B";
+        
         INSERT INTO "BookingChange" (
             id,
             "bookingId",
+            "organizationId",
             "changeType",
             "bookingAfter",
             "changedFields",
@@ -280,6 +298,7 @@ BEGIN
         ) VALUES (
             change_id,
             NEW."B",
+            org_id,
             change_type,
             booking_after,
             ARRAY[''tags''],
@@ -290,9 +309,13 @@ BEGIN
         change_type := ''TAG_REMOVED'';
         booking_after := get_booking_snapshot(OLD."B");
         
+        -- Get organizationId from the booking
+        SELECT "organizationId" INTO org_id FROM "Booking" WHERE id = OLD."B";
+        
         INSERT INTO "BookingChange" (
             id,
             "bookingId",
+            "organizationId",
             "changeType",
             "bookingAfter",
             "changedFields",
@@ -300,6 +323,7 @@ BEGIN
         ) VALUES (
             change_id,
             OLD."B",
+            org_id,
             change_type,
             booking_after,
             ARRAY[''tags''],
@@ -331,3 +355,4 @@ CREATE OR REPLACE TRIGGER booking_tag_audit_trigger
     AFTER INSERT OR DELETE ON "_BookingToTag"
     FOR EACH ROW
     EXECUTE FUNCTION log_booking_tag_changes();
+
