@@ -51,11 +51,18 @@ export function AdvancedFilteringAndSorting() {
   );
 }
 
-const getTriggerClasses = (open: boolean, activeItems: number) =>
+const getTriggerClasses = (
+  open: boolean,
+  activeItems: number,
+  className?: string
+) =>
   tw(
     "font-normal text-gray-500",
     open ? "bg-gray-50" : "",
-    activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
+    activeItems > 0
+      ? "whitespace-nowrap border-primary bg-primary-25 text-primary"
+      : "",
+    className
   );
 
 function AdvancedFilter() {
