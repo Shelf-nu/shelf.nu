@@ -103,6 +103,7 @@ export async function getLocation(
                       name: true,
                     },
                   },
+                  kit: { select: { id: true, name: true, status: true } },
                 },
                 skip,
                 take,

@@ -54,3 +54,70 @@ If you think this is a mistake, please contact the organization’s administrato
 Thanks,
 The Shelf Team
 `;
+
+export const assetCustodyAssignedEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+}) => `Howdy,
+
+${assignerName} has assigned you as custodian for ${assetName}.
+Please click the link below to view the asset:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;
+
+export const assetCustodyRevokedEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+}) => `Howdy,
+
+${assignerName} has revoked your custody for ${assetName}.
+Please click the link below to view the asset:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;
+
+export const assetCustodyAssignedWithAgreementEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+  custodyId,
+  signatureRequired,
+  orgName,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+  custodyId: string;
+  signatureRequired: boolean;
+  orgName: string;
+}) => `Howdy,
+
+${assignerName} has assigned you as custodian for ${assetName}.
+Please click the link below to view the custody agreement ${
+  signatureRequired ? "and sign it" : ""
+}:
+${SERVER_URL}/sign/${custodyId}
+
+To view the asset, please click the link below:
+${SERVER_URL}/assets/${assetId}
+
+Workspace: ${orgName}
+
+Thanks,
+The Shelf Team
+`;

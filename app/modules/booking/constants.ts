@@ -39,6 +39,7 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           color: true,
         },
       },
+      kit: { select: { id: true, name: true } },
     },
   },
 } satisfies Prisma.BookingInclude;

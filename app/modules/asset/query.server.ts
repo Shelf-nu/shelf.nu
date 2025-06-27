@@ -1282,7 +1282,8 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
-      c.id AS "categoryId",
+      k.status AS "kitStatus",
+    c.id AS "categoryId",
       c.name AS "categoryName",
       c.color AS "categoryColor",
       CASE 
@@ -1295,7 +1296,8 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           WHEN cu.id IS NOT NULL THEN
             jsonb_build_object(
               'name', tm.name,
-              'custodian', jsonb_build_object(
+              'signatureStatus', cu."signatureStatus",
+            'custodian', jsonb_build_object(
                 'name', tm.name,
                 'user', CASE 
                   WHEN u.id IS NOT NULL THEN
