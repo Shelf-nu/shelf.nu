@@ -171,7 +171,7 @@ export async function checkDomainSSOStatus(
   email: string
 ): Promise<DomainCheckResult> {
   try {
-    const domain = email.split("@")[1].toLowerCase();
+    const domain = email.split("@")[1]?.toLowerCase();
 
     // Check all SSO providers configured for this domain
     const ssoConfigs = await db.$queryRaw<{ ssoProviderId: string }[]>`
