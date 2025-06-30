@@ -560,8 +560,17 @@ export async function bulkInviteUsers({
   extraMessage?: string | null;
 }) {
   try {
+    // Filter out entries with missing or invalid email/role
+    const validUsers = users.filter(
+      (user) =>
+        user.email &&
+        user.role &&
+        user.email.trim() !== "" &&
+        user.role.trim() !== ""
+    );
+
     // Filter out duplicate emails
-    const uniquePayloads = lodash.uniqBy(users, (user) => user.email);
+    const uniquePayloads = lodash.uniqBy(validUsers, (user) => user.email);
 
     // Batch validate all emails against SS
     await Promise.all(
@@ -825,7 +834,7 @@ export async function bulkInviteUsers({
       cause,
       message,
       label,
-      additionalData: { users },
+      additionalData: { users, userId, organizationId, extraMessage },
     });
   }
 }
