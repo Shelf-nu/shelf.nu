@@ -426,10 +426,12 @@ export const AssetForm = ({
           >
             <BarcodesInput
               barcodes={[]}
-              typeName={(i) => `barcodes[${i}].type`}
-              valueName={(i) => `barcodes[${i}].value`}
-              typeError={() => undefined}
-              valueError={() => undefined}
+              typeName={(i) => `barcodes.${i}.type`}
+              valueName={(i) => `barcodes.${i}.value`}
+              // typeError={(i) => zo.errors[`barcodes.${i}.type`]?.()?.message}
+              // valueError={(i) => zo.errors[`barcodes.${i}.value`]?.()?.message}
+              typeError={(i) => undefined}
+              valueError={(i) => undefined}
               disabled={disabled}
             />
             <When truthy={!!zo.errors.barcodes()?.message}>

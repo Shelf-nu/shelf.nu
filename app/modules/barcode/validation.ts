@@ -115,21 +115,19 @@ export function validateBarcodeValue(
 /**
  * Zod schema for a single barcode
  */
-export const BarcodeSchema = z
-  .object({
-    type: z.nativeEnum(BarcodeType),
-    value: z.string().min(1, "Barcode value is required"),
-  })
-  .refine(
-    (data) => {
-      const error = validateBarcodeValue(data.type, data.value);
-      return error === null;
-    },
-    (data) => ({
-      message: validateBarcodeValue(data.type, data.value) || "Invalid barcode",
+export const BarcodeSchema = z.object({
+  type: z.nativeEnum(BarcodeType),
+  value: z.string().min(1, "Barcode value is required"),
+}).superRefine((data, ctx) => {
+  const error = validateBarcodeValue(data.type, data.value);
+  if (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error,
       path: ["value"],
-    })
-  );
+    });
+  }
+});
 
 /**
  * Zod schema for array of barcodes with uniqueness validation
