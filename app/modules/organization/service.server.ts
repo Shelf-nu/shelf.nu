@@ -421,8 +421,34 @@ export async function toggleWorkspaceDisabled({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while toggling organization SSO. Please try again or contact support.",
+        "Something went wrong while toggling workspace disabled. Please try again or contact support.",
       additionalData: { organizationId, workspaceDisabled },
+      label,
+    });
+  }
+}
+
+export async function toggleBarcodeEnabled({
+  organizationId,
+  barcodesEnabled,
+}: {
+  organizationId: string;
+  barcodesEnabled: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId, type: OrganizationType.TEAM },
+      data: {
+        barcodesEnabled,
+        barcodesEnabledAt: barcodesEnabled ? new Date() : null,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling barcode functionality. Please try again or contact support.",
+      additionalData: { organizationId, barcodesEnabled },
       label,
     });
   }

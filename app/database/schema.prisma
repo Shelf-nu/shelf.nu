@@ -529,6 +529,10 @@ model Organization {
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
+  // Barcode feature (admin-managed, will later integrate with custom tier limits)
+  barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
+  barcodesEnabledAt DateTime? // Track when barcode feature was enabled
+
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
