@@ -53,7 +53,7 @@ export async function createBarcode({
       });
     }
 
-    return await db.barcode.create({
+    const barcode = await db.barcode.create({
       data: {
         type,
         value: value.toUpperCase(), // Normalize to uppercase
@@ -62,6 +62,7 @@ export async function createBarcode({
         ...(kitId && { kitId }),
       },
     });
+    return barcode;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { type, value, organizationId, userId, assetId, kitId },
@@ -155,10 +156,11 @@ export async function updateBarcode({
       }
     }
 
-    return await db.barcode.update({
+    const barcode = await db.barcode.update({
       where: { id, organizationId },
       data: updateData,
     });
+    return barcode;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { id, type, value, organizationId },
@@ -231,7 +233,7 @@ export async function getBarcodeByValue({
   organizationId: Organization["id"];
 }): Promise<Barcode | null> {
   try {
-    return await db.barcode.findFirst({
+    const barcode = await db.barcode.findFirst({
       where: {
         value: value.toUpperCase(),
         organizationId,
@@ -241,6 +243,7 @@ export async function getBarcodeByValue({
         kit: true,
       },
     });
+    return barcode;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -262,7 +265,7 @@ export async function getAssetBarcodes({
   organizationId: Organization["id"];
 }): Promise<Barcode[]> {
   try {
-    return await db.barcode.findMany({
+    const barcodes = await db.barcode.findMany({
       where: {
         assetId,
         organizationId,
@@ -271,6 +274,7 @@ export async function getAssetBarcodes({
         createdAt: "asc",
       },
     });
+    return barcodes;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -292,7 +296,7 @@ export async function getKitBarcodes({
   organizationId: Organization["id"];
 }): Promise<Barcode[]> {
   try {
-    return await db.barcode.findMany({
+    const barcodes = await db.barcode.findMany({
       where: {
         kitId,
         organizationId,
@@ -301,6 +305,7 @@ export async function getKitBarcodes({
         createdAt: "asc",
       },
     });
+    return barcodes;
   } catch (cause) {
     throw new ShelfError({
       cause,
