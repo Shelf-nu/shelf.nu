@@ -11,7 +11,7 @@ export function useBarcodePermissions() {
      * Whether barcodes are enabled for the current organization
      */
     barcodesEnabled: currentOrganization?.barcodesEnabled ?? false,
-    
+
     /**
      * Whether the user can use barcode features
      * For now this is the same as barcodesEnabled, but can be extended

@@ -18,21 +18,21 @@ const validateCode128 = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
-  
+
   if (value.length < BARCODE_LENGTHS.CODE128_MIN) {
     return `Code128 barcode must be at least ${BARCODE_LENGTHS.CODE128_MIN} characters`;
   }
-  
+
   if (value.length > BARCODE_LENGTHS.CODE128_MAX) {
     return `Code128 barcode too long (max ${BARCODE_LENGTHS.CODE128_MAX} characters)`;
   }
-  
+
   // Check for valid ASCII printable characters
   const validAsciiRegex = /^[\x20-\x7E]*$/;
   if (!validAsciiRegex.test(value)) {
     return "Code128 barcode contains invalid characters";
   }
-  
+
   return null;
 };
 
@@ -44,17 +44,17 @@ const validateCode39 = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
-  
+
   if (value.length !== BARCODE_LENGTHS.CODE39_LENGTH) {
     return `Code39 barcode must be exactly ${BARCODE_LENGTHS.CODE39_LENGTH} characters`;
   }
-  
+
   // Code39 alphanumeric: A-Z, 0-9 (industry standard for asset tracking)
   const alphanumericRegex = /^[A-Z0-9]*$/;
   if (!alphanumericRegex.test(value)) {
     return "Code39 barcode must contain only uppercase letters (A-Z) and numbers (0-9)";
   }
-  
+
   return null;
 };
 
@@ -66,31 +66,40 @@ const validateMicroQRCode = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
-  
+
   if (value.length !== BARCODE_LENGTHS.MICRO_QR_LENGTH) {
     return `Micro QR Code must be exactly ${BARCODE_LENGTHS.MICRO_QR_LENGTH} characters`;
   }
-  
+
   // Alphanumeric only for maximum compatibility and compactness
   const alphanumericRegex = /^[A-Z0-9]*$/;
   if (!alphanumericRegex.test(value)) {
     return "Micro QR Code must contain only uppercase letters (A-Z) and numbers (0-9)";
   }
-  
+
   return null;
 };
 
 /**
  * Check if Code128 value should show warning (over 30 characters)
  */
-export function shouldWarnLongBarcode(type: BarcodeType, value: string): boolean {
-  return type === BarcodeType.Code128 && value.length > BARCODE_LENGTHS.CODE128_WARN_THRESHOLD;
+export function shouldWarnLongBarcode(
+  type: BarcodeType,
+  value: string
+): boolean {
+  return (
+    type === BarcodeType.Code128 &&
+    value.length > BARCODE_LENGTHS.CODE128_WARN_THRESHOLD
+  );
 }
 
 /**
  * Validates a barcode value based on its type
  */
-export function validateBarcodeValue(type: BarcodeType, value: string): string | null {
+export function validateBarcodeValue(
+  type: BarcodeType,
+  value: string
+): string | null {
   switch (type) {
     case BarcodeType.Code128:
       return validateCode128(value);
@@ -106,19 +115,21 @@ export function validateBarcodeValue(type: BarcodeType, value: string): string |
 /**
  * Zod schema for a single barcode
  */
-export const BarcodeSchema = z.object({
-  type: z.nativeEnum(BarcodeType),
-  value: z.string().min(1, "Barcode value is required"),
-}).refine(
-  (data) => {
-    const error = validateBarcodeValue(data.type, data.value);
-    return error === null;
-  },
-  (data) => ({
-    message: validateBarcodeValue(data.type, data.value) || "Invalid barcode",
-    path: ["value"],
+export const BarcodeSchema = z
+  .object({
+    type: z.nativeEnum(BarcodeType),
+    value: z.string().min(1, "Barcode value is required"),
   })
-);
+  .refine(
+    (data) => {
+      const error = validateBarcodeValue(data.type, data.value);
+      return error === null;
+    },
+    (data) => ({
+      message: validateBarcodeValue(data.type, data.value) || "Invalid barcode",
+      path: ["value"],
+    })
+  );
 
 /**
  * Zod schema for array of barcodes with uniqueness validation
@@ -129,9 +140,11 @@ export const BarcodesArraySchema = z
   .refine(
     (barcodes) => {
       if (!barcodes || barcodes.length === 0) return true;
-      
+
       // Check for duplicate values within the form
-      const values = barcodes.map(b => b.value).filter(v => v.trim() !== "");
+      const values = barcodes
+        .map((b) => b.value)
+        .filter((v) => v.trim() !== "");
       const uniqueValues = new Set(values);
       return values.length === uniqueValues.size;
     },
