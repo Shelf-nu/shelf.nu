@@ -30,10 +30,13 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    esbuildOptions: {
+      target: "esnext",
+    },
     include: ["./app/routes/**/*"],
   },
   build: {
-    target: "ES2022",
+    target: "esnext",
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {
