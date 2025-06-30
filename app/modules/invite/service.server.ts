@@ -834,7 +834,7 @@ export async function bulkInviteUsers({
       cause,
       message,
       label,
-      additionalData: { users },
+      additionalData: { users, userId, organizationId, extraMessage },
     });
   }
 }
