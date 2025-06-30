@@ -315,6 +315,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   selfServiceCanSeeBookings: true,
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
+  barcodesEnabled: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{

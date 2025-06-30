@@ -12,18 +12,20 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
+import { BarcodesArraySchema } from "~/modules/barcode/validation";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
-
 import { zodFieldIsRequired } from "~/utils/zod";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
+import BarcodesInput from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
@@ -43,6 +45,7 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
+import When from "../when/when";
 
 export const NewAssetFormSchema = z.object({
   title: z
@@ -67,6 +70,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  barcodes: BarcodesArraySchema,
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -103,6 +107,7 @@ export const AssetForm = ({
   tags,
 }: Props) => {
   const navigation = useNavigation();
+  const { canUseBarcodes } = useBarcodePermissions();
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
     (cf) =>
@@ -412,6 +417,28 @@ export const AssetForm = ({
             </span>
           </div>
         </FormRow>
+
+        <When truthy={canUseBarcodes}>
+          <FormRow
+            rowLabel={"Barcodes"}
+            className="border-b-0"
+            subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Micro QR). Note: Each asset automatically gets a default Shelf QR code for tracking."
+          >
+            <BarcodesInput
+              barcodes={[]}
+              typeName={(i) => `barcodes[${i}].type`}
+              valueName={(i) => `barcodes[${i}].value`}
+              typeError={() => undefined}
+              valueError={() => undefined}
+              disabled={disabled}
+            />
+            <When truthy={!!zo.errors.barcodes()?.message}>
+              <p className="mt-2 text-sm text-red-500">
+                {zo.errors.barcodes()?.message}
+              </p>
+            </When>
+          </FormRow>
+        </When>
 
         <AssetCustomFields zo={zo} schema={FormSchema} currency={currency} />
 

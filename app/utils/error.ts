@@ -50,6 +50,7 @@ export type FailureReason = {
     | "Assets"
     | "Asset Index Settings"
     | "Auth"
+    | "Barcode"
     | "Booking"
     | "Booking Settings"
     | "Category"
