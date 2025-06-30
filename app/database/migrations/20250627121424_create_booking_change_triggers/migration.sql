@@ -55,7 +55,7 @@ BEGIN
             ''title'', a.title,
             ''description'', a.description,
             ''status'', a.status,
-            ''valuation'', a.valuation,
+            ''valuation'', a.value,  
             ''availableToBook'', a."availableToBook",
             ''categoryId'', a."categoryId",
             ''locationId'', a."locationId",
@@ -189,7 +189,7 @@ BEGIN
             change_id,
             COALESCE(NEW.id, OLD.id),
             COALESCE(NEW."organizationId", OLD."organizationId"),
-            change_type,
+            change_type::"ChangeType", 
             booking_before,
             booking_after,
             changed_fields,
@@ -232,7 +232,7 @@ BEGIN
             change_id,
             NEW."B",
             org_id,
-            change_type,
+            change_type::"ChangeType",  -- Cast text to enum type
             booking_after,
             ARRAY[''assets''],
             NOW()
@@ -257,7 +257,7 @@ BEGIN
             change_id,
             OLD."B",
             org_id,
-            change_type,
+            change_type::"ChangeType",  
             booking_after,
             ARRAY[''assets''],
             NOW()
@@ -299,7 +299,7 @@ BEGIN
             change_id,
             NEW."B",
             org_id,
-            change_type,
+            change_type::"ChangeType", 
             booking_after,
             ARRAY[''tags''],
             NOW()
@@ -324,7 +324,7 @@ BEGIN
             change_id,
             OLD."B",
             org_id,
-            change_type,
+            change_type::"ChangeType", 
             booking_after,
             ARRAY[''tags''],
             NOW()
@@ -355,4 +355,3 @@ CREATE OR REPLACE TRIGGER booking_tag_audit_trigger
     AFTER INSERT OR DELETE ON "_BookingToTag"
     FOR EACH ROW
     EXECUTE FUNCTION log_booking_tag_changes();
-
