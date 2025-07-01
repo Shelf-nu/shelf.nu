@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Kit } from "@prisma/client";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -7,14 +8,17 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import When from "../when/when";
 
 export const NewKitFormSchema = z.object({
   name: z
@@ -45,6 +49,8 @@ export default function KitsForm({
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const { canUseBarcodes } = useBarcodePermissions();
+  const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
@@ -66,6 +72,21 @@ export default function KitsForm({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={(e) => {
+          // Force validation of all barcode fields to show errors
+          barcodesInputRef.current?.validateAll();
+          
+          // Check for barcode validation errors
+          const hasBarcodeErrors = barcodesInputRef.current?.hasErrors();
+          
+          // If there are barcode errors, prevent submission
+          // Zorm will handle its own validation and prevent submission if needed
+          if (hasBarcodeErrors) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+        }}
       >
         <AbsolutePositionedHeaderActions className="hidden md:mr-4 md:flex">
           <Button type="submit" disabled={disabled || nameErrorMessage}>
@@ -138,6 +159,22 @@ export default function KitsForm({
             </p>
           </div>
         </FormRow>
+
+        <When truthy={canUseBarcodes}>
+          <FormRow
+            rowLabel={"Barcodes"}
+            className="border-b-0"
+            subHeading="Add additional barcodes to this kit (Code 128, Code 39, or Micro QR). Note: Each kit automatically gets a default Shelf QR code for tracking."
+          >
+            <BarcodesInput
+              ref={barcodesInputRef}
+              barcodes={[]}
+              typeName={(i) => `barcodes[${i}].type`}
+              valueName={(i) => `barcodes[${i}].value`}
+              disabled={disabled}
+            />
+          </FormRow>
+        </When>
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto">

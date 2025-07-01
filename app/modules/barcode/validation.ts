@@ -130,4 +130,3 @@ export const BarcodeSchema = z
       });
     }
   });
-
