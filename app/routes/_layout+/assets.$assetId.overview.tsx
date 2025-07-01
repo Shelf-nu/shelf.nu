@@ -11,6 +11,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -18,7 +19,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { QrPreview } from "~/components/qr/qr-preview";
-
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -372,6 +372,40 @@ export default function AssetOverview() {
                         currency: asset.organization.currency,
                       })}{" "}
                     </div>
+                  </div>
+                </li>
+              ) : null}
+
+              {asset && asset?.barcodes?.length > 0 ? (
+                <li className="w-full p-4 last:border-b-0 md:block">
+                  <span className="mb-3 block text-[14px] font-medium text-gray-900">
+                    Barcodes ({asset.barcodes.length})
+                  </span>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {asset.barcodes.map((barcode) => (
+                      <div
+                        key={barcode.id}
+                        className="inline-block rounded-lg border bg-gray-50 p-3"
+                      >
+                        <div className="mb-2 flex items-center gap-1">
+                          <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                            {barcode.type}
+                          </span>
+                          <span className="font-mono  text-gray-700">
+                            {barcode.value}
+                          </span>
+                        </div>
+                        <div className="flex flex-col justify-center rounded bg-white p-2 ">
+                          <BarcodeDisplay
+                            type={barcode.type}
+                            value={barcode.value}
+                            height={60}
+                            width={1.5}
+                            fontSize={12}
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </li>
               ) : null}

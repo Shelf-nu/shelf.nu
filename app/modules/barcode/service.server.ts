@@ -8,7 +8,13 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  maybeUniqueConstraintViolation,
+  VALIDATION_ERROR,
+  isLikeShelfError,
+} from "~/utils/error";
+import type { ValidationError } from "~/utils/http";
 import { validateBarcodeValue } from "./validation";
 
 const label: ErrorLabel = "Barcode";
@@ -108,6 +114,9 @@ export async function createBarcodes({
       }
     }
 
+    // Check for duplicate barcode values before creating
+    await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId);
+
     // Use createMany for bulk insert performance
     await db.barcode.createMany({
       data: barcodes.map((barcode) => ({
@@ -119,6 +128,14 @@ export async function createBarcodes({
       })),
     });
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, organizationId, userId, assetId, kitId },
     });
@@ -350,10 +367,118 @@ export async function replaceBarcodes({
       });
     }
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to replace barcodes",
       additionalData: { barcodes, assetId, kitId, organizationId, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Validates that all barcode values are unique within the organization
+ * Throws ShelfError with validation errors if duplicates are found
+ */
+export async function validateBarcodeUniqueness(
+  barcodes: { type: BarcodeType; value: string }[],
+  organizationId: Organization["id"],
+  assetId?: Asset["id"],
+  kitId?: Kit["id"],
+  excludeItemId?: string // For updates, exclude current asset/kit
+): Promise<void> {
+  const validationErrors: ValidationError<any> = {};
+
+  // Check for duplicates within the submitted barcodes
+  const duplicateIndexes = new Set<number>();
+  const seenValues = new Map<string, number>();
+
+  for (let i = 0; i < barcodes.length; i++) {
+    const normalizedValue = barcodes[i].value.toUpperCase();
+
+    if (seenValues.has(normalizedValue)) {
+      // Mark both the first occurrence and current as duplicates
+      const firstIndex = seenValues.get(normalizedValue)!;
+      duplicateIndexes.add(firstIndex);
+      duplicateIndexes.add(i);
+    } else {
+      seenValues.set(normalizedValue, i);
+    }
+  }
+
+  // Check for duplicates in the database
+  for (let i = 0; i < barcodes.length; i++) {
+    const barcode = barcodes[i];
+    const normalizedValue = barcode.value.toUpperCase();
+
+    // For updates, exclude barcodes that belong to the current asset/kit being edited
+    const query = {
+      value: normalizedValue,
+      organizationId,
+      ...(excludeItemId && {
+        NOT: assetId ? { assetId: excludeItemId } : { kitId: excludeItemId }
+      }),
+    };
+    
+    console.log(`Checking barcode ${i}:`, { 
+      normalizedValue, 
+      query: JSON.stringify(query, null, 2), 
+      excludeItemId 
+    });
+    
+    // Debug: Check what barcodes exist with this value in the database
+    const allMatchingBarcodes = await db.barcode.findMany({
+      where: {
+        value: normalizedValue,
+        organizationId,
+      },
+      include: {
+        asset: { select: { title: true, id: true } },
+        kit: { select: { name: true, id: true } },
+      },
+    });
+    console.log("allMatchingBarcodes:", allMatchingBarcodes);
+    
+    const existingBarcode = await db.barcode.findFirst({
+      where: query,
+      include: {
+        asset: { select: { title: true } },
+        kit: { select: { name: true } },
+      },
+    });
+
+    console.log("existingBarcode", existingBarcode);
+    if (existingBarcode) {
+      const itemName =
+        existingBarcode.asset?.title ||
+        existingBarcode.kit?.name ||
+        "Unknown item";
+      validationErrors[`barcodes[${i}].value`] = {
+        message: `This barcode value is already used by "${itemName}"`,
+      };
+    } else if (duplicateIndexes.has(i)) {
+      validationErrors[`barcodes[${i}].value`] = {
+        message: "This barcode value is duplicated in the form",
+      };
+    }
+  }
+
+  if (Object.keys(validationErrors).length > 0) {
+    console.log("validationErrors", validationErrors);
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Some barcode values are already in use. Please use unique values.",
+      status: 400,
+      additionalData: { [VALIDATION_ERROR]: validationErrors },
       label,
     });
   }
@@ -392,6 +517,23 @@ export async function updateBarcodes({
         });
       }
     }
+
+    // Check for duplicate barcode values before updating
+    const currentItemId = assetId || kitId;
+    console.log("validateBarcodeUniqueness params:", { 
+      barcodes: barcodes.map(b => ({ type: b.type, value: b.value })), 
+      organizationId, 
+      assetId, 
+      kitId, 
+      currentItemId 
+    });
+    await validateBarcodeUniqueness(
+      barcodes,
+      organizationId,
+      assetId,
+      kitId,
+      currentItemId
+    );
 
     // Get existing barcodes
     const existingBarcodes = await db.barcode.findMany({
@@ -460,6 +602,11 @@ export async function updateBarcodes({
     // Execute all operations in a transaction
     await db.$transaction(operations);
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (cause instanceof ShelfError && cause.additionalData?.[VALIDATION_ERROR]) {
+      throw cause;
+    }
+    
     throw new ShelfError({
       cause,
       message: "Failed to update barcodes",

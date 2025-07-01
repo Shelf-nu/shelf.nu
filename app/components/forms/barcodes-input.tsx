@@ -1,5 +1,6 @@
 import { useState, forwardRef, useImperativeHandle, useMemo } from "react";
 import { BarcodeType } from "@prisma/client";
+import { useActionData } from "@remix-run/react";
 import {
   Popover,
   PopoverTrigger,
@@ -8,6 +9,7 @@ import {
 } from "@radix-ui/react-popover";
 import { ChevronRight } from "~/components/icons/library";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
+import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import Input from "./input";
 import { Button } from "../shared/button";
@@ -56,6 +58,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
   ) {
     const [barcodes, setBarcodes] = useState<BarcodeInput[]>(incomingBarcodes);
     const [touchedFields, setTouchedFields] = useState<Set<number>>(new Set());
+    
+    // Get server-side validation errors from action data
+    const actionData = useActionData<{ error?: any }>();
+    const serverValidationErrors = getValidationErrors(actionData?.error);
 
     // Custom validation logic
     const validationErrors = useMemo(() => {
@@ -105,9 +111,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
     return (
       <div className={tw("w-full", className)} style={style}>
         {barcodes.map((barcode, i) => {
-          const valueErrorMessage = touchedFields.has(i)
-            ? validationErrors[i]
-            : undefined;
+          // Show server errors first, then client-side validation errors
+          const serverError = serverValidationErrors?.[`barcodes[${i}].value`]?.message;
+          const clientError = touchedFields.has(i) ? validationErrors[i] : undefined;
+          const valueErrorMessage = serverError || clientError;
 
           return (
             <div key={i} className="mb-3">

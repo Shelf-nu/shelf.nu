@@ -29,7 +29,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { updateBarcodes } from "~/modules/barcode/service.server";
+import { updateBarcodes, validateBarcodeUniqueness } from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -65,6 +65,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -757,11 +758,16 @@ export async function createAsset({
       });
     }
 
-    /** If barcodes are passed, create them */
+    /** If barcodes are passed, validate them first, then include them in asset creation */
     if (barcodes && barcodes.length > 0) {
       const barcodesToAdd = barcodes.filter(
         (barcode) => !!barcode.value && !!barcode.type
       );
+
+      // Validate barcode uniqueness before creating the asset
+      if (barcodesToAdd.length > 0) {
+        await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+      }
 
       Object.assign(data, {
         barcodes: {
@@ -972,6 +978,11 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (cause instanceof ShelfError && cause.additionalData?.[VALIDATION_ERROR]) {
+      throw cause;
+    }
+    
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
