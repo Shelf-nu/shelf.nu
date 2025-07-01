@@ -318,6 +318,7 @@ export function maybeUniqueConstraintViolation(
   modelName: string,
   options?: Options
 ) {
+  console.log("cause", JSON.stringify(cause, null, 2));
   let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
   let shouldBeCaptured = false;
   const validationErrors = {} as ValidationError<any>;
@@ -328,9 +329,21 @@ export function maybeUniqueConstraintViolation(
   ) {
     message = `${modelName} name is already taken. Please choose a different name.`;
     shouldBeCaptured = false;
-    validationErrors["name"] = {
-      message,
-    };
+    
+    // Special handling for Barcode unique constraint violations
+    if (modelName === "Barcode" && options?.additionalData?.barcodes) {
+      const barcodes = options.additionalData.barcodes as Array<{value: string, type: string}>;
+      // For now, we can't determine which specific barcode failed, 
+      // so we'll mark the first one as having an error
+      // TODO: This could be improved by querying which value exists
+      validationErrors[`barcodes[0].value`] = {
+        message: "One or more barcode values are already in use",
+      };
+    } else {
+      validationErrors["name"] = {
+        message,
+      };
+    }
   }
 
   return new ShelfError({

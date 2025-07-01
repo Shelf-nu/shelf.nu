@@ -758,26 +758,24 @@ export async function createAsset({
       });
     }
 
-    /** If barcodes are passed, validate them first, then include them in asset creation */
+    /** If barcodes are passed, validate them and include them in asset creation */
     if (barcodes && barcodes.length > 0) {
       const barcodesToAdd = barcodes.filter(
         (barcode) => !!barcode.value && !!barcode.type
       );
 
-      // Validate barcode uniqueness before creating the asset
+      // Let Prisma handle unique constraint violations for performance
       if (barcodesToAdd.length > 0) {
-        await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        Object.assign(data, {
+          barcodes: {
+            create: barcodesToAdd.map(({ type, value }) => ({
+              type,
+              value: value.toUpperCase(),
+              organizationId,
+            })),
+          },
+        });
       }
-
-      Object.assign(data, {
-        barcodes: {
-          create: barcodesToAdd.map(({ type, value }) => ({
-            type,
-            value: value.toUpperCase(),
-            organizationId,
-          })),
-        },
-      });
     }
 
     return await db.asset.create({
@@ -789,6 +787,23 @@ export async function createAsset({
       },
     });
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values, 
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+      
+      if (target && target.includes('value') && barcodes && barcodes.length > 0) {
+        const barcodesToAdd = barcodes.filter(
+          (barcode) => !!barcode.value && !!barcode.type
+        );
+        if (barcodesToAdd.length > 0) {
+          // Use existing validation function for detailed error messages
+          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        }
+      }
+    }
+    
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, organizationId },
     });

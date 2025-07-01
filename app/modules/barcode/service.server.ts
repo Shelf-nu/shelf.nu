@@ -114,8 +114,7 @@ export async function createBarcodes({
       }
     }
 
-    // Check for duplicate barcode values before creating
-    await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId);
+    // Let Prisma handle unique constraint violations for performance
 
     // Use createMany for bulk insert performance
     await db.barcode.createMany({
@@ -128,14 +127,18 @@ export async function createBarcodes({
       })),
     });
   } catch (cause) {
-    // If it's already a ShelfError with validation errors, re-throw as is
-    if (
-      cause instanceof ShelfError &&
-      cause.additionalData?.[VALIDATION_ERROR]
-    ) {
-      throw cause;
+    // If it's a Prisma unique constraint violation on barcode values, 
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+      
+      if (target && target.includes('value')) {
+        // Use existing validation function for detailed error messages
+        await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId);
+      }
     }
-
+    
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, organizationId, userId, assetId, kitId },
     });
@@ -414,48 +417,35 @@ export async function validateBarcodeUniqueness(
     }
   }
 
-  // Check for duplicates in the database
-  for (let i = 0; i < barcodes.length; i++) {
-    const barcode = barcodes[i];
-    const normalizedValue = barcode.value.toUpperCase();
-
-    // For updates, exclude barcodes that belong to the current asset/kit being edited
-    const query = {
-      value: normalizedValue,
+  // OPTIMIZED: Single query to get all existing barcodes with these values
+  const submittedValues = barcodes.map(b => b.value.toUpperCase());
+  
+  const existingBarcodes = await db.barcode.findMany({
+    where: {
+      value: { in: submittedValues },
       organizationId,
       ...(excludeItemId && {
         NOT: assetId ? { assetId: excludeItemId } : { kitId: excludeItemId }
       }),
-    };
-    
-    console.log(`Checking barcode ${i}:`, { 
-      normalizedValue, 
-      query: JSON.stringify(query, null, 2), 
-      excludeItemId 
-    });
-    
-    // Debug: Check what barcodes exist with this value in the database
-    const allMatchingBarcodes = await db.barcode.findMany({
-      where: {
-        value: normalizedValue,
-        organizationId,
-      },
-      include: {
-        asset: { select: { title: true, id: true } },
-        kit: { select: { name: true, id: true } },
-      },
-    });
-    console.log("allMatchingBarcodes:", allMatchingBarcodes);
-    
-    const existingBarcode = await db.barcode.findFirst({
-      where: query,
-      include: {
-        asset: { select: { title: true } },
-        kit: { select: { name: true } },
-      },
-    });
+    },
+    include: {
+      asset: { select: { title: true } },
+      kit: { select: { name: true } },
+    },
+  });
 
-    console.log("existingBarcode", existingBarcode);
+  // Create a map for O(1) lookup: value -> existing barcode info
+  const existingValueMap = new Map<string, typeof existingBarcodes[0]>();
+  existingBarcodes.forEach(barcode => {
+    existingValueMap.set(barcode.value, barcode);
+  });
+
+  // Check each submitted barcode against the map
+  for (let i = 0; i < barcodes.length; i++) {
+    const barcode = barcodes[i];
+    const normalizedValue = barcode.value.toUpperCase();
+    const existingBarcode = existingValueMap.get(normalizedValue);
+
     if (existingBarcode) {
       const itemName =
         existingBarcode.asset?.title ||
@@ -472,7 +462,6 @@ export async function validateBarcodeUniqueness(
   }
 
   if (Object.keys(validationErrors).length > 0) {
-    console.log("validationErrors", validationErrors);
     throw new ShelfError({
       cause: null,
       message:
@@ -518,22 +507,7 @@ export async function updateBarcodes({
       }
     }
 
-    // Check for duplicate barcode values before updating
-    const currentItemId = assetId || kitId;
-    console.log("validateBarcodeUniqueness params:", { 
-      barcodes: barcodes.map(b => ({ type: b.type, value: b.value })), 
-      organizationId, 
-      assetId, 
-      kitId, 
-      currentItemId 
-    });
-    await validateBarcodeUniqueness(
-      barcodes,
-      organizationId,
-      assetId,
-      kitId,
-      currentItemId
-    );
+    // Let Prisma handle unique constraint violations for performance
 
     // Get existing barcodes
     const existingBarcodes = await db.barcode.findMany({
@@ -602,16 +576,21 @@ export async function updateBarcodes({
     // Execute all operations in a transaction
     await db.$transaction(operations);
   } catch (cause) {
-    // If it's already a ShelfError with validation errors, re-throw as is
-    if (cause instanceof ShelfError && cause.additionalData?.[VALIDATION_ERROR]) {
-      throw cause;
+    // If it's a Prisma unique constraint violation on barcode values, 
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+      
+      if (target && target.includes('value')) {
+        // Use existing validation function for detailed error messages
+        const currentItemId = assetId || kitId;
+        await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId, currentItemId);
+      }
     }
     
-    throw new ShelfError({
-      cause,
-      message: "Failed to update barcodes",
+    throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, assetId, kitId, organizationId, userId },
-      label,
     });
   }
 }
