@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Asset, Qr } from "@prisma/client";
 import {
   Link,
@@ -12,7 +13,6 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
-import { BarcodesArraySchema } from "~/modules/barcode/validation";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
@@ -25,7 +25,7 @@ import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
-import BarcodesInput from "../forms/barcodes-input";
+import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
@@ -70,7 +70,6 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
-  barcodes: BarcodesArraySchema,
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -108,6 +107,7 @@ export const AssetForm = ({
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
+  const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
     (cf) =>
@@ -155,6 +155,21 @@ export const AssetForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={(e) => {
+          // Force validation of all barcode fields to show errors
+          barcodesInputRef.current?.validateAll();
+
+          // Check for barcode validation errors
+          const hasBarcodeErrors = barcodesInputRef.current?.hasErrors();
+
+          // If there are barcode errors, prevent submission
+          // Zorm will handle its own validation and prevent submission if needed
+          if (hasBarcodeErrors) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+        }}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
@@ -425,20 +440,12 @@ export const AssetForm = ({
             subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Micro QR). Note: Each asset automatically gets a default Shelf QR code for tracking."
           >
             <BarcodesInput
+              ref={barcodesInputRef}
               barcodes={[]}
-              typeName={(i) => `barcodes.${i}.type`}
-              valueName={(i) => `barcodes.${i}.value`}
-              // typeError={(i) => zo.errors[`barcodes.${i}.type`]?.()?.message}
-              // valueError={(i) => zo.errors[`barcodes.${i}.value`]?.()?.message}
-              typeError={(i) => undefined}
-              valueError={(i) => undefined}
+              typeName={(i) => `barcodes[${i}].type`}
+              valueName={(i) => `barcodes[${i}].value`}
               disabled={disabled}
             />
-            <When truthy={!!zo.errors.barcodes()?.message}>
-              <p className="mt-2 text-sm text-red-500">
-                {zo.errors.barcodes()?.message}
-              </p>
-            </When>
           </FormRow>
         </When>
 

@@ -115,38 +115,19 @@ export function validateBarcodeValue(
 /**
  * Zod schema for a single barcode
  */
-export const BarcodeSchema = z.object({
-  type: z.nativeEnum(BarcodeType),
-  value: z.string().min(1, "Barcode value is required"),
-}).superRefine((data, ctx) => {
-  const error = validateBarcodeValue(data.type, data.value);
-  if (error) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: error,
-      path: ["value"],
-    });
-  }
-});
-
-/**
- * Zod schema for array of barcodes with uniqueness validation
- */
-export const BarcodesArraySchema = z
-  .array(BarcodeSchema)
-  .optional()
-  .refine(
-    (barcodes) => {
-      if (!barcodes || barcodes.length === 0) return true;
-
-      // Check for duplicate values within the form
-      const values = barcodes
-        .map((b) => b.value)
-        .filter((v) => v.trim() !== "");
-      const uniqueValues = new Set(values);
-      return values.length === uniqueValues.size;
-    },
-    {
-      message: "Duplicate barcode values are not allowed",
+export const BarcodeSchema = z
+  .object({
+    type: z.nativeEnum(BarcodeType),
+    value: z.string().min(1, "Barcode value is required"),
+  })
+  .superRefine((data, ctx) => {
+    const error = validateBarcodeValue(data.type, data.value);
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ["value"],
+      });
     }
-  );
+  });
+
