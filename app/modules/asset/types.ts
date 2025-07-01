@@ -13,6 +13,7 @@ import type {
   AssetReminder,
   Organization,
   Booking,
+  BarcodeType,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -45,6 +46,7 @@ export interface UpdateAssetPayload {
   tags?: { set: { id: string }[] };
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { id?: string; type: BarcodeType; value: string }[];
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
 }

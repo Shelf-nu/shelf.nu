@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { Asset, Qr } from "@prisma/client";
+import type { Asset, Barcode, Qr } from "@prisma/client";
 import {
   Link,
   useActionData,
@@ -90,6 +90,7 @@ type Props = Partial<
 > & {
   qrId?: Qr["id"] | null;
   tags?: Tag[];
+  barcodes?: Pick<Barcode, "id" | "value" | "type">[];
 };
 
 export const AssetForm = ({
@@ -104,6 +105,7 @@ export const AssetForm = ({
   valuation,
   qrId,
   tags,
+  barcodes,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -441,9 +443,10 @@ export const AssetForm = ({
           >
             <BarcodesInput
               ref={barcodesInputRef}
-              barcodes={[]}
+              barcodes={barcodes || []}
               typeName={(i) => `barcodes[${i}].type`}
               valueName={(i) => `barcodes[${i}].value`}
+              idName={(i) => `barcodes[${i}].id`}
               disabled={disabled}
             />
           </FormRow>

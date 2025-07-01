@@ -41,8 +41,8 @@ export async function createBarcode({
   kitId,
 }: CreateBarcodeParams): Promise<Barcode> {
   try {
-    // Validate barcode value format
-    const validationError = validateBarcodeValue(type, value);
+    // Validate barcode value format (using uppercase version)
+    const validationError = validateBarcodeValue(type, value.toUpperCase());
     if (validationError) {
       throw new ShelfError({
         cause: null,
@@ -91,9 +91,12 @@ export async function createBarcodes({
       return;
     }
 
-    // Validate all barcode values first
+    // Validate all barcode values first (using uppercase version)
     for (const barcode of barcodes) {
-      const validationError = validateBarcodeValue(barcode.type, barcode.value);
+      const validationError = validateBarcodeValue(
+        barcode.type,
+        barcode.value.toUpperCase()
+      );
       if (validationError) {
         throw new ShelfError({
           cause: null,
@@ -142,9 +145,9 @@ export async function updateBarcode({
       updateData.value = value.toUpperCase();
     }
 
-    // Validate new values if provided
+    // Validate new values if provided (using uppercase version)
     if (type !== undefined && value !== undefined) {
-      const validationError = validateBarcodeValue(type, value);
+      const validationError = validateBarcodeValue(type, value.toUpperCase());
       if (validationError) {
         throw new ShelfError({
           cause: null,
@@ -350,6 +353,116 @@ export async function replaceBarcodes({
     throw new ShelfError({
       cause,
       message: "Failed to replace barcodes",
+      additionalData: { barcodes, assetId, kitId, organizationId, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Update barcodes for an asset efficiently using ID-based matching
+ */
+export async function updateBarcodes({
+  barcodes,
+  assetId,
+  kitId,
+  organizationId,
+  userId,
+}: {
+  barcodes: { id?: string; type: BarcodeType; value: string }[];
+  assetId?: Asset["id"];
+  kitId?: Kit["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<void> {
+  try {
+    // Validate all barcode values first (using uppercase version)
+    for (const barcode of barcodes) {
+      const validationError = validateBarcodeValue(
+        barcode.type,
+        barcode.value.toUpperCase()
+      );
+      if (validationError) {
+        throw new ShelfError({
+          cause: null,
+          message: `Invalid barcode "${barcode.value}": ${validationError}`,
+          status: 400,
+          additionalData: { barcodes, organizationId },
+          label,
+        });
+      }
+    }
+
+    // Get existing barcodes
+    const existingBarcodes = await db.barcode.findMany({
+      where: {
+        organizationId,
+        ...(assetId && { assetId }),
+        ...(kitId && { kitId }),
+      },
+    });
+
+    // Separate barcodes into updates and creates
+    const barcodesToUpdate = barcodes.filter((barcode) => barcode.id);
+    const barcodesToCreate = barcodes.filter((barcode) => !barcode.id);
+
+    // Find barcodes to delete (existing ones not in the new list)
+    const submittedIds = new Set(barcodes.map((b) => b.id).filter(Boolean));
+    const barcodesToDelete = existingBarcodes.filter(
+      (existing) => !submittedIds.has(existing.id)
+    );
+
+    const operations = [];
+
+    // Update existing barcodes
+    for (const barcode of barcodesToUpdate) {
+      operations.push(
+        db.barcode.update({
+          where: {
+            id: barcode.id!,
+            organizationId, // Security: ensure the barcode belongs to this org
+          },
+          data: {
+            type: barcode.type,
+            value: barcode.value.toUpperCase(),
+          },
+        })
+      );
+    }
+
+    // Create new barcodes
+    for (const barcode of barcodesToCreate) {
+      operations.push(
+        db.barcode.create({
+          data: {
+            type: barcode.type,
+            value: barcode.value.toUpperCase(),
+            organizationId,
+            ...(assetId && { assetId }),
+            ...(kitId && { kitId }),
+          },
+        })
+      );
+    }
+
+    // Delete removed barcodes
+    if (barcodesToDelete.length > 0) {
+      operations.push(
+        db.barcode.deleteMany({
+          where: {
+            id: { in: barcodesToDelete.map((b) => b.id) },
+            organizationId, // Security: ensure we only delete from this org
+          },
+        })
+      );
+    }
+
+    // Execute all operations in a transaction
+    await db.$transaction(operations);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update barcodes",
       additionalData: { barcodes, assetId, kitId, organizationId, userId },
       label,
     });

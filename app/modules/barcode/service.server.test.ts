@@ -1,0 +1,528 @@
+import { BarcodeType } from "@prisma/client";
+
+import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
+
+import {
+  createBarcode,
+  createBarcodes,
+  updateBarcode,
+  deleteBarcodes,
+  getBarcodeByValue,
+  getAssetBarcodes,
+  updateBarcodes,
+  replaceBarcodes,
+} from "./service.server";
+
+// @vitest-environment node
+// 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
+// Mock db
+vitest.mock("~/database/db.server", () => ({
+  db: {
+    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    barcode: {
+      create: vitest.fn().mockResolvedValue({}),
+      createMany: vitest.fn().mockResolvedValue({}),
+      update: vitest.fn().mockResolvedValue({}),
+      delete: vitest.fn().mockResolvedValue({}),
+      deleteMany: vitest.fn().mockResolvedValue({}),
+      findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
+  },
+}));
+
+const mockTransaction = db.$transaction as ReturnType<typeof vitest.fn>;
+
+const mockBarcodeData = {
+  id: "barcode-1",
+  type: BarcodeType.Code128,
+  value: "TEST123",
+  organizationId: "org-1",
+  assetId: "asset-1",
+  kitId: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const mockCreateParams = {
+  type: BarcodeType.Code128,
+  value: "TEST123",
+  organizationId: "org-1",
+  userId: "user-1",
+  assetId: "asset-1",
+};
+
+describe("createBarcode", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should create a barcode successfully", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+
+    const result = await createBarcode(mockCreateParams);
+
+    expect(db.barcode.create).toHaveBeenCalledWith({
+      data: {
+        type: BarcodeType.Code128,
+        value: "TEST123",
+        organizationId: "org-1",
+        assetId: "asset-1",
+      },
+    });
+    expect(result).toEqual(mockBarcodeData);
+  });
+
+  it("should normalize barcode value to uppercase", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+
+    await createBarcode({
+      ...mockCreateParams,
+      value: "test123",
+    });
+
+    expect(db.barcode.create).toHaveBeenCalledWith({
+      data: {
+        type: BarcodeType.Code128,
+        value: "TEST123",
+        organizationId: "org-1",
+        assetId: "asset-1",
+      },
+    });
+  });
+
+  it("should throw error for invalid barcode value", async () => {
+    expect.assertions(1);
+
+    await expect(
+      createBarcode({
+        ...mockCreateParams,
+        value: "AB", // Too short for Code128
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should create barcode for kit when kitId provided", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+
+    await createBarcode({
+      type: BarcodeType.Code128,
+      value: "TEST123",
+      organizationId: "org-1",
+      userId: "user-1",
+      kitId: "kit-1",
+    });
+
+    expect(db.barcode.create).toHaveBeenCalledWith({
+      data: {
+        type: BarcodeType.Code128,
+        value: "TEST123",
+        organizationId: "org-1",
+        kitId: "kit-1",
+      },
+    });
+  });
+});
+
+describe("createBarcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should create multiple barcodes successfully", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.createMany.mockResolvedValue({ count: 2 });
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "TEST123" },
+      { type: BarcodeType.Code39, value: "ABC123" },
+    ];
+
+    await createBarcodes({
+      barcodes,
+      organizationId: "org-1",
+      userId: "user-1",
+      assetId: "asset-1",
+    });
+
+    expect(db.barcode.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          type: BarcodeType.Code128,
+          value: "TEST123",
+          organizationId: "org-1",
+          assetId: "asset-1",
+        },
+        {
+          type: BarcodeType.Code39,
+          value: "ABC123",
+          organizationId: "org-1",
+          assetId: "asset-1",
+        },
+      ],
+    });
+  });
+
+  it("should handle empty barcodes array", async () => {
+    expect.assertions(1);
+
+    await createBarcodes({
+      barcodes: [],
+      organizationId: "org-1",
+      userId: "user-1",
+      assetId: "asset-1",
+    });
+
+    expect(db.barcode.createMany).not.toHaveBeenCalled();
+  });
+
+  it("should throw error for invalid barcode in batch", async () => {
+    expect.assertions(1);
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "TEST123" },
+      { type: BarcodeType.Code128, value: "AB" }, // Invalid
+    ];
+
+    await expect(
+      createBarcodes({
+        barcodes,
+        organizationId: "org-1",
+        userId: "user-1",
+        assetId: "asset-1",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("updateBarcode", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should update barcode successfully", async () => {
+    expect.assertions(2);
+    const updatedBarcode = { ...mockBarcodeData, value: "UPD123" };
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockResolvedValue(updatedBarcode);
+
+    const result = await updateBarcode({
+      id: "barcode-1",
+      type: BarcodeType.Code39,
+      value: "upd123",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.update).toHaveBeenCalledWith({
+      where: { id: "barcode-1", organizationId: "org-1" },
+      data: { type: BarcodeType.Code39, value: "UPD123" },
+    });
+    expect(result).toEqual(updatedBarcode);
+  });
+
+  it("should update only provided fields", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockResolvedValue(mockBarcodeData);
+
+    await updateBarcode({
+      id: "barcode-1",
+      value: "upd123",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.update).toHaveBeenCalledWith({
+      where: { id: "barcode-1", organizationId: "org-1" },
+      data: { value: "UPD123" },
+    });
+  });
+});
+
+describe("getBarcodeByValue", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should find barcode by value", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
+
+    const result = await getBarcodeByValue({
+      value: "test123",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.findFirst).toHaveBeenCalledWith({
+      where: {
+        value: "TEST123",
+        organizationId: "org-1",
+      },
+      include: {
+        asset: true,
+        kit: true,
+      },
+    });
+    expect(result).toEqual(mockBarcodeData);
+  });
+
+  it("should return null when barcode not found", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.findFirst.mockResolvedValue(null);
+
+    const result = await getBarcodeByValue({
+      value: "NOTFOUND",
+      organizationId: "org-1",
+    });
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("getAssetBarcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should get barcodes for asset", async () => {
+    expect.assertions(2);
+    const barcodes = [mockBarcodeData];
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue(barcodes);
+
+    const result = await getAssetBarcodes({
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.findMany).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        organizationId: "org-1",
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+    expect(result).toEqual(barcodes);
+  });
+});
+
+describe("updateBarcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should update existing barcodes and create new ones", async () => {
+    expect.assertions(4);
+    const existingBarcodes = [
+      { id: "barcode-1", type: BarcodeType.Code128, value: "OLD123" },
+    ];
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue(existingBarcodes);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((operations) =>
+      Promise.all(operations.map(() => ({ success: true })))
+    );
+
+    const barcodes = [
+      { id: "barcode-1", type: BarcodeType.Code128, value: "UPDATED123" },
+      { type: BarcodeType.Code39, value: "NEW123" }, // No ID = new barcode
+    ];
+
+    await updateBarcodes({
+      barcodes,
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.barcode.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        assetId: "asset-1",
+      },
+    });
+
+    // Should create one update operation and one create operation
+    expect(db.$transaction).toHaveBeenCalledWith([
+      expect.objectContaining({
+        // This would be the update operation for existing barcode
+      }),
+      expect.objectContaining({
+        // This would be the create operation for new barcode
+      }),
+    ]);
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    const transactionOperations = mockTransaction.mock.calls[0][0];
+    expect(transactionOperations).toHaveLength(2); // One update, one create
+  });
+
+  it("should delete barcodes not in new list", async () => {
+    expect.assertions(2);
+    const existingBarcodes = [
+      { id: "barcode-1", type: BarcodeType.Code128, value: "OLD123" },
+      { id: "barcode-2", type: BarcodeType.Code39, value: "OLD456" },
+    ];
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue(existingBarcodes);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((operations) =>
+      Promise.all(operations.map(() => ({ success: true })))
+    );
+
+    const barcodes = [
+      { id: "barcode-1", type: BarcodeType.Code128, value: "UPDATED123" },
+      // barcode-2 is missing, so it should be deleted
+    ];
+
+    await updateBarcodes({
+      barcodes,
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    const transactionOperations = mockTransaction.mock.calls[0][0];
+    expect(transactionOperations).toHaveLength(2); // One update, one deleteMany
+  });
+
+  it("should validate all barcodes before processing", async () => {
+    expect.assertions(1);
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "AB" }, // Invalid - too short
+    ];
+
+    await expect(
+      updateBarcodes({
+        barcodes,
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("deleteBarcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should delete all barcodes for asset", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.deleteMany.mockResolvedValue({ count: 2 });
+
+    await deleteBarcodes({
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        assetId: "asset-1",
+      },
+    });
+  });
+
+  it("should delete all barcodes for kit", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteBarcodes({
+      kitId: "kit-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        kitId: "kit-1",
+      },
+    });
+  });
+});
+
+describe("replaceBarcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should replace all barcodes for asset", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.deleteMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.barcode.createMany.mockResolvedValue({ count: 2 });
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "NEW123" },
+      { type: BarcodeType.Code39, value: "NEW456" },
+    ];
+
+    await replaceBarcodes({
+      barcodes,
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // Should delete existing barcodes first
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        assetId: "asset-1",
+      },
+    });
+
+    // Should create new barcodes
+    expect(db.barcode.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          type: BarcodeType.Code128,
+          value: "NEW123",
+          organizationId: "org-1",
+          assetId: "asset-1",
+        },
+        {
+          type: BarcodeType.Code39,
+          value: "NEW456",
+          organizationId: "org-1",
+          assetId: "asset-1",
+        },
+      ],
+    });
+  });
+
+  it("should handle empty barcodes array in replace", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.deleteMany.mockResolvedValue({ count: 1 });
+
+    await replaceBarcodes({
+      barcodes: [],
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.barcode.deleteMany).toHaveBeenCalled();
+    expect(db.barcode.createMany).not.toHaveBeenCalled();
+  });
+});

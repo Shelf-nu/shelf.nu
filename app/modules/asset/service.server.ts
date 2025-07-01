@@ -13,6 +13,7 @@ import type {
   AssetIndexSettings,
   UserOrganization,
   TagUseFor,
+  BarcodeType,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -28,6 +29,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { updateBarcodes } from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -600,6 +602,7 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
+  barcodes,
   id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
@@ -611,6 +614,7 @@ export async function createAsset({
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { type: BarcodeType; value: string }[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
   id?: Asset["id"]; // Make ID optional
@@ -753,6 +757,23 @@ export async function createAsset({
       });
     }
 
+    /** If barcodes are passed, create them */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      Object.assign(data, {
+        barcodes: {
+          create: barcodesToAdd.map(({ type, value }) => ({
+            type,
+            value: value.toUpperCase(),
+            organizationId,
+          })),
+        },
+      });
+    }
+
     return await db.asset.create({
       data,
       include: {
@@ -782,6 +803,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  barcodes,
   organizationId,
 }: UpdateAssetPayload) {
   try {
@@ -892,6 +914,16 @@ export async function updateAsset({
       data,
       include: { location: true, tags: true },
     });
+
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        assetId: id,
+        organizationId,
+        userId,
+      });
+    }
 
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {

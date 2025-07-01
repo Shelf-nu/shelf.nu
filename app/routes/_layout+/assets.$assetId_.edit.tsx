@@ -25,6 +25,7 @@ import {
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
@@ -65,7 +66,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const asset = await getAsset({
       organizationId,
       id,
-      include: { tags: true, customFields: true },
+      include: {
+        tags: true,
+        customFields: true,
+        barcodes: {
+          select: {
+            id: true,
+            type: true,
+            value: true,
+          },
+        },
+      },
       userOrganizations,
       request,
     });
@@ -190,6 +201,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(payload.tags);
 
+    /** Extract barcode data from form */
+    const barcodes = extractBarcodesFromFormData(formData);
+
     await updateAsset({
       id,
       title,
@@ -200,6 +214,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       currentLocationId,
       userId: authSession.userId,
       customFieldsValues,
+      barcodes,
       valuation,
       organizationId,
     });
@@ -255,6 +270,7 @@ export default function AssetEditPage() {
           description={asset.description}
           valuation={asset.valuation}
           tags={tags}
+          barcodes={asset.barcodes}
         />
       </div>
     </div>

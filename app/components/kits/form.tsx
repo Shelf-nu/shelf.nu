@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { Kit } from "@prisma/client";
+import type { Barcode, Kit } from "@prisma/client";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -38,6 +38,7 @@ type KitFormProps = {
   description?: Kit["description"];
   saveButtonLabel?: string;
   qrId?: string | null;
+  barcodes?: Pick<Barcode, "id" | "value" | "type">[];
 };
 
 export default function KitsForm({
@@ -46,6 +47,7 @@ export default function KitsForm({
   description,
   saveButtonLabel = "Add",
   qrId,
+  barcodes,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -75,10 +77,10 @@ export default function KitsForm({
         onSubmit={(e) => {
           // Force validation of all barcode fields to show errors
           barcodesInputRef.current?.validateAll();
-          
+
           // Check for barcode validation errors
           const hasBarcodeErrors = barcodesInputRef.current?.hasErrors();
-          
+
           // If there are barcode errors, prevent submission
           // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
@@ -168,9 +170,10 @@ export default function KitsForm({
           >
             <BarcodesInput
               ref={barcodesInputRef}
-              barcodes={[]}
+              barcodes={barcodes || []}
               typeName={(i) => `barcodes[${i}].type`}
               valueName={(i) => `barcodes[${i}].value`}
+              idName={(i) => `barcodes[${i}].id`}
               disabled={disabled}
             />
           </FormRow>

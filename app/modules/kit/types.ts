@@ -1,18 +1,12 @@
-import type { Kit, Prisma } from "@prisma/client";
+import type { Kit, Prisma, Barcode } from "@prisma/client";
 
 export type UpdateKitPayload = Partial<
-  Pick<
-    Kit,
-    | "name"
-    | "description"
-    | "status"
-    | "image"
-    | "imageExpiration"
-    | "createdById"
-  >
+  Pick<Kit, "name" | "description" | "status" | "image" | "imageExpiration">
 > & {
   id: Kit["id"];
   organizationId: Kit["organizationId"];
+  createdById: Kit["createdById"];
+  barcodes?: (Pick<Barcode, "type" | "value"> & { id?: string })[];
 };
 
 // Define the static includes

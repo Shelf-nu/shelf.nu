@@ -1,4 +1,5 @@
 import type {
+  Barcode,
   Booking,
   Kit,
   Organization,
@@ -18,6 +19,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { updateBarcodes } from "~/modules/barcode/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -58,8 +60,10 @@ export async function createKit({
   createdById,
   organizationId,
   qrId,
+  barcodes,
 }: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
   qrId?: Qr["id"];
+  barcodes?: Pick<Barcode, "type" | "value">[];
 }) {
   try {
     /** User connection data */
@@ -110,6 +114,23 @@ export async function createKit({
       qrCodes,
     };
 
+    /** If barcodes are passed, create them */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      Object.assign(data, {
+        barcodes: {
+          create: barcodesToAdd.map(({ type, value }) => ({
+            type,
+            value: value.toUpperCase(),
+            organizationId,
+          })),
+        },
+      });
+    }
+
     return await db.kit.create({
       data,
     });
@@ -129,9 +150,10 @@ export async function updateKit({
   status,
   createdById,
   organizationId,
+  barcodes,
 }: UpdateKitPayload) {
   try {
-    return await db.kit.update({
+    const kit = await db.kit.update({
       where: { id, organizationId },
       data: {
         name,
@@ -141,6 +163,18 @@ export async function updateKit({
         status,
       },
     });
+
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        kitId: id,
+        organizationId,
+        userId: createdById,
+      });
+    }
+
+    return kit;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, id },

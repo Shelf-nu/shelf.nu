@@ -14,6 +14,7 @@ import { Button } from "../shared/button";
 import When from "../when/when";
 
 type BarcodeInput = {
+  id?: string; // ID for existing barcodes
   type: BarcodeType;
   value: string;
 };
@@ -24,6 +25,7 @@ type BarcodesInputProps = {
   disabled?: boolean;
   typeName: (index: number) => string;
   valueName: (index: number) => string;
+  idName?: (index: number) => string; // Optional ID field name generator
   barcodes: BarcodeInput[];
 };
 
@@ -47,6 +49,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
       disabled,
       typeName,
       valueName,
+      idName,
       barcodes: incomingBarcodes,
     },
     ref
@@ -158,6 +161,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     name={typeName(i)}
                     value={barcode.type}
                   />
+                  {/* Hidden ID field for existing barcodes */}
+                  <When truthy={Boolean(idName) && Boolean(barcode.id)}>
+                    <input type="hidden" name={idName!(i)} value={barcode.id} />
+                  </When>
                 </div>
 
                 {/* Barcode Value Input */}
@@ -167,10 +174,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     hideLabel
                     disabled={disabled}
                     name={valueName(i)}
-                    defaultValue={barcode.value}
+                    value={barcode.value}
                     placeholder="Enter barcode value"
                     onChange={(e) => {
-                      barcodes[i].value = e.target.value;
+                      barcodes[i].value = e.target.value.toUpperCase();
                       setBarcodes([...barcodes]);
                     }}
                     onBlur={() => {
