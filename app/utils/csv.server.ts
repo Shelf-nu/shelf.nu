@@ -624,10 +624,10 @@ export const buildCsvExportDataFromBookings = (
     to: "Actual end date", // date
     custodian: "Custodian",
     description: "Description", // string
+    tags: "Tags",
     asset: "Assets", // New column for assets
     originalFrom: "Planned start date",
     originalTo: "Planned end date",
-    tags: "Tags",
   };
 
   // Create data rows with assets
