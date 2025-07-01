@@ -3,6 +3,7 @@ import type {
   AssetIndexSettings,
   Organization,
   Prisma,
+  Tag,
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -547,6 +548,7 @@ export async function exportBookingsFromIndexToCsv({
         ...selfServiceData,
         orderBy,
         orderDirection,
+        extraInclude: { tags: { select: { name: true } } },
       });
       bookings = bookingsData.bookings;
     } else {
@@ -559,6 +561,7 @@ export async function exportBookingsFromIndexToCsv({
               title: true,
             },
           },
+          tags: { select: { name: true } },
         },
       });
     }
@@ -598,6 +601,7 @@ type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   displayTo?: string;
   displayOriginalFrom?: string;
   displayOriginalTo?: string;
+  tags: Pick<Tag, "name">[];
 };
 
 /**
@@ -623,6 +627,7 @@ export const buildCsvExportDataFromBookings = (
     asset: "Assets", // New column for assets
     originalFrom: "Planned start date",
     originalTo: "Planned end date",
+    tags: "Tags",
   };
 
   // Create data rows with assets
@@ -693,6 +698,12 @@ export const buildCsvExportDataFromBookings = (
           value = booking.displayOriginalTo
             ? booking.displayOriginalTo
             : booking.displayTo;
+          break;
+
+        case "tags":
+          value = booking.tags.length
+            ? booking.tags.map((tag) => tag.name).join(", ")
+            : "No tags";
           break;
         default:
           value = "";
