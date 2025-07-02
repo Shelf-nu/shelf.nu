@@ -12,6 +12,9 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  TagUseFor,
+  BarcodeType,
+
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -28,6 +31,10 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+} from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -63,6 +70,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -600,6 +608,7 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
+  barcodes,
   id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
@@ -611,6 +620,7 @@ export async function createAsset({
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { type: BarcodeType; value: string }[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
   id?: Asset["id"]; // Make ID optional
@@ -753,6 +763,26 @@ export async function createAsset({
       });
     }
 
+    /** If barcodes are passed, validate them and include them in asset creation */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      // Let Prisma handle unique constraint violations for performance
+      if (barcodesToAdd.length > 0) {
+        Object.assign(data, {
+          barcodes: {
+            create: barcodesToAdd.map(({ type, value }) => ({
+              type,
+              value: value.toUpperCase(),
+              organizationId,
+            })),
+          },
+        });
+      }
+    }
+
     return await db.asset.create({
       data,
       include: {
@@ -762,6 +792,28 @@ export async function createAsset({
       },
     });
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
+        const barcodesToAdd = barcodes.filter(
+          (barcode) => !!barcode.value && !!barcode.type
+        );
+        if (barcodesToAdd.length > 0) {
+          // Use existing validation function for detailed error messages
+          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, organizationId },
     });
@@ -782,6 +834,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  barcodes,
   organizationId,
 }: UpdateAssetPayload) {
   try {
@@ -893,6 +946,16 @@ export async function updateAsset({
       include: { location: true, tags: true },
     });
 
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        assetId: id,
+        organizationId,
+        userId,
+      });
+    }
+
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {
       /**
@@ -940,6 +1003,14 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });

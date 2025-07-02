@@ -25,6 +25,7 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import {
   toggleOrganizationSso,
   toggleWorkspaceDisabled,
+  toggleBarcodeEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -106,6 +107,7 @@ export const action = async ({
           "updateSsoDetails",
           "content",
           "disableWorkspace",
+          "toggleBarcodes",
         ]),
       })
     );
@@ -140,6 +142,23 @@ export const action = async ({
         return json(
           data({
             message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
+          })
+        );
+      case "toggleBarcodes":
+        const { barcodesEnabled } = parseData(
+          await request.formData(),
+          z.object({
+            barcodesEnabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await toggleBarcodeEnabled({ organizationId, barcodesEnabled });
+
+        return json(
+          data({
+            message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
           })
         );
       case "updateSsoDetails":
@@ -294,6 +313,29 @@ export default function OrgPage() {
                 title={"Toggle SSO"}
               />
               <input type="hidden" value="toggleSso" name="intent" />
+            </div>
+          </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disable Barcodes</h4>
+          <p>Enable or disable barcode functionality for this workspace</p>
+          <fetcher.Form
+            method="post"
+            onChange={(e) => fetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Enable Barcodes
+                </p>
+              </div>
+              <Switch
+                name={"barcodesEnabled"}
+                disabled={isFormProcessing(fetcher.state)}
+                defaultChecked={organization.barcodesEnabled}
+                required
+                title={"Toggle Barcodes"}
+              />
+              <input type="hidden" value="toggleBarcodes" name="intent" />
             </div>
           </fetcher.Form>
           <hr className="border-1 border-gray-700" />

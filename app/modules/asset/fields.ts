@@ -73,6 +73,13 @@ export const ASSET_OVERVIEW_FIELDS = {
       custodianUser: true,
     },
   },
+  barcodes: {
+    select: {
+      id: true,
+      type: true,
+      value: true,
+    },
+  },
 } satisfies Prisma.AssetInclude;
 
 /**
