@@ -1,10 +1,9 @@
-import { TagUseFor } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
-import { db } from "~/database/db.server";
 import { getBookings } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -57,7 +56,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const [{ bookings, bookingCount }, tags] = await Promise.all([
+    const [{ bookings, bookingCount }, tagsData] = await Promise.all([
       getBookings({
         organizationId,
         page,
@@ -74,14 +73,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           tags: { select: { id: true, name: true } },
         },
       }),
-      db.tag.findMany({
-        where: {
-          organizationId,
-          OR: [
-            { useFor: { isEmpty: true } },
-            { useFor: { has: TagUseFor.BOOKING } },
-          ],
-        },
+      getTagsForBookingTagsFilter({
+        organizationId,
       }),
     ]);
     const totalPages = Math.ceil(bookingCount / perPage);
@@ -107,8 +100,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-        tags,
-        totalTags: tags.length,
+        ...tagsData,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],

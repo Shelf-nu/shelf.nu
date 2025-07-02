@@ -12,13 +12,13 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
-  TagUseFor,
 } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
   ErrorCorrection,
   Prisma,
+  TagUseFor,
 } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import { LRUCache } from "lru-cache";
@@ -2960,13 +2960,35 @@ export async function getEntitiesWithSelectedValues({
 
     /** Tags start */
     db.tag.findMany({
-      where: { organizationId, id: { notIn: selectedTagIds } },
+      where: {
+        organizationId,
+        id: { notIn: selectedTagIds },
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
       take: allSelectedEntries.includes("tag") ? undefined : 12,
     }),
     db.tag.findMany({
-      where: { organizationId, id: { in: selectedTagIds } },
+      where: {
+        organizationId,
+        id: { in: selectedTagIds },
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
     }),
-    db.tag.count({ where: { organizationId } }),
+    db.tag.count({
+      where: {
+        organizationId,
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
+    }),
     /** Tags end */
 
     /** Location start */
