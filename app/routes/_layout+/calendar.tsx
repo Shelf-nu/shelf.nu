@@ -8,6 +8,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
+import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
@@ -21,6 +22,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -110,6 +112,11 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       db.tag.findMany({ where: { organizationId } }),
     ]);
 
+    const modelName = {
+      singular: "booking",
+      plural: "bookings",
+    };
+
     return json(
       data({
         header,
@@ -117,6 +124,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         currentOrganization,
         tags,
         totalTags: tags.length,
+        modelName,
       })
     );
   } catch (cause) {
@@ -133,6 +141,8 @@ export default function Calendar() {
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
+
+  const [searchParams] = useSearchParams();
 
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -202,6 +212,8 @@ export default function Calendar() {
         />
       </Header>
 
+      <BookingFilters className="mt-4" hideSortBy />
+
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
           <div className="flex items-center gap-2">
@@ -249,7 +261,8 @@ export default function Calendar() {
               events={{
                 url: "/calendar/events",
                 method: "GET",
-                failure: (err) => setError(err.message),
+                failure: (error) => setError(error.message),
+                extraParams: Object.fromEntries(searchParams.entries()),
               }}
               slotEventOverlap={true}
               dayMaxEvents={3}
