@@ -1,8 +1,7 @@
-import { BookingStatus, TagUseFor } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
-import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   getBookings,
@@ -10,6 +9,7 @@ import {
 } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import {
   setCookie,
@@ -78,7 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
     });
 
-    const [{ bookings, bookingCount }, teamMembersData, tags] =
+    const [{ bookings, bookingCount }, teamMembersData, tagsData] =
       await Promise.all([
         getBookings({
           organizationId,
@@ -108,14 +108,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
           userId,
         }),
-        db.tag.findMany({
-          where: {
-            organizationId,
-            OR: [
-              { useFor: { isEmpty: true } },
-              { useFor: { has: TagUseFor.BOOKING } },
-            ],
-          },
+        getTagsForBookingTagsFilter({
+          organizationId,
         }),
       ]);
 
@@ -143,8 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...teamMembersData,
-        tags,
-        totalTags: tags.length,
+        ...tagsData,
       }),
       {
         headers: [

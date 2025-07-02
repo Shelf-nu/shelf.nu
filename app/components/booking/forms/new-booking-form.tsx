@@ -45,12 +45,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const { teamMembers, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
-
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
     value: tag.id,
   }));
-
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const disabled = useDisabled(fetcher);
