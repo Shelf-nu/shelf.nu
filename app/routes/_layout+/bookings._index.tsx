@@ -1,17 +1,15 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus, TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
-import { ChevronRight } from "lucide-react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
+import BookingFilters from "~/components/booking/booking-filters";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
-import { StatusFilter } from "~/components/booking/status-filter";
-import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -20,15 +18,11 @@ import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Filters } from "~/components/list/filters";
-import { SortBy } from "~/components/list/filters/sort-by";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
-import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -44,14 +38,11 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
-import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
-import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export type BookingsIndexLoaderData = typeof loader;
 
@@ -221,12 +212,6 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-const BOOKING_SORTING_OPTIONS = {
-  from: "From Date",
-  to: "To Date",
-  name: "Name",
-} as const;
-
 export default function BookingsIndexPage({
   className,
   disableBulkActions = false,
@@ -236,8 +221,7 @@ export default function BookingsIndexPage({
 }) {
   const navigate = useNavigate();
   const matches = useMatches();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
-  const organization = useCurrentOrganization();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -272,18 +256,6 @@ export default function BookingsIndexPage({
   const isBookingUpdateExisting =
     currentRoute?.handle?.name === "bookings.update-existing";
 
-  const canSeeAllCustody = userHasCustodyViewPermission({
-    roles,
-    organization: organization as OrganizationPermissionSettings,
-  });
-
-  const shouldRenderCustodianFilter =
-    canSeeAllCustody &&
-    !["$userId.bookings", "me.bookings"].includes(
-      // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
-      currentRoute?.handle?.name
-    );
-
   return shouldRenderIndex ? (
     //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
     <div
@@ -308,55 +280,8 @@ export default function BookingsIndexPage({
       ) : null}
 
       <ListContentWrapper className={className}>
-        <Filters
-          slots={{
-            "left-of-search": <StatusFilter statusItems={BookingStatus} />,
-            "right-of-search": (
-              <SortBy
-                sortingOptions={BOOKING_SORTING_OPTIONS}
-                defaultSortingBy="from"
-                defaultSortingDirection="asc"
-              />
-            ),
-          }}
-        >
-          <When truthy={shouldRenderCustodianFilter}>
-            <DynamicDropdown
-              trigger={
-                <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
-                  Custodian{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-              label="Filter by custodian"
-              placeholder="Search team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-            />
-          </When>
+        <BookingFilters />
 
-          <DynamicDropdown
-            trigger={
-              <div className="flex cursor-pointer items-center gap-2">
-                Tags <ChevronRight className="hidden rotate-90 md:inline" />
-              </div>
-            }
-            model={{ name: "tag", queryKey: "name" }}
-            label="Filter by tag"
-            initialDataKey="tags"
-            countKey="totalTags"
-            withoutValueItem={{
-              id: "untagged",
-              name: "Without tag",
-            }}
-          />
-        </Filters>
         <List
           bulkActions={
             disableBulkActions || isBaseOrSelfService ? undefined : (

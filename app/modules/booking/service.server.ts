@@ -1963,7 +1963,14 @@ export async function getBookingsForCalendar(params: {
     canSeeAllBookings,
     canSeeAllCustody,
   } = params;
-  const searchParams = getCurrentSearchParams(request);
+
+  const { searchParams, search, status, teamMemberIds, tags } =
+    await getBookingsFilterData({
+      request,
+      canSeeAllBookings,
+      organizationId,
+      userId,
+    });
 
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
@@ -1973,13 +1980,16 @@ export async function getBookingsForCalendar(params: {
       organizationId,
       page: 1,
       perPage: 1000,
+      search,
       userId,
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
+      }),
       bookingFrom: new Date(start),
       bookingTo: new Date(end),
-      ...(!canSeeAllBookings && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: userId,
-      }),
+      custodianTeamMemberIds: teamMemberIds,
+      tags,
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,
