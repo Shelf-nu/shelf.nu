@@ -851,6 +851,23 @@ export async function checkinBooking({
       }).toJSDate();
     }
 
+    /**
+     * If booking was overdue then we have to adjust the endDate of booking
+     * */
+    if (bookingFound.status === BookingStatus.OVERDUE) {
+      // Update originalTo to booking's to date
+      dataToUpdate.originalTo = bookingFound.to;
+
+      const toDateStr = DateTime.fromJSDate(new Date(), {
+        zone: hints.timeZone,
+      }).toFormat(DATE_TIME_FORMAT);
+
+      // Update the `to` date to current date
+      dataToUpdate.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+        zone: hints.timeZone,
+      }).toJSDate();
+    }
+
     const updatedBooking = await db.$transaction(async (tx) => {
       /* Updating the status of all assets inside booking */
       await tx.asset.updateMany({
