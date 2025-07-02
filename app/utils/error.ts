@@ -318,7 +318,6 @@ export function maybeUniqueConstraintViolation(
   modelName: string,
   options?: Options
 ) {
-  console.log("cause", JSON.stringify(cause, null, 2));
   let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
   let shouldBeCaptured = false;
   const validationErrors = {} as ValidationError<any>;
@@ -327,23 +326,29 @@ export function maybeUniqueConstraintViolation(
     cause instanceof Prisma.PrismaClientKnownRequestError &&
     cause.code === "P2002"
   ) {
-    message = `${modelName} name is already taken. Please choose a different name.`;
     shouldBeCaptured = false;
+
+    // Extract the target field(s) from the Prisma error
+    const target = cause.meta?.target as string[] | undefined;
     
-    // Special handling for Barcode unique constraint violations
-    if (modelName === "Barcode" && options?.additionalData?.barcodes) {
-      const barcodes = options.additionalData.barcodes as Array<{value: string, type: string}>;
-      // For now, we can't determine which specific barcode failed, 
-      // so we'll mark the first one as having an error
-      // TODO: This could be improved by querying which value exists
-      validationErrors[`barcodes[0].value`] = {
-        message: "One or more barcode values are already in use",
-      };
-    } else {
-      validationErrors["name"] = {
-        message,
-      };
-    }
+    // Filter out organizational fields and clean up function-wrapped fields
+    const relevantFields = target?.filter(field => {
+      // Remove organizational/scoping fields
+      if (field === 'organizationId' || field === 'userId' || field === 'teamId') {
+        return false;
+      }
+      return true;
+    }).map(field => {
+      // Clean up function-wrapped fields like 'lower(name)' -> 'name'
+      const match = field.match(/^[a-zA-Z_]+\(([^)]+)\)$/);
+      return match ? match[1] : field;
+    });
+    
+    const failedField = relevantFields?.[0] || "name"; // Get the first relevant field or default to "name"
+
+    // Generate dynamic message based on the actual failed field
+    message = `${modelName} ${failedField} is already taken. Please choose a different ${failedField}.`;
+    validationErrors[failedField] = { message };
   }
 
   return new ShelfError({

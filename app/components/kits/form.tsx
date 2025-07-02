@@ -8,6 +8,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -60,12 +61,11 @@ export default function KitsForm({
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
-  const actionData = useActionData<{
-    errors?: { name?: { message: string } };
-  }>();
+  const actionData = useActionData<{ error?: any }>();
 
+  const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
-    actionData?.errors?.name?.message ?? zo.errors.name()?.message;
+    serverValidationErrors?.name?.message ?? zo.errors.name()?.message;
 
   return (
     <Card className={tw("w-full md:w-min", className)}>

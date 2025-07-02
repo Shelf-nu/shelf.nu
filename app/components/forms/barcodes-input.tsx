@@ -1,12 +1,12 @@
-import { useState, forwardRef, useImperativeHandle, useMemo } from "react";
+import { useState, forwardRef, useImperativeHandle, useMemo, useEffect } from "react";
 import { BarcodeType } from "@prisma/client";
-import { useActionData } from "@remix-run/react";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import { useActionData } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons/library";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
@@ -58,10 +58,18 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
   ) {
     const [barcodes, setBarcodes] = useState<BarcodeInput[]>(incomingBarcodes);
     const [touchedFields, setTouchedFields] = useState<Set<number>>(new Set());
-    
+    const [clearedServerErrors, setClearedServerErrors] = useState<Set<number>>(new Set());
+
     // Get server-side validation errors from action data
     const actionData = useActionData<{ error?: any }>();
     const serverValidationErrors = getValidationErrors(actionData?.error);
+
+    // Reset cleared server errors when we get new action data (e.g., after form submission)
+    useEffect(() => {
+      if (actionData?.error) {
+        setClearedServerErrors(new Set());
+      }
+    }, [actionData]);
 
     // Custom validation logic
     const validationErrors = useMemo(() => {
@@ -111,9 +119,13 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
     return (
       <div className={tw("w-full", className)} style={style}>
         {barcodes.map((barcode, i) => {
-          // Show server errors first, then client-side validation errors
-          const serverError = serverValidationErrors?.[`barcodes[${i}].value`]?.message;
-          const clientError = touchedFields.has(i) ? validationErrors[i] : undefined;
+          // Show server errors first (unless cleared), then client-side validation errors
+          const serverError = !clearedServerErrors.has(i)
+            ? serverValidationErrors?.[`barcodes[${i}].value`]?.message
+            : undefined;
+          const clientError = touchedFields.has(i)
+            ? validationErrors[i]
+            : undefined;
           const valueErrorMessage = serverError || clientError;
 
           return (
@@ -186,6 +198,9 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     onChange={(e) => {
                       barcodes[i].value = e.target.value.toUpperCase();
                       setBarcodes([...barcodes]);
+                      
+                      // Clear server error for this field when user starts typing
+                      setClearedServerErrors((prev) => new Set(prev).add(i));
                     }}
                     onBlur={() => {
                       setTouchedFields((prev) => new Set(prev).add(i));
@@ -221,6 +236,20 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                         // Skip index === i (the removed item)
                       });
                       return newTouched;
+                    });
+
+                    // Clean up cleared server errors - shift indices down for items after the removed one
+                    setClearedServerErrors((prev) => {
+                      const newCleared = new Set<number>();
+                      prev.forEach((index) => {
+                        if (index < i) {
+                          newCleared.add(index);
+                        } else if (index > i) {
+                          newCleared.add(index - 1);
+                        }
+                        // Skip index === i (the removed item)
+                      });
+                      return newCleared;
                     });
                   }}
                 />

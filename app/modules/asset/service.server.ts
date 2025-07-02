@@ -29,7 +29,10 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { updateBarcodes, validateBarcodeUniqueness } from "~/modules/barcode/service.server";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+} from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -787,13 +790,18 @@ export async function createAsset({
       },
     });
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values, 
+    // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
       const target = prismaError.meta?.target;
-      
-      if (target && target.includes('value') && barcodes && barcodes.length > 0) {
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
         const barcodesToAdd = barcodes.filter(
           (barcode) => !!barcode.value && !!barcode.type
         );
@@ -803,7 +811,7 @@ export async function createAsset({
         }
       }
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, organizationId },
     });
@@ -994,10 +1002,13 @@ export async function updateAsset({
     return asset;
   } catch (cause) {
     // If it's already a ShelfError with validation errors, re-throw as is
-    if (cause instanceof ShelfError && cause.additionalData?.[VALIDATION_ERROR]) {
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
       throw cause;
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });

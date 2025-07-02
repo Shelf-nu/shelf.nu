@@ -37,17 +37,21 @@ export function BarcodeDisplay({
           // Set canvas size
           canvas.width = 200;
           canvas.height = height + 40;
-          
+
           // Clear canvas
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          
+
           // Show placeholder message
           ctx.fillStyle = "#6b7280";
           ctx.font = "12px sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText("MicroQR preview", canvas.width / 2, canvas.height / 2 - 10);
+          ctx.fillText(
+            "MicroQR preview",
+            canvas.width / 2,
+            canvas.height / 2 - 10
+          );
           ctx.fillText("coming soon", canvas.width / 2, canvas.height / 2 + 10);
-          
+
           if (displayValue) {
             ctx.fillStyle = "#374151";
             ctx.font = `${fontSize}px sans-serif`;
@@ -65,7 +69,6 @@ export function BarcodeDisplay({
 
       const format = formatMap[type as Exclude<BarcodeType, "MicroQRCode">];
       if (!format) {
-        console.error(`Unsupported barcode type: ${type}`);
         return;
       }
 
@@ -80,8 +83,6 @@ export function BarcodeDisplay({
         margin,
       });
     } catch (error) {
-      console.error(`Failed to generate ${type} barcode:`, error);
-      
       // Clear canvas and show error
       const ctx = canvas.getContext("2d");
       if (ctx) {

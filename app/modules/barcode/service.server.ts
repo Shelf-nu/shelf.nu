@@ -12,7 +12,6 @@ import {
   ShelfError,
   maybeUniqueConstraintViolation,
   VALIDATION_ERROR,
-  isLikeShelfError,
 } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
 import { validateBarcodeValue } from "./validation";
@@ -33,6 +32,8 @@ export interface UpdateBarcodeParams {
   type?: BarcodeType;
   value?: string;
   organizationId: Organization["id"];
+  assetId?: Asset["id"];
+  kitId?: Kit["id"];
 }
 
 /**
@@ -70,6 +71,29 @@ export async function createBarcode({
     });
     return barcode;
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (target && target.includes("value")) {
+        // Use existing validation function for detailed error messages
+        const relationshipType = assetId ? "asset" : "kit";
+        try {
+          await validateBarcodeUniqueness(
+            [{ type, value }],
+            organizationId,
+            undefined, // No currentItemId for creates
+            relationshipType as "asset" | "kit"
+          );
+        } catch (validationError) {
+          // Re-throw the detailed validation error
+          throw validationError;
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { type, value, organizationId, userId, assetId, kitId },
     });
@@ -127,18 +151,29 @@ export async function createBarcodes({
       })),
     });
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values, 
+    // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
       const target = prismaError.meta?.target;
-      
-      if (target && target.includes('value')) {
+
+      if (target && target.includes("value")) {
         // Use existing validation function for detailed error messages
-        await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId);
+        const relationshipType = assetId ? "asset" : "kit";
+        try {
+          await validateBarcodeUniqueness(
+            barcodes,
+            organizationId,
+            undefined, // No currentItemId for creates
+            relationshipType as "asset" | "kit"
+          );
+        } catch (validationError) {
+          // Re-throw the detailed validation error
+          throw validationError;
+        }
       }
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, organizationId, userId, assetId, kitId },
     });
@@ -153,6 +188,8 @@ export async function updateBarcode({
   type,
   value,
   organizationId,
+  assetId,
+  kitId,
 }: UpdateBarcodeParams): Promise<Barcode> {
   try {
     const updateData: Partial<Pick<Barcode, "type" | "value">> = {};
@@ -185,8 +222,32 @@ export async function updateBarcode({
     });
     return barcode;
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (target && target.includes("value") && value !== undefined) {
+        const relationshipType = assetId ? "asset" : "kit";
+        const currentItemId = assetId || kitId;
+
+        try {
+          await validateBarcodeUniqueness(
+            [{ type: type || "Code128", value }], // Use provided type or default
+            organizationId,
+            currentItemId,
+            relationshipType as "asset" | "kit"
+          );
+        } catch (validationError) {
+          // Re-throw the detailed validation error
+          throw validationError;
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
-      additionalData: { id, type, value, organizationId },
+      additionalData: { id, type, value, organizationId, assetId, kitId },
     });
   }
 }
@@ -394,9 +455,8 @@ export async function replaceBarcodes({
 export async function validateBarcodeUniqueness(
   barcodes: { type: BarcodeType; value: string }[],
   organizationId: Organization["id"],
-  assetId?: Asset["id"],
-  kitId?: Kit["id"],
-  excludeItemId?: string // For updates, exclude current asset/kit
+  currentItemId?: string,
+  relationshipType?: "asset" | "kit"
 ): Promise<void> {
   const validationErrors: ValidationError<any> = {};
 
@@ -418,15 +478,13 @@ export async function validateBarcodeUniqueness(
   }
 
   // OPTIMIZED: Single query to get all existing barcodes with these values
-  const submittedValues = barcodes.map(b => b.value.toUpperCase());
-  
+  const submittedValues = barcodes.map((b) => b.value.toUpperCase());
+
+  const isEditing = !!currentItemId && !!relationshipType;
   const existingBarcodes = await db.barcode.findMany({
     where: {
       value: { in: submittedValues },
       organizationId,
-      ...(excludeItemId && {
-        NOT: assetId ? { assetId: excludeItemId } : { kitId: excludeItemId }
-      }),
     },
     include: {
       asset: { select: { title: true } },
@@ -434,9 +492,23 @@ export async function validateBarcodeUniqueness(
     },
   });
 
+  // Filter out the current item manually
+  const filteredExistingBarcodes = isEditing
+    ? existingBarcodes.filter((barcode) => {
+        if (relationshipType === "asset") {
+          return barcode.assetId !== currentItemId;
+        } else {
+          return barcode.kitId !== currentItemId;
+        }
+      })
+    : existingBarcodes;
+
   // Create a map for O(1) lookup: value -> existing barcode info
-  const existingValueMap = new Map<string, typeof existingBarcodes[0]>();
-  existingBarcodes.forEach(barcode => {
+  const existingValueMap = new Map<
+    string,
+    (typeof filteredExistingBarcodes)[0]
+  >();
+  filteredExistingBarcodes.forEach((barcode) => {
     existingValueMap.set(barcode.value, barcode);
   });
 
@@ -576,19 +648,32 @@ export async function updateBarcodes({
     // Execute all operations in a transaction
     await db.$transaction(operations);
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values, 
+    // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
       const target = prismaError.meta?.target;
-      
-      if (target && target.includes('value')) {
+
+      if (target && target.includes("value")) {
         // Use existing validation function for detailed error messages
         const currentItemId = assetId || kitId;
-        await validateBarcodeUniqueness(barcodes, organizationId, assetId, kitId, currentItemId);
+        const relationshipType = assetId ? "asset" : "kit";
+        try {
+          await validateBarcodeUniqueness(
+            barcodes,
+            organizationId,
+            currentItemId,
+            relationshipType as "asset" | "kit"
+          );
+        } catch (validationError) {
+          // Re-throw the detailed validation error
+          throw validationError;
+        }
+        // If validateBarcodeUniqueness completes without throwing,
+        // it means no duplicates were found, so continue with the generic error
       }
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, assetId, kitId, organizationId, userId },
     });

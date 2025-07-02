@@ -12,6 +12,7 @@ import {
   getAssetBarcodes,
   updateBarcodes,
   replaceBarcodes,
+  validateBarcodeUniqueness,
 } from "./service.server";
 
 // @vitest-environment node
@@ -130,6 +131,45 @@ describe("createBarcode", () => {
       },
     });
   });
+
+  it("should handle constraint violations with detailed validation", async () => {
+    expect.assertions(1);
+
+    // Mock Prisma constraint violation error
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockRejectedValue(constraintError);
+
+    // Mock the database query to simulate existing barcode
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        value: "DUPLICATE123",
+        assetId: "other-asset",
+        kitId: null,
+        asset: { title: "Test Asset" },
+        kit: null,
+      },
+    ]);
+
+    await expect(
+      createBarcode({
+        type: BarcodeType.Code128,
+        value: "DUPLICATE123",
+        organizationId: "org-1",
+        userId: "user-1",
+        assetId: "asset-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
 });
 
 describe("createBarcodes", () => {
@@ -202,6 +242,86 @@ describe("createBarcodes", () => {
       })
     ).rejects.toThrow(ShelfError);
   });
+
+  it("should handle constraint violations with detailed validation", async () => {
+    expect.assertions(1);
+
+    // Mock Prisma constraint violation error
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.barcode.createMany.mockRejectedValue(constraintError);
+
+    // Mock the database query to simulate existing barcode
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        value: "DUPLICATE123",
+        assetId: "other-asset",
+        kitId: null,
+        asset: { title: "Test Asset" },
+        kit: null,
+      },
+    ]);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "DUPLICATE123" }];
+
+    await expect(
+      createBarcodes({
+        barcodes,
+        organizationId: "org-1",
+        userId: "user-1",
+        kitId: "kit-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
+
+  it("should handle constraint violations for kit barcodes", async () => {
+    expect.assertions(1);
+
+    // Mock Prisma constraint violation error
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.barcode.createMany.mockRejectedValue(constraintError);
+
+    // Mock the database query to simulate existing barcode
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        value: "DUPLICATE123",
+        assetId: null,
+        kitId: "other-kit",
+        asset: null,
+        kit: { name: "Test Kit" },
+      },
+    ]);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "DUPLICATE123" }];
+
+    await expect(
+      createBarcodes({
+        barcodes,
+        organizationId: "org-1",
+        userId: "user-1",
+        kitId: "kit-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
 });
 
 describe("updateBarcode", () => {
@@ -220,6 +340,7 @@ describe("updateBarcode", () => {
       type: BarcodeType.Code39,
       value: "upd123",
       organizationId: "org-1",
+      assetId: "asset-1",
     });
 
     expect(db.barcode.update).toHaveBeenCalledWith({
@@ -238,12 +359,91 @@ describe("updateBarcode", () => {
       id: "barcode-1",
       value: "upd123",
       organizationId: "org-1",
+      assetId: "asset-1",
     });
 
     expect(db.barcode.update).toHaveBeenCalledWith({
       where: { id: "barcode-1", organizationId: "org-1" },
       data: { value: "UPD123" },
     });
+  });
+
+  it("should handle constraint violations with detailed validation", async () => {
+    expect.assertions(1);
+
+    // Mock Prisma constraint violation error
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockRejectedValue(constraintError);
+
+    // Mock the database query to simulate existing barcode
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        value: "DUPLICATE123",
+        assetId: "other-asset",
+        kitId: null,
+        asset: { title: "Test Asset" },
+        kit: null,
+      },
+    ]);
+
+    await expect(
+      updateBarcode({
+        id: "barcode-1",
+        type: BarcodeType.Code128,
+        value: "DUPLICATE123",
+        organizationId: "org-1",
+        assetId: "asset-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
+
+  it("should handle constraint violations for kit barcodes", async () => {
+    expect.assertions(1);
+
+    // Mock Prisma constraint violation error
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockRejectedValue(constraintError);
+
+    // Mock the database query to simulate existing barcode
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        value: "DUPLICATE123",
+        assetId: null,
+        kitId: "other-kit",
+        asset: null,
+        kit: { name: "Test Kit" },
+      },
+    ]);
+
+    await expect(
+      updateBarcode({
+        id: "barcode-1",
+        type: BarcodeType.Code128,
+        value: "DUPLICATE123",
+        organizationId: "org-1",
+        kitId: "kit-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
   });
 });
 
@@ -415,6 +615,97 @@ describe("updateBarcodes", () => {
       })
     ).rejects.toThrow(ShelfError);
   });
+
+  it("should handle constraint violations with detailed validation", async () => {
+    expect.assertions(1);
+
+    // Mock existing barcodes for the updateBarcodes function
+    db.barcode.findMany
+      //@ts-expect-error adding Prisma error properties
+      .mockResolvedValueOnce([]) // For current asset barcodes
+      .mockResolvedValueOnce([
+        // For uniqueness check
+        {
+          id: "existing-1",
+          value: "DUPLICATE123",
+          assetId: "other-asset",
+          kitId: null,
+          asset: { title: "Test Asset" },
+          kit: null,
+        },
+      ]);
+
+    // Mock Prisma constraint violation error in transaction
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+
+    //@ts-expect-error adding Prisma error properties
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockRejectedValue(constraintError);
+
+    const barcodes = [
+      { id: "barcode-1", type: BarcodeType.Code128, value: "DUPLICATE123" },
+      { type: BarcodeType.Code39, value: "NEW456" }, // No ID = new barcode
+    ];
+
+    await expect(
+      updateBarcodes({
+        barcodes,
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
+
+  it("should handle constraint violations for kit updates", async () => {
+    expect.assertions(1);
+
+    // Mock existing barcodes for the updateBarcodes function
+    db.barcode.findMany
+      //@ts-expect-error missing vitest type
+      .mockResolvedValueOnce([]) // For current kit barcodes
+      .mockResolvedValueOnce([
+        // For uniqueness check
+        {
+          id: "existing-1",
+          value: "DUPLICATE123",
+          assetId: null,
+          kitId: "other-kit",
+          asset: null,
+          kit: { name: "Test Kit" },
+        },
+      ]);
+
+    // Mock Prisma constraint violation error in transaction
+    const constraintError = new Error("Unique constraint failed");
+    //@ts-expect-error adding Prisma error properties
+    constraintError.code = "P2002";
+
+    //@ts-expect-error missing vitest type
+    constraintError.meta = { target: ["value"] };
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockRejectedValue(constraintError);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "DUPLICATE123" }];
+
+    await expect(
+      updateBarcodes({
+        barcodes,
+        kitId: "kit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(
+      "Some barcode values are already in use. Please use unique values."
+    );
+  });
 });
 
 describe("deleteBarcodes", () => {
@@ -524,5 +815,138 @@ describe("replaceBarcodes", () => {
 
     expect(db.barcode.deleteMany).toHaveBeenCalled();
     expect(db.barcode.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("validateBarcodeUniqueness", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should pass when no duplicate barcodes exist", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "UNIQUE123" },
+      { type: BarcodeType.Code39, value: "UNIQUE456" },
+    ];
+
+    await expect(
+      validateBarcodeUniqueness(barcodes, "org-1")
+    ).resolves.not.toThrow();
+
+    expect(db.barcode.findMany).toHaveBeenCalledWith({
+      where: {
+        value: { in: ["UNIQUE123", "UNIQUE456"] },
+        organizationId: "org-1",
+      },
+      include: {
+        asset: { select: { title: true } },
+        kit: { select: { name: true } },
+      },
+    });
+  });
+
+  it("should throw detailed error when duplicate barcode exists", async () => {
+    expect.assertions(2);
+    const existingBarcode = {
+      id: "existing-1",
+      value: "DUPLICATE123",
+      assetId: "other-asset",
+      kitId: null,
+      asset: { title: "Existing Asset" },
+      kit: null,
+    };
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([existingBarcode]);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "DUPLICATE123" }];
+
+    const error = await validateBarcodeUniqueness(barcodes, "org-1").catch(
+      (e) => e
+    );
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.additionalData.validationErrors).toEqual({
+      "barcodes[0].value": {
+        message: 'This barcode value is already used by "Existing Asset"',
+      },
+    });
+  });
+
+  it("should filter out current item when editing", async () => {
+    expect.assertions(2);
+    const existingBarcode = {
+      id: "existing-1",
+      value: "MYBARCODE123",
+      assetId: "current-asset",
+      kitId: null,
+      asset: { title: "Current Asset" },
+      kit: null,
+    };
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([existingBarcode]);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "MYBARCODE123" }];
+
+    // Should not throw because the barcode belongs to the current asset being edited
+    await expect(
+      validateBarcodeUniqueness(barcodes, "org-1", "current-asset", "asset")
+    ).resolves.not.toThrow();
+
+    expect(db.barcode.findMany).toHaveBeenCalled();
+  });
+
+  it("should detect duplicates within submitted barcodes", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const barcodes = [
+      { type: BarcodeType.Code128, value: "DUPLICATE123" },
+      { type: BarcodeType.Code39, value: "DUPLICATE123" },
+    ];
+
+    const error = await validateBarcodeUniqueness(barcodes, "org-1").catch(
+      (e) => e
+    );
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.additionalData.validationErrors).toEqual({
+      "barcodes[0].value": {
+        message: "This barcode value is duplicated in the form",
+      },
+      "barcodes[1].value": {
+        message: "This barcode value is duplicated in the form",
+      },
+    });
+  });
+
+  it("should handle kit relationships correctly", async () => {
+    expect.assertions(1);
+    const existingBarcode = {
+      id: "existing-1",
+      value: "KITBARCODE123",
+      assetId: null,
+      kitId: "other-kit",
+      asset: null,
+      kit: { name: "Existing Kit" },
+    };
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([existingBarcode]);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "KITBARCODE123" }];
+
+    const error = await validateBarcodeUniqueness(barcodes, "org-1").catch(
+      (e) => e
+    );
+
+    expect(error.additionalData.validationErrors).toEqual({
+      "barcodes[0].value": {
+        message: 'This barcode value is already used by "Existing Kit"',
+      },
+    });
   });
 });
