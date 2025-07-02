@@ -1,4 +1,10 @@
-import { useState, forwardRef, useImperativeHandle, useMemo, useEffect } from "react";
+import {
+  useState,
+  forwardRef,
+  useImperativeHandle,
+  useMemo,
+  useEffect,
+} from "react";
 import { BarcodeType } from "@prisma/client";
 import {
   Popover,
@@ -58,7 +64,9 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
   ) {
     const [barcodes, setBarcodes] = useState<BarcodeInput[]>(incomingBarcodes);
     const [touchedFields, setTouchedFields] = useState<Set<number>>(new Set());
-    const [clearedServerErrors, setClearedServerErrors] = useState<Set<number>>(new Set());
+    const [clearedServerErrors, setClearedServerErrors] = useState<Set<number>>(
+      new Set()
+    );
 
     // Get server-side validation errors from action data
     const actionData = useActionData<{ error?: any }>();
@@ -198,7 +206,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     onChange={(e) => {
                       barcodes[i].value = e.target.value.toUpperCase();
                       setBarcodes([...barcodes]);
-                      
+
                       // Clear server error for this field when user starts typing
                       setClearedServerErrors((prev) => new Set(prev).add(i));
                     }}

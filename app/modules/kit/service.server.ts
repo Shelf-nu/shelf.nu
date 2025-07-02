@@ -19,7 +19,10 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { updateBarcodes, validateBarcodeUniqueness } from "~/modules/barcode/service.server";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+} from "~/modules/barcode/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -136,13 +139,18 @@ export async function createKit({
       data,
     });
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values, 
+    // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && 'code' in cause && cause.code === 'P2002') {
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
       const target = prismaError.meta?.target;
-      
-      if (target && target.includes('value') && barcodes && barcodes.length > 0) {
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
         const barcodesToAdd = barcodes.filter(
           (barcode) => !!barcode.value && !!barcode.type
         );
@@ -152,7 +160,7 @@ export async function createKit({
         }
       }
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, organizationId },
     });
@@ -195,10 +203,13 @@ export async function updateKit({
     return kit;
   } catch (cause) {
     // If it's already a ShelfError with validation errors, re-throw as is
-    if (cause instanceof ShelfError && cause.additionalData?.[VALIDATION_ERROR]) {
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
       throw cause;
     }
-    
+
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, id },
     });

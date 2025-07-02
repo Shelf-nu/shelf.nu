@@ -330,20 +330,26 @@ export function maybeUniqueConstraintViolation(
 
     // Extract the target field(s) from the Prisma error
     const target = cause.meta?.target as string[] | undefined;
-    
+
     // Filter out organizational fields and clean up function-wrapped fields
-    const relevantFields = target?.filter(field => {
-      // Remove organizational/scoping fields
-      if (field === 'organizationId' || field === 'userId' || field === 'teamId') {
-        return false;
-      }
-      return true;
-    }).map(field => {
-      // Clean up function-wrapped fields like 'lower(name)' -> 'name'
-      const match = field.match(/^[a-zA-Z_]+\(([^)]+)\)$/);
-      return match ? match[1] : field;
-    });
-    
+    const relevantFields = target
+      ?.filter((field) => {
+        // Remove organizational/scoping fields
+        if (
+          field === "organizationId" ||
+          field === "userId" ||
+          field === "teamId"
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map((field) => {
+        // Clean up function-wrapped fields like 'lower(name)' -> 'name'
+        const match = field.match(/^[a-zA-Z_]+\(([^)]+)\)$/);
+        return match ? match[1] : field;
+      });
+
     const failedField = relevantFields?.[0] || "name"; // Get the first relevant field or default to "name"
 
     // Generate dynamic message based on the actual failed field
