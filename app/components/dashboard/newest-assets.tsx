@@ -1,6 +1,7 @@
-import type { Asset, Category } from "@prisma/client";
+import type { Asset, Category, Kit } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -11,6 +12,7 @@ import { Td, Table, Tr } from "../table";
 
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
+
   return (
     <>
       <div className="border border-b-0 border-gray-200">
@@ -78,6 +80,7 @@ const Row = ({
 }: {
   item: Asset & {
     category: Pick<Category, "id" | "name" | "color"> | null;
+    kit: Pick<Kit, "id" | "name" | "status"> | null;
   };
 }) => {
   const { category } = item;
@@ -114,7 +117,9 @@ const Row = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={item?.kit}
                   status={item.status}
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                   availableToBook={item.availableToBook}
                 />
               </div>

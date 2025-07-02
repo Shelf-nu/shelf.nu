@@ -21,6 +21,8 @@ export const GET_KIT_STATIC_INCLUDES = {
     select: {
       id: true,
       createdAt: true,
+      agreement: true,
+      signatureStatus: true,
       custodian: {
         select: {
           id: true,
@@ -41,7 +43,7 @@ export const GET_KIT_STATIC_INCLUDES = {
   organization: {
     select: { currency: true },
   },
-};
+} satisfies Prisma.KitInclude;
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
@@ -75,6 +77,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImageExpiration: true,
   status: true,
   availableToBook: true,
+  kitId: true,
   category: {
     select: {
       id: true,
@@ -94,7 +97,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
       name: true,
     },
   },
-};
+} satisfies Prisma.AssetSelect;
 
 /** Type used for the list item component */
 export type ListItemForKitPage = Prisma.AssetGetPayload<{

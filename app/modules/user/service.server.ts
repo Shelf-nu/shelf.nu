@@ -1006,7 +1006,7 @@ export async function updateProfilePicture({
     return await updateUser({
       id: userId,
       profilePicture: profilePicture
-        ? getPublicFileURL({ filename: profilePicture })
+        ? await getPublicFileURL({ filename: profilePicture })
         : undefined,
     });
   } catch (cause) {

@@ -28,12 +28,14 @@ export function useAssetAvailabilityData(items: Items) {
       id: item.id,
       title: item.title,
       extendedProps: {
+        id: item.id,
         mainImage: item.mainImage,
         thumbnailImage: item.thumbnailImage,
         mainImageExpiration: item.mainImageExpiration,
         status: item.status,
         availableToBook: item.availableToBook,
         category: item.category,
+        kit: item?.kit,
       },
     }));
 

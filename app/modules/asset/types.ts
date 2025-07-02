@@ -13,6 +13,7 @@ import type {
   AssetReminder,
   Organization,
   Booking,
+  CustodySignatureStatus,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -124,11 +125,12 @@ export type AdvancedIndexAsset = Pick<
   | "kitId"
 > & {
   qrId: string; // QR code will always be available
-  kit: Pick<Kit, "id" | "name"> | null;
+  kit: Pick<Kit, "id" | "name" | "status"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name">[];
   location: Pick<Location, "name"> | null;
   custody: {
+    signatureStatus: CustodySignatureStatus;
     custodian: {
       name: string;
       user: {

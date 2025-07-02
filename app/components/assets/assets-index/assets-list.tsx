@@ -1,4 +1,4 @@
-import type { Tag } from "@prisma/client";
+import type { Prisma, Tag } from "@prisma/client";
 
 import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
@@ -28,6 +28,7 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -163,6 +164,14 @@ export const AssetsList = ({
                       </div>
                       <div className="flex items-center gap-2">
                         <AssetStatusBadge
+                          shareAgreementUrl={getShareAgreementUrl(
+                            resource.extendedProps as Prisma.AssetGetPayload<{
+                              select: {
+                                id: true;
+                                kit: { select: { id: true; status: true } };
+                              };
+                            }>
+                          )}
                           status={resource.extendedProps?.status}
                           availableToBook={
                             resource.extendedProps?.availableToBook
@@ -262,6 +271,8 @@ const ListAssetContent = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  kit={item?.kit}
+                  shareAgreementUrl={getShareAgreementUrl(item)}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />

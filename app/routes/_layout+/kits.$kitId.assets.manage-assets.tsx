@@ -52,6 +52,7 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getShareAgreementUrl } from "~/utils/asset";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -479,6 +480,10 @@ export default function ManageAssetsInKit() {
       const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
       const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
 
+      /**
+       * If the asset is checked out or in custody and not part of the current kit,
+       * then we need to disable it
+       */
       if ((isCheckedOut || isInCustody) && !kitAssetIds.includes(asset.id)) {
         acc.push(asset);
       }
@@ -724,13 +729,15 @@ const RowComponent = ({
                 */}
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    kit={item?.kit}
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    shareAgreementUrl={getShareAgreementUrl(item)}
                   />
                 </When>
 
                 {/* When asset is in other custody, show special badge */}
-                <When truthy={isInCustody}>
+                <When truthy={item.status === AssetStatus.IN_CUSTODY}>
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -751,6 +758,35 @@ const RowComponent = ({
                           Asset is currently in custody of a team member. <br />{" "}
                           Make sure the asset has an Available status in order
                           to add it to this kit.
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </When>
+
+                {/* Asset is signature pending */}
+                <When truthy={item.status === AssetStatus.SIGNATURE_PENDING}>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-xs text-warning-700">
+                          Signature pending
+                        </div>
+                      </TooltipTrigger>
+
+                      <TooltipContent
+                        side="top"
+                        align="end"
+                        className="md:w-80"
+                      >
+                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                          Asset has a pending signature
+                        </h2>
+                        <div className="text-wrap text-xs font-medium text-gray-500">
+                          Assets with a pending signature are in the process of
+                          being assigned to a team member. <br /> Make sure the
+                          asset has an Available status in order to add it to
+                          this kit.
                         </div>
                       </TooltipContent>
                     </Tooltip>

@@ -53,6 +53,17 @@ export function sanitizeFilename(filename: string): string {
   return s;
 }
 
+/**
+ * Converts the given enum case string to title case
+ *
+ * @param value - The enum case string to convert
+ * @returns The title case string
+ * @example SOME_ENUM_CASE -> Some Enum Case
+ */
+export function formatEnum(value: string) {
+  return _.startCase(_.toLower(value));
+}
+
 export async function getImageAsBase64(url: string) {
   try {
     // Fetch the image data
@@ -71,15 +82,4 @@ export async function getImageAsBase64(url: string) {
     console.error("Error fetching image:", error);
     return null;
   }
-}
-
-/**
- * Converts the given enum case string to title case
- *
- * @param value - The enum case string to convert
- * @returns The title case string
- * @example SOME_ENUM_CASE -> Some Enum Case
- */
-export function formatEnum(value: string) {
-  return _.startCase(_.toLower(value));
 }

@@ -1,4 +1,8 @@
-import type { BookingStatus } from "@prisma/client";
+import type {
+  BookingStatus,
+  CustodySignatureStatus,
+  CustodyStatus,
+} from "@prisma/client";
 import type {
   SortingDirection,
   SortingOptions,
@@ -39,6 +43,18 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   id: searchParams.getAll("id") || [],
   assetKitFilter: searchParams.get("assetKitFilter"),
   tags: searchParams.getAll("tag") || [],
+  custodyStatus:
+    searchParams.get("custodyStatus") === "ALL"
+      ? null
+      : (searchParams.get("custodyStatus") as CustodyStatus),
+  signatureStatus:
+    searchParams.get("signatureStatus") === "ALL"
+      ? null
+      : (searchParams.get("signatureStatus") as CustodySignatureStatus),
+  asset: searchParams.get("asset"),
+  kit: searchParams.get("kit"),
+  teamMember: searchParams.get("teamMember"),
+  custodyAgreement: searchParams.get("custodyAgreement"),
 });
 
 export const ALL_SELECTED_KEY = "all-selected";
