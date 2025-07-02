@@ -16,11 +16,16 @@ export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
       rect.bottom <=
         (window.innerHeight || document.documentElement.clientHeight) &&
       rect.right <= (window.innerWidth || document.documentElement.clientWidth);
-
     // If the element is not visible, scroll to it
     if (!isVisible) {
       const y = rect.top + window.scrollY + yOffset;
-      window.scrollTo({ top: y, behavior: "smooth" });
+      const main = document.querySelector("main");
+      if (main) {
+        main.scrollTo({
+          top: y,
+          behavior: "smooth",
+        });
+      }
       break;
     }
   }

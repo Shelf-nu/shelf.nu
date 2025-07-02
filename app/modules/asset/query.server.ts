@@ -1117,6 +1117,8 @@ export function parseSortingOptions(sortBy: string[]): {
       if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
         // Direct sort for dates and booleans
         orderByParts.push(`${alias} ${field.direction}`);
+      } else if (field.fieldType === "AMOUNT") {
+        orderByParts.push(`${alias}::numeric ${field.direction}`);
       } else {
         // Natural sort for text-based custom fields
         orderByParts.push(getNormalizedSortExpression(alias, field.direction));
