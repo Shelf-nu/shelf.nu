@@ -20,9 +20,9 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
-import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -95,8 +95,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-
-    const [teamMembersData, tags] = await Promise.all([
+    const [teamMembersData, tagsData] = await Promise.all([
       getTeamMemberForCustodianFilter({
         organizationId,
         selectedTeamMembers: teamMemberIds,
@@ -106,8 +105,9 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
         userId,
       }),
-
-      db.tag.findMany({ where: { organizationId } }),
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
     ]);
 
     return json(
@@ -115,8 +115,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         header,
         ...teamMembersData,
         currentOrganization,
-        tags,
-        totalTags: tags.length,
+        ...tagsData,
       })
     );
   } catch (cause) {
