@@ -298,6 +298,22 @@ async function getAssets(params: {
               },
             },
           },
+          // Search qr code id
+          {
+            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
+          },
+          // Search in custom fields
+          {
+            customFields: {
+              some: {
+                value: {
+                  path: ["valueText"],
+                  string_contains: term,
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
         ],
       }));
     }
