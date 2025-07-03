@@ -10,6 +10,7 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -25,13 +26,14 @@ export const NewKitFormSchema = z.object({
     .string()
     .optional()
     .transform((value) => value?.trim()),
+  category: z.string().optional(),
   qrId: z.string().optional(),
 });
 
-type KitFormProps = {
+type KitFormProps = Partial<
+  Pick<Kit, "name" | "description" | "categoryId">
+> & {
   className?: string;
-  name?: Kit["name"];
-  description?: Kit["description"];
   saveButtonLabel?: string;
   qrId?: string | null;
 };
@@ -42,6 +44,7 @@ export default function KitsForm({
   description,
   saveButtonLabel = "Add",
   qrId,
+  categoryId,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -113,6 +116,44 @@ export default function KitsForm({
             disabled={disabled}
             className="w-full"
             required={zodFieldIsRequired(NewKitFormSchema.shape.description)}
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel="Category"
+          subHeading={
+            <p>
+              Make it unique. Each asset can have 1 category. It will show on
+              your index.
+            </p>
+          }
+          className="border-b-0 pb-[10px]"
+          required={zodFieldIsRequired(NewKitFormSchema.shape.category)}
+        >
+          <DynamicSelect
+            disabled={disabled}
+            defaultValue={categoryId ?? undefined}
+            model={{ name: "category", queryKey: "name" }}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+            contentLabel="Categories"
+            label="Category"
+            hideLabel
+            initialDataKey="categories"
+            countKey="totalCategories"
+            closeOnSelect
+            selectionMode="set"
+            allowClear={true}
+            extraContent={
+              <Button
+                to="/categories/new"
+                variant="link"
+                icon="plus"
+                className="w-full justify-start pt-4"
+                target="_blank"
+              >
+                Create new category
+              </Button>
+            }
           />
         </FormRow>
 

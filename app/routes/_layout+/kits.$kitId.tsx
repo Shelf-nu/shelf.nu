@@ -9,6 +9,7 @@ import type {
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
@@ -121,6 +122,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           qrCodes: true,
+          category: true,
         },
         userOrganizations,
         request,
@@ -384,20 +386,33 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          <CustodyCard
-            className="mt-0"
-            // @ts-expect-error - we are passing the correct props
-            booking={currentBooking || undefined}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: kit?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-            custody={kit.custody}
-          />
+          <When truthy={!!kit.custody}>
+            <CustodyCard
+              className="mt-0"
+              // @ts-expect-error - we are passing the correct props
+              booking={currentBooking || undefined}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: kit?.custody?.custodian?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+              custody={kit.custody}
+            />
+          </When>
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
+          <When truthy={!!kit.category}>
+            <Card className="mb-3 mt-0 flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-600">
+                Category
+              </span>
+              <div className="max-w-[250px] font-medium">
+                <CategoryBadge category={kit.category} />
+              </div>
+            </Card>
+          </When>
+
           <Card className="mb-3 mt-0 flex justify-between">
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
