@@ -9,6 +9,7 @@ export type UpdateKitPayload = Partial<
     | "image"
     | "imageExpiration"
     | "createdById"
+    | "categoryId"
   >
 > & {
   id: Kit["id"];

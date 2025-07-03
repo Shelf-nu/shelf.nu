@@ -58,7 +58,11 @@ export async function createKit({
   createdById,
   organizationId,
   qrId,
-}: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
+  categoryId,
+}: Pick<
+  Kit,
+  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+> & {
   qrId?: Qr["id"];
 }) {
   try {
@@ -102,17 +106,16 @@ export async function createKit({
             ],
           };
 
-    const data = {
+    const data: Prisma.KitCreateInput = {
       name,
       description,
       createdBy: user,
       organization,
       qrCodes,
+      category: categoryId ? { connect: { id: categoryId } } : undefined,
     };
 
-    return await db.kit.create({
-      data,
-    });
+    return await db.kit.create({ data });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, organizationId },
@@ -129,6 +132,7 @@ export async function updateKit({
   status,
   createdById,
   organizationId,
+  categoryId,
 }: UpdateKitPayload) {
   try {
     return await db.kit.update({
@@ -139,6 +143,7 @@ export async function updateKit({
         image,
         imageExpiration,
         status,
+        category: categoryId ? { connect: { id: categoryId } } : undefined,
       },
     });
   } catch (cause) {
