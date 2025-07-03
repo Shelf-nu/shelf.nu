@@ -1,9 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
-import type { BookingStatus, Tag } from "@prisma/client";
+import { TagUseFor, type BookingStatus, type Tag } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
@@ -109,7 +109,9 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         userId,
       }),
 
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: { organizationId, useFor: { has: TagUseFor.BOOKING } },
+      }),
     ]);
 
     const modelName = {
@@ -141,7 +143,6 @@ export default function Calendar() {
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
-
   const [searchParams] = useSearchParams();
 
   const [calendarHeader, setCalendarHeader] = useState<{
@@ -204,6 +205,11 @@ export default function Calendar() {
     }
   };
 
+  const extraParams = useMemo(
+    () => Object.fromEntries(searchParams.entries()),
+    [searchParams]
+  );
+
   return (
     <>
       <Header hidePageDescription>
@@ -262,7 +268,7 @@ export default function Calendar() {
                 url: "/calendar/events",
                 method: "GET",
                 failure: (error) => setError(error.message),
-                extraParams: Object.fromEntries(searchParams.entries()),
+                extraParams,
               }}
               slotEventOverlap={true}
               dayMaxEvents={3}
