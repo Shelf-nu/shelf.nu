@@ -2,23 +2,24 @@ import React from "react";
 
 import { RemixBrowser } from "@remix-run/react";
 import i18next from "i18next";
-import LanguageDetector from "i18next-browser-languagedetector";
+import LanguageDetector from 'i18next-browser-languagedetector';
+import Backend from "i18next-fs-backend";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { I18nextProvider, initReactI18next } from "react-i18next";
-import { getInitialNamespaces } from "remix-i18next/client";
 import i18n from "./i18n/i18n";
-import en from "../public/locales/en/common";
-import fr from "../public/locales/fr/common";
+
 async function hydrate() {
   await i18next
     .use(initReactI18next)
+    .use(Backend)
     .use(LanguageDetector)
     .init({
       ...i18n,
-      ns: getInitialNamespaces(),
-      resources: { en: { common: en }, fr: { common: fr } },
+      debug: true,
+
     });
+  console.log("i18next initialized", i18next);
   React.startTransition(() => {
     hydrateRoot(
       document,

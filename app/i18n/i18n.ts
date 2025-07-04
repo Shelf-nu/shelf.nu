@@ -1,10 +1,7 @@
+import { resolve } from "node:path";
+import Backend from "i18next-fs-backend";
 import { config } from "~/config/shelf.config";
-
 export default {
-  detection: {
-    order: ["htmlTag"],
-    lookupCookie: "i18next",
-  },
   // This is the list of languages your application supports
   supportedLngs: config.SUPPORTED_LANGUAGES,
   // This is the language you want to use in case
@@ -12,4 +9,9 @@ export default {
   fallbackLng: config.FALLBACK_LANGUAGE,
   // The default namespace of i18next is "translation", but you can customize it here
   defaultNS: "common",
+  backend: {
+    // Absolute path recommended
+    loadPath: resolve("./public/locales/{{lng}}/{{ns}}.js"),
+  },
+  plugins: [Backend],
 };
