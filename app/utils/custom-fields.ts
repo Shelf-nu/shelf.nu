@@ -202,6 +202,9 @@ export const buildCustomFieldValue = (
         return { raw, valueOption: String(raw) };
       case "MULTILINE_TEXT":
         return { raw, valueMultiLineText: String(raw) };
+      case "AMOUNT": {
+        return { raw: Number(raw), valueText: String(raw) };
+      }
     }
 
     return { raw, valueText: String(raw) };
