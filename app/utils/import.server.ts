@@ -1,5 +1,6 @@
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
 import { ShelfError } from "./error";
+import { id } from "./id/id.server";
 
 /* This function receives an array of object and a key name
  * It then extracts all the values of that key and makes sure there are no duplicates
@@ -38,8 +39,18 @@ export function extractCSVDataFromContentImport(
   const headers = data[0].map((key) => key.trim()); // Trim the keys
   const values = data.slice(1) as string[][];
 
-  const csvData = values.map((entry) =>
-    Object.fromEntries(
+  const csvData = values.map((entry) => {
+    /**
+     * Our csv file might contain duplicate data items, for example:
+     * - Asset title can be duplicated
+     *
+     * In that case we need a way to identify each entry uniquely.
+     * We will generate a unique id for each entry.
+     * This will be used later to identify the entry when creating/updating assets.
+     */
+    const uniqueId = id(); // Generate a unique id for each entry
+
+    const entryData = Object.fromEntries(
       entry.map((value, index) => {
         switch (headers[index]) {
           case "tags":
@@ -53,8 +64,13 @@ export function extractCSVDataFromContentImport(
             return [headers[index], value];
         }
       })
-    )
-  );
+    );
+
+    return {
+      uniqueId,
+      ...entryData,
+    };
+  });
 
   /* Validating headers in csv file */
   const defectedHeaders: Array<{
