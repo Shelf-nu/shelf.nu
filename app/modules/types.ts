@@ -19,7 +19,7 @@ export interface SearchableIndexResponse {
   /** Tooltip for the search field */
   searchFieldTooltip?: {
     title: string;
-    text: string;
+    text: string; // Supports markdown
   };
 }
 
