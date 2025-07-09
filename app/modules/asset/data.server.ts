@@ -16,6 +16,7 @@ import {
 } from "~/utils/cookies.server";
 import { data, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -46,6 +47,18 @@ interface Props {
   user: { firstName: string | null };
   settings: AssetIndexSettings;
 }
+
+const searchFieldTooltipText = `
+Search assets based on asset fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
+- Name
+- Description
+- Category
+- Location
+- Tags
+- Custodian names (first or last name)
+- QR code value
+- Custom field values
+`;
 
 export async function simpleModeLoader({
   request,
@@ -186,7 +199,7 @@ export async function simpleModeLoader({
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
+        text: parseMarkdownToReact(searchFieldTooltipText),
       },
       totalCategories,
       totalTags,
@@ -363,10 +376,10 @@ export async function advancedModeLoader({
           entity: PermissionEntity.asset,
           action: PermissionAction.import,
         })),
-      searchFieldLabel: "Search by asset name",
+      searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
+        text: parseMarkdownToReact(searchFieldTooltipText),
       },
       filters,
       organizationId,

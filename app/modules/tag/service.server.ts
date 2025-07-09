@@ -4,8 +4,8 @@ import type {
   Tag,
   TeamMember,
   User,
-  TagUseFor,
 } from "@prisma/client";
+import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -279,6 +279,36 @@ export async function bulkDeleteTags({
       cause,
       message: "Something went wrong while bulk deleting tags.",
       additionalData: { tagIds, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * This function fetches tags that can be used for booking tags filter, which is used in the booking create forms as well as in the bookings filters
+ */
+export async function getTagsForBookingTagsFilter({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  try {
+    const tags = await db.tag.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.BOOKING } },
+        ],
+      },
+    });
+
+    return { tags, totalTags: tags.length };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching tags for booking filter",
+      additionalData: { organizationId },
       label,
     });
   }
