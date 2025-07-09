@@ -36,9 +36,26 @@ export function generateWhereClause(
       .filter(Boolean);
 
     if (words.length > 0) {
-      // Create OR conditions for each search term
+      // Create OR conditions for each search term, searching across multiple fields
       const searchConditions = words.map(
-        (term) => Prisma.sql`a.title ILIKE ${`%${term}%`}`
+        (term) => Prisma.sql`(
+          a.title ILIKE ${`%${term}%`} OR
+          a.description ILIKE ${`%${term}%`} OR
+          c.name ILIKE ${`%${term}%`} OR
+          l.name ILIKE ${`%${term}%`} OR
+          t.name ILIKE ${`%${term}%`} OR
+          tm.name ILIKE ${`%${term}%`} OR
+          u."firstName" ILIKE ${`%${term}%`} OR
+          u."lastName" ILIKE ${`%${term}%`} OR
+          EXISTS (
+            SELECT 1 FROM public."Qr" q 
+            WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
+          ) OR
+          EXISTS (
+            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
+            WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
+          )
+        )`
       );
 
       // Combine all search terms with OR
