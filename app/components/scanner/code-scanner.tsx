@@ -18,18 +18,24 @@ import { Spinner } from "../shared/spinner";
 import { scannerActionAtom } from "./drawer/action-atom";
 import type { ActionType } from "./drawer/action-switcher";
 
-export type OnQrDetectionSuccessProps = {
-  qrId: string;
+export type OnCodeDetectionSuccessProps = {
+  value: string;           // The actual scanned value (QR ID or barcode value)
+  type?: 'qr' | 'barcode'; // Code type - optional for backward compatibility
   error?: string;
 };
 
-export type OnQRDetectionSuccess = ({
-  qrId,
+export type OnCodeDetectionSuccess = ({
+  value,
+  type,
   error,
-}: OnQrDetectionSuccessProps) => void | Promise<void>;
+}: OnCodeDetectionSuccessProps) => void | Promise<void>;
+
+// Legacy type aliases for backward compatibility
+export type OnQrDetectionSuccessProps = OnCodeDetectionSuccessProps;
+export type OnQRDetectionSuccess = OnCodeDetectionSuccess;
 
 type CodeScannerProps = {
-  onQrDetectionSuccess: OnQRDetectionSuccess;
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
   isLoading?: boolean;
   backButtonText?: string;
   allowNonShelfCodes?: boolean;
@@ -55,7 +61,7 @@ type CodeScannerProps = {
 type Mode = "camera" | "scanner";
 
 export const CodeScanner = ({
-  onQrDetectionSuccess,
+  onCodeDetectionSuccess,
   backButtonText = "Back",
   allowNonShelfCodes = false,
   hideBackButtonText = false,
@@ -155,7 +161,7 @@ export const CodeScanner = ({
 
         {mode === "scanner" ? (
           <ScannerMode
-            onQrDetectionSuccess={onQrDetectionSuccess}
+            onCodeDetectionSuccess={onCodeDetectionSuccess}
             allowNonShelfCodes={shouldAllowNonShelfCodes}
             paused={paused}
             className={
@@ -171,7 +177,7 @@ export const CodeScanner = ({
             setIsLoading={setIsLoading}
             paused={paused}
             setPaused={setPaused}
-            onQrDetectionSuccess={onQrDetectionSuccess}
+            onCodeDetectionSuccess={onCodeDetectionSuccess}
             allowNonShelfCodes={shouldAllowNonShelfCodes}
             action={action}
           />
@@ -198,13 +204,13 @@ export const CodeScanner = ({
 };
 
 function ScannerMode({
-  onQrDetectionSuccess,
+  onCodeDetectionSuccess,
   allowNonShelfCodes = false,
   paused,
   className,
   callback,
 }: {
-  onQrDetectionSuccess: OnQRDetectionSuccess;
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
   allowNonShelfCodes: boolean;
   paused: boolean;
   className?: string;
@@ -226,7 +232,7 @@ function ScannerMode({
       const result = extractQrIdFromValue(input.value);
       await handleDetection({
         result,
-        onQrDetectionSuccess,
+        onCodeDetectionSuccess,
         allowNonShelfCodes,
         paused,
       });
@@ -288,13 +294,13 @@ function CameraMode({
   setIsLoading,
   paused,
   setPaused,
-  onQrDetectionSuccess,
+  onCodeDetectionSuccess,
   allowNonShelfCodes = false,
 }: {
   setIsLoading: (loading: boolean) => void;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  onQrDetectionSuccess: OnQRDetectionSuccess;
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
   allowNonShelfCodes: boolean;
   action?: ActionType;
 }) {
@@ -317,7 +323,7 @@ function CameraMode({
             animationFrame,
             paused,
             setPaused,
-            onQrDetectionSuccess,
+            onCodeDetectionSuccess,
             allowNonShelfCodes,
             setError,
           });
@@ -333,7 +339,7 @@ function CameraMode({
         cancelAnimationFrame(animationFrame.current);
       }
     };
-  }, [allowNonShelfCodes, onQrDetectionSuccess, paused, setPaused]);
+  }, [allowNonShelfCodes, onCodeDetectionSuccess, paused, setPaused]);
 
   // Effect to handle pause and resume
   useEffect(() => {
@@ -357,7 +363,7 @@ function CameraMode({
               animationFrame,
               paused,
               setPaused,
-              onQrDetectionSuccess,
+              onCodeDetectionSuccess,
               allowNonShelfCodes,
               setError,
             });
@@ -366,7 +372,7 @@ function CameraMode({
         void handleMetadata();
       }
     }
-  }, [paused, allowNonShelfCodes, onQrDetectionSuccess, setPaused]);
+  }, [paused, allowNonShelfCodes, onCodeDetectionSuccess, setPaused]);
 
   return (
     <>

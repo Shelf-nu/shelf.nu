@@ -12,7 +12,7 @@ import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
@@ -157,8 +157,8 @@ const QRScanner = () => {
   );
 
   // Define the handler using useCallback to prevent recreating it on every render
-  const handleQrDetectionSuccess = useCallback(
-    ({ qrId, error }: OnQrDetectionSuccessProps) => {
+  const handleCodeDetectionSuccess = useCallback(
+    ({ value, error, type }: OnCodeDetectionSuccessProps) => {
       // IMPORTANT: Always use the current value from the ref
       const currentAction = actionRef.current;
 
@@ -170,13 +170,19 @@ const QRScanner = () => {
         isNavigating.current = true;
         handleSetPaused(true);
         setScanMessage("Redirecting to mapped asset...");
-        navigate(`/qr/${qrId}`);
+
+        // Navigate to appropriate route based on code type
+        if (type === "barcode") {
+          navigate(`/barcode/${value}`);
+        } else {
+          navigate(`/qr/${value}`);
+        }
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
         )
       ) {
-        addItem(qrId, error);
+        addItem(value, error, type);
       }
     },
     [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
@@ -190,7 +196,7 @@ const QRScanner = () => {
         style={{ height: `${height}px` }}
       >
         <CodeScanner
-          onQrDetectionSuccess={handleQrDetectionSuccess}
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
           paused={paused}
           setPaused={handleSetPaused}
           scanMessage={scanMessage}

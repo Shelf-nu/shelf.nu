@@ -12,9 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
-  TagUseFor,
   BarcodeType,
-
 } from "@prisma/client";
 import {
   AssetStatus,

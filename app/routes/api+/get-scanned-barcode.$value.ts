@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { getQr } from "~/modules/qr/service.server";
+import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   data,
@@ -22,14 +22,13 @@ import type {
 } from "~/utils/scanner-includes.server";
 import {
   ASSET_INCLUDE,
+  BARCODE_INCLUDE,
   KIT_INCLUDE,
-  QR_INCLUDE,
 } from "~/utils/scanner-includes.server";
 
-// Re-export types for backward compatibility
-export type AssetFromQr = AssetFromScanner;
-export type KitFromQr = KitFromScanner;
-
+// Export types for barcode scanning
+export type AssetFromBarcode = AssetFromScanner;
+export type KitFromBarcode = KitFromScanner;
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -39,11 +38,11 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.qr,
+      entity: PermissionEntity.asset, // Use asset permissions for barcode scanning
       action: PermissionAction.read,
     });
 
-    const { qrId } = getParams(params, z.object({ qrId: z.string() }), {
+    const { value } = getParams(params, z.object({ value: z.string() }), {
       additionalData: {
         userId,
       },
@@ -81,7 +80,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     };
 
     const include = {
-      ...QR_INCLUDE,
+      ...BARCODE_INCLUDE,
 
       // Include additional data based on search params. This will override the default includes
       ...(assetExtraInclude
@@ -93,37 +92,38 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         : undefined),
     };
 
-    const qr = await getQr({
-      id: qrId,
+    const barcode = await getBarcodeByValue({
+      value,
+      organizationId,
       include,
     });
 
-    if (qr.organizationId !== organizationId) {
+    if (!barcode) {
       throw new ShelfError({
         cause: null,
         message:
-          "This QR code doesn't exist or it doesn't belong to your current organization.",
-        additionalData: { qrId, shouldSendNotification: false },
-        label: "QR",
+          "This barcode doesn't exist or it doesn't belong to your current organization.",
+        additionalData: { value, shouldSendNotification: false },
+        label: "Barcode",
         shouldBeCaptured: false,
       });
     }
 
-    if (!qr.assetId && !qr.kitId) {
+    if (!barcode.assetId && !barcode.kitId) {
       throw new ShelfError({
         cause: null,
-        message: "QR code is not linked to any asset or kit",
-        additionalData: { qrId, shouldSendNotification: false },
+        message: "Barcode is not linked to any asset or kit",
+        additionalData: { value, shouldSendNotification: false },
         shouldBeCaptured: false,
-        label: "QR",
+        label: "Barcode",
       });
     }
 
     return json(
       data({
-        qr: {
-          ...qr,
-          type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+        barcode: {
+          ...barcode,
+          type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
         },
       })
     );

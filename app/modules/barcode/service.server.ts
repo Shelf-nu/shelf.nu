@@ -309,20 +309,25 @@ export async function deleteBarcodes({
 /**
  * Get barcode by value within organization
  */
-export async function getBarcodeByValue({
+export async function getBarcodeByValue<T = {
+  asset: boolean;
+  kit: boolean;
+}>({
   value,
   organizationId,
+  include,
 }: {
   value: string;
   organizationId: Organization["id"];
-}): Promise<Barcode | null> {
+  include?: T;
+}): Promise<any> {
   try {
     const barcode = await db.barcode.findFirst({
       where: {
         value: value.toUpperCase(),
         organizationId,
       },
-      include: {
+      include: include || {
         asset: true,
         kit: true,
       },

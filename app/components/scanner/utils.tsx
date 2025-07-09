@@ -1,6 +1,8 @@
+import { BarcodeType } from "@prisma/client";
 import { readBarcodes, type ReadResult } from "zxing-wasm";
+import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { isQrId } from "~/utils/id";
-import type { OnQRDetectionSuccess } from "./code-scanner";
+import type { OnCodeDetectionSuccess } from "./code-scanner";
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -109,6 +111,40 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
  * @param position  The position of the detected barcode
  * @returns void
  */
+/**
+ * Attempts to detect what type of barcode a value might be based on its characteristics
+ * Returns the barcode type if it matches validation rules, null otherwise
+ */
+function detectBarcodeType(value: string): BarcodeType | null {
+  const normalizedValue = value.toUpperCase();
+
+  // Automatically get all barcode types from the enum
+  const allBarcodeTypes = Object.values(BarcodeType) as BarcodeType[];
+
+  for (const type of allBarcodeTypes) {
+    const validationError = validateBarcodeValue(type, normalizedValue);
+    if (!validationError) {
+      return type;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Checks if a scanned value is a valid barcode format
+ */
+function isValidBarcode(value: string): {
+  isValid: boolean;
+  type?: BarcodeType;
+} {
+  const detectedType = detectBarcodeType(value);
+  return {
+    isValid: detectedType !== null,
+    type: detectedType || undefined,
+  };
+}
+
 export const drawDetectionBox = (
   ctx: CanvasRenderingContext2D,
   position: ReadResult["position"]
@@ -143,7 +179,7 @@ export const processFrame = async ({
   animationFrame,
   paused,
   setPaused,
-  onQrDetectionSuccess,
+  onCodeDetectionSuccess,
   allowNonShelfCodes,
   setError,
 }: {
@@ -152,7 +188,7 @@ export const processFrame = async ({
   animationFrame: React.MutableRefObject<number>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  onQrDetectionSuccess: OnQRDetectionSuccess;
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
   allowNonShelfCodes: boolean;
   setError: (error: string) => void;
 }) => {
@@ -182,7 +218,7 @@ export const processFrame = async ({
           animationFrame,
           paused,
           setPaused,
-          onQrDetectionSuccess,
+          onCodeDetectionSuccess,
           allowNonShelfCodes,
           setError,
         })
@@ -200,7 +236,7 @@ export const processFrame = async ({
     const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
     const results = await readBarcodes(imageData, {
       tryHarder: true,
-      formats: ["QRCode"],
+      formats: ["QRCode", "Code128", "Code39", "MicroQRCode"],
       maxNumberOfSymbols: 1,
     });
 
@@ -211,12 +247,12 @@ export const processFrame = async ({
       // Don't set paused yet - let handleDetection decide
       await handleDetection({
         result: result.text,
-        onQrDetectionSuccess,
+        onCodeDetectionSuccess,
         allowNonShelfCodes,
         paused, // Use the current paused state
       });
 
-      // The onQrDetectionSuccess callback will handle pausing based on the action
+      // The onCodeDetectionSuccess callback will handle pausing based on the action
     }
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -236,7 +272,7 @@ export const processFrame = async ({
         animationFrame,
         paused,
         setPaused,
-        onQrDetectionSuccess,
+        onCodeDetectionSuccess,
         allowNonShelfCodes,
         setError,
       })
@@ -247,34 +283,75 @@ export const processFrame = async ({
 export const handleDetection = async ({
   result,
   allowNonShelfCodes,
-  onQrDetectionSuccess,
+  onCodeDetectionSuccess,
   paused,
 }: {
   result: string;
   allowNonShelfCodes: boolean;
-  onQrDetectionSuccess?: OnQRDetectionSuccess;
+  onCodeDetectionSuccess?: OnCodeDetectionSuccess;
   paused: boolean;
 }) => {
   if (!result || paused) return;
 
-  const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-  const match = result.match(regex);
+  console.log("🔍 Detection Debug:", { result, allowNonShelfCodes });
 
-  if (!match && !allowNonShelfCodes) {
-    await onQrDetectionSuccess?.({
-      qrId: result,
-      error: "Scanned code is not a valid Shelf QR code.",
+  // First, check if it's a QR code (URL pattern)
+  const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+  const qrMatch = result.match(qrRegex);
+  
+  console.log("QR URL check:", { qrMatch, regex: qrRegex.toString() });
+
+  if (qrMatch) {
+    // It's a QR code URL
+    const qrId = qrMatch[2];
+    await onCodeDetectionSuccess?.({
+      value: qrId,
+      type: "qr",
+      error: !isQrId(qrId) ? "Invalid QR code format" : undefined,
     });
     return;
   }
 
-  const qrId = match ? match[2] : result;
-  if (match && !isQrId(qrId)) {
-    await onQrDetectionSuccess?.({ qrId, error: "Invalid QR code format" });
+  // Check if it's a raw QR ID (before checking barcodes)
+  console.log("Checking if QR ID:", { result, isQrId: isQrId(result) });
+  if (isQrId(result)) {
+    console.log("✅ Detected as QR ID");
+    await onCodeDetectionSuccess?.({
+      value: result,
+      type: "qr",
+    });
     return;
   }
 
-  await onQrDetectionSuccess?.({ qrId });
+  // If not a QR code, check if it's a valid barcode
+  const barcodeCheck = isValidBarcode(result);
+  console.log("Barcode check:", { barcodeCheck });
+
+  if (barcodeCheck.isValid) {
+    console.log("✅ Detected as barcode");
+    // It's a valid barcode
+    await onCodeDetectionSuccess?.({
+      value: result.toUpperCase(),
+      type: "barcode",
+    });
+    return;
+  }
+
+  // TODO: Research if allowNonShelfCodes is still needed in scanner detection logic
+  // If allowNonShelfCodes is true, treat as a raw QR value
+  if (allowNonShelfCodes) {
+    await onCodeDetectionSuccess?.({
+      value: result,
+      type: "qr",
+    });
+    return;
+  }
+
+  // Not a valid QR code or barcode
+  await onCodeDetectionSuccess?.({
+    value: result,
+    error: "Scanned code is not a valid Shelf QR code or barcode.",
+  });
 };
 
 /** Updates the canvas size to match the video size */

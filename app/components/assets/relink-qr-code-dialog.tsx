@@ -10,7 +10,7 @@ import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import type { OnQrDetectionSuccessProps } from "../scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "../scanner/code-scanner";
 import { CodeScanner } from "../scanner/code-scanner";
 import { Button } from "../shared/button";
 import When from "../when/when";
@@ -43,9 +43,15 @@ export default function RelinkQrCodeDialog({
   const isNewCodeSameAsCurrent = qrCode?.id === newQrId;
 
   function handleQrDetectionSuccess({
-    qrId,
+    value: qrId,
     error,
-  }: OnQrDetectionSuccessProps) {
+    type,
+  }: OnCodeDetectionSuccessProps) {
+    // Only handle QR codes in this context - reject barcodes
+    if (type === "barcode") {
+      setErrorMessage("Please scan a QR code, not a barcode.");
+      return;
+    }
     /** Set the error returned from the scanner */
     if (error && error !== "") {
       setErrorMessage(error);
@@ -115,7 +121,7 @@ export default function RelinkQrCodeDialog({
               className="!h-[450px] [&_.info-overlay]:h-[450px]"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}
-              onQrDetectionSuccess={handleQrDetectionSuccess}
+              onCodeDetectionSuccess={handleQrDetectionSuccess}
               allowNonShelfCodes
               hideBackButtonText
               paused={!!newQrId}
