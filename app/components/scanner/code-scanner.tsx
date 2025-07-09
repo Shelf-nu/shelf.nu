@@ -19,8 +19,8 @@ import { scannerActionAtom } from "./drawer/action-atom";
 import type { ActionType } from "./drawer/action-switcher";
 
 export type OnCodeDetectionSuccessProps = {
-  value: string;           // The actual scanned value (QR ID or barcode value)
-  type?: 'qr' | 'barcode'; // Code type - optional for backward compatibility
+  value: string; // The actual scanned value (QR ID or barcode value)
+  type?: "qr" | "barcode"; // Code type - optional for backward compatibility
   error?: string;
 };
 

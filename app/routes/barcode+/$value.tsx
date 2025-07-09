@@ -3,16 +3,12 @@ import { redirect, json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
+import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserOrganizations } from "~/modules/organization/service.server";
-import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import {
-  data,
-  error,
-  getParams,
-} from "~/utils/http.server";
+import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -128,7 +124,5 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function BarcodeScanner() {
-  return (
-    <ErrorContent />
-  );
+  return <ErrorContent />;
 }

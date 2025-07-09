@@ -309,10 +309,12 @@ export async function deleteBarcodes({
 /**
  * Get barcode by value within organization
  */
-export async function getBarcodeByValue<T = {
-  asset: boolean;
-  kit: boolean;
-}>({
+export async function getBarcodeByValue<
+  T = {
+    asset: boolean;
+    kit: boolean;
+  },
+>({
   value,
   organizationId,
   include,

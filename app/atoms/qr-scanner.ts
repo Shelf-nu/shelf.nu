@@ -90,26 +90,31 @@ export const updateScannedItemAtom = atom(
     // Check for duplicate assets/kits by ID before adding
     if (item && item.data && item.type) {
       const assetOrKitId = item.data.id;
-      
+
       // Look for existing items with the same asset/kit ID
-      const existingDuplicateKey = Object.entries(currentItems).find(([key, existingItem]) => {
-        if (key === qrId) return false; // Don't compare with self
-        return existingItem?.data?.id === assetOrKitId && existingItem?.type === item.type;
-      });
+      const existingDuplicateKey = Object.entries(currentItems).find(
+        ([key, existingItem]) => {
+          if (key === qrId) return false; // Don't compare with self
+          return (
+            existingItem?.data?.id === assetOrKitId &&
+            existingItem?.type === item.type
+          );
+        }
+      );
 
       if (existingDuplicateKey) {
         console.log(`🚫 Duplicate ${item.type} detected:`, {
           newKey: qrId,
           existingKey: existingDuplicateKey[0],
-          assetOrKitId
+          assetOrKitId,
         });
-        
+
         // Add the duplicate with an error message instead of blocking silently
         const duplicateItem: ScanListItem = {
           error: `This ${item.type} is already in the list.`,
           codeType: item.codeType,
         };
-        
+
         set(scannedItemsAtom, {
           ...currentItems,
           [qrId]: duplicateItem,

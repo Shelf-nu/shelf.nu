@@ -298,7 +298,7 @@ export const handleDetection = async ({
   // First, check if it's a QR code (URL pattern)
   const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
   const qrMatch = result.match(qrRegex);
-  
+
   console.log("QR URL check:", { qrMatch, regex: qrRegex.toString() });
 
   if (qrMatch) {

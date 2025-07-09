@@ -8,13 +8,13 @@ import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import useApiQuery from "~/hooks/use-api-query";
 import type {
-  AssetFromQr,
-  KitFromQr,
-} from "~/routes/api+/get-scanned-item.$qrId";
-import type {
   AssetFromBarcode,
   KitFromBarcode,
 } from "~/routes/api+/get-scanned-barcode.$value";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 
 // Type for the QR API response
@@ -98,7 +98,7 @@ export function GenericItemRow<T>({
 
   // Determine which API to call based on codeType
   const isBarcode = item?.codeType === "barcode";
-  const apiEndpoint = isBarcode 
+  const apiEndpoint = isBarcode
     ? `/api/get-scanned-barcode/${qrId}`
     : `/api/get-scanned-item/${qrId}`;
 
@@ -108,7 +108,7 @@ export function GenericItemRow<T>({
     item,
     isBarcode,
     apiEndpoint,
-    codeType: item?.codeType
+    codeType: item?.codeType,
   });
 
   // Use the API hook to fetch item data
@@ -125,7 +125,7 @@ export function GenericItemRow<T>({
       console.log("Response processing:", {
         response,
         isBarcode,
-        qrId
+        qrId,
       });
 
       // If the server returns an error, add it to the item and return
@@ -138,12 +138,12 @@ export function GenericItemRow<T>({
       }
 
       // Handle both QR and barcode responses
-      const dataSource = isBarcode 
-        ? (response as BarcodeApiResponse).barcode 
+      const dataSource = isBarcode
+        ? (response as BarcodeApiResponse).barcode
         : (response as QrApiResponse).qr;
-      
+
       console.log("DataSource extracted:", dataSource);
-      
+
       // Determine item type (asset or kit) and update accordingly
       if (dataSource && dataSource.type === "asset") {
         const itemWithType: ScanListItem = {
