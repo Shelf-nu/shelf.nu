@@ -1819,8 +1819,7 @@ export async function createAssetsFromContentImport({
 
       await createAsset({
         id: assetId, // Pass the pre-generated ID
-        qrId: qrCodesPerAsset.find((item) => item?.uniqueId === asset.uniqueId)
-          ?.qrId,
+        qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
         organizationId,
         title: asset.title,
         description: asset.description || "",

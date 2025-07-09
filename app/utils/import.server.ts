@@ -48,7 +48,7 @@ export function extractCSVDataFromContentImport(
      * We will generate a unique id for each entry.
      * This will be used later to identify the entry when creating/updating assets.
      */
-    const uniqueId = id(); // Generate a unique id for each entry
+    const key = id(); // Generate a unique id for each entry
 
     const entryData = Object.fromEntries(
       entry.map((value, index) => {
@@ -67,7 +67,7 @@ export function extractCSVDataFromContentImport(
     );
 
     return {
-      uniqueId,
+      key,
       ...entryData,
     };
   });

@@ -524,7 +524,7 @@ export async function parseQrCodesFromImportData({
       .map((asset) => {
         if (asset.qrId) {
           return {
-            uniqueId: asset.uniqueId,
+            key: asset.key,
             title: asset.title,
             qrId: asset.qrId,
           };
