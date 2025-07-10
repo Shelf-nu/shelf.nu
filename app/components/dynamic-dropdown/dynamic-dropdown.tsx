@@ -101,7 +101,7 @@ export default function DynamicDropdown({
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger
           className={tw(
-            "inline-flex items-center gap-2 text-gray-500",
+            "inline-flex items-center gap-1 text-gray-500",
             triggerWrapperClassName
           )}
           asChild
