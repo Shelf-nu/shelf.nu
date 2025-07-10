@@ -54,7 +54,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
   try {
     /** Validate permissions and fetch user */
-    const [{ organizationId, organizations, currentOrganization, role }, user] =
+    const [{ organizationId, organizations, currentOrganization, role, canUseBarcodes }, user] =
       await Promise.all([
         requirePermission({
           userId,
@@ -82,7 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           }),
       ]);
 
-    const settings = await getAssetIndexSettings({ userId, organizationId });
+    const settings = await getAssetIndexSettings({ userId, organizationId, canUseBarcodes });
     const mode = settings.mode;
 
     /** For base and self service users, we dont allow to view the advanced index */

@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from "react";
+import React, { useRef, useMemo, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -49,6 +49,7 @@ interface CodePreviewProps {
     value: string;
   }>;
   onCodeChange?: (code: CodeType | null) => void;
+  selectedBarcodeId?: string;
 }
 
 export const CodePreview = ({
@@ -59,6 +60,7 @@ export const CodePreview = ({
   item,
   hideButton = false,
   onCodeChange,
+  selectedBarcodeId,
 }: CodePreviewProps) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
@@ -99,8 +101,21 @@ export const CodePreview = ({
     return codes;
   }, [qrObj, barcodes, canUseBarcodes]);
 
-  // Default to QR code if available, otherwise first barcode
+  // Default to selected barcode, then QR code if available, otherwise first barcode
   const [selectedCodeId, setSelectedCodeId] = useState<string>(() => {
+    // If a specific barcode is selected, prioritize it
+    if (selectedBarcodeId) {
+      const selectedBarcode = availableCodes.find((code) => code.id === selectedBarcodeId);
+      if (selectedBarcode) {
+        // Notify parent of initial selection
+        if (onCodeChange) {
+          onCodeChange(selectedBarcode);
+        }
+        return selectedBarcodeId;
+      }
+    }
+
+    // Otherwise default to QR code if available, then first barcode
     const qrCode = availableCodes.find((code) => code.type === "qr");
     const defaultId = qrCode?.id || availableCodes[0]?.id || "";
 

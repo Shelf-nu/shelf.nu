@@ -14,6 +14,7 @@ import type {
   Organization,
   Booking,
   BarcodeType,
+  Barcode,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -159,6 +160,9 @@ export type AdvancedIndexAsset = Pick<
   };
   bookings?: Array<
     Pick<Booking, "id" | "name" | "from" | "to" | "status" | "description">
+  >;
+  barcodes?: Array<
+    Pick<Barcode, "id" | "type" | "value">
   >;
 };
 // Type for the entire query result

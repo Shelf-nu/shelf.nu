@@ -301,6 +301,7 @@ export async function advancedModeLoader({
       filters,
       settings,
       getBookings: view === "availability",
+      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({

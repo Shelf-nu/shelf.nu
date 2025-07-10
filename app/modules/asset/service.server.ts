@@ -514,6 +514,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   takeAll = false,
   assetIds,
   getBookings = false,
+  canUseBarcodes = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -522,6 +523,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   takeAll?: boolean;
   assetIds?: string[];
   getBookings?: boolean;
+  canUseBarcodes?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -551,11 +553,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const paginationClause = takeAll
       ? Prisma.empty
       : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-
     const query = Prisma.sql`
       WITH asset_query AS (
         ${assetQueryFragment({
           withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
         })}
         ${customFieldSelect}
         ${assetQueryJoins}
@@ -575,6 +577,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment({
           withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
         })}
       FROM sorted_asset_query aq;
     `;
@@ -583,7 +586,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
-
+    console.log("Assets fetched:", assets);
     return {
       search,
       totalAssets,

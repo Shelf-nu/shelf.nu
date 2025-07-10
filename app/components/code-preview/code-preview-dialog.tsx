@@ -25,12 +25,13 @@ type CodePreviewDialogProps = {
     onClick: () => void;
     ref: React.ForwardedRef<HTMLButtonProps>;
   }>;
+  selectedBarcodeId?: string;
 };
 
 export const CodePreviewDialog = forwardRef<
   HTMLButtonProps,
   CodePreviewDialogProps
->(function ({ className, item, trigger }, ref) {
+>(function ({ className, item, trigger, selectedBarcodeId }, ref) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedCode, setSelectedCode] = useState<CodeType | null>(null);
   const { canUseBarcodes } = useBarcodePermissions();
@@ -107,6 +108,7 @@ export const CodePreviewDialog = forwardRef<
                     qrObj={data?.qrObj}
                     barcodes={canUseBarcodes ? data?.barcodes || [] : []}
                     onCodeChange={setSelectedCode}
+                    selectedBarcodeId={selectedBarcodeId}
                   />
                 </Card>
               </When>

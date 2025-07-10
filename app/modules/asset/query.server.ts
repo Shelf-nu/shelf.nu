@@ -70,7 +70,7 @@ export function generateWhereClause(
   for (const filter of filters) {
     switch (filter.type) {
       case "string":
-        if (["location", "kit", "category", "qrId"].includes(filter.name)) {
+        if (["location", "kit", "category", "qrId"].includes(filter.name) || filter.name.startsWith("barcode_")) {
           whereClause = addRelationFilter(whereClause, filter);
         } else {
           whereClause = addStringFilter(whereClause, filter);
@@ -664,6 +664,40 @@ function addRelationFilter(
     }
   }
 
+  // Special handling for barcode fields
+  if (filter.name.startsWith("barcode_")) {
+    const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, MicroQRCode)
+    
+    // Normalize filter value to uppercase to match how barcodes are stored
+    const normalizedValue = typeof filter.value === 'string' ? filter.value.toUpperCase() : filter.value;
+    
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ${normalizedValue})`;
+      case "isNot":
+        return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ${normalizedValue})`;
+      case "contains":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value ILIKE ${`%${normalizedValue}%`})`;
+      case "matchesAny": {
+        const values = (filter.value as string).split(",").map((v) => v.trim().toUpperCase());
+        const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ANY(${valuesArray}::text[]))`;
+      }
+      case "containsAny": {
+        const values = (filter.value as string).split(",").map((v) => v.trim().toUpperCase());
+        const likeConditions = values.map(
+          (value) => Prisma.sql`b.value ILIKE ${`%${value}%`}`
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND (${Prisma.join(
+          likeConditions,
+          " OR "
+        )}))`;
+      }
+      default:
+        return whereClause;
+    }
+  }
+
   switch (filter.operator) {
     case "is":
       return Prisma.sql`${whereClause} AND ${Prisma.raw(alias)}.name = ${
@@ -1205,15 +1239,17 @@ export function generateCustomFieldSelect(
 // TypeScript types for options
 export type AssetQueryOptions = {
   withBookings?: boolean;
+  withBarcodes?: boolean;
 };
 
 export type AssetReturnOptions = {
   withBookings?: boolean;
+  withBarcodes?: boolean;
 };
 
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
-  const { withBookings = false } = options;
+  const { withBookings = false, withBarcodes = false } = options;
 
   const bookingsSelect = withBookings
     ? Prisma.sql`,
@@ -1270,6 +1306,24 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         atb."A" = a.id 
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ) AS bookings`
+    : Prisma.sql``;
+
+  const barcodesSelect = withBarcodes
+    ? Prisma.sql`,
+    (
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', b.id,
+            'type', b.type,
+            'value', b.value
+          )
+        ),
+        '[]'::jsonb
+      )
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id
+    ) AS barcodes`
     : Prisma.sql``;
 
   return Prisma.sql`
@@ -1388,7 +1442,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ORDER BY 
           ar."alertDateTime" ASC
         LIMIT 1
-      ) AS upcomingReminder${bookingsSelect}
+      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}
   `;
 };
 
@@ -1420,11 +1474,16 @@ export const assetQueryJoins = Prisma.sql`
  * @returns Prisma.Sql fragment that safely handles no results
  */
 export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
-  const { withBookings = false } = options;
+  const { withBookings = false, withBarcodes = false } = options;
 
   const bookingsField = withBookings
     ? Prisma.sql`,
         'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  const barcodesField = withBarcodes
+    ? Prisma.sql`,
+        'barcodes', COALESCE(aq.barcodes, '[]'::jsonb)`
     : Prisma.sql``;
 
   return Prisma.sql`
@@ -1454,7 +1513,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'location', jsonb_build_object('name', aq."locationName"),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-          'upcomingReminder', aq.upcomingReminder${bookingsField}
+          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
         )
       ) FILTER (WHERE aq."assetId" IS NOT NULL),
       '[]'
