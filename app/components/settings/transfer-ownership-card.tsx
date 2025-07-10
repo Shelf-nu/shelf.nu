@@ -36,6 +36,14 @@ type TransferOwnershipCardProps = {
 
 export const TransferOwnershipSchema = z.object({
   newOwner: z.string().min(1, "New owner is required"),
+  agreeConditions: z
+    .string({ required_error: "You must agree to the terms and conditions" })
+    .transform((value) => value === "on")
+    .pipe(
+      z.boolean().refine((value) => value, {
+        message: "You must agree to the terms and conditions",
+      })
+    ),
 });
 
 export default function TransferOwnershipCard({
@@ -52,8 +60,6 @@ export default function TransferOwnershipCard({
   const currentOrganization = useCurrentOrganization();
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
-
-  const formError = zo.errors?.newOwner()?.message;
 
   if (!isOwner) {
     return null;
@@ -116,8 +122,10 @@ export default function TransferOwnershipCard({
                 </SelectContent>
               </Select>
 
-              <When truthy={!!formError}>
-                <p className="text-sm text-error-500">{formError}</p>
+              <When truthy={!!zo.errors?.newOwner()?.message}>
+                <p className="text-sm text-error-500">
+                  {zo.errors?.newOwner()?.message}
+                </p>
               </When>
 
               <When truthy={!!selectedOwner}>
@@ -138,7 +146,7 @@ export default function TransferOwnershipCard({
                   <li>Become an admin member</li>
                 </ul>
 
-                <div>
+                <div className="mb-2">
                   <p>
                     To confirm this transfer, type the workspace name exactly as
                     shown:
@@ -154,6 +162,29 @@ export default function TransferOwnershipCard({
                   <p className="text-sm text-gray-500">
                     Expected input: {currentOrganization?.name}
                   </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={zo.fields.agreeConditions()}
+                    className={tw(
+                      "flex cursor-pointer select-none items-center gap-2 py-2 text-sm"
+                    )}
+                  >
+                    <input
+                      id={zo.fields.agreeConditions()}
+                      name={zo.fields.agreeConditions()}
+                      type="checkbox"
+                      className="rounded-sm checked:bg-primary focus-within:ring-primary checked:hover:bg-primary checked:focus:bg-primary"
+                    />
+
+                    <span>I understand this action cannot be undone.</span>
+                  </label>
+                  <When truthy={!!zo.errors?.agreeConditions()?.message}>
+                    <p className="text-sm text-error-500">
+                      {zo.errors?.agreeConditions()?.message}
+                    </p>
+                  </When>
                 </div>
               </When>
 
