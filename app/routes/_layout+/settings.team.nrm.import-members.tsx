@@ -82,6 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // Transform member names into format expected by createTeamMemberIfNotExists
     const importData: CreateAssetFromContentImportPayload[] = memberNames.map(
       (name) => ({
+        key: "", // Required by type but unused
         title: "", // Required by type but unused
         tags: [], // Required by type but unused
         custodian: name,
