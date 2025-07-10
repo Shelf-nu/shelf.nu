@@ -2,8 +2,10 @@ import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
@@ -508,10 +510,12 @@ export function updateOrganizationPermissions({
 
 export async function transferOwnership({
   currentOrganizationId,
+  currentOrganizationName,
   newOwnerId,
   userId,
 }: {
   currentOrganizationId: Organization["id"];
+  currentOrganizationName: string;
   newOwnerId: User["id"];
   userId: User["id"];
 }) {
@@ -528,7 +532,9 @@ export async function transferOwnership({
       },
       select: {
         id: true,
-        user: { select: { id: true, firstName: true, lastName: true } },
+        user: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
         roles: true,
       },
     });
@@ -594,6 +600,27 @@ export async function transferOwnership({
         where: { id: newOwnerUserOrg.id },
         data: { roles: { set: [OrganizationRoles.OWNER] } },
       });
+    });
+
+    /** Send email to new owner */
+    sendEmail({
+      subject: `🎉 You're now the Owner of ${currentOrganizationName} - Shelf`,
+      to: newOwnerUserOrg.user.email,
+      text: newOwnerEmailText({
+        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        workspaceName: currentOrganizationName,
+      }),
+    });
+
+    /** Send email to previous owner */
+    sendEmail({
+      subject: `🔁 You've Transferred Ownership of ${currentOrganizationName}`,
+      to: currentOwnerUserOrg.user.email,
+      text: previousOwnerEmailText({
+        previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
+        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        workspaceName: currentOrganizationName,
+      }),
     });
 
     return {

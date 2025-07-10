@@ -332,6 +332,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const { newOwner } = await transferOwnership({
           currentOrganizationId: organizationId,
+          currentOrganizationName: currentOrganization.name,
           newOwnerId: payload.newOwner,
           userId: authSession.userId,
         });
