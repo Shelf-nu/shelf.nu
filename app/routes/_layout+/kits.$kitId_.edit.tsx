@@ -12,6 +12,7 @@ import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getKit,
   updateKit,
@@ -58,6 +59,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
+      {
+        organizationId,
+        request,
+        defaultCategory: kit?.categoryId,
+      }
+    );
+
     const header: HeaderData = {
       title: `Edit | ${kit.name}`,
       subHeading: kit.id,
@@ -67,6 +76,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         kit,
         header,
+        categories,
+        totalCategories,
       })
     );
   } catch (cause) {
@@ -115,6 +126,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: payload.name,
         description: payload.description,
         organizationId,
+        categoryId: payload.category ?? null,
       }),
       updateKitImage({
         request,
@@ -156,6 +168,7 @@ export default function KitEdit() {
         <KitsForm
           name={kit.name}
           description={kit.description}
+          categoryId={kit.categoryId}
           saveButtonLabel="Save"
         />
       </div>
