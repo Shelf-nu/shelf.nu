@@ -14,7 +14,7 @@ export function canUserManageBookingAssets(
   const isCancelled = booking.status === BookingStatus.CANCELLED;
 
   const cantManageAssetsAsSelfService =
-    isSelfService && booking.status === BookingStatus.DRAFT;
+    isSelfService && booking.status !== BookingStatus.DRAFT;
 
   return (
     !!booking.from &&
