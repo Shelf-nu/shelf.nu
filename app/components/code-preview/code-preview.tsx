@@ -105,7 +105,9 @@ export const CodePreview = ({
   const [selectedCodeId, setSelectedCodeId] = useState<string>(() => {
     // If a specific barcode is selected, prioritize it
     if (selectedBarcodeId) {
-      const selectedBarcode = availableCodes.find((code) => code.id === selectedBarcodeId);
+      const selectedBarcode = availableCodes.find(
+        (code) => code.id === selectedBarcodeId
+      );
       if (selectedBarcode) {
         // Notify parent of initial selection
         if (onCodeChange) {

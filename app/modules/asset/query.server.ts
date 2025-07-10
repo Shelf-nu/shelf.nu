@@ -70,7 +70,10 @@ export function generateWhereClause(
   for (const filter of filters) {
     switch (filter.type) {
       case "string":
-        if (["location", "kit", "category", "qrId"].includes(filter.name) || filter.name.startsWith("barcode_")) {
+        if (
+          ["location", "kit", "category", "qrId"].includes(filter.name) ||
+          filter.name.startsWith("barcode_")
+        ) {
           whereClause = addRelationFilter(whereClause, filter);
         } else {
           whereClause = addStringFilter(whereClause, filter);
@@ -667,10 +670,13 @@ function addRelationFilter(
   // Special handling for barcode fields
   if (filter.name.startsWith("barcode_")) {
     const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, MicroQRCode)
-    
+
     // Normalize filter value to uppercase to match how barcodes are stored
-    const normalizedValue = typeof filter.value === 'string' ? filter.value.toUpperCase() : filter.value;
-    
+    const normalizedValue =
+      typeof filter.value === "string"
+        ? filter.value.toUpperCase()
+        : filter.value;
+
     switch (filter.operator) {
       case "is":
         return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ${normalizedValue})`;
@@ -679,12 +685,16 @@ function addRelationFilter(
       case "contains":
         return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value ILIKE ${`%${normalizedValue}%`})`;
       case "matchesAny": {
-        const values = (filter.value as string).split(",").map((v) => v.trim().toUpperCase());
+        const values = (filter.value as string)
+          .split(",")
+          .map((v) => v.trim().toUpperCase());
         const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
         return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ANY(${valuesArray}::text[]))`;
       }
       case "containsAny": {
-        const values = (filter.value as string).split(",").map((v) => v.trim().toUpperCase());
+        const values = (filter.value as string)
+          .split(",")
+          .map((v) => v.trim().toUpperCase());
         const likeConditions = values.map(
           (value) => Prisma.sql`b.value ILIKE ${`%${value}%`}`
         );

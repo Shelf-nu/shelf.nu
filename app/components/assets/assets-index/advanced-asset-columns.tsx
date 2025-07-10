@@ -31,7 +31,10 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
-import type { ColumnLabelKey, BarcodeField } from "~/modules/asset-index-settings/helpers";
+import type {
+  ColumnLabelKey,
+  BarcodeField,
+} from "~/modules/asset-index-settings/helpers";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -438,15 +441,16 @@ function BarcodeColumn({
 }) {
   // Map column names to actual enum values
   const typeMapping: Record<string, string> = {
-    "Code128": "Code128",
-    "Code39": "Code39",
-    "MicroQRCode": "MicroQRCode"
+    Code128: "Code128",
+    Code39: "Code39",
+    MicroQRCode: "MicroQRCode",
   };
-  
+
   const columnType = column.split("_")[1];
   const actualBarcodeType = typeMapping[columnType] || columnType;
-  
-  const barcodes = item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
+
+  const barcodes =
+    item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
 
   if (barcodes.length === 0) {
     return <Td> </Td>;
@@ -488,7 +492,9 @@ function BarcodeColumn({
             selectedBarcodeId={barcode.id}
             trigger={<Button variant="link-gray">{barcode.value}</Button>}
           />
-          {index < barcodes.length - 1 && <span className="text-gray-400">, </span>}
+          {index < barcodes.length - 1 && (
+            <span className="text-gray-400">, </span>
+          )}
         </span>
       ))}
     </Td>

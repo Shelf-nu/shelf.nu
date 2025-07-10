@@ -161,9 +161,7 @@ export type AdvancedIndexAsset = Pick<
   bookings?: Array<
     Pick<Booking, "id" | "name" | "from" | "to" | "status" | "description">
   >;
-  barcodes?: Array<
-    Pick<Barcode, "id" | "type" | "value">
-  >;
+  barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
