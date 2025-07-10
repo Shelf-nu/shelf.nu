@@ -12,13 +12,13 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
+import { CodePreview } from "~/components/code-preview/code-preview";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { CodePreview } from "~/components/code-preview/code-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -27,7 +27,6 @@ import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   getAsset,
@@ -55,10 +54,13 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
-type AssetWithOptionalBarcodes = ReturnType<typeof useLoaderData<typeof loader>>['asset'] & {
+type AssetWithOptionalBarcodes = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["asset"] & {
   barcodes?: Array<{
     id: string;
     type: any;
@@ -82,13 +84,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, currentOrganization, canUseBarcodes } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      currentOrganization,
+      canUseBarcodes,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
 
     const { locale, timeZone } = getClientHint(request);
 
@@ -388,38 +394,46 @@ export default function AssetOverview() {
 
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
-                return asset && assetWithBarcodes.barcodes?.length && assetWithBarcodes.barcodes.length > 0 && canUseBarcodes;
+                return (
+                  asset &&
+                  assetWithBarcodes.barcodes?.length &&
+                  assetWithBarcodes.barcodes.length > 0 &&
+                  canUseBarcodes
+                );
               })() ? (
                 <li className="w-full p-4 last:border-b-0 md:block">
                   <span className="mb-3 block text-[14px] font-medium text-gray-900">
-                    Barcodes ({(asset as AssetWithOptionalBarcodes).barcodes?.length})
+                    Barcodes (
+                    {(asset as AssetWithOptionalBarcodes).barcodes?.length})
                   </span>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {(asset as AssetWithOptionalBarcodes).barcodes?.map((barcode) => (
-                      <div
-                        key={barcode.id}
-                        className="inline-block rounded-lg border bg-gray-50 p-3"
-                      >
-                        <div className="mb-2 flex items-center gap-1">
-                          <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                            {barcode.type}
-                          </span>
-                          <span className="font-mono  text-gray-700">
-                            {barcode.value}
-                          </span>
+                    {(asset as AssetWithOptionalBarcodes).barcodes?.map(
+                      (barcode) => (
+                        <div
+                          key={barcode.id}
+                          className="inline-block rounded-lg border bg-gray-50 p-3"
+                        >
+                          <div className="mb-2 flex items-center gap-1">
+                            <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                              {barcode.type}
+                            </span>
+                            <span className="font-mono  text-gray-700">
+                              {barcode.value}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-center justify-center rounded bg-white p-2">
+                            <BarcodeDisplay
+                              type={barcode.type}
+                              value={barcode.value}
+                              height={60}
+                              width={1.5}
+                              fontSize={12}
+                              maxWidth="280px"
+                            />
+                          </div>
                         </div>
-                        <div className="flex flex-col items-center justify-center rounded bg-white p-2">
-                          <BarcodeDisplay
-                            type={barcode.type}
-                            value={barcode.value}
-                            height={60}
-                            width={1.5}
-                            fontSize={12}
-                            maxWidth="280px"
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    )}
                   </div>
                 </li>
               ) : null}
@@ -581,7 +595,11 @@ export default function AssetOverview() {
           {asset && (
             <CodePreview
               qrObj={qrObj}
-              barcodes={canUseBarcodes ? ((asset as AssetWithOptionalBarcodes).barcodes || []) : []}
+              barcodes={
+                canUseBarcodes
+                  ? (asset as AssetWithOptionalBarcodes).barcodes || []
+                  : []
+              }
               item={{
                 name: asset.title,
                 type: "asset",

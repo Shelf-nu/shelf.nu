@@ -14,8 +14,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
-import { DeleteAsset } from "../delete-asset";
 import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
+import { DeleteAsset } from "../delete-asset";
 
 type AssetQuickActionsProps = {
   className?: string;

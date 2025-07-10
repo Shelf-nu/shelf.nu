@@ -167,7 +167,9 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const tags = buildTagsSet(payload.tags);
 
     /** Extract barcode data from form only if barcodes are enabled */
-    const barcodes = canUseBarcodes ? extractBarcodesFromFormData(formData) : [];
+    const barcodes = canUseBarcodes
+      ? extractBarcodesFromFormData(formData)
+      : [];
 
     const asset = await createAsset({
       organizationId,

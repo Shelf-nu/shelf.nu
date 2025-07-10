@@ -1,8 +1,8 @@
 import { cloneElement, forwardRef, useState } from "react";
 import type { Asset, Kit, BarcodeType } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
-import { tw } from "~/utils/tw";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { tw } from "~/utils/tw";
 import { CodePreview, type CodeType } from "./code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import type { HTMLButtonProps } from "../shared/button";
@@ -58,10 +58,10 @@ export const CodePreviewDialog = forwardRef<
   }
 
   const itemName = item.type === "asset" ? item.title : item.name;
-  
+
   // Generate dynamic title based on selected code
-  const dialogTitle = selectedCode 
-    ? selectedCode.type === "qr" 
+  const dialogTitle = selectedCode
+    ? selectedCode.type === "qr"
       ? `QR Code: ${item.qrId}`
       : `Barcode: ${selectedCode.barcodeData?.value || selectedCode.id}`
     : `Codes for ${itemName}`;
@@ -105,7 +105,7 @@ export const CodePreviewDialog = forwardRef<
                       type: item.type,
                     }}
                     qrObj={data?.qrObj}
-                    barcodes={canUseBarcodes ? (data?.barcodes || []) : []}
+                    barcodes={canUseBarcodes ? data?.barcodes || [] : []}
                     onCodeChange={setSelectedCode}
                   />
                 </Card>

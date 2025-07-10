@@ -5,9 +5,9 @@ import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
-import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";

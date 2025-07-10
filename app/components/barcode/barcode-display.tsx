@@ -101,11 +101,11 @@ export function BarcodeDisplay({
     <canvas
       ref={canvasRef}
       className={className}
-      style={{ 
+      style={{
         maxWidth: maxWidth,
         maxHeight: "120px",
         width: "auto",
-        height: "auto"
+        height: "auto",
       }}
     />
   );

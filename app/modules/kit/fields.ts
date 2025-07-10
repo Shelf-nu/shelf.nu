@@ -12,7 +12,7 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
       },
     } satisfies Prisma.KitInclude;
   }
-  
+
   return {} satisfies Prisma.KitInclude;
 };
 
