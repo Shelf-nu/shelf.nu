@@ -15,7 +15,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "../delete-asset";
-import { QrPreviewDialog } from "../qr-preview-dialog";
+import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 
 type AssetQuickActionsProps = {
   className?: string;
@@ -60,11 +60,12 @@ export default function AssetQuickActions({
       </When>
 
       <Tooltip>
-        <QrPreviewDialog
-          asset={{
+        <CodePreviewDialog
+          item={{
             id: asset.id,
             title: asset.title,
             qrId: asset.qrId,
+            type: "asset",
           }}
           trigger={
             <TooltipTrigger asChild>

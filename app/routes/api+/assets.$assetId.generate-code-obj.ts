@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
+import { getAsset } from "~/modules/asset/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -18,20 +19,37 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.read,
     });
 
-    const qrObj = await generateQrObj({
-      assetId,
-      userId,
-      organizationId,
-    });
+    const [qrObj, asset] = await Promise.all([
+      generateQrObj({
+        assetId,
+        userId,
+        organizationId,
+      }),
+      getAsset({
+        id: assetId,
+        organizationId,
+        userOrganizations,
+        request,
+        include: {
+          barcodes: {
+            select: {
+              id: true,
+              type: true,
+              value: true,
+            },
+          },
+        },
+      }),
+    ]);
 
-    return json(data({ qrObj }));
+    return json(data({ qrObj, barcodes: asset.barcodes }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return json(error(reason), { status: reason.status });

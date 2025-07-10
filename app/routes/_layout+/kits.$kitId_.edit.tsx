@@ -104,7 +104,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -119,7 +119,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     /** Extract barcode data from form */
-    const barcodes = extractBarcodesFromFormData(formData);
+    const barcodes = canUseBarcodes
+      ? extractBarcodesFromFormData(formData)
+      : [];
 
     await Promise.all([
       updateKit({

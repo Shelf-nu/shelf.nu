@@ -43,9 +43,9 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
-import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
 // eslint-disable-next-line import/no-cycle
 import { ListItemTagsColumn } from "./assets-list";
@@ -168,8 +168,13 @@ export function AdvancedIndexColumn({
 
     case "qrId":
       return (
-        <QrPreviewDialog
-          asset={item}
+        <CodePreviewDialog
+          item={{
+            id: item.id,
+            title: item.title,
+            qrId: item.qrId,
+            type: "asset",
+          }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
               <Button variant="link-gray">{item.qrId}</Button>

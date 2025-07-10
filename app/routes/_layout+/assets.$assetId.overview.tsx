@@ -18,7 +18,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { QrPreview } from "~/components/qr/qr-preview";
+import { CodePreview } from "~/components/code-preview/code-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -27,7 +27,8 @@ import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   getAsset,
   updateAssetBookingAvailability,
@@ -57,6 +58,14 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
+type AssetWithOptionalBarcodes = ReturnType<typeof useLoaderData<typeof loader>>['asset'] & {
+  barcodes?: Array<{
+    id: string;
+    type: any;
+    value: string;
+  }>;
+};
+
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -73,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, currentOrganization } =
+    const { organizationId, userOrganizations, currentOrganization, canUseBarcodes } =
       await requirePermission({
         userId,
         request,
@@ -88,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: ASSET_OVERVIEW_FIELDS,
+      include: getAssetOverviewFields(canUseBarcodes),
     });
 
     /**
@@ -270,6 +279,7 @@ export default function AssetOverview() {
     AvailabilityForBookingFormSchema
   );
   const { roles } = useUserRoleHelper();
+  const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
@@ -376,13 +386,16 @@ export default function AssetOverview() {
                 </li>
               ) : null}
 
-              {asset && asset?.barcodes?.length > 0 ? (
+              {(() => {
+                const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
+                return asset && assetWithBarcodes.barcodes?.length && assetWithBarcodes.barcodes.length > 0 && canUseBarcodes;
+              })() ? (
                 <li className="w-full p-4 last:border-b-0 md:block">
                   <span className="mb-3 block text-[14px] font-medium text-gray-900">
-                    Barcodes ({asset.barcodes.length})
+                    Barcodes ({(asset as AssetWithOptionalBarcodes).barcodes?.length})
                   </span>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {asset.barcodes.map((barcode) => (
+                    {(asset as AssetWithOptionalBarcodes).barcodes?.map((barcode) => (
                       <div
                         key={barcode.id}
                         className="inline-block rounded-lg border bg-gray-50 p-3"
@@ -395,13 +408,14 @@ export default function AssetOverview() {
                             {barcode.value}
                           </span>
                         </div>
-                        <div className="flex flex-col justify-center rounded bg-white p-2 ">
+                        <div className="flex flex-col items-center justify-center rounded bg-white p-2">
                           <BarcodeDisplay
                             type={barcode.type}
                             value={barcode.value}
                             height={60}
                             width={1.5}
                             fontSize={12}
+                            maxWidth="280px"
                           />
                         </div>
                       </div>
@@ -565,8 +579,9 @@ export default function AssetOverview() {
           />
 
           {asset && (
-            <QrPreview
+            <CodePreview
               qrObj={qrObj}
+              barcodes={canUseBarcodes ? ((asset as AssetWithOptionalBarcodes).barcodes || []) : []}
               item={{
                 name: asset.title,
                 type: "asset",

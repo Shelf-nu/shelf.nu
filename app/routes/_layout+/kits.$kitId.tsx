@@ -9,6 +9,7 @@ import type {
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import { CodePreview } from "~/components/code-preview/code-preview";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
@@ -17,9 +18,6 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
-import { QrPreview } from "~/components/qr/qr-preview";
-import { Card } from "~/components/shared/card";
-import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
@@ -50,8 +48,19 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+type KitWithOptionalBarcodes = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["kit"] & {
+  barcodes?: Array<{
+    id: string;
+    type: any;
+    value: string;
+  }>;
+};
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -65,13 +74,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations, currentOrganization } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.kit,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      currentOrganization,
+      canUseBarcodes,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.read,
+    });
 
     let [kit, qrObj] = await Promise.all([
       getKit({
@@ -84,6 +97,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               status: true,
               custody: { select: { id: true } },
               bookings: {
+                where: {
+                  status: { in: ["ONGOING", "OVERDUE"] },
+                },
                 select: {
                   id: true,
                   name: true,
@@ -121,6 +137,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           qrCodes: true,
+          ...(canUseBarcodes && {
+            barcodes: {
+              select: {
+                id: true,
+                type: true,
+                value: true,
+              },
+            },
+          }),
         },
         userOrganizations,
         request,
@@ -310,11 +335,13 @@ export default function KitDetails() {
   const { kit, currentBooking, qrObj, lastScan, userId, currentOrganization } =
     useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
+  const { canUseBarcodes } = useBarcodePermissions();
 
   const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
 
   const items = [
     { to: "assets", content: "Assets" },
+    { to: "overview", content: "Overview" },
     { to: "bookings", content: "Bookings" },
   ];
 
@@ -375,14 +402,6 @@ export default function KitDetails() {
 
         {/* Right column */}
         <div className="w-full md:w-[360px] lg:ml-4">
-          {kit.description ? (
-            <Card className="mb-3 mt-0">
-              <p className="whitespace-pre-wrap text-gray-600">
-                {kit.description}
-              </p>
-            </Card>
-          ) : null}
-
           {/* Kit Custody */}
           <CustodyCard
             className="mt-0"
@@ -397,13 +416,13 @@ export default function KitDetails() {
             custody={kit.custody}
           />
 
-          <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card className="mb-3 mt-0 flex justify-between">
-            <span className="text-xs font-medium text-gray-600">ID</span>
-            <div className="max-w-[250px] font-medium">{kit.id}</div>
-          </Card>
-          <QrPreview
+          <CodePreview
             qrObj={qrObj}
+            barcodes={
+              canUseBarcodes
+                ? (kit as KitWithOptionalBarcodes).barcodes || []
+                : []
+            }
             item={{
               name: kit.name,
               type: "kit",

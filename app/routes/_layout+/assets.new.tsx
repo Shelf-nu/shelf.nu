@@ -110,7 +110,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -166,8 +166,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(payload.tags);
 
-    /** Extract barcode data from form */
-    const barcodes = extractBarcodesFromFormData(formData);
+    /** Extract barcode data from form only if barcodes are enabled */
+    const barcodes = canUseBarcodes ? extractBarcodesFromFormData(formData) : [];
 
     const asset = await createAsset({
       organizationId,

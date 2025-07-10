@@ -102,15 +102,6 @@ export function GenericItemRow<T>({
     ? `/api/get-scanned-barcode/${qrId}`
     : `/api/get-scanned-item/${qrId}`;
 
-  // Debug logging
-  console.log("GenericItemRow Debug:", {
-    qrId,
-    item,
-    isBarcode,
-    apiEndpoint,
-    codeType: item?.codeType,
-  });
-
   // Use the API hook to fetch item data
   const { data: response, error: fetchError } = useApiQuery<ApiResponse>({
     api: apiEndpoint,
@@ -121,13 +112,6 @@ export function GenericItemRow<T>({
   // Process the response when it changes
   useEffect(() => {
     if (response) {
-      // Debug the response
-      console.log("Response processing:", {
-        response,
-        isBarcode,
-        qrId,
-      });
-
       // If the server returns an error, add it to the item and return
       if (response.error) {
         setItem({
@@ -141,8 +125,6 @@ export function GenericItemRow<T>({
       const dataSource = isBarcode
         ? (response as BarcodeApiResponse).barcode
         : (response as QrApiResponse).qr;
-
-      console.log("DataSource extracted:", dataSource);
 
       // Determine item type (asset or kit) and update accordingly
       if (dataSource && dataSource.type === "asset") {
@@ -171,6 +153,7 @@ export function GenericItemRow<T>({
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response, qrId, setItem]);
 
   // Handle fetch errors
@@ -253,7 +236,7 @@ export function DefaultLoadingState({
   return (
     <div className="max-w-full">
       <p>
-        QR id: <span className="font-semibold">{qrId}</span>
+        Code: <span className="font-semibold">{qrId}</span>
       </p>{" "}
       {error ? (
         <p className="whitespace-normal text-[12px] text-error-500">{error}</p>

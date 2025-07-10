@@ -21,66 +21,80 @@ export const KITS_INCLUDE_FIELDS = {
   },
 } satisfies Prisma.KitInclude;
 
-export const ASSET_OVERVIEW_FIELDS = {
-  category: true,
-  qrCodes: true,
-  tags: true,
-  location: true,
-  custody: {
-    select: {
-      createdAt: true,
-      custodian: {
-        include: {
-          user: true,
+export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
+  const baseFields = {
+    category: true,
+    qrCodes: true,
+    tags: true,
+    location: true,
+    custody: {
+      select: {
+        createdAt: true,
+        custodian: {
+          include: {
+            user: true,
+          },
         },
       },
     },
-  },
-  organization: {
-    select: {
-      currency: true,
-    },
-  },
-  customFields: {
-    where: {
-      customField: {
-        active: true,
+    organization: {
+      select: {
+        currency: true,
       },
     },
-    include: {
-      customField: {
+    customFields: {
+      where: {
+        customField: {
+          active: true,
+        },
+      },
+      include: {
+        customField: {
+          select: {
+            id: true,
+            name: true,
+            helpText: true,
+            required: true,
+            type: true,
+            categories: true,
+          },
+        },
+      },
+    },
+    kit: { select: { id: true, name: true, status: true } },
+    bookings: {
+      where: {
+        status: { in: ["ONGOING", "OVERDUE"] },
+      },
+      select: {
+        id: true,
+        name: true,
+        from: true,
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    },
+  } satisfies Prisma.AssetInclude;
+
+  // Conditionally add barcodes if enabled
+  if (canUseBarcodes) {
+    return {
+      ...baseFields,
+      barcodes: {
         select: {
           id: true,
-          name: true,
-          helpText: true,
-          required: true,
           type: true,
-          categories: true,
+          value: true,
         },
       },
-    },
-  },
-  kit: { select: { id: true, name: true, status: true } },
-  bookings: {
-    where: {
-      status: { in: ["ONGOING", "OVERDUE"] },
-    },
-    select: {
-      id: true,
-      name: true,
-      from: true,
-      custodianTeamMember: true,
-      custodianUser: true,
-    },
-  },
-  barcodes: {
-    select: {
-      id: true,
-      type: true,
-      value: true,
-    },
-  },
-} satisfies Prisma.AssetInclude;
+    } satisfies Prisma.AssetInclude;
+  }
+
+  return baseFields;
+};
+
+// Keep the original for backward compatibility
+export const ASSET_OVERVIEW_FIELDS = getAssetOverviewFields(true);
 
 /**
  * Generates include fields for asset queries with optimized field selection

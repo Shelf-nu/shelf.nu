@@ -11,6 +11,7 @@ interface BarcodeDisplayProps {
   displayValue?: boolean;
   fontSize?: number;
   margin?: number;
+  maxWidth?: string;
 }
 
 export function BarcodeDisplay({
@@ -22,6 +23,7 @@ export function BarcodeDisplay({
   displayValue = true,
   fontSize = 14,
   margin = 10,
+  maxWidth = "300px",
 }: BarcodeDisplayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -99,7 +101,12 @@ export function BarcodeDisplay({
     <canvas
       ref={canvasRef}
       className={className}
-      style={{ maxWidth: "100%" }}
+      style={{ 
+        maxWidth: maxWidth,
+        maxHeight: "120px",
+        width: "auto",
+        height: "auto"
+      }}
     />
   );
 }

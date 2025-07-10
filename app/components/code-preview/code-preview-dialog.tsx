@@ -1,34 +1,51 @@
 import { cloneElement, forwardRef, useState } from "react";
-import type { Asset } from "@prisma/client";
+import type { Asset, Kit, BarcodeType } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
 import { tw } from "~/utils/tw";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { CodePreview, type CodeType } from "./code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import { QrPreview } from "../qr/qr-preview";
 import type { HTMLButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
+import { Card } from "../shared/card";
 import When from "../when/when";
 
-type QrPreviewDialogProps = {
+type CodePreviewDialogProps = {
   className?: string;
-  asset: Pick<Asset, "id" | "title"> & {
-    qrId: string;
-  };
+  item:
+    | (Pick<Asset, "id" | "title"> & {
+        qrId: string;
+        type: "asset";
+      })
+    | (Pick<Kit, "id" | "name"> & {
+        qrId: string;
+        type: "kit";
+      });
   trigger: React.ReactElement<{
     onClick: () => void;
     ref: React.ForwardedRef<HTMLButtonProps>;
   }>;
 };
 
-export const QrPreviewDialog = forwardRef<
+export const CodePreviewDialog = forwardRef<
   HTMLButtonProps,
-  QrPreviewDialogProps
->(function ({ className, asset, trigger }, ref) {
+  CodePreviewDialogProps
+>(function ({ className, item, trigger }, ref) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedCode, setSelectedCode] = useState<CodeType | null>(null);
+  const { canUseBarcodes } = useBarcodePermissions();
 
   const { isLoading, data, error } = useApiQuery<{
-    qrObj: React.ComponentProps<typeof QrPreview>["qrObj"];
+    qrObj: React.ComponentProps<typeof CodePreview>["qrObj"];
+    barcodes: Array<{
+      id: string;
+      type: BarcodeType;
+      value: string;
+    }>;
   }>({
-    api: `/api/assets/${asset.id}/generate-qr-obj`,
+    api: `/api/${item.type === "asset" ? "assets" : "kits"}/${
+      item.id
+    }/generate-code-obj`,
     enabled: isDialogOpen,
   });
 
@@ -39,6 +56,15 @@ export const QrPreviewDialog = forwardRef<
   function closeDialog() {
     setIsDialogOpen(false);
   }
+
+  const itemName = item.type === "asset" ? item.title : item.name;
+  
+  // Generate dynamic title based on selected code
+  const dialogTitle = selectedCode 
+    ? selectedCode.type === "qr" 
+      ? `QR Code: ${item.qrId}`
+      : `Barcode: ${selectedCode.barcodeData?.value || selectedCode.id}`
+    : `Codes for ${itemName}`;
 
   return (
     <>
@@ -52,7 +78,7 @@ export const QrPreviewDialog = forwardRef<
             "h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-1/2",
             className
           )}
-          title={`QR Id: ${asset.qrId}`}
+          title={dialogTitle}
         >
           <div
             className={
@@ -63,7 +89,7 @@ export const QrPreviewDialog = forwardRef<
               <When truthy={isLoading}>
                 <div className="relative size-full animate-pulse bg-gray-200">
                   <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-2">
-                    <p>Fetching qr code...</p>
+                    <p>Fetching codes...</p>
                   </div>
                 </div>
               </When>
@@ -71,14 +97,18 @@ export const QrPreviewDialog = forwardRef<
                 <p className="text-center text-error-500">{error}</p>
               </When>
               <When truthy={!isLoading}>
-                <QrPreview
-                  className="mb-0 flex size-full flex-col items-center justify-center"
-                  item={{
-                    name: asset.title,
-                    type: "asset",
-                  }}
-                  qrObj={data?.qrObj}
-                />
+                <Card className="min-w-[360px]">
+                  <CodePreview
+                    className="mb-0 flex size-full flex-col items-center justify-center border-0"
+                    item={{
+                      name: itemName,
+                      type: item.type,
+                    }}
+                    qrObj={data?.qrObj}
+                    barcodes={canUseBarcodes ? (data?.barcodes || []) : []}
+                    onCodeChange={setSelectedCode}
+                  />
+                </Card>
               </When>
             </div>
             <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
@@ -93,4 +123,4 @@ export const QrPreviewDialog = forwardRef<
   );
 });
 
-QrPreviewDialog.displayName = "QrPreviewDialog";
+CodePreviewDialog.displayName = "CodePreviewDialog";
