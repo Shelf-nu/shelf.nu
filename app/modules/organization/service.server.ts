@@ -3,7 +3,7 @@ import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
@@ -504,4 +504,109 @@ export function updateOrganizationPermissions({
       ...configuration,
     },
   });
+}
+
+export async function transferOwnership({
+  currentOrganizationId,
+  newOwnerId,
+  userId,
+}: {
+  currentOrganizationId: Organization["id"];
+  newOwnerId: User["id"];
+  userId: User["id"];
+}) {
+  try {
+    /**
+     * To transfer ownership, we need to:
+     * 1. Update the owner of the organization
+     * 2. Update the role of both users in the current organization
+     */
+    const userOrganization = await db.userOrganization.findMany({
+      where: {
+        organizationId: currentOrganizationId,
+        OR: [{ userId: newOwnerId }, { userId }],
+      },
+      select: {
+        id: true,
+        user: { select: { id: true, firstName: true, lastName: true } },
+        roles: true,
+      },
+    });
+
+    const currentOwnerUserOrg = userOrganization.find(
+      (userOrg) => userOrg.user.id === userId
+    );
+    /** Validate if the current user is a member of the organization */
+    if (!currentOwnerUserOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "Current user is not a member of the organization.",
+        label,
+      });
+    }
+
+    /** Validate if the current user is the owner of organization */
+    if (!currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Current user is not the owner of the organization.",
+        label,
+      });
+    }
+
+    const newOwnerUserOrg = userOrganization.find(
+      (userOrg) => userOrg.user.id === newOwnerId
+    );
+    if (!newOwnerUserOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "New owner is not a member of the organization.",
+        label,
+      });
+    }
+
+    /** Validate if the new owner is ADMIN in the current organization */
+    if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
+      throw new ShelfError({
+        cause: null,
+        message: "New owner is not an admin of the organization.",
+        label,
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      /** Update the owner of the organization */
+      await tx.organization.update({
+        where: { id: currentOrganizationId },
+        data: {
+          owner: { connect: { id: newOwnerUserOrg.user.id } },
+        },
+      });
+
+      /** Update the role of current owner to ADMIN */
+      await tx.userOrganization.update({
+        where: { id: currentOwnerUserOrg.id },
+        data: { roles: { set: [OrganizationRoles.ADMIN] } },
+      });
+
+      /** Update the role of new owner to OWNER */
+      await tx.userOrganization.update({
+        where: { id: newOwnerUserOrg.id },
+        data: { roles: { set: [OrganizationRoles.OWNER] } },
+      });
+    });
+
+    return {
+      newOwner: newOwnerUserOrg.user,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while transferring ownership. Please try again or contact support.",
+      additionalData: { currentOrganizationId, newOwnerId },
+      label,
+    });
+  }
 }
