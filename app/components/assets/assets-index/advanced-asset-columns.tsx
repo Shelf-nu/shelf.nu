@@ -443,7 +443,7 @@ function BarcodeColumn({
   const typeMapping: Record<string, string> = {
     Code128: "Code128",
     Code39: "Code39",
-    MicroQRCode: "MicroQRCode",
+    DataMatrix: "DataMatrix",
   };
 
   const columnType = column.split("_")[1];

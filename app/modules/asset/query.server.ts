@@ -1168,6 +1168,12 @@ export function parseSortingOptions(sortBy: string[]): {
       orderByParts.push(
         getNormalizedSortExpression(`custody->>'name'`, field.direction)
       );
+    } else if (field.name.startsWith("barcode_")) {
+      // Handle barcode column sorting
+      const barcodeType = field.name.replace("barcode_", "");
+      orderByParts.push(
+        getNormalizedSortExpression(`barcode_${barcodeType}`, field.direction)
+      );
     } else if (field.name.startsWith("cf_")) {
       const customFieldName = field.name.slice(3);
       const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
@@ -1337,7 +1343,25 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       )
       FROM public."Barcode" b
       WHERE b."assetId" = a.id
-    ) AS barcodes`
+    ) AS barcodes,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'Code128'
+      LIMIT 1
+    ) AS barcode_Code128,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'Code39'
+      LIMIT 1
+    ) AS barcode_Code39,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'DataMatrix'
+      LIMIT 1
+    ) AS barcode_DataMatrix`
     : Prisma.sql``;
 
   return Prisma.sql`
