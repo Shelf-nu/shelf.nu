@@ -31,6 +31,7 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import {
+  getOrganizationAdmins,
   transferOwnership,
   updateOrganization,
   updateOrganizationPermissions,
@@ -109,15 +110,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         organizations,
       }),
-      /** Get all the admins in current organization */
-      db.userOrganization.findMany({
-        where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
-        select: {
-          user: {
-            select: { id: true, firstName: true, lastName: true, email: true },
-          },
-        },
-      }),
+      getOrganizationAdmins({ organizationId }),
     ]);
 
     const header: HeaderData = {
@@ -133,7 +126,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         curriences: Object.keys(Currency),
         isPersonalWorkspace:
           currentOrganization.type === OrganizationType.PERSONAL,
-        admins: admins.map((admin) => admin.user),
+        admins,
       })
     );
   } catch (cause) {
@@ -331,8 +324,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         const { newOwner } = await transferOwnership({
-          currentOrganizationId: organizationId,
-          currentOrganizationName: currentOrganization.name,
+          currentOrganization,
           newOwnerId: payload.newOwner,
           userId: authSession.userId,
         });

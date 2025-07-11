@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { Roles } from "@prisma/client";
+import { Form, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type loader } from "~/routes/_layout+/settings.general";
 import { tw } from "~/utils/tw";
@@ -23,6 +25,7 @@ import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -37,11 +40,13 @@ type TransferOwnershipCardProps = {
 export const TransferOwnershipSchema = z.object({
   newOwner: z.string().min(1, "New owner is required"),
   agreeConditions: z
-    .string({ required_error: "You must agree to the terms and conditions" })
+    .string({
+      required_error: "You must agree to changing the owner of the workspace",
+    })
     .transform((value) => value === "on")
     .pipe(
       z.boolean().refine((value) => value, {
-        message: "You must agree to the terms and conditions",
+        message: "You must agree to changing the owner of the workspace",
       })
     ),
 });
@@ -51,17 +56,19 @@ export default function TransferOwnershipCard({
 }: TransferOwnershipCardProps) {
   const { admins } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
+  const user = useUserData();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<
     (typeof admins)[number] | null
   >(null);
   const disabled = useDisabled();
-
   const currentOrganization = useCurrentOrganization();
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
 
-  if (!isOwner) {
+  const isShelfAdmin = user?.roles.some((role) => role.name === Roles.ADMIN);
+
+  if (!isOwner && !isShelfAdmin) {
     return null;
   }
 
@@ -93,12 +100,22 @@ export default function TransferOwnershipCard({
             <Button variant="secondary">Transfer Ownership</Button>
           </AlertDialogTrigger>
 
-          <AlertDialogContent>
+          <AlertDialogContent aria-describedby="Transfer ownership">
             <AlertDialogHeader>
               <AlertDialogTitle>Transfer Workspace Ownership</AlertDialogTitle>
+              <AlertDialogDescription>
+                Transfer workspace to another user. To transfer the workspace,
+                the new owner must be already be part of the workspace as an
+                admin.
+              </AlertDialogDescription>
             </AlertDialogHeader>
 
-            <form method="POST" encType="multipart/form-data" ref={zo.ref}>
+            <Form
+              method="POST"
+              encType="multipart/form-data"
+              ref={zo.ref}
+              action="/settings/general"
+            >
               <input type="hidden" name="intent" value="transfer-ownership" />
 
               <InnerLabel>New owner</InnerLabel>
@@ -190,7 +207,12 @@ export default function TransferOwnershipCard({
 
               <AlertDialogFooter className="mt-4 flex items-center gap-2">
                 <AlertDialogCancel asChild>
-                  <Button className="flex-1" variant="secondary" type="button">
+                  <Button
+                    disabled={disabled}
+                    className="flex-1"
+                    variant="secondary"
+                    type="button"
+                  >
                     Cancel
                   </Button>
                 </AlertDialogCancel>
@@ -203,14 +225,12 @@ export default function TransferOwnershipCard({
                       : confirmationInput !== currentOrganization?.name
                       ? { reason: "Please type the workspace name to confirm." }
                       : disabled
-                      ? { reason: "Form is processing..." }
-                      : false
                   }
                 >
                   Transfer ownership
                 </Button>
               </AlertDialogFooter>
-            </form>
+            </Form>
           </AlertDialogContent>
         </AlertDialog>
       </When>

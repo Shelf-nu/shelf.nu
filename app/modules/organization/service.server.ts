@@ -1,4 +1,4 @@
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
@@ -508,18 +508,67 @@ export function updateOrganizationPermissions({
   });
 }
 
+export async function getOrganizationAdmins({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  try {
+    /** Get all the admins in current organization */
+    const admins = await db.userOrganization.findMany({
+      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
+      select: {
+        user: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+      },
+    });
+
+    return admins.map((a) => a.user);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching organization admins.",
+      label,
+    });
+  }
+}
+
 export async function transferOwnership({
-  currentOrganizationId,
-  currentOrganizationName,
+  currentOrganization,
   newOwnerId,
   userId,
 }: {
-  currentOrganizationId: Organization["id"];
-  currentOrganizationName: string;
+  currentOrganization: Pick<Organization, "id" | "name" | "type">;
   newOwnerId: User["id"];
   userId: User["id"];
 }) {
   try {
+    if (currentOrganization.type === OrganizationType.PERSONAL) {
+      throw new ShelfError({
+        cause: null,
+        message: "Personal workspaces cannot be transferred.",
+        label,
+      });
+    }
+
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: { id: userId },
+        select: { id: true, roles: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Something went wrong while fetching current user.",
+          label,
+        });
+      });
+
+    const isCurrentUserShelfAdmin = user.roles.some(
+      (role) => role.name === Roles.ADMIN
+    );
+
     /**
      * To transfer ownership, we need to:
      * 1. Update the owner of the organization
@@ -527,20 +576,29 @@ export async function transferOwnership({
      */
     const userOrganization = await db.userOrganization.findMany({
       where: {
-        organizationId: currentOrganizationId,
-        OR: [{ userId: newOwnerId }, { userId }],
+        organizationId: currentOrganization.id,
+        OR: [
+          { userId: newOwnerId },
+          { roles: { has: OrganizationRoles.OWNER } },
+        ],
       },
       select: {
         id: true,
         user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            roles: true,
+          },
         },
         roles: true,
       },
     });
 
-    const currentOwnerUserOrg = userOrganization.find(
-      (userOrg) => userOrg.user.id === userId
+    const currentOwnerUserOrg = userOrganization.find((userOrg) =>
+      userOrg.roles.includes(OrganizationRoles.OWNER)
     );
     /** Validate if the current user is a member of the organization */
     if (!currentOwnerUserOrg) {
@@ -551,8 +609,14 @@ export async function transferOwnership({
       });
     }
 
-    /** Validate if the current user is the owner of organization */
-    if (!currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER)) {
+    /**
+     * Validate if the current user is the owner of organization
+     * or is a Shelf admin
+     */
+    if (
+      !currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER) &&
+      !isCurrentUserShelfAdmin
+    ) {
       throw new ShelfError({
         cause: null,
         message: "Current user is not the owner of the organization.",
@@ -583,7 +647,7 @@ export async function transferOwnership({
     await db.$transaction(async (tx) => {
       /** Update the owner of the organization */
       await tx.organization.update({
-        where: { id: currentOrganizationId },
+        where: { id: currentOrganization.id },
         data: {
           owner: { connect: { id: newOwnerUserOrg.user.id } },
         },
@@ -604,22 +668,22 @@ export async function transferOwnership({
 
     /** Send email to new owner */
     sendEmail({
-      subject: `🎉 You're now the Owner of ${currentOrganizationName} - Shelf`,
+      subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
       to: newOwnerUserOrg.user.email,
       text: newOwnerEmailText({
         newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
-        workspaceName: currentOrganizationName,
+        workspaceName: currentOrganization.name,
       }),
     });
 
     /** Send email to previous owner */
     sendEmail({
-      subject: `🔁 You've Transferred Ownership of ${currentOrganizationName}`,
+      subject: `🔁 You've Transferred Ownership of ${currentOrganization.name}`,
       to: currentOwnerUserOrg.user.email,
       text: previousOwnerEmailText({
         previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
         newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
-        workspaceName: currentOrganizationName,
+        workspaceName: currentOrganization.name,
       }),
     });
 
@@ -632,7 +696,7 @@ export async function transferOwnership({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while transferring ownership. Please try again or contact support.",
-      additionalData: { currentOrganizationId, newOwnerId },
+      additionalData: { currentOrganization, newOwnerId },
       label,
     });
   }
