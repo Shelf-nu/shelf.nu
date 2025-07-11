@@ -7,7 +7,7 @@ export function newOwnerEmailText({
 }) {
   return `Hi ${newOwnerName},
 
-You have successfully been assigned as the **owner** of the workspace **${workspaceName}**.
+You have successfully been assigned as the owner of the workspace "${workspaceName}".
 
 This means you now have full control over:
 - Workspace settings
@@ -30,10 +30,10 @@ export function previousOwnerEmailText({
 }) {
   return `Hi ${previousOwnerName},
 
-You have successfully transferred ownership of the workspace **${workspaceName}** to **${newOwnerName}**.
+You have successfully transferred ownership of the workspace "${workspaceName}" to "${newOwnerName}".
 
 As a result:
-- You are now an **admin** in the workspace
+- You are now an admin in the workspace
 - You no longer have access to billing or ownership-level settings
 
 Thanks,
