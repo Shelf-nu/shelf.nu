@@ -1978,7 +1978,7 @@ export async function getBookingsForCalendar(params: {
   // If start and end are not provided, default to current month
   let startDate: Date;
   let endDate: Date;
-  
+
   if (start && end) {
     startDate = new Date(start);
     endDate = new Date(end);

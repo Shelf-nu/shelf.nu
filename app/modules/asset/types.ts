@@ -13,6 +13,8 @@ import type {
   AssetReminder,
   Organization,
   Booking,
+  BarcodeType,
+  Barcode,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
@@ -45,6 +47,7 @@ export interface UpdateAssetPayload {
   tags?: { set: { id: string }[] };
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { id?: string; type: BarcodeType; value: string }[];
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
 }
@@ -56,7 +59,7 @@ export interface CreateAssetFromContentImportPayload
   description?: string;
   category?: string;
   kit?: string;
-  tags: string[];
+  tags?: string[];
   location?: string;
   custodian?: string;
   bookable?: "yes" | "no";
@@ -158,6 +161,7 @@ export type AdvancedIndexAsset = Pick<
   bookings?: Array<
     Pick<Booking, "id" | "name" | "from" | "to" | "status" | "description">
   >;
+  barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{

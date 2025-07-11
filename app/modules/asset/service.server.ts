@@ -12,6 +12,7 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  BarcodeType,
 } from "@prisma/client";
 import {
   AssetStatus,
@@ -28,6 +29,11 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+  parseBarcodesFromImportData,
+} from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -63,6 +69,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -302,6 +309,12 @@ async function getAssets(params: {
           {
             qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
           },
+          // Search barcode values
+          {
+            barcodes: {
+              some: { value: { contains: term, mode: "insensitive" } },
+            },
+          },
           // Search in custom fields
           {
             customFields: {
@@ -508,6 +521,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   takeAll = false,
   assetIds,
   getBookings = false,
+  canUseBarcodes = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -516,6 +530,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   takeAll?: boolean;
   assetIds?: string[];
   getBookings?: boolean;
+  canUseBarcodes?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -545,11 +560,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const paginationClause = takeAll
       ? Prisma.empty
       : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-
     const query = Prisma.sql`
       WITH asset_query AS (
         ${assetQueryFragment({
           withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
         })}
         ${customFieldSelect}
         ${assetQueryJoins}
@@ -569,6 +584,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment({
           withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
         })}
       FROM sorted_asset_query aq;
     `;
@@ -577,7 +593,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
-
     return {
       search,
       totalAssets,
@@ -616,6 +631,7 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
+  barcodes,
   id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
@@ -627,6 +643,7 @@ export async function createAsset({
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { type: BarcodeType; value: string }[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
   id?: Asset["id"]; // Make ID optional
@@ -769,6 +786,26 @@ export async function createAsset({
       });
     }
 
+    /** If barcodes are passed, validate them and include them in asset creation */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      // Let Prisma handle unique constraint violations for performance
+      if (barcodesToAdd.length > 0) {
+        Object.assign(data, {
+          barcodes: {
+            create: barcodesToAdd.map(({ type, value }) => ({
+              type,
+              value: value.toUpperCase(),
+              organizationId,
+            })),
+          },
+        });
+      }
+    }
+
     return await db.asset.create({
       data,
       include: {
@@ -778,6 +815,28 @@ export async function createAsset({
       },
     });
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
+        const barcodesToAdd = barcodes.filter(
+          (barcode) => !!barcode.value && !!barcode.type
+        );
+        if (barcodesToAdd.length > 0) {
+          // Use existing validation function for detailed error messages
+          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, organizationId },
     });
@@ -798,6 +857,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  barcodes,
   organizationId,
 }: UpdateAssetPayload) {
   try {
@@ -909,6 +969,16 @@ export async function updateAsset({
       include: { location: true, tags: true },
     });
 
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        assetId: id,
+        organizationId,
+        userId,
+      });
+    }
+
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {
       /**
@@ -956,6 +1026,14 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
@@ -1692,10 +1770,12 @@ export async function createAssetsFromContentImport({
   data,
   userId,
   organizationId,
+  canUseBarcodes,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
+  canUseBarcodes?: boolean;
 }) {
   try {
     // Create cache instance for this import operation
@@ -1709,6 +1789,35 @@ export async function createAssetsFromContentImport({
       organizationId,
       userId,
     });
+
+    // Check if any assets have barcode data and if barcodes are enabled
+    const hasBarcodesData = data.some(
+      (asset) =>
+        asset.barcode_Code128 ||
+        asset.barcode_Code39 ||
+        asset.barcode_DataMatrix
+    );
+
+    if (hasBarcodesData && !canUseBarcodes) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Your workspace doesn't have barcodes enabled. Please contact sales to learn more about barcodes.",
+        additionalData: { userId, organizationId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Parse barcode data if barcodes are enabled
+    const barcodesPerAsset = canUseBarcodes
+      ? await parseBarcodesFromImportData({
+          data,
+          organizationId,
+          userId,
+        })
+      : [];
 
     // Create all required related entities
     const [kits, categories, locations, teamMembers, tags, { customFields }] =
@@ -1817,6 +1926,10 @@ export async function createAssetsFromContentImport({
         }
       }
 
+      // Get barcodes for this asset if any
+      const assetBarcodes =
+        barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -1829,7 +1942,7 @@ export async function createAssetsFromContentImport({
         locationId: asset.location ? locations?.[asset.location] : undefined,
         custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
         tags:
-          asset?.tags?.length > 0
+          asset?.tags && asset.tags.length > 0
             ? {
                 set: asset.tags
                   .filter((t) => tags[t])
@@ -1841,6 +1954,8 @@ export async function createAssetsFromContentImport({
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,
         mainImageExpiration: mainImageExpiration || null,
+        // Add barcodes if present
+        barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
       });
     }
   } catch (cause) {

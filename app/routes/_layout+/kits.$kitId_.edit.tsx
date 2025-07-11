@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -18,6 +18,7 @@ import {
   updateKitImage,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -56,6 +57,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      extraInclude: {
+        barcodes: {
+          select: {
+            id: true,
+            type: true,
+            value: true,
+          },
+        },
+      },
     });
 
     const header: HeaderData = {
@@ -94,7 +104,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -108,6 +118,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       additionalData: { userId, kitId, organizationId },
     });
 
+    /** Extract barcode data from form */
+    const barcodes = canUseBarcodes
+      ? extractBarcodesFromFormData(formData)
+      : [];
+
     await Promise.all([
       updateKit({
         id: kitId,
@@ -115,6 +130,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: payload.name,
         description: payload.description,
         organizationId,
+        barcodes,
       }),
       updateKitImage({
         request,
@@ -131,7 +147,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/kits/${kitId}/assets`);
+    return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });
@@ -157,6 +173,7 @@ export default function KitEdit() {
           name={kit.name}
           description={kit.description}
           saveButtonLabel="Save"
+          barcodes={kit.barcodes}
         />
       </div>
     </>

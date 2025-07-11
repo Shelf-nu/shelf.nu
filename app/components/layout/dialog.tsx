@@ -40,7 +40,7 @@ export const Dialog = ({
             <Button
               onClick={onClose}
               variant="link"
-              className={"mt-4 leading-none text-gray-500 md:right-6"}
+              className={"mt-2 leading-none text-gray-500 md:right-6"}
             >
               <XIcon />
             </Button>

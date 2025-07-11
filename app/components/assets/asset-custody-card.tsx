@@ -57,11 +57,12 @@ export function CustodyCard({
     entity: PermissionEntity.teamMemberProfile,
     action: PermissionAction.read,
   });
-  /** We return null if user is selfService */
-  if (!hasPermission || !custody) {
+  /** We return null if user is selfService or if neither custody nor booking exists */
+  if (!hasPermission || (!custody && !booking)) {
     return <div className="my-3" />;
   }
-  const fullName = resolveTeamMemberName(custody.custodian);
+
+  const fullName = custody ? resolveTeamMemberName(custody.custodian) : "";
 
   /* If custody is present, we render the card showing custody */
   if (custody?.dateDisplay) {

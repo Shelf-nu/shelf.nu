@@ -4,7 +4,12 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
-import { defaultFields, fixedFields } from "./helpers";
+import {
+  barcodeFields,
+  defaultFields,
+  fixedFields,
+  generateBarcodeColumns,
+} from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
 const label: ErrorLabel = "Asset Index Settings";
@@ -12,10 +17,12 @@ const label: ErrorLabel = "Asset Index Settings";
 export async function createUserAssetIndexSettings({
   userId,
   organizationId,
+  canUseBarcodes = false,
   tx,
 }: {
   userId: string;
   organizationId: string;
+  canUseBarcodes?: boolean;
   /** Optionally receive a transaction when the settingsd need to be created together with other entries */
   tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
@@ -30,6 +37,11 @@ export async function createUserAssetIndexSettings({
 
     /** We start at the default fields length */
     let position = defaultFields.length - 1;
+
+    // Add barcode columns if enabled
+    const barcodeColumns = canUseBarcodes ? generateBarcodeColumns() : [];
+    position += barcodeColumns.length;
+
     const customFieldsColumns = org.customFields.map((cf) => {
       /** We increment the position for each custom field */
       position += 1;
@@ -41,7 +53,11 @@ export async function createUserAssetIndexSettings({
       };
     });
 
-    const columns = [...defaultFields, ...customFieldsColumns];
+    const columns = [
+      ...defaultFields,
+      ...barcodeColumns,
+      ...customFieldsColumns,
+    ];
 
     const settings = await _db.assetIndexSettings.create({
       data: {
@@ -68,9 +84,11 @@ export async function createUserAssetIndexSettings({
 export async function getAssetIndexSettings({
   userId,
   organizationId,
+  canUseBarcodes = false,
 }: {
   userId: string;
   organizationId: string;
+  canUseBarcodes?: boolean;
 }) {
   try {
     const assetIndexSettings = await db.assetIndexSettings.findFirst({
@@ -82,6 +100,7 @@ export async function getAssetIndexSettings({
       return await createUserAssetIndexSettings({
         userId,
         organizationId,
+        canUseBarcodes,
       });
     }
 
@@ -90,6 +109,7 @@ export async function getAssetIndexSettings({
       userId,
       organizationId,
       columns: assetIndexSettings.columns as Column[],
+      canUseBarcodes,
     });
     return validatedSettings || assetIndexSettings;
   } catch (cause) {
@@ -294,10 +314,12 @@ async function validateColumns({
   userId,
   organizationId,
   columns,
+  canUseBarcodes = false,
 }: {
   userId: string;
   organizationId: string;
   columns: Column[];
+  canUseBarcodes?: boolean;
 }) {
   try {
     let needsUpdate = false;
@@ -323,7 +345,56 @@ async function validateColumns({
       needsUpdate = true;
     }
 
-    // 2. Validate custom field columns structure
+    // 2. Handle barcode columns based on permissions
+    const existingBarcodeColumns = updatedColumns.filter((col) =>
+      barcodeFields.includes(col.name as any)
+    );
+
+    if (canUseBarcodes) {
+      // Add missing barcode columns if barcodes are enabled
+      const missingBarcodeFields = barcodeFields.filter(
+        (field) => !existingBarcodeColumns.some((col) => col.name === field)
+      );
+
+      if (missingBarcodeFields.length > 0) {
+        // Insert barcode columns right after default fields
+        const barcodeStartPosition = defaultFields.length;
+
+        // Create new barcode columns at their intended positions
+        const newBarcodeColumns = missingBarcodeFields.map((field, index) => ({
+          name: field,
+          visible: true,
+          position: barcodeStartPosition + index,
+        }));
+
+        // Shift existing columns that come after barcode positions
+        const adjustedColumns = updatedColumns.map((col) => {
+          if (
+            col.position >= barcodeStartPosition &&
+            !col.name.startsWith("barcode_")
+          ) {
+            return {
+              ...col,
+              position: col.position + missingBarcodeFields.length,
+            };
+          }
+          return col;
+        });
+
+        updatedColumns = [...adjustedColumns, ...newBarcodeColumns];
+        needsUpdate = true;
+      }
+    } else {
+      // Remove barcode columns if barcodes are disabled
+      if (existingBarcodeColumns.length > 0) {
+        updatedColumns = updatedColumns.filter(
+          (col) => !barcodeFields.includes(col.name as any)
+        );
+        needsUpdate = true;
+      }
+    }
+
+    // 3. Validate custom field columns structure
     const customFieldColumns = updatedColumns.filter((col) =>
       col.name.startsWith("cf_")
     );

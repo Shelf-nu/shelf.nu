@@ -8,7 +8,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import DeleteKit from "./delete-kit";
-import QrPreviewDialog from "./qr-preview-dialog";
+import { CodePreviewDialog } from "../code-preview/code-preview-dialog";
 import { Button } from "../shared/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../shared/tooltip";
 import When from "../when/when";
@@ -61,8 +61,13 @@ export default function KitQuickActions({
         })}
       >
         <Tooltip>
-          <QrPreviewDialog
-            kit={kit}
+          <CodePreviewDialog
+            item={{
+              id: kit.id,
+              name: kit.name,
+              qrId: kit.qrId,
+              type: "kit",
+            }}
             trigger={
               <TooltipTrigger asChild>
                 <Button size="sm" variant="secondary" className="p-2">
@@ -73,7 +78,7 @@ export default function KitQuickActions({
           />
 
           <TooltipContent align="center" side="top">
-            Show kit qr
+            Show kit codes
           </TooltipContent>
         </Tooltip>
       </When>

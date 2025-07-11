@@ -11,7 +11,7 @@ import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
-import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to-kit-drawer";
 import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -100,12 +100,13 @@ export default function ScanAssetsForKit() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
-  function handleQrDetectionSuccess({
-    qrId,
+  function handleCodeDetectionSuccess({
+    value: qrId,
     error,
-  }: OnQrDetectionSuccessProps) {
+    type,
+  }: OnCodeDetectionSuccessProps) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
-    addItem(qrId, error);
+    addItem(qrId, error, type);
   }
 
   return (
@@ -117,7 +118,7 @@ export default function ScanAssetsForKit() {
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner
           isLoading={isLoading}
-          onQrDetectionSuccess={handleQrDetectionSuccess}
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Kit"
           allowNonShelfCodes
           paused={false}

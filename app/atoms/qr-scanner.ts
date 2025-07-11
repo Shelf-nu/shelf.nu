@@ -13,6 +13,7 @@ export type ScanListItem =
       data?: KitFromQr | AssetFromQr;
       error?: string;
       type?: "asset" | "kit";
+      codeType?: "qr" | "barcode"; // Track whether this came from QR or barcode
     }
   | undefined;
 
@@ -52,7 +53,7 @@ export const scannedItemIdsAtom = atom((get) => {
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(
   null,
-  (get, set, qrId: string, error?: string) => {
+  (get, set, qrId: string, error?: string, codeType?: "qr" | "barcode") => {
     const currentItems = get(scannedItemsAtom);
     if (!currentItems[qrId]) {
       /** Set can optionally receive error. If it does, add it to the item.
@@ -62,8 +63,11 @@ export const addScannedItemAtom = atom(
         [qrId]: error
           ? {
               error: error,
+              codeType,
             }
-          : undefined, // Add the new entry at the start
+          : {
+              codeType,
+            }, // Add the new entry at the start
         ...currentItems, // Spread the rest of the existing items
       });
     }
@@ -76,9 +80,41 @@ export const updateScannedItemAtom = atom(
   (get, set, { qrId, item }: { qrId: string; item: ScanListItem }) => {
     const currentItems = get(scannedItemsAtom);
 
-    // Check if the item already exists; if it does, skip the update
-    if (!item || currentItems[qrId]) {
-      return; // Skip the update if the item is already present
+    // Check if the item already exists with data; if it does, skip the update
+    // Allow updates if the current item doesn't have data (just codeType or undefined)
+    const currentItem = currentItems[qrId];
+    if (!item || (currentItem && currentItem.data)) {
+      return; // Skip the update if the item is already present with data
+    }
+
+    // Check for duplicate assets/kits by ID before adding
+    if (item && item.data && item.type) {
+      const assetOrKitId = item.data.id;
+
+      // Look for existing items with the same asset/kit ID
+      const existingDuplicateKey = Object.entries(currentItems).find(
+        ([key, existingItem]) => {
+          if (key === qrId) return false; // Don't compare with self
+          return (
+            existingItem?.data?.id === assetOrKitId &&
+            existingItem?.type === item.type
+          );
+        }
+      );
+
+      if (existingDuplicateKey) {
+        // Add the duplicate with an error message instead of blocking silently
+        const duplicateItem: ScanListItem = {
+          error: `This ${item.type} is already in the list.`,
+          codeType: item.codeType,
+        };
+
+        set(scannedItemsAtom, {
+          ...currentItems,
+          [qrId]: duplicateItem,
+        });
+        return;
+      }
     }
 
     if ((item && item?.data && item?.type) || item?.error) {

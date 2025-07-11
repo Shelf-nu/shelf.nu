@@ -44,6 +44,7 @@
     "cross-spawn": "~7.0.6"
   },
   "dependencies": {
+    "@bwip-js/browser": "^4.7.0",
     "@fullcalendar/core": "^6.1.17",
     "@fullcalendar/daygrid": "^6.1.17",
     "@fullcalendar/list": "^6.1.17",
