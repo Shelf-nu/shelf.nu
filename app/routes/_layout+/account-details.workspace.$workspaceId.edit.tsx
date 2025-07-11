@@ -17,6 +17,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import TransferOwnershipCard from "~/components/settings/transfer-ownership-card";
 
 import {
   EditGeneralWorkspaceSettingsFormSchema,
@@ -26,6 +27,7 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import {
+  getOrganizationAdmins,
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
@@ -94,6 +96,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
+    const admins = await getOrganizationAdmins({
+      organizationId: organization.id,
+    });
+
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
     };
@@ -104,6 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         curriences: Object.keys(Currency),
         isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
+        admins,
       })
     );
   } catch (cause) {
@@ -348,6 +355,8 @@ export default function WorkspaceEditPage() {
           className="mt-4"
         />
       </div>
+
+      <TransferOwnershipCard />
     </>
   );
 }
