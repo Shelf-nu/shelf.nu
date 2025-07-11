@@ -59,22 +59,22 @@ const validateCode39 = (value: string) => {
 };
 
 /**
- * Validation rules for MicroQRCode
- * Ultra-compact: exactly 4 characters for tiny printing
+ * Validation rules for DataMatrix
+ * Compact 2D barcode: exactly 4 characters for tiny printing
  */
-const validateMicroQRCode = (value: string) => {
+const validateDataMatrix = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
 
   if (value.length !== BARCODE_LENGTHS.MICRO_QR_LENGTH) {
-    return `Micro QR Code must be exactly ${BARCODE_LENGTHS.MICRO_QR_LENGTH} characters`;
+    return `DataMatrix barcode must be exactly ${BARCODE_LENGTHS.MICRO_QR_LENGTH} characters`;
   }
 
   // Alphanumeric only for maximum compatibility and compactness
   const alphanumericRegex = /^[A-Z0-9]*$/;
   if (!alphanumericRegex.test(value)) {
-    return "Micro QR Code must contain only uppercase letters (A-Z) and numbers (0-9)";
+    return "DataMatrix barcode must contain only uppercase letters (A-Z) and numbers (0-9)";
   }
 
   return null;
@@ -105,8 +105,8 @@ export function validateBarcodeValue(
       return validateCode128(value);
     case BarcodeType.Code39:
       return validateCode39(value);
-    case BarcodeType.MicroQRCode:
-      return validateMicroQRCode(value);
+    case BarcodeType.DataMatrix:
+      return validateDataMatrix(value);
     default:
       return "Unknown barcode type";
   }

@@ -52,6 +52,10 @@ export function generateWhereClause(
             WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
           ) OR
           EXISTS (
+            SELECT 1 FROM public."Barcode" b 
+            WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
+          ) OR
+          EXISTS (
             SELECT 1 FROM public."AssetCustomFieldValue" acfv 
             WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
           )
@@ -669,7 +673,7 @@ function addRelationFilter(
 
   // Special handling for barcode fields
   if (filter.name.startsWith("barcode_")) {
-    const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, MicroQRCode)
+    const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, DataMatrix, etc.)
 
     // Normalize filter value to uppercase to match how barcodes are stored
     const normalizedValue =

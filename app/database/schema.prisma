@@ -373,7 +373,7 @@ model Barcode {
 enum BarcodeType {
   Code128
   Code39
-  MicroQRCode
+  DataMatrix
 }
 
 

@@ -439,7 +439,7 @@ export const AssetForm = ({
           <FormRow
             rowLabel={"Barcodes"}
             className="border-b-0"
-            subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Micro QR). Note: Each asset automatically gets a default Shelf QR code for tracking."
+            subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
           >
             <BarcodesInput
               ref={barcodesInputRef}

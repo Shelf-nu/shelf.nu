@@ -406,7 +406,7 @@ export default function AssetOverview() {
                     Barcodes (
                     {(asset as AssetWithOptionalBarcodes).barcodes?.length})
                   </span>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {(asset as AssetWithOptionalBarcodes).barcodes?.map(
                       (barcode) => (
                         <div
@@ -425,9 +425,6 @@ export default function AssetOverview() {
                             <BarcodeDisplay
                               type={barcode.type}
                               value={barcode.value}
-                              height={60}
-                              width={1.5}
-                              fontSize={12}
                               maxWidth="280px"
                             />
                           </div>

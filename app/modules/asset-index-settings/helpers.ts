@@ -29,7 +29,7 @@ export const fixedFields = [
 export const barcodeFields = [
   "barcode_Code128",
   "barcode_Code39",
-  "barcode_MicroQRCode",
+  "barcode_DataMatrix",
 ] as const;
 
 export type BarcodeField = (typeof barcodeFields)[number];
@@ -64,7 +64,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   actions: "Actions",
   barcode_Code128: "Code128",
   barcode_Code39: "Code39",
-  barcode_MicroQRCode: "MicroQR",
+  barcode_DataMatrix: "DataMatrix",
 };
 
 export const defaultFields: Column[] = [
@@ -93,9 +93,10 @@ export const generateBarcodeColumns = (): Column[] =>
   }));
 
 export const generateColumnsSchema = (customFields: string[]) => {
-  // Combine fixed and custom fields to form ColumnLabelKey
+  // Combine fixed, barcode and custom fields to form ColumnLabelKey
   const allFields = [
     ...fixedFields,
+    ...barcodeFields,
     "name", // Explicitly include "name"
     ...customFields,
   ] as const;

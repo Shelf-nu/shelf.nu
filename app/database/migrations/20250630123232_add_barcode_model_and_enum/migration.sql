@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "BarcodeType" AS ENUM ('Code128', 'MicroQRCode');
+CREATE TYPE "BarcodeType" AS ENUM ('Code128', 'DataMatrix', 'Code39');
 
 -- CreateTable
 CREATE TABLE "Barcode" (
@@ -38,3 +38,6 @@ ALTER TABLE "Barcode" ADD CONSTRAINT "Barcode_kitId_fkey" FOREIGN KEY ("kitId") 
 
 -- AddForeignKey
 ALTER TABLE "Barcode" ADD CONSTRAINT "Barcode_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Enable RLS
+ALTER TABLE "Barcode" ENABLE row level security;

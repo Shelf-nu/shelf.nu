@@ -272,7 +272,7 @@ export function AdvancedIndexColumn({
 
     case "barcode_Code128":
     case "barcode_Code39":
-    case "barcode_MicroQRCode":
+    case "barcode_DataMatrix":
       return <BarcodeColumn column={column} item={item} />;
 
     default:

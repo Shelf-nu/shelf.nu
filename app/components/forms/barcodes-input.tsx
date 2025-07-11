@@ -46,7 +46,7 @@ export type BarcodesInputRef = {
 const BARCODE_TYPE_OPTIONS = [
   { value: BarcodeType.Code128, label: "Code 128" },
   { value: BarcodeType.Code39, label: "Code 39" },
-  { value: BarcodeType.MicroQRCode, label: "Micro QR Code" },
+  { value: BarcodeType.DataMatrix, label: "DataMatrix" },
 ];
 
 const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(

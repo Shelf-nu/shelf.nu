@@ -58,6 +58,7 @@ Search assets based on asset fields. Separate your keywords by a comma(,) to sea
 - Custodian names (first or last name)
 - QR code value
 - Custom field values
+- Barcodes values
 `;
 
 export async function simpleModeLoader({

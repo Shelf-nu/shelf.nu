@@ -236,7 +236,7 @@ export const processFrame = async ({
     const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
     const results = await readBarcodes(imageData, {
       tryHarder: true,
-      formats: ["QRCode", "Code128", "Code39", "MicroQRCode"],
+      formats: ["QRCode", ...Object.values(BarcodeType)],
       maxNumberOfSymbols: 1,
     });
 

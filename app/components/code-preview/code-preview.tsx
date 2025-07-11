@@ -168,6 +168,7 @@ export const CodePreview = ({
           downloadLink.click();
           URL.revokeObjectURL(downloadLink.href);
         })
+        // eslint-disable-next-line no-console
         .catch(console.error);
     }
   }
@@ -380,9 +381,6 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
           <BarcodeDisplay
             type={data.type}
             value={data.value}
-            height={80}
-            width={2}
-            fontSize={14}
             maxWidth="250px"
           />
         </div>

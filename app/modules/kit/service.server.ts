@@ -310,10 +310,13 @@ export async function getPaginatedAndFilterableKits<
     const where: Prisma.KitWhereInput = { organizationId };
 
     if (search) {
-      where.name = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
+      const searchTerm = search.toLowerCase().trim();
+      where.OR = [
+        // Search in kit name
+        { name: { contains: searchTerm, mode: "insensitive" } },
+        // Search in barcode values
+        { barcodes: { some: { value: { contains: searchTerm, mode: "insensitive" } } } },
+      ];
     }
 
     if (status) {
@@ -542,10 +545,13 @@ export async function getAssetsForKits({
     let where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
-      where.title = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
+      const searchTerm = search.toLowerCase().trim();
+      where.OR = [
+        // Search in asset title
+        { title: { contains: searchTerm, mode: "insensitive" } },
+        // Search in asset barcodes
+        { barcodes: { some: { value: { contains: searchTerm, mode: "insensitive" } } } },
+      ];
     }
 
     const finalQuery = {

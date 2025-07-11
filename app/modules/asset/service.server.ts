@@ -308,6 +308,10 @@ async function getAssets(params: {
           {
             qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
           },
+          // Search barcode values
+          {
+            barcodes: { some: { value: { contains: term, mode: "insensitive" } } },
+          },
           // Search in custom fields
           {
             customFields: {

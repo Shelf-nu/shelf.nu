@@ -44,6 +44,7 @@
     "cross-spawn": "~7.0.6"
   },
   "dependencies": {
+    "@bwip-js/browser": "^4.7.0",
     "@fullcalendar/core": "^6.1.17",
     "@fullcalendar/daygrid": "^6.1.17",
     "@fullcalendar/list": "^6.1.17",
@@ -75,7 +76,6 @@
     "@stripe/stripe-js": "^3.0.2",
     "@supabase/supabase-js": "^2.43.4",
     "@tremor/react": "^3.14.0",
-    "@types/jsbarcode": "^3.11.4",
     "@zxing/library": "^0.20.0",
     "changedpi": "^1.0.4",
     "chardet": "^2.0.0",
@@ -93,7 +93,6 @@
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^4.4.0",
     "jotai": "^2.7.1",
-    "jsbarcode": "^3.12.1",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
     "lodash": "^4.17.21",
