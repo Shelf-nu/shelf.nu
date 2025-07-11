@@ -27,12 +27,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, canUseBarcodes } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
-    });
+    const { organizationId, organizations, canUseBarcodes } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.import,
+      });
 
     await assertUserCanImportAssets({ organizationId, organizations });
 

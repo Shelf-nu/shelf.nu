@@ -724,12 +724,22 @@ export async function parseBarcodesFromImportData({
 
       barcodeTypes.forEach(({ column, type }) => {
         const columnValue = asset[column];
-        if (columnValue && typeof columnValue === "string" && columnValue.trim()) {
+        if (
+          columnValue &&
+          typeof columnValue === "string" &&
+          columnValue.trim()
+        ) {
           // Split comma-separated values and validate each
-          const values = columnValue.split(",").map((v) => v.trim()).filter(Boolean);
+          const values = columnValue
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
           values.forEach((value) => {
             // Validate barcode format
-            const validationError = validateBarcodeValue(type, value.toUpperCase());
+            const validationError = validateBarcodeValue(
+              type,
+              value.toUpperCase()
+            );
             if (validationError) {
               throw new ShelfError({
                 cause: null,
@@ -760,7 +770,10 @@ export async function parseBarcodesFromImportData({
 
     // Collect all barcode values for duplicate checking
     const allBarcodeValues: string[] = [];
-    const barcodeSourceMap = new Map<string, { assetTitle: string; type: BarcodeType }>();
+    const barcodeSourceMap = new Map<
+      string,
+      { assetTitle: string; type: BarcodeType }
+    >();
 
     barcodePerAsset.forEach((asset) => {
       asset.barcodes.forEach((barcode) => {
@@ -785,7 +798,9 @@ export async function parseBarcodesFromImportData({
 
       throw new ShelfError({
         cause: null,
-        message: `Some barcodes appear multiple times in the import data. Each barcode must be unique: ${duplicateDetails.join(", ")}`,
+        message: `Some barcodes appear multiple times in the import data. Each barcode must be unique: ${duplicateDetails.join(
+          ", "
+        )}`,
         additionalData: { duplicateValues, duplicateDetails },
         label,
         shouldBeCaptured: false,
@@ -812,13 +827,16 @@ export async function parseBarcodesFromImportData({
     if (linkedBarcodes.length > 0) {
       const linkedDetails = linkedBarcodes.map((barcode) => {
         const source = barcodeSourceMap.get(barcode.value);
-        const linkedTo = barcode.asset?.title || barcode.kit?.name || "Unknown item";
+        const linkedTo =
+          barcode.asset?.title || barcode.kit?.name || "Unknown item";
         return `${barcode.value} (${source?.type}) - already linked to "${linkedTo}"`;
       });
 
       throw new ShelfError({
         cause: null,
-        message: `Some barcodes are already linked to other assets or kits in your organization. Please use unlinked barcodes: ${linkedDetails.join(", ")}`,
+        message: `Some barcodes are already linked to other assets or kits in your organization. Please use unlinked barcodes: ${linkedDetails.join(
+          ", "
+        )}`,
         additionalData: { linkedBarcodes: linkedDetails },
         label,
         shouldBeCaptured: false,
