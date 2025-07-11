@@ -1,9 +1,11 @@
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
@@ -504,4 +506,198 @@ export function updateOrganizationPermissions({
       ...configuration,
     },
   });
+}
+
+export async function getOrganizationAdmins({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  try {
+    /** Get all the admins in current organization */
+    const admins = await db.userOrganization.findMany({
+      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
+      select: {
+        user: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+      },
+    });
+
+    return admins.map((a) => a.user);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching organization admins.",
+      label,
+    });
+  }
+}
+
+export async function transferOwnership({
+  currentOrganization,
+  newOwnerId,
+  userId,
+}: {
+  currentOrganization: Pick<Organization, "id" | "name" | "type">;
+  newOwnerId: User["id"];
+  userId: User["id"];
+}) {
+  try {
+    if (currentOrganization.type === OrganizationType.PERSONAL) {
+      throw new ShelfError({
+        cause: null,
+        message: "Personal workspaces cannot be transferred.",
+        label,
+      });
+    }
+
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: { id: userId },
+        select: { id: true, roles: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Something went wrong while fetching current user.",
+          label,
+        });
+      });
+
+    const isCurrentUserShelfAdmin = user.roles.some(
+      (role) => role.name === Roles.ADMIN
+    );
+
+    /**
+     * To transfer ownership, we need to:
+     * 1. Update the owner of the organization
+     * 2. Update the role of both users in the current organization
+     */
+    const userOrganization = await db.userOrganization.findMany({
+      where: {
+        organizationId: currentOrganization.id,
+        OR: [
+          { userId: newOwnerId },
+          { roles: { has: OrganizationRoles.OWNER } },
+        ],
+      },
+      select: {
+        id: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            roles: true,
+          },
+        },
+        roles: true,
+      },
+    });
+
+    const currentOwnerUserOrg = userOrganization.find((userOrg) =>
+      userOrg.roles.includes(OrganizationRoles.OWNER)
+    );
+    /** Validate if the current user is a member of the organization */
+    if (!currentOwnerUserOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "Current user is not a member of the organization.",
+        label,
+      });
+    }
+
+    /**
+     * Validate if the current user is the owner of organization
+     * or is a Shelf admin
+     */
+    if (
+      !currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER) &&
+      !isCurrentUserShelfAdmin
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Current user is not the owner of the organization.",
+        label,
+      });
+    }
+
+    const newOwnerUserOrg = userOrganization.find(
+      (userOrg) => userOrg.user.id === newOwnerId
+    );
+    if (!newOwnerUserOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "New owner is not a member of the organization.",
+        label,
+      });
+    }
+
+    /** Validate if the new owner is ADMIN in the current organization */
+    if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
+      throw new ShelfError({
+        cause: null,
+        message: "New owner is not an admin of the organization.",
+        label,
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      /** Update the owner of the organization */
+      await tx.organization.update({
+        where: { id: currentOrganization.id },
+        data: {
+          owner: { connect: { id: newOwnerUserOrg.user.id } },
+        },
+      });
+
+      /** Update the role of current owner to ADMIN */
+      await tx.userOrganization.update({
+        where: { id: currentOwnerUserOrg.id },
+        data: { roles: { set: [OrganizationRoles.ADMIN] } },
+      });
+
+      /** Update the role of new owner to OWNER */
+      await tx.userOrganization.update({
+        where: { id: newOwnerUserOrg.id },
+        data: { roles: { set: [OrganizationRoles.OWNER] } },
+      });
+    });
+
+    /** Send email to new owner */
+    sendEmail({
+      subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
+      to: newOwnerUserOrg.user.email,
+      text: newOwnerEmailText({
+        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        workspaceName: currentOrganization.name,
+      }),
+    });
+
+    /** Send email to previous owner */
+    sendEmail({
+      subject: `🔁 You've Transferred Ownership of ${currentOrganization.name}`,
+      to: currentOwnerUserOrg.user.email,
+      text: previousOwnerEmailText({
+        previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
+        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        workspaceName: currentOrganization.name,
+      }),
+    });
+
+    return {
+      newOwner: newOwnerUserOrg.user,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while transferring ownership. Please try again or contact support.",
+      additionalData: { currentOrganization, newOwnerId },
+      label,
+    });
+  }
 }

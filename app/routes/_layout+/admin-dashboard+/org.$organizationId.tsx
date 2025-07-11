@@ -448,6 +448,7 @@ export default function OrgPage() {
             { to: "assets", content: "Assets" },
             { to: "qr-codes", content: "QR codes" },
             { to: "members", content: "Members" },
+            { to: "transfer-ownership", content: "Transfer Ownership" },
           ]}
         />
         <div>
