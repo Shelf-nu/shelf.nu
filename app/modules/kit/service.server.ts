@@ -315,7 +315,11 @@ export async function getPaginatedAndFilterableKits<
         // Search in kit name
         { name: { contains: searchTerm, mode: "insensitive" } },
         // Search in barcode values
-        { barcodes: { some: { value: { contains: searchTerm, mode: "insensitive" } } } },
+        {
+          barcodes: {
+            some: { value: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
       ];
     }
 
@@ -550,7 +554,11 @@ export async function getAssetsForKits({
         // Search in asset title
         { title: { contains: searchTerm, mode: "insensitive" } },
         // Search in asset barcodes
-        { barcodes: { some: { value: { contains: searchTerm, mode: "insensitive" } } } },
+        {
+          barcodes: {
+            some: { value: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
       ];
     }
 

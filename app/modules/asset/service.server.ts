@@ -310,7 +310,9 @@ async function getAssets(params: {
           },
           // Search barcode values
           {
-            barcodes: { some: { value: { contains: term, mode: "insensitive" } } },
+            barcodes: {
+              some: { value: { contains: term, mode: "insensitive" } },
+            },
           },
           // Search in custom fields
           {
