@@ -12,9 +12,11 @@ import {
   ShelfError,
   maybeUniqueConstraintViolation,
   VALIDATION_ERROR,
+  isLikeShelfError,
 } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
 import { validateBarcodeValue } from "./validation";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Barcode";
 
@@ -683,6 +685,161 @@ export async function updateBarcodes({
 
     throw maybeUniqueConstraintViolation(cause, "Barcode", {
       additionalData: { barcodes, assetId, kitId, organizationId, userId },
+    });
+  }
+}
+
+/**
+ * Extracts barcodes from import data and validates them for import
+ * Similar to QR code import validation - checks for duplicates and organization ownership
+ */
+export type BarcodePerImportedAsset = {
+  key: string;
+  title: string;
+  barcodes: { type: BarcodeType; value: string }[];
+};
+
+export async function parseBarcodesFromImportData({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const barcodePerAsset: BarcodePerImportedAsset[] = [];
+
+    // Extract barcode data from each asset
+    data.forEach((asset) => {
+      const assetBarcodes: { type: BarcodeType; value: string }[] = [];
+
+      // Check each barcode type column
+      const barcodeTypes: { column: string; type: BarcodeType }[] = [
+        { column: "barcode_Code128", type: "Code128" },
+        { column: "barcode_Code39", type: "Code39" },
+        { column: "barcode_DataMatrix", type: "DataMatrix" },
+      ];
+
+      barcodeTypes.forEach(({ column, type }) => {
+        const columnValue = asset[column];
+        if (columnValue && typeof columnValue === "string" && columnValue.trim()) {
+          // Split comma-separated values and validate each
+          const values = columnValue.split(",").map((v) => v.trim()).filter(Boolean);
+          values.forEach((value) => {
+            // Validate barcode format
+            const validationError = validateBarcodeValue(type, value.toUpperCase());
+            if (validationError) {
+              throw new ShelfError({
+                cause: null,
+                message: `Invalid ${type} barcode "${value}" for asset "${asset.title}": ${validationError}`,
+                additionalData: { asset: asset.title, type, value },
+                label,
+                shouldBeCaptured: false,
+              });
+            }
+            assetBarcodes.push({ type, value: value.toUpperCase() });
+          });
+        }
+      });
+
+      // Only add to results if asset has barcodes
+      if (assetBarcodes.length > 0) {
+        barcodePerAsset.push({
+          key: asset.key,
+          title: asset.title,
+          barcodes: assetBarcodes,
+        });
+      }
+    });
+
+    if (barcodePerAsset.length === 0) {
+      return []; // No barcodes to validate
+    }
+
+    // Collect all barcode values for duplicate checking
+    const allBarcodeValues: string[] = [];
+    const barcodeSourceMap = new Map<string, { assetTitle: string; type: BarcodeType }>();
+
+    barcodePerAsset.forEach((asset) => {
+      asset.barcodes.forEach((barcode) => {
+        allBarcodeValues.push(barcode.value);
+        barcodeSourceMap.set(barcode.value, {
+          assetTitle: asset.title,
+          type: barcode.type,
+        });
+      });
+    });
+
+    // Check for duplicates within the import data
+    const duplicateValues = allBarcodeValues.filter(
+      (value, index, self) => self.indexOf(value) !== index
+    );
+
+    if (duplicateValues.length > 0) {
+      const duplicateDetails = duplicateValues.map((value) => {
+        const source = barcodeSourceMap.get(value);
+        return `${value} (${source?.type}) for asset "${source?.assetTitle}"`;
+      });
+
+      throw new ShelfError({
+        cause: null,
+        message: `Some barcodes appear multiple times in the import data. Each barcode must be unique: ${duplicateDetails.join(", ")}`,
+        additionalData: { duplicateValues, duplicateDetails },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Check existing barcodes in the current organization only
+    const existingBarcodes = await db.barcode.findMany({
+      where: {
+        value: { in: allBarcodeValues },
+        organizationId, // Only check within current organization
+      },
+      include: {
+        asset: { select: { title: true } },
+        kit: { select: { name: true } },
+      },
+    });
+
+    // Check for barcodes already linked to assets or kits in this organization
+    const linkedBarcodes = existingBarcodes.filter(
+      (barcode) => barcode.assetId || barcode.kitId
+    );
+
+    if (linkedBarcodes.length > 0) {
+      const linkedDetails = linkedBarcodes.map((barcode) => {
+        const source = barcodeSourceMap.get(barcode.value);
+        const linkedTo = barcode.asset?.title || barcode.kit?.name || "Unknown item";
+        return `${barcode.value} (${source?.type}) - already linked to "${linkedTo}"`;
+      });
+
+      throw new ShelfError({
+        cause: null,
+        message: `Some barcodes are already linked to other assets or kits in your organization. Please use unlinked barcodes: ${linkedDetails.join(", ")}`,
+        additionalData: { linkedBarcodes: linkedDetails },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return barcodePerAsset;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Failed to process barcodes from import data",
+      additionalData: {
+        data: data.length,
+        userId,
+        organizationId,
+        ...(isShelfError && cause.additionalData),
+      },
+      label,
     });
   }
 }

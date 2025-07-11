@@ -13,6 +13,7 @@ import {
   updateBarcodes,
   replaceBarcodes,
   validateBarcodeUniqueness,
+  parseBarcodesFromImportData,
 } from "./service.server";
 
 // @vitest-environment node
@@ -948,5 +949,373 @@ describe("validateBarcodeUniqueness", () => {
         message: 'This barcode value is already used by "Existing Kit"',
       },
     });
+  });
+});
+
+describe("parseBarcodesFromImportData", () => {
+  const mockImportData = [
+    {
+      key: "asset-1",
+      title: "Test Asset 1",
+      description: "Description 1",
+      barcode_Code128: "ABCD1234",
+      barcode_Code39: "ABC123",
+      barcode_DataMatrix: "AB12",
+    },
+    {
+      key: "asset-2",
+      title: "Test Asset 2",
+      description: "Description 2",
+      barcode_Code128: "EFGH5678,IJKL9012",
+      barcode_Code39: "DEF456",
+      barcode_DataMatrix: "",
+    },
+    {
+      key: "asset-3",
+      title: "Test Asset 3",
+      description: "Description 3",
+      // No barcode data
+    },
+  ];
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should parse barcodes from import data successfully", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const result = await parseBarcodesFromImportData({
+      data: mockImportData,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(2); // Only assets with barcodes
+    expect(result[0]).toEqual({
+      key: "asset-1",
+      title: "Test Asset 1",
+      barcodes: [
+        { type: BarcodeType.Code128, value: "ABCD1234" },
+        { type: BarcodeType.Code39, value: "ABC123" },
+        { type: BarcodeType.DataMatrix, value: "AB12" },
+      ],
+    });
+    expect(result[1]).toEqual({
+      key: "asset-2",
+      title: "Test Asset 2",
+      barcodes: [
+        { type: BarcodeType.Code128, value: "EFGH5678" },
+        { type: BarcodeType.Code128, value: "IJKL9012" },
+        { type: BarcodeType.Code39, value: "DEF456" },
+      ],
+    });
+  });
+
+  it("should handle empty import data", async () => {
+    expect.assertions(1);
+
+    const result = await parseBarcodesFromImportData({
+      data: [],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("should handle assets with no barcode data", async () => {
+    expect.assertions(1);
+    const dataWithNoBarcodes = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        description: "Description 1",
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithNoBarcodes,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("should throw error for invalid barcode format", async () => {
+    expect.assertions(1);
+    const invalidData = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "AB", // Too short
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: invalidData,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow('Invalid Code128 barcode "AB" for asset "Test Asset 1"');
+  });
+
+  it("should throw error for duplicate barcodes within import data", async () => {
+    expect.assertions(1);
+    const duplicateData = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "DUPLICATE123",
+      },
+      {
+        key: "asset-2",
+        title: "Test Asset 2",
+        barcode_Code128: "DUPLICATE123",
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: duplicateData,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow("Some barcodes appear multiple times in the import data");
+  });
+
+  it("should throw error for barcodes already linked to assets", async () => {
+    expect.assertions(1);
+    const existingLinkedBarcode = {
+      id: "existing-1",
+      value: "LINKED123",
+      assetId: "other-asset",
+      kitId: null,
+      asset: { title: "Existing Asset" },
+      kit: null,
+    };
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([existingLinkedBarcode]);
+
+    const dataWithLinkedBarcode = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "LINKED123",
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: dataWithLinkedBarcode,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      "Some barcodes are already linked to other assets or kits in your organization"
+    );
+  });
+
+  it("should throw error for barcodes already linked to kits", async () => {
+    expect.assertions(1);
+    const existingLinkedBarcode = {
+      id: "existing-1",
+      value: "LINKED123",
+      assetId: null,
+      kitId: "other-kit",
+      asset: null,
+      kit: { name: "Existing Kit" },
+    };
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([existingLinkedBarcode]);
+
+    const dataWithLinkedBarcode = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "LINKED123",
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: dataWithLinkedBarcode,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      "Some barcodes are already linked to other assets or kits in your organization"
+    );
+  });
+
+  it("should handle comma-separated barcode values", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const dataWithMultipleBarcodes = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "ABC123, DEF456 , GHI789", // With spaces
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithMultipleBarcodes,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].barcodes).toEqual([
+      { type: BarcodeType.Code128, value: "ABC123" },
+      { type: BarcodeType.Code128, value: "DEF456" },
+      { type: BarcodeType.Code128, value: "GHI789" },
+    ]);
+  });
+
+  it("should normalize barcode values to uppercase", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const dataWithLowercaseBarcodes = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "abc123",
+        barcode_Code39: "def456",
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithLowercaseBarcodes,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].barcodes).toEqual([
+      { type: BarcodeType.Code128, value: "ABC123" },
+      { type: BarcodeType.Code39, value: "DEF456" },
+    ]);
+  });
+
+  it("should filter out empty barcode values", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const dataWithEmptyValues = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "ABC123,,  ,DEF456", // Empty values and spaces
+        barcode_Code39: "", // Empty string
+        barcode_DataMatrix: "   ", // Only spaces
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithEmptyValues,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].barcodes).toEqual([
+      { type: BarcodeType.Code128, value: "ABC123" },
+      { type: BarcodeType.Code128, value: "DEF456" },
+    ]);
+  });
+
+  it("should handle mix of valid and invalid characters gracefully", async () => {
+    expect.assertions(1);
+    const dataWithInvalidChars = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "ABC\x00123", // Invalid character (null byte)
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: dataWithInvalidChars,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      'Invalid Code128 barcode "ABC\x00123" for asset "Test Asset 1"'
+    );
+  });
+
+  it("should only check barcodes within the same organization", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const result = await parseBarcodesFromImportData({
+      data: mockImportData,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(2);
+    expect(db.barcode.findMany).toHaveBeenCalledWith({
+      where: {
+        value: {
+          in: ["ABCD1234", "ABC123", "AB12", "EFGH5678", "IJKL9012", "DEF456"],
+        },
+        organizationId: "org-1", // Only check within this organization
+      },
+      include: {
+        asset: { select: { title: true } },
+        kit: { select: { name: true } },
+      },
+    });
+    expect(db.barcode.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("should handle different barcode type combinations", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const mixedData = [
+      {
+        key: "asset-1",
+        title: "Only Code128",
+        barcode_Code128: "ABC123",
+      },
+      {
+        key: "asset-2",
+        title: "Only Code39",
+        barcode_Code39: "DEF456",
+      },
+      {
+        key: "asset-3",
+        title: "Only DataMatrix",
+        barcode_DataMatrix: "GH78",
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: mixedData,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.barcodes)).toEqual([
+      [{ type: BarcodeType.Code128, value: "ABC123" }],
+      [{ type: BarcodeType.Code39, value: "DEF456" }],
+      [{ type: BarcodeType.DataMatrix, value: "GH78" }],
+    ]);
   });
 });

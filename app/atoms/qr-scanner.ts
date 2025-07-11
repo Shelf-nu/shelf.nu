@@ -103,12 +103,6 @@ export const updateScannedItemAtom = atom(
       );
 
       if (existingDuplicateKey) {
-        console.log(`🚫 Duplicate ${item.type} detected:`, {
-          newKey: qrId,
-          existingKey: existingDuplicateKey[0],
-          assetOrKitId,
-        });
-
         // Add the duplicate with an error message instead of blocking silently
         const duplicateItem: ScanListItem = {
           error: `This ${item.type} is already in the list.`,

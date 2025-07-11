@@ -42,11 +42,7 @@ export function calcTimeDifference(
 }
 
 export function getTimeRemainingMessage(date1: Date, date2: Date): string {
-  // console.log("date1", date1);
-  // console.log("date2", date2);
   const { hours, minutes } = calcTimeDifference(date1, date2);
-  // console.log("hours", hours);
-  // console.log("minutes", minutes);
 
   if (hours > 0) {
     return `${hours} hour${hours > 1 ? "s" : ""}`;

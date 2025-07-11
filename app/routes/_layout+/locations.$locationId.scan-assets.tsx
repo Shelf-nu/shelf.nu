@@ -96,7 +96,6 @@ export default function ScanAssetsForLocation() {
     error,
     type,
   }: OnCodeDetectionSuccessProps) {
-    console.log("Location scanner handler:", { value, error, type });
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
     addItem(value, error, type);
   }

@@ -293,13 +293,9 @@ export const handleDetection = async ({
 }) => {
   if (!result || paused) return;
 
-  console.log("🔍 Detection Debug:", { result, allowNonShelfCodes });
-
   // First, check if it's a QR code (URL pattern)
   const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
   const qrMatch = result.match(qrRegex);
-
-  console.log("QR URL check:", { qrMatch, regex: qrRegex.toString() });
 
   if (qrMatch) {
     // It's a QR code URL
@@ -313,9 +309,7 @@ export const handleDetection = async ({
   }
 
   // Check if it's a raw QR ID (before checking barcodes)
-  console.log("Checking if QR ID:", { result, isQrId: isQrId(result) });
   if (isQrId(result)) {
-    console.log("✅ Detected as QR ID");
     await onCodeDetectionSuccess?.({
       value: result,
       type: "qr",
@@ -325,10 +319,8 @@ export const handleDetection = async ({
 
   // If not a QR code, check if it's a valid barcode
   const barcodeCheck = isValidBarcode(result);
-  console.log("Barcode check:", { barcodeCheck });
 
   if (barcodeCheck.isValid) {
-    console.log("✅ Detected as barcode");
     // It's a valid barcode
     await onCodeDetectionSuccess?.({
       value: result.toUpperCase(),

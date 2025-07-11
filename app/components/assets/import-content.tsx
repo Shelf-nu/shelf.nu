@@ -4,6 +4,7 @@ import { useFetcher } from "@remix-run/react";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import {
@@ -20,20 +21,23 @@ import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
-export const ImportContent = () => (
-  <div className="text-left">
-    <h3>Import your own content</h3>
-    <p>
-      Import your own content by placing it in the csv file. Here you can{" "}
-      <Button
-        variant="link"
-        to="/static/shelf.nu-example-asset-import-from-content.csv"
-        target="_blank"
-        download
-      >
-        download our CSV template.
-      </Button>{" "}
-    </p>
+export const ImportContent = () => {
+  const { canUseBarcodes } = useBarcodePermissions();
+  
+  return (
+    <div className="text-left">
+      <h3>Import your own content</h3>
+      <p>
+        Import your own content by placing it in the csv file. Here you can{" "}
+        <Button
+          variant="link"
+          to={canUseBarcodes ? "/static/shelf.nu-example-asset-import-from-content-with-barcodes.csv" : "/static/shelf.nu-example-asset-import-from-content.csv"}
+          target="_blank"
+          download
+        >
+          download our CSV template.
+        </Button>{" "}
+      </p>
     <WarningBox className="my-4">
       <>
         <strong>IMPORTANT</strong>: Do not use data exported from asset backup
@@ -126,6 +130,50 @@ export const ImportContent = () => (
       free to get in touch with support and we can provide those for you.
     </div>
 
+    <When truthy={canUseBarcodes}>
+      <h4 className="mt-2">Importing with Barcodes</h4>
+      <div>
+        You can also import assets with barcodes using the barcode columns. This
+        feature supports three barcode types: <b>Code128</b>, <b>Code39</b>, and{" "}
+        <b>DataMatrix</b>.
+        <br />
+        <br />
+        <b>Barcode column format:</b>
+        <ul className="list-inside list-disc pl-4">
+          <li>
+            <b>barcode_Code128</b> - For Code128 barcodes (4-40 characters, supports letters, numbers, and symbols like dashes)
+          </li>
+          <li>
+            <b>barcode_Code39</b> - For Code39 barcodes (exactly 6 characters)
+          </li>
+          <li>
+            <b>barcode_DataMatrix</b> - For DataMatrix barcodes (exactly 4 characters)
+          </li>
+        </ul>
+        <br />
+        <b>Important rules:</b>
+        <ul className="list-inside list-disc pl-4">
+          <li>
+            <b>Multiple barcodes</b> - Use comma separation for multiple barcodes
+            of the same type (e.g., "ABC123,DEF456")
+          </li>
+          <li>
+            <b>Unique values</b> - Each barcode value must be unique within your
+            organization
+          </li>
+          <li>
+            <b>Character restrictions</b> - Code39 and DataMatrix allow only letters and numbers, Code128 supports most symbols
+          </li>
+          <li>
+            <b>Case insensitive</b> - Values will be automatically converted to
+            uppercase
+          </li>
+        </ul>
+        Leave barcode columns empty if you don't want to assign barcodes to specific
+        assets.
+      </div>
+    </When>
+
     <div>
       <h4 className="mt-2">Extra considerations</h4>
       <ul className="list-inside list-disc pl-4">
@@ -153,7 +201,8 @@ export const ImportContent = () => (
 
     <FileForm intent={"content"} />
   </div>
-);
+  );
+};
 
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");

@@ -59,7 +59,7 @@ export interface CreateAssetFromContentImportPayload
   description?: string;
   category?: string;
   kit?: string;
-  tags: string[];
+  tags?: string[];
   location?: string;
   custodian?: string;
   bookable?: "yes" | "no";

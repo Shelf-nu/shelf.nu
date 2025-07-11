@@ -27,7 +27,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
+    const { organizationId, organizations, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -63,6 +63,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       data: contentData,
       userId,
       organizationId,
+      canUseBarcodes,
     });
     return json(data(null));
   } catch (cause) {

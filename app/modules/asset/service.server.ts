@@ -32,6 +32,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
+  parseBarcodesFromImportData,
 } from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
@@ -592,7 +593,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
-    console.log("Assets fetched:", assets);
     return {
       search,
       totalAssets,
@@ -1770,10 +1770,12 @@ export async function createAssetsFromContentImport({
   data,
   userId,
   organizationId,
+  canUseBarcodes,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
+  canUseBarcodes?: boolean;
 }) {
   try {
     // Create cache instance for this import operation
@@ -1787,6 +1789,35 @@ export async function createAssetsFromContentImport({
       organizationId,
       userId,
     });
+
+    // Check if any assets have barcode data and if barcodes are enabled
+    const hasBarcodesData = data.some(
+      (asset) =>
+        asset.barcode_Code128 ||
+        asset.barcode_Code39 ||
+        asset.barcode_DataMatrix
+    );
+
+    if (hasBarcodesData && !canUseBarcodes) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Your workspace doesn't have barcodes enabled. Please contact sales to learn more about barcodes.",
+        additionalData: { userId, organizationId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Parse barcode data if barcodes are enabled
+    const barcodesPerAsset = canUseBarcodes
+      ? await parseBarcodesFromImportData({
+          data,
+          organizationId,
+          userId,
+        })
+      : [];
 
     // Create all required related entities
     const [kits, categories, locations, teamMembers, tags, { customFields }] =
@@ -1895,6 +1926,10 @@ export async function createAssetsFromContentImport({
         }
       }
 
+      // Get barcodes for this asset if any
+      const assetBarcodes =
+        barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -1907,7 +1942,7 @@ export async function createAssetsFromContentImport({
         locationId: asset.location ? locations?.[asset.location] : undefined,
         custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
         tags:
-          asset?.tags?.length > 0
+          asset?.tags && asset.tags.length > 0
             ? {
                 set: asset.tags
                   .filter((t) => tags[t])
@@ -1919,6 +1954,8 @@ export async function createAssetsFromContentImport({
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,
         mainImageExpiration: mainImageExpiration || null,
+        // Add barcodes if present
+        barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
       });
     }
   } catch (cause) {

@@ -13,12 +13,18 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { useActionData } from "@remix-run/react";
-import { ChevronRight } from "~/components/icons/library";
+import { ChevronRight, HelpIcon } from "~/components/icons/library";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import Input from "./input";
 import { Button } from "../shared/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 import When from "../when/when";
 
 type BarcodeInput = {
@@ -44,10 +50,52 @@ export type BarcodesInputRef = {
 };
 
 const BARCODE_TYPE_OPTIONS = [
-  { value: BarcodeType.Code128, label: "Code 128" },
-  { value: BarcodeType.Code39, label: "Code 39" },
-  { value: BarcodeType.DataMatrix, label: "DataMatrix" },
+  {
+    value: BarcodeType.Code128,
+    label: "Code 128",
+    description:
+      "4-40 characters, supports letters, numbers, and symbols (e.g., ABC-123)",
+  },
+  {
+    value: BarcodeType.Code39,
+    label: "Code 39",
+    description:
+      "Exactly 6 characters, letters and numbers only (e.g., ABC123)",
+  },
+  {
+    value: BarcodeType.DataMatrix,
+    label: "DataMatrix",
+    description: "Exactly 4 characters, letters and numbers only (e.g., AB12)",
+  },
 ];
+
+const BarcodeTypeTooltip = ({ type }: { type: BarcodeType }) => {
+  const option = BARCODE_TYPE_OPTIONS.find((opt) => opt.value === type);
+
+  if (!option) return null;
+
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <i className="absolute right-3 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-700">
+            <HelpIcon />
+          </i>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <div className="max-w-[260px] sm:max-w-[320px]">
+            <h6 className="mb-1 text-xs font-semibold text-gray-700">
+              {option.label}
+            </h6>
+            <p className="text-xs font-medium text-gray-500">
+              {option.description}
+            </p>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
   function BarcodesInput(
@@ -140,14 +188,14 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
             <div key={i} className="mb-3">
               <div className="flex items-start gap-x-2">
                 {/* Barcode Type Select */}
-                <div className="flex-1">
+                <div className="relative flex-1">
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         type="button"
                         variant="secondary"
                         disabled={disabled}
-                        className="h-auto w-full justify-start truncate whitespace-nowrap px-[14px] py-2 text-text-md font-normal [&_span]:max-w-full [&_span]:truncate"
+                        className="h-auto w-full justify-start truncate whitespace-nowrap px-[14px] py-2 pr-10 text-text-md font-normal [&_span]:max-w-full [&_span]:truncate"
                       >
                         <ChevronRight className="ml-[2px] inline-block rotate-90 text-sm" />
                         <span className="ml-2 text-text-md">
@@ -168,7 +216,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                           <div
                             key={option.value}
                             className={tw(
-                              "px-4 py-2 !text-text-md text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                              "px-4 py-3 hover:cursor-pointer hover:bg-gray-50",
                               barcode.type === option.value &&
                                 "bg-gray-50 font-medium"
                             )}
@@ -177,12 +225,18 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                               setBarcodes([...barcodes]);
                             }}
                           >
-                            {option.label}
+                            <div className="font-medium text-gray-900">
+                              {option.label}
+                            </div>
+                            <div className="mt-1 text-sm text-gray-500">
+                              {option.description}
+                            </div>
                           </div>
                         ))}
                       </PopoverContent>
                     </PopoverPortal>
                   </Popover>
+                  <BarcodeTypeTooltip type={barcode.type} />
                   <input
                     type="hidden"
                     name={typeName(i)}
