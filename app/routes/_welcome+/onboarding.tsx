@@ -31,7 +31,13 @@ import { getValidationErrors } from "~/utils/http";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 
-function createOnboardingSchema(userSignedUpWithPassword: boolean) {
+function createOnboardingSchema({
+  userSignedUpWithPassword,
+  showHowDidYouFindUs,
+}: {
+  userSignedUpWithPassword: boolean;
+  showHowDidYouFindUs: boolean;
+}) {
   return z
     .object({
       username: z
@@ -45,7 +51,9 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
-      referralSource: z.string().min(5, "Field is required."),
+      referralSource: showHowDidYouFindUs
+        ? z.string().min(5, "Field is required.")
+        : z.string().optional().nullable(),
     })
     .superRefine(
       ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
@@ -77,9 +85,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
     const userSignedUpWithPassword =
       authUser.user_metadata.signup_method === "email-password";
 
-    const OnboardingFormSchema = createOnboardingSchema(
-      userSignedUpWithPassword
-    );
+    const OnboardingFormSchema = createOnboardingSchema({
+      userSignedUpWithPassword,
+      showHowDidYouFindUs: config.showHowDidYouFindUs,
+    });
 
     const title = "Set up your account";
     const subHeading =
@@ -121,9 +130,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const OnboardingFormSchema = createOnboardingSchema(
-      userSignedUpWithPassword
-    );
+    const OnboardingFormSchema = createOnboardingSchema({
+      userSignedUpWithPassword,
+      showHowDidYouFindUs: config.showHowDidYouFindUs,
+    });
 
     const payload = parseData(formData, OnboardingFormSchema);
 
@@ -219,7 +229,10 @@ export default function Onboarding() {
   } = useLoaderData<typeof loader>();
 
   const [searchParams] = useSearchParams();
-  const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
+  const OnboardingFormSchema = createOnboardingSchema({
+    userSignedUpWithPassword,
+    showHowDidYouFindUs,
+  });
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
   const actionData = useActionData<typeof action>();
