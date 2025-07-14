@@ -599,6 +599,7 @@ export default function AssetOverview() {
                   : []
               }
               item={{
+                id: asset.id,
                 name: asset.title,
                 type: "asset",
               }}

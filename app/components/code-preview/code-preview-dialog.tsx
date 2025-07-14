@@ -36,7 +36,7 @@ export const CodePreviewDialog = forwardRef<
   const [selectedCode, setSelectedCode] = useState<CodeType | null>(null);
   const { canUseBarcodes } = useBarcodePermissions();
 
-  const { isLoading, data, error } = useApiQuery<{
+  const { isLoading, data, error, refetch } = useApiQuery<{
     qrObj: React.ComponentProps<typeof CodePreview>["qrObj"];
     barcodes: Array<{
       id: string;
@@ -102,6 +102,7 @@ export const CodePreviewDialog = forwardRef<
                   <CodePreview
                     className="mb-0 flex size-full flex-col items-center justify-center border-0"
                     item={{
+                      id: item.id,
                       name: itemName,
                       type: item.type,
                     }}
@@ -109,6 +110,7 @@ export const CodePreviewDialog = forwardRef<
                     barcodes={canUseBarcodes ? data?.barcodes || [] : []}
                     onCodeChange={setSelectedCode}
                     selectedBarcodeId={selectedBarcodeId}
+                    onRefetchData={refetch}
                   />
                 </Card>
               </When>

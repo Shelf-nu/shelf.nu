@@ -1,3 +1,4 @@
+import { BarcodeType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -27,6 +28,8 @@ import {
   relinkQrCode,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
+import { createBarcode } from "~/modules/barcode/service.server";
+import { validateBarcodeValue } from "~/modules/barcode/validation";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -118,13 +121,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete", "relink-qr-code", "set-reminder"]) })
+      z.object({
+        intent: z.enum([
+          "delete",
+          "relink-qr-code",
+          "set-reminder",
+          "add-barcode",
+        ]),
+      })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
       "relink-qr-code": PermissionAction.update,
       "set-reminder": PermissionAction.update,
+      "add-barcode": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -216,6 +227,52 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return redirect(safeRedirect(redirectTo));
+      }
+
+      case "add-barcode": {
+        const { barcodeType, barcodeValue } = parseData(
+          formData,
+          z.object({
+            barcodeType: z.nativeEnum(BarcodeType),
+            barcodeValue: z.string().min(1, "Barcode value is required"),
+          })
+        );
+
+        // Validate barcode value
+        const normalizedValue = barcodeValue.toUpperCase();
+        const validationError = validateBarcodeValue(
+          barcodeType,
+          normalizedValue
+        );
+
+        if (validationError) {
+          return json(data({ error: validationError }), { status: 400 });
+        }
+
+        try {
+          await createBarcode({
+            type: barcodeType,
+            value: normalizedValue,
+            organizationId,
+            userId,
+            assetId: id,
+          });
+
+          sendNotification({
+            title: "Barcode added",
+            message: "Barcode has been added to your asset successfully",
+            icon: { name: "success", variant: "success" },
+            senderId: authSession.userId,
+          });
+
+          return json(data({ success: true }));
+        } catch (cause) {
+          // Handle constraint violations and other barcode creation errors
+          const reason = makeShelfError(cause);
+          return json(data({ error: reason.message }), {
+            status: reason.status,
+          });
+        }
       }
 
       default: {

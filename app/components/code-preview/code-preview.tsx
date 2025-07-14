@@ -8,6 +8,8 @@ import { Button } from "~/components/shared/button";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
+import { AddBarcodeForm } from "./add-barcode-form";
+import { Dialog } from "../layout/dialog";
 import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
@@ -33,6 +35,7 @@ interface CodePreviewProps {
   style?: React.CSSProperties;
   hideButton?: boolean;
   item: {
+    id: string; // Need the ID to construct the action URL
     name: string;
     type: "asset" | "kit";
   };
@@ -50,6 +53,7 @@ interface CodePreviewProps {
   }>;
   onCodeChange?: (code: CodeType | null) => void;
   selectedBarcodeId?: string;
+  onRefetchData?: () => void; // Callback to refetch data when barcode is added
 }
 
 export const CodePreview = ({
@@ -61,10 +65,12 @@ export const CodePreview = ({
   hideButton = false,
   onCodeChange,
   selectedBarcodeId,
+  onRefetchData,
 }: CodePreviewProps) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
+  const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
   const availableCodes: CodeType[] = useMemo(() => {
@@ -186,14 +192,8 @@ export const CodePreview = ({
       style={style}
     >
       {/* Code Selector */}
-      {availableCodes.length > 1 && (
-        <div className="w-full border-b-[1.1px] border-[#E3E4E8] px-4 py-3">
-          <label
-            htmlFor="code-selector"
-            className="mb-2 hidden text-sm font-medium text-gray-700"
-          >
-            Select Code to Preview
-          </label>
+      <div className="w-full border-b-[1.1px] border-[#E3E4E8] px-4 py-3">
+        <div className="flex items-center gap-2">
           <select
             id="code-selector"
             value={selectedCodeId}
@@ -204,7 +204,7 @@ export const CodePreview = ({
               );
               onCodeChange?.(newSelectedCode || null);
             }}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-w-0 max-w-xs flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {availableCodes.map((code) => (
               <option key={code.id} value={code.id}>
@@ -212,8 +212,28 @@ export const CodePreview = ({
               </option>
             ))}
           </select>
+          <Button
+            icon="plus"
+            variant="secondary"
+            size="sm"
+            onClick={() => setIsAddBarcodeDialogOpen(true)}
+            disabled={
+              !canUseBarcodes
+                ? {
+                    reason: (
+                      <>
+                        Action disabled. Your workspace doesn't support
+                        barcodes. Please get in touch with sales.
+                      </>
+                    ),
+                  }
+                : false
+            }
+            tooltip={canUseBarcodes ? "Add code to asset" : undefined}
+            className="shrink-0"
+          />
         </div>
-      )}
+      </div>
 
       {/* Code Preview */}
       <div className="flex w-full justify-center pt-6">
@@ -255,6 +275,27 @@ export const CodePreview = ({
           </Button>
         </div>
       </When>
+
+      {/* Add Barcode Dialog */}
+      <Dialog
+        open={isAddBarcodeDialogOpen}
+        onClose={() => setIsAddBarcodeDialogOpen(false)}
+        title={
+          <div className="-mb-3  pb-6">
+            <h3>Add barcode to {item.type}</h3>
+          </div>
+        }
+        className="sm:max-w-md"
+      >
+        <div className="p-4 pt-0">
+          <AddBarcodeForm
+            action={`/${item.type === "asset" ? "assets" : "kits"}/${item.id}`}
+            onCancel={() => setIsAddBarcodeDialogOpen(false)}
+            onSuccess={() => setIsAddBarcodeDialogOpen(false)}
+            onRefetchData={onRefetchData}
+          />
+        </div>
+      </Dialog>
     </div>
   );
 };
