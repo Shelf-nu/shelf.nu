@@ -31,7 +31,7 @@ export default function useApiQuery<TData>({
   );
 
   const refetch = () => {
-    setRefetchTrigger(prev => prev + 1);
+    setRefetchTrigger((prev) => prev + 1);
   };
 
   useEffect(
