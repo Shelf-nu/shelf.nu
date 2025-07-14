@@ -35,12 +35,24 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset, // Use asset permissions for barcode scanning
       action: PermissionAction.read,
     });
+
+    // Check if organization has barcode permissions enabled
+    if (!canUseBarcodes) {
+      throw new ShelfError({
+        cause: null,
+        message: "Barcode scanning is not enabled for this organization.",
+        additionalData: { shouldSendNotification: false },
+        label: "Barcode",
+        shouldBeCaptured: false,
+        status: 403,
+      });
+    }
 
     const { value } = getParams(params, z.object({ value: z.string() }), {
       additionalData: {

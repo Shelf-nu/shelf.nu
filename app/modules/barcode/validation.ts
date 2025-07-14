@@ -7,7 +7,8 @@ export const BARCODE_LENGTHS = {
   CODE128_MAX: 40,
   CODE128_WARN_THRESHOLD: 30,
   CODE39_LENGTH: 6,
-  MICRO_QR_LENGTH: 4,
+  DATAMATRIX_MIN: 4,
+  DATAMATRIX_MAX: 100,
 } as const;
 
 /**
@@ -60,21 +61,25 @@ const validateCode39 = (value: string) => {
 
 /**
  * Validation rules for DataMatrix
- * Compact 2D barcode: exactly 4 characters for tiny printing
+ * Flexible 2D barcode: 4-100 characters for various use cases
  */
 const validateDataMatrix = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
 
-  if (value.length !== BARCODE_LENGTHS.MICRO_QR_LENGTH) {
-    return `DataMatrix barcode must be exactly ${BARCODE_LENGTHS.MICRO_QR_LENGTH} characters`;
+  if (value.length < BARCODE_LENGTHS.DATAMATRIX_MIN) {
+    return `DataMatrix barcode must be at least ${BARCODE_LENGTHS.DATAMATRIX_MIN} characters`;
   }
 
-  // Alphanumeric only for maximum compatibility and compactness
-  const alphanumericRegex = /^[A-Z0-9]*$/;
-  if (!alphanumericRegex.test(value)) {
-    return "DataMatrix barcode must contain only uppercase letters (A-Z) and numbers (0-9)";
+  if (value.length > BARCODE_LENGTHS.DATAMATRIX_MAX) {
+    return `DataMatrix barcode too long (max ${BARCODE_LENGTHS.DATAMATRIX_MAX} characters)`;
+  }
+
+  // Check for valid ASCII printable characters (same as Code128 for flexibility)
+  const validAsciiRegex = /^[\x20-\x7E]*$/;
+  if (!validAsciiRegex.test(value)) {
+    return "DataMatrix barcode contains invalid characters";
   }
 
   return null;

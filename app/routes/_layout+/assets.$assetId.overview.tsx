@@ -406,12 +406,13 @@ export default function AssetOverview() {
                     Barcodes (
                     {(asset as AssetWithOptionalBarcodes).barcodes?.length})
                   </span>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="flex flex-wrap gap-3">
                     {(asset as AssetWithOptionalBarcodes).barcodes?.map(
                       (barcode) => (
                         <div
                           key={barcode.id}
-                          className="inline-block rounded-lg border bg-gray-50 p-3"
+                          className="shrink-0 rounded-lg border bg-gray-50 p-3"
+                          style={{ minWidth: "280px" }}
                         >
                           <div className="mb-2 flex items-center gap-1">
                             <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">

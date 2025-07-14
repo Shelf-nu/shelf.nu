@@ -102,7 +102,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message:
-          "This QR code doesn't exist or it doesn't belong to your current organization.",
+          "This code doesn't exist or it doesn't belong to your current organization.",
         additionalData: { qrId, shouldSendNotification: false },
         label: "QR",
         shouldBeCaptured: false,

@@ -65,7 +65,7 @@ const BARCODE_TYPE_OPTIONS = [
   {
     value: BarcodeType.DataMatrix,
     label: "DataMatrix",
-    description: "Exactly 4 characters, letters and numbers only (e.g., AB12)",
+    description: "4-100 characters, supports letters, numbers, and symbols (e.g., ABC-123)",
   },
 ];
 

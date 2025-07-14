@@ -129,11 +129,12 @@ export default function KitOverview() {
             <span className="mb-3 block text-[14px] font-medium text-gray-900">
               Barcodes ({(kit as KitWithOptionalBarcodes).barcodes?.length})
             </span>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-wrap gap-3">
               {(kit as KitWithOptionalBarcodes).barcodes?.map((barcode) => (
                 <div
                   key={barcode.id}
-                  className="inline-block rounded-lg border bg-gray-50 p-3"
+                  className="shrink-0 rounded-lg border bg-gray-50 p-3"
+                  style={{ minWidth: "280px" }}
                 >
                   <div className="mb-2 flex items-center gap-1">
                     <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">

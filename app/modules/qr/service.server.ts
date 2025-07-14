@@ -74,7 +74,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
     throw new ShelfError({
       cause,
       message:
-        "This QR code doesn't exist or it doesn't belong to your current organization.",
+        "This code doesn't exist or it doesn't belong to your current organization.",
       title: "QR code not found",
       status: 404,
       additionalData: { id },
@@ -241,7 +241,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
     throw new ShelfError({
       cause,
       message:
-        "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
+        "This code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
       title: "QR code not found",
       status: 404,
       additionalData: { qrId, organizationId },

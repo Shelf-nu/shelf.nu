@@ -110,6 +110,40 @@ describe("createBarcode", () => {
     ).rejects.toThrow(ShelfError);
   });
 
+  it("should validate DataMatrix barcode length range", async () => {
+    expect.assertions(3);
+
+    // Test minimum length (4 characters)
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+    
+    await expect(
+      createBarcode({
+        ...mockCreateParams,
+        type: BarcodeType.DataMatrix,
+        value: "ABCD", // Minimum valid length
+      })
+    ).resolves.not.toThrow();
+
+    // Test too short DataMatrix barcode
+    await expect(
+      createBarcode({
+        ...mockCreateParams,
+        type: BarcodeType.DataMatrix,
+        value: "AB", // Too short for DataMatrix
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Test too long DataMatrix barcode
+    await expect(
+      createBarcode({
+        ...mockCreateParams,
+        type: BarcodeType.DataMatrix,
+        value: "A".repeat(101), // Too long for DataMatrix (max 100)
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
   it("should create barcode for kit when kitId provided", async () => {
     expect.assertions(1);
     //@ts-expect-error missing vitest type
@@ -960,7 +994,7 @@ describe("parseBarcodesFromImportData", () => {
       description: "Description 1",
       barcode_Code128: "ABCD1234",
       barcode_Code39: "ABC123",
-      barcode_DataMatrix: "AB12",
+      barcode_DataMatrix: "WXYZ5678",
     },
     {
       key: "asset-2",
@@ -1000,7 +1034,7 @@ describe("parseBarcodesFromImportData", () => {
       barcodes: [
         { type: BarcodeType.Code128, value: "ABCD1234" },
         { type: BarcodeType.Code39, value: "ABC123" },
-        { type: BarcodeType.DataMatrix, value: "AB12" },
+        { type: BarcodeType.DataMatrix, value: "WXYZ5678" },
       ],
     });
     expect(result[1]).toEqual({
@@ -1270,7 +1304,7 @@ describe("parseBarcodesFromImportData", () => {
     expect(db.barcode.findMany).toHaveBeenCalledWith({
       where: {
         value: {
-          in: ["ABCD1234", "ABC123", "AB12", "EFGH5678", "IJKL9012", "DEF456"],
+          in: ["ABCD1234", "ABC123", "WXYZ5678", "EFGH5678", "IJKL9012", "DEF456"],
         },
         organizationId: "org-1", // Only check within this organization
       },
@@ -1301,7 +1335,7 @@ describe("parseBarcodesFromImportData", () => {
       {
         key: "asset-3",
         title: "Only DataMatrix",
-        barcode_DataMatrix: "GH78",
+        barcode_DataMatrix: "GHIJ7890",
       },
     ];
 
@@ -1315,7 +1349,7 @@ describe("parseBarcodesFromImportData", () => {
     expect(result.map((r) => r.barcodes)).toEqual([
       [{ type: BarcodeType.Code128, value: "ABC123" }],
       [{ type: BarcodeType.Code39, value: "DEF456" }],
-      [{ type: BarcodeType.DataMatrix, value: "GH78" }],
+      [{ type: BarcodeType.DataMatrix, value: "GHIJ7890" }],
     ]);
   });
 });

@@ -154,7 +154,7 @@ export const ImportContent = () => {
               <b>barcode_Code39</b> - For Code39 barcodes (exactly 6 characters)
             </li>
             <li>
-              <b>barcode_DataMatrix</b> - For DataMatrix barcodes (exactly 4
+              <b>barcode_DataMatrix</b> - For DataMatrix barcodes (4-100
               characters)
             </li>
           </ul>

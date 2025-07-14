@@ -114,14 +114,22 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
 /**
  * Attempts to detect what type of barcode a value might be based on its characteristics
  * Returns the barcode type if it matches validation rules, null otherwise
+ * 
+ * Note: Tests fixed-length types (Code39, DataMatrix) before variable-length Code128
+ * to avoid misclassification of shorter values as Code128
  */
 function detectBarcodeType(value: string): BarcodeType | null {
   const normalizedValue = value.toUpperCase();
 
-  // Automatically get all barcode types from the enum
-  const allBarcodeTypes = Object.values(BarcodeType) as BarcodeType[];
+  // Check fixed-length types first to avoid misclassification
+  // Order by specificity: most restrictive validation rules first
+  const orderedTypes: BarcodeType[] = [
+    BarcodeType.Code39,    // Exactly 6 characters, alphanumeric only
+    BarcodeType.DataMatrix, // 4-100 characters, but check before Code128
+    BarcodeType.Code128,   // 4-40 characters, most permissive (check last)
+  ];
 
-  for (const type of allBarcodeTypes) {
+  for (const type of orderedTypes) {
     const validationError = validateBarcodeValue(type, normalizedValue);
     if (!validationError) {
       return type;

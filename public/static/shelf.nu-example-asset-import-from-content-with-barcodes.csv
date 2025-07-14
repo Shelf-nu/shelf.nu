@@ -1,3 +1,3 @@
 qrId,title,description,kit,category,tags,location,valuation,custodian,bookable,barcode_Code128,barcode_Code39,barcode_DataMatrix,"cf: Serial number,type:text","cf:brand, type:option","cf:purchase date, type:date"
-abcde12345,AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,AMD001234,AMD001,AM01,WQE239123d,amd,2024-02-22
-12345abcde,"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,"MBP001234,MBP005678",MBP001,MB01,43543we23d,apple,2022-03-12
+abcde12345,AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,AMD001234,AMD001,CPU-AMD-2024,WQE239123d,amd,2024-02-22
+12345abcde,"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,"MBP001234,MBP005678",MBP001,LAPTOP-MBP-001,43543we23d,apple,2022-03-12
