@@ -22,12 +22,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, canUseBarcodes } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset, // Use asset permissions for barcode access
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, canUseBarcodes } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset, // Use asset permissions for barcode access
+        action: PermissionAction.read,
+      });
 
     // Check if organization has barcode permissions enabled
     if (!canUseBarcodes) {

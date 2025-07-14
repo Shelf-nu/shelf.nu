@@ -4,6 +4,9 @@ import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { isQrId } from "~/utils/id";
 import type { OnCodeDetectionSuccess } from "./code-scanner";
 
+// Supported barcode formats that match our BarcodeType enum
+export const SUPPORTED_BARCODE_FORMATS = Object.values(BarcodeType) as string[];
+
 /**
  * Common patterns for back camera labels across different devices and operating systems
  */
@@ -114,7 +117,7 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
 /**
  * Attempts to detect what type of barcode a value might be based on its characteristics
  * Returns the barcode type if it matches validation rules, null otherwise
- * 
+ *
  * Note: Tests fixed-length types (Code39, DataMatrix) before variable-length Code128
  * to avoid misclassification of shorter values as Code128
  */
@@ -124,9 +127,9 @@ function detectBarcodeType(value: string): BarcodeType | null {
   // Check fixed-length types first to avoid misclassification
   // Order by specificity: most restrictive validation rules first
   const orderedTypes: BarcodeType[] = [
-    BarcodeType.Code39,    // Exactly 6 characters, alphanumeric only
+    BarcodeType.Code39, // Exactly 6 characters, alphanumeric only
     BarcodeType.DataMatrix, // 4-100 characters, but check before Code128
-    BarcodeType.Code128,   // 4-40 characters, most permissive (check last)
+    BarcodeType.Code128, // 4-40 characters, most permissive (check last)
   ];
 
   for (const type of orderedTypes) {
@@ -244,7 +247,7 @@ export const processFrame = async ({
     const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
     const results = await readBarcodes(imageData, {
       tryHarder: true,
-      formats: ["QRCode", ...Object.values(BarcodeType)],
+      formats: [], // Empty array detects all supported barcode types
       maxNumberOfSymbols: 1,
     });
 
@@ -252,15 +255,45 @@ export const processFrame = async ({
       const result = results[0];
       drawDetectionBox(ctx, result.position);
 
-      // Don't set paused yet - let handleDetection decide
-      await handleDetection({
-        result: result.text,
-        onCodeDetectionSuccess,
-        allowNonShelfCodes,
-        paused, // Use the current paused state
-      });
+      // Check if the detected barcode format is supported
+      const detectedFormat = result.format;
 
-      // The onCodeDetectionSuccess callback will handle pausing based on the action
+      // Check if it's a QR code first
+      if (detectedFormat === "QRCode") {
+        // Handle QR codes normally
+        await handleDetection({
+          result: result.text,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          paused,
+        });
+      } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
+        // It's a supported barcode type
+        // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
+        let normalizedValue = result.text;
+
+        if (detectedFormat === "DataMatrix" && result.text.includes("(")) {
+          // For database operations, use raw data (remove parentheses)
+          normalizedValue = result.text.replace(/[()]/g, "");
+        }
+
+        await handleDetection({
+          result: normalizedValue,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          paused,
+        });
+      } else {
+        // Unsupported barcode type - pause scanner and show error
+        setPaused(true);
+        await onCodeDetectionSuccess({
+          value: result.text,
+          type: "barcode",
+          error: `We detected a ${detectedFormat} barcode, but Shelf currently works with ${SUPPORTED_BARCODE_FORMATS.join(
+            ", "
+          )} barcodes only.`,
+        });
+      }
     }
   } catch (error) {
     // eslint-disable-next-line no-console

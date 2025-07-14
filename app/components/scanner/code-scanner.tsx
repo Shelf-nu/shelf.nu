@@ -12,6 +12,7 @@ import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
 import { handleDetection, processFrame, updateCanvasSize } from "./utils";
 import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
+import { ErrorIcon } from "../errors";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -19,7 +20,7 @@ import { scannerActionAtom } from "./drawer/action-atom";
 import type { ActionType } from "./drawer/action-switcher";
 
 export type OnCodeDetectionSuccessProps = {
-  value: string; // The actual scanned value (QR ID or barcode value)
+  value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
   type?: "qr" | "barcode"; // Code type - optional for backward compatibility
   error?: string;
 };
@@ -47,6 +48,9 @@ type CodeScannerProps = {
   /** Custom message to show when scanner is paused after detecting a code */
   scanMessage?: string;
 
+  /** Error message to show when scanner encounters an unsupported barcode */
+  errorMessage?: string;
+
   /** Custom class for the scanner mode.
    * Can be a string or a function that receives the mode and returns a string
    */
@@ -70,6 +74,7 @@ export const CodeScanner = ({
   paused,
   setPaused,
   scanMessage,
+  errorMessage,
 
   scannerModeClassName,
   scannerModeCallback,
@@ -190,11 +195,32 @@ export const CodeScanner = ({
             )}
           >
             <div className="flex h-full flex-col items-center justify-center rounded bg-white p-4 text-center shadow-md">
-              <h5>Code detected</h5>
-              <ClientOnly fallback={null}>
-                {() => <SuccessAnimation />}
-              </ClientOnly>
-              <p>{scanMessage || "Scanner paused"}</p>
+              {errorMessage ? (
+                <>
+                  <span className="mb-5 size-14 text-primary">
+                    <ErrorIcon />
+                  </span>
+                  <h5 className="mb-2">Unsupported Barcode detected</h5>
+                  <p className="mb-4 max-w-[300px] text-red-600">
+                    {errorMessage}
+                  </p>
+                  <Button
+                    onClick={() => setPaused(false)}
+                    variant="secondary"
+                    className="mt-2"
+                  >
+                    Scan again
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <h5>Code detected</h5>
+                  <ClientOnly fallback={null}>
+                    {() => <SuccessAnimation />}
+                  </ClientOnly>
+                  <p>{scanMessage || "Scanner paused"}</p>
+                </>
+              )}
             </div>
           </div>
         )}

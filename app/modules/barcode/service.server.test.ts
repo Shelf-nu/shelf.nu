@@ -116,7 +116,7 @@ describe("createBarcode", () => {
     // Test minimum length (4 characters)
     //@ts-expect-error missing vitest type
     db.barcode.create.mockResolvedValue(mockBarcodeData);
-    
+
     await expect(
       createBarcode({
         ...mockCreateParams,
@@ -1304,7 +1304,14 @@ describe("parseBarcodesFromImportData", () => {
     expect(db.barcode.findMany).toHaveBeenCalledWith({
       where: {
         value: {
-          in: ["ABCD1234", "ABC123", "WXYZ5678", "EFGH5678", "IJKL9012", "DEF456"],
+          in: [
+            "ABCD1234",
+            "ABC123",
+            "WXYZ5678",
+            "EFGH5678",
+            "IJKL9012",
+            "DEF456",
+          ],
         },
         organizationId: "org-1", // Only check within this organization
       },

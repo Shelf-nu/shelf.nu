@@ -123,6 +123,7 @@ const QRScanner = () => {
   const [scanMessage, setScanMessage] = useState<string>(
     "Processing QR code..."
   );
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
@@ -151,6 +152,12 @@ const QRScanner = () => {
       // Always use the ref value for the most current action
       if (actionRef.current === "View asset") {
         setPaused(value);
+
+        // Clear error message when unpausing (for "Continue Scanning" button)
+        if (!value) {
+          setErrorMessage(undefined);
+          setScanMessage("Processing QR code...");
+        }
       }
     },
     [] // No dependencies needed since we use the ref
@@ -167,8 +174,17 @@ const QRScanner = () => {
           return;
         }
 
+        // Handle error case (unsupported barcode type)
+        if (error) {
+          handleSetPaused(true);
+          setErrorMessage(error);
+          setScanMessage(""); // Clear scan message for error state
+          return;
+        }
+
         isNavigating.current = true;
         handleSetPaused(true);
+        setErrorMessage(undefined); // Clear any previous errors
         setScanMessage("Redirecting to mapped asset...");
 
         // Navigate to appropriate route based on code type
@@ -200,6 +216,7 @@ const QRScanner = () => {
           paused={paused}
           setPaused={handleSetPaused}
           scanMessage={scanMessage}
+          errorMessage={errorMessage}
           actionSwitcher={<ActionSwitcher />}
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
