@@ -295,9 +295,9 @@ export default function AssetOverview() {
   return (
     <div>
       <ContextualModal />
-      <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex">
-        <div className="flex-1 overflow-hidden">
-          <Card className="my-3 px-[-4] py-[-5] md:border">
+      <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex ">
+        <div className="max-w-full flex-1 overflow-hidden">
+          <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
@@ -401,7 +401,7 @@ export default function AssetOverview() {
                   canUseBarcodes
                 );
               })() ? (
-                <li className="w-full p-4 last:border-b-0 md:block">
+                <li className="w-full max-w-full p-4 last:border-b-0 md:block">
                   <span className="mb-3 block text-[14px] font-medium text-gray-900">
                     Barcodes (
                     {(asset as AssetWithOptionalBarcodes).barcodes?.length})

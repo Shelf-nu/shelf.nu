@@ -7,7 +7,7 @@ export const BarcodeCard = ({
   barcode: Pick<Barcode, "id" | "value" | "type">;
 }) => (
   <div
-    className="shrink-0 rounded-lg border bg-gray-50 p-3"
+    className="flex w-full max-w-full shrink-0 flex-col rounded-lg border bg-gray-50 p-3 md:w-auto"
     style={{ minWidth: "280px" }}
   >
     <div
@@ -17,10 +17,12 @@ export const BarcodeCard = ({
       <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
         {barcode.type}
       </span>
-      <span className="font-mono  text-gray-700">{barcode.value}</span>
+      <span className="max-w-full  truncate font-mono text-gray-700">
+        {barcode.value}
+      </span>
     </div>
     <div
-      className="flex flex-col items-center justify-center rounded bg-white p-2"
+      className="flex flex-1 flex-col items-center justify-center rounded bg-white p-2"
       title={`${barcode.type}: ${barcode.value}`}
     >
       <BarcodeDisplay
