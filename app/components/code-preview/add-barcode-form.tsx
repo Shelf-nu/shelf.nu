@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { BarcodeType } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
+import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
 import Input from "../forms/input";
 
@@ -64,6 +65,13 @@ export function AddBarcodeForm({
     }
   }, [fetcher.state, fetcher.data, onRefetchData, onSuccess]);
 
+  const helpText = useMemo(() => {
+    const option = BARCODE_TYPE_OPTIONS.find(
+      (opt) => opt.value === barcodeType
+    );
+    return option ? option.description : undefined;
+  }, [barcodeType]);
+
   return (
     <fetcher.Form method="post" action={action} className="space-y-4">
       <input type="hidden" name="intent" value="add-barcode" />
@@ -86,14 +94,13 @@ export function AddBarcodeForm({
           disabled={disabled}
           required
         >
-          <option value={BarcodeType.Code128}>Code128 (4-40 characters)</option>
-          <option value={BarcodeType.Code39}>
-            Code39 (exactly 6 characters)
-          </option>
-          <option value={BarcodeType.DataMatrix}>
-            DataMatrix (4-100 characters)
-          </option>
+          {BARCODE_TYPE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
+        <p className="mt-1 text-gray-600">{helpText}</p>
       </div>
 
       {/* Barcode Value Input */}

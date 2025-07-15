@@ -11,7 +11,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
-import { BarcodeDisplay } from "~/components/barcode/barcode-display";
+import { BarcodeCard } from "~/components/barcode/barcode-card";
 import { CodePreview } from "~/components/code-preview/code-preview";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -409,27 +409,7 @@ export default function AssetOverview() {
                   <div className="flex flex-wrap gap-3">
                     {(asset as AssetWithOptionalBarcodes).barcodes?.map(
                       (barcode) => (
-                        <div
-                          key={barcode.id}
-                          className="shrink-0 rounded-lg border bg-gray-50 p-3"
-                          style={{ minWidth: "280px" }}
-                        >
-                          <div className="mb-2 flex items-center gap-1">
-                            <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                              {barcode.type}
-                            </span>
-                            <span className="font-mono  text-gray-700">
-                              {barcode.value}
-                            </span>
-                          </div>
-                          <div className="flex flex-col items-center justify-center rounded bg-white p-2">
-                            <BarcodeDisplay
-                              type={barcode.type}
-                              value={barcode.value}
-                              maxWidth="280px"
-                            />
-                          </div>
-                        </div>
+                        <BarcodeCard key={barcode.id} barcode={barcode} />
                       )
                     )}
                   </div>

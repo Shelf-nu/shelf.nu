@@ -53,6 +53,7 @@ export function BarcodeDisplay({
           textgaps: 2,
           backgroundcolor: "ffffff",
           barcolor: "000000",
+          textyoffset: 2, // Adjust text position for better visibility
         });
       } catch (error) {
         // Clear canvas and show error

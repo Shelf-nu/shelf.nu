@@ -14,6 +14,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useActionData } from "@remix-run/react";
 import { ChevronRight, HelpIcon } from "~/components/icons/library";
+import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
@@ -48,27 +49,6 @@ export type BarcodesInputRef = {
   getErrors: () => string[];
   validateAll: () => void; // Force validation of all fields
 };
-
-const BARCODE_TYPE_OPTIONS = [
-  {
-    value: BarcodeType.Code128,
-    label: "Code 128",
-    description:
-      "4-40 characters, supports letters, numbers, and symbols (e.g., ABC-123)",
-  },
-  {
-    value: BarcodeType.Code39,
-    label: "Code 39",
-    description:
-      "Exactly 6 characters, letters and numbers only (e.g., ABC123)",
-  },
-  {
-    value: BarcodeType.DataMatrix,
-    label: "DataMatrix",
-    description:
-      "4-100 characters, supports letters, numbers, and symbols (e.g., ABC-123)",
-  },
-];
 
 const BarcodeTypeTooltip = ({ type }: { type: BarcodeType }) => {
   const option = BARCODE_TYPE_OPTIONS.find((opt) => opt.value === type);

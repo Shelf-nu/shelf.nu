@@ -98,7 +98,7 @@ export const CodePreviewDialog = forwardRef<
                 <p className="text-center text-error-500">{error}</p>
               </When>
               <When truthy={!isLoading}>
-                <Card className="min-w-[360px]">
+                <Card className="min-w-[360px] px-0">
                   <CodePreview
                     className="mb-0 flex size-full flex-col items-center justify-center border-0"
                     item={{

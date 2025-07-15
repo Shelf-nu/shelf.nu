@@ -10,6 +10,7 @@ import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
 import { AddBarcodeForm } from "./add-barcode-form";
 import { Dialog } from "../layout/dialog";
+import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
@@ -204,7 +205,7 @@ export const CodePreview = ({
               );
               onCodeChange?.(newSelectedCode || null);
             }}
-            className="min-w-0 max-w-xs flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {availableCodes.map((code) => (
               <option key={code.id} value={code.id}>
@@ -222,8 +223,10 @@ export const CodePreview = ({
                 ? {
                     reason: (
                       <>
-                        Action disabled. Your workspace doesn't support
-                        barcodes. Please get in touch with sales.
+                        Your workspace doesn't currently support barcodes. If
+                        you want to enable barcodes for your workspace, please
+                        get in touch with{" "}
+                        <CrispButton variant="link">sales</CrispButton>.
                       </>
                     ),
                   }
@@ -281,13 +284,13 @@ export const CodePreview = ({
         open={isAddBarcodeDialogOpen}
         onClose={() => setIsAddBarcodeDialogOpen(false)}
         title={
-          <div className="-mb-3  pb-6">
+          <div className="">
             <h3>Add barcode to {item.type}</h3>
           </div>
         }
         className="sm:max-w-md"
       >
-        <div className="p-4 pt-0">
+        <div className="px-6 py-3 pt-0">
           <AddBarcodeForm
             action={`/${item.type === "asset" ? "assets" : "kits"}/${item.id}`}
             onCancel={() => setIsAddBarcodeDialogOpen(false)}
@@ -427,7 +430,16 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
         </div>
         <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
           <div style={{ fontWeight: 600 }}>
-            {data.type}: {data.value}
+            {data.type}:{" "}
+            <div
+              style={{
+                wordBreak: "break-all",
+                overflowWrap: "break-word",
+                lineHeight: "1.2",
+              }}
+            >
+              {data.value}
+            </div>
           </div>
           <div>
             Powered by{" "}
