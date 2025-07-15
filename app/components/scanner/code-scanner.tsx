@@ -218,9 +218,13 @@ export const CodeScanner = ({
             <div
               className={tw(
                 "flex flex-col items-center rounded bg-white p-4 shadow-md",
-                overlayPosition === "fullscreen" ? "h-full justify-center text-center" : "min-h-[200px]",
+                overlayPosition === "fullscreen"
+                  ? "h-full justify-center text-center"
+                  : "min-h-[200px]",
                 // Use different alignment based on content type
-                typeof scanMessage === "string" || !scanMessage ? "justify-center text-center" : "justify-start text-left"
+                typeof scanMessage === "string" || !scanMessage
+                  ? "justify-center text-center"
+                  : "justify-start text-left"
               )}
             >
               {errorMessage ? (

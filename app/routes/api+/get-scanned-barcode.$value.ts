@@ -54,12 +54,16 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    const { value: encodedValue } = getParams(params, z.object({ value: z.string() }), {
-      additionalData: {
-        userId,
-      },
-    });
-    
+    const { value: encodedValue } = getParams(
+      params,
+      z.object({ value: z.string() }),
+      {
+        additionalData: {
+          userId,
+        },
+      }
+    );
+
     // Decode the URL-encoded barcode value
     const value = decodeURIComponent(encodedValue);
 
