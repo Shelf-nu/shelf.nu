@@ -29,9 +29,8 @@ export function AddBarcodeForm({
 }: AddBarcodeFormProps) {
   const fetcher = useFetcher<{ error?: string; success?: boolean }>();
   const disabled = useDisabled(fetcher);
-  const [barcodeType, setBarcodeType] = useState<BarcodeType>(
-    initialBarcodeType
-  );
+  const [barcodeType, setBarcodeType] =
+    useState<BarcodeType>(initialBarcodeType);
   const [barcodeValue, setBarcodeValue] = useState(initialBarcodeValue);
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -62,7 +61,10 @@ export function AddBarcodeForm({
   // Initial validation for hideFields mode
   useEffect(() => {
     if (hideFields && initialBarcodeValue) {
-      const error = validateBarcodeValue(initialBarcodeType, initialBarcodeValue);
+      const error = validateBarcodeValue(
+        initialBarcodeType,
+        initialBarcodeValue
+      );
       setValidationError(error);
     }
   }, [hideFields, initialBarcodeType, initialBarcodeValue]);
