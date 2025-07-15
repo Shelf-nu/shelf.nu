@@ -549,6 +549,7 @@ export async function validateBarcodeUniqueness(
         "Some barcode values are already in use. Please use unique values.",
       status: 400,
       additionalData: { [VALIDATION_ERROR]: validationErrors },
+      shouldBeCaptured: false,
       label,
     });
   }
