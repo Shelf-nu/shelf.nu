@@ -14,6 +14,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useActionData } from "@remix-run/react";
 import { ChevronRight, HelpIcon } from "~/components/icons/library";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
 import { validateBarcodeValue } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
@@ -96,6 +97,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
     const [clearedServerErrors, setClearedServerErrors] = useState<Set<number>>(
       new Set()
     );
+    const { isMd } = useViewportHeight();
 
     // Get server-side validation errors from action data
     const actionData = useActionData<{ error?: any }>();
@@ -153,8 +155,53 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
       [validationErrors, barcodes]
     );
 
+    const RemoveButton = ({ i }: { i: number }) => (
+      <Button
+        icon="x"
+        className="h-[42px] py-2"
+        variant="secondary"
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          barcodes.splice(i, 1);
+          setBarcodes([...barcodes]);
+
+          // Clean up touched fields - shift indices down for items after the removed one
+          setTouchedFields((prev) => {
+            const newTouched = new Set<number>();
+            prev.forEach((index) => {
+              if (index < i) {
+                newTouched.add(index);
+              } else if (index > i) {
+                newTouched.add(index - 1);
+              }
+              // Skip index === i (the removed item)
+            });
+            return newTouched;
+          });
+
+          // Clean up cleared server errors - shift indices down for items after the removed one
+          setClearedServerErrors((prev) => {
+            const newCleared = new Set<number>();
+            prev.forEach((index) => {
+              if (index < i) {
+                newCleared.add(index);
+              } else if (index > i) {
+                newCleared.add(index - 1);
+              }
+              // Skip index === i (the removed item)
+            });
+            return newCleared;
+          });
+        }}
+      />
+    );
+
     return (
       <div className={tw("w-full", className)} style={style}>
+        <div className=" border-t py-5 md:hidden">
+          <h2 className="mb-1 text-[18px] font-semibold">Barcodes</h2>
+        </div>
         {barcodes.map((barcode, i) => {
           // Show server errors first (unless cleared), then client-side validation errors
           const serverError = !clearedServerErrors.has(i)
@@ -167,30 +214,36 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
 
           return (
             <div key={i} className="mb-3">
-              <div className="flex items-start gap-x-2">
+              <div className="flex flex-col items-start gap-2 md:flex-row">
                 {/* Barcode Type Select */}
-                <div className="relative flex-1">
+                <div className=" flex w-full items-end gap-2 md:w-auto md:flex-1 md:items-start">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={disabled}
-                        className="h-auto w-full justify-start truncate whitespace-nowrap px-[14px] py-2 pr-10 text-text-md font-normal [&_span]:max-w-full [&_span]:truncate"
-                      >
-                        <ChevronRight className="ml-[2px] inline-block rotate-90 text-sm" />
-                        <span className="ml-2 text-text-md">
-                          {BARCODE_TYPE_OPTIONS.find(
-                            (opt) => opt.value === barcode.type
-                          )?.label || "Select barcode type"}
-                        </span>
-                      </Button>
+                      <div className="w-full">
+                        <p className="inner-label mb-[6px] font-medium text-gray-700 lg:hidden">
+                          Select barcode type
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={disabled}
+                          className="relative h-auto w-full justify-start truncate whitespace-nowrap px-[14px] py-2 pr-10 text-text-md font-normal [&_span]:max-w-full [&_span]:truncate"
+                        >
+                          <ChevronRight className="ml-[2px] inline-block rotate-90 text-sm" />
+                          <span className="ml-2 text-text-md">
+                            {BARCODE_TYPE_OPTIONS.find(
+                              (opt) => opt.value === barcode.type
+                            )?.label || "Select barcode type"}
+                          </span>
+                          <BarcodeTypeTooltip type={barcode.type} />
+                        </Button>
+                      </div>
                     </PopoverTrigger>
                     <PopoverPortal>
                       <PopoverContent
                         align="start"
                         className={tw(
-                          "z-[999999] mt-2 max-h-[400px]  rounded-md border border-gray-200 bg-white"
+                          "z-[999999] mt-2 max-h-[400px]  max-w-[300px] rounded-md border border-gray-200 bg-white md:max-w-none"
                         )}
                       >
                         {BARCODE_TYPE_OPTIONS.map((option) => (
@@ -217,7 +270,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                       </PopoverContent>
                     </PopoverPortal>
                   </Popover>
-                  <BarcodeTypeTooltip type={barcode.type} />
+                  {/* Remove small screen button */}
+                  <When truthy={!isMd}>
+                    <RemoveButton i={i} />
+                  </When>
                   <input
                     type="hidden"
                     name={typeName(i)}
@@ -230,7 +286,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                 </div>
 
                 {/* Barcode Value Input */}
-                <div className="flex-[2]">
+                <div className="w-full md:w-auto md:flex-[2]">
                   <Input
                     label="Barcode Value"
                     hideLabel
@@ -256,46 +312,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                   </When>
                 </div>
 
-                {/* Remove Button */}
-                <Button
-                  icon="x"
-                  className="py-2"
-                  variant="outline"
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    barcodes.splice(i, 1);
-                    setBarcodes([...barcodes]);
-
-                    // Clean up touched fields - shift indices down for items after the removed one
-                    setTouchedFields((prev) => {
-                      const newTouched = new Set<number>();
-                      prev.forEach((index) => {
-                        if (index < i) {
-                          newTouched.add(index);
-                        } else if (index > i) {
-                          newTouched.add(index - 1);
-                        }
-                        // Skip index === i (the removed item)
-                      });
-                      return newTouched;
-                    });
-
-                    // Clean up cleared server errors - shift indices down for items after the removed one
-                    setClearedServerErrors((prev) => {
-                      const newCleared = new Set<number>();
-                      prev.forEach((index) => {
-                        if (index < i) {
-                          newCleared.add(index);
-                        } else if (index > i) {
-                          newCleared.add(index - 1);
-                        }
-                        // Skip index === i (the removed item)
-                      });
-                      return newCleared;
-                    });
-                  }}
-                />
+                {/* Remove Button Desktop */}
+                <When truthy={isMd}>
+                  <RemoveButton i={i} />
+                </When>
               </div>
             </div>
           );
