@@ -99,7 +99,7 @@ export function GenericItemRow<T>({
   // Determine which API to call based on codeType
   const isBarcode = item?.codeType === "barcode";
   const apiEndpoint = isBarcode
-    ? `/api/get-scanned-barcode/${qrId}`
+    ? `/api/get-scanned-barcode/${encodeURIComponent(qrId)}`
     : `/api/get-scanned-item/${qrId}`;
 
   // Use the API hook to fetch item data

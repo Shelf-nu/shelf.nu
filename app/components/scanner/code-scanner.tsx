@@ -211,14 +211,16 @@ export const CodeScanner = ({
               "absolute left-1/2 -translate-x-1/2 rounded",
               overlayPosition === "fullscreen"
                 ? "top-[75px] h-[400px] w-11/12 max-w-[600px]"
-                : "top-1/2 max-h-[80%] w-11/12 max-w-[500px] -translate-y-1/2 overflow-y-auto",
+                : "top-1/2 max-h-[90%] w-11/12 max-w-[500px] -translate-y-1/2 overflow-y-auto md:max-h-[95%]",
               overlayClassName
             )}
           >
             <div
               className={tw(
-                "flex flex-col items-center justify-center rounded bg-white p-4 text-center shadow-md",
-                overlayPosition === "fullscreen" ? "h-full" : "min-h-[200px]"
+                "flex flex-col items-center rounded bg-white p-4 shadow-md",
+                overlayPosition === "fullscreen" ? "h-full justify-center text-center" : "min-h-[200px]",
+                // Use different alignment based on content type
+                typeof scanMessage === "string" || !scanMessage ? "justify-center text-center" : "justify-start text-left"
               )}
             >
               {errorMessage ? (

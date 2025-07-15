@@ -189,7 +189,7 @@ const QRScanner = () => {
 
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
-          navigate(`/barcode/${value}`);
+          navigate(`/barcode/${encodeURIComponent(value)}`);
         } else {
           navigate(`/qr/${value}`);
         }

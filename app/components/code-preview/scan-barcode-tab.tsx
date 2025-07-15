@@ -60,7 +60,7 @@ export function ScanBarcodeTab({
   // Form component to show when barcode is detected
   const barcodeForm =
     scannedValue && detectedType ? (
-      <div className="w-full space-y-3 text-left">
+      <div className="w-full max-w-none space-y-3 text-left">
         {/* Detected Barcode Preview */}
         <div className="rounded-lg border bg-gray-50 p-3">
           <h4 className="mb-2 text-sm font-medium text-gray-900">

@@ -54,11 +54,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    const { value } = getParams(params, z.object({ value: z.string() }), {
+    const { value: encodedValue } = getParams(params, z.object({ value: z.string() }), {
       additionalData: {
         userId,
       },
     });
+    
+    // Decode the URL-encoded barcode value
+    const value = decodeURIComponent(encodedValue);
 
     const { assetExtraInclude, kitExtraInclude } = parseData(
       searchParams,
