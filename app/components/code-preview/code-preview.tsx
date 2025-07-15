@@ -8,8 +8,7 @@ import { Button } from "~/components/shared/button";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
-import { AddBarcodeForm } from "./add-barcode-form";
-import { Dialog } from "../layout/dialog";
+import { AddBarcodeDialog } from "./add-barcode-dialog";
 import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
@@ -280,25 +279,12 @@ export const CodePreview = ({
       </When>
 
       {/* Add Barcode Dialog */}
-      <Dialog
-        open={isAddBarcodeDialogOpen}
+      <AddBarcodeDialog
+        isOpen={isAddBarcodeDialogOpen}
         onClose={() => setIsAddBarcodeDialogOpen(false)}
-        title={
-          <div className="">
-            <h3>Add barcode to {item.type}</h3>
-          </div>
-        }
-        className="sm:max-w-md"
-      >
-        <div className="px-6 py-3 pt-0">
-          <AddBarcodeForm
-            action={`/${item.type === "asset" ? "assets" : "kits"}/${item.id}`}
-            onCancel={() => setIsAddBarcodeDialogOpen(false)}
-            onSuccess={() => setIsAddBarcodeDialogOpen(false)}
-            onRefetchData={onRefetchData}
-          />
-        </div>
-      </Dialog>
+        item={item}
+        onRefetchData={onRefetchData}
+      />
     </div>
   );
 };

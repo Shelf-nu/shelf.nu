@@ -12,6 +12,10 @@ interface AddBarcodeFormProps {
   onSuccess: () => void;
   action: string; // The route to submit to (e.g., "/assets/123" or "/kits/456")
   onRefetchData?: () => void; // Callback to refetch data after successful submission
+  // For scan mode - hide fields and use predetermined values
+  hideFields?: boolean;
+  initialBarcodeType?: BarcodeType;
+  initialBarcodeValue?: string;
 }
 
 export function AddBarcodeForm({
@@ -19,13 +23,16 @@ export function AddBarcodeForm({
   onSuccess,
   action,
   onRefetchData,
+  hideFields = false,
+  initialBarcodeType = BarcodeType.Code128,
+  initialBarcodeValue = "",
 }: AddBarcodeFormProps) {
   const fetcher = useFetcher<{ error?: string; success?: boolean }>();
   const disabled = useDisabled(fetcher);
   const [barcodeType, setBarcodeType] = useState<BarcodeType>(
-    BarcodeType.Code128
+    initialBarcodeType
   );
-  const [barcodeValue, setBarcodeValue] = useState("");
+  const [barcodeValue, setBarcodeValue] = useState(initialBarcodeValue);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Validate barcode value when it changes
@@ -51,6 +58,14 @@ export function AddBarcodeForm({
       setValidationError(error);
     }
   };
+
+  // Initial validation for hideFields mode
+  useEffect(() => {
+    if (hideFields && initialBarcodeValue) {
+      const error = validateBarcodeValue(initialBarcodeType, initialBarcodeValue);
+      setValidationError(error);
+    }
+  }, [hideFields, initialBarcodeType, initialBarcodeValue]);
 
   // Handle successful submission
   useEffect(() => {
@@ -79,40 +94,53 @@ export function AddBarcodeForm({
       <input type="hidden" name="barcodeValue" value={barcodeValue} />
 
       {/* Barcode Type Selector */}
-      <div>
-        <label
-          htmlFor="barcodeType"
-          className="mb-1 block text-sm font-medium text-gray-700"
-        >
-          Barcode Type
-        </label>
-        <select
-          id="barcodeType"
-          value={barcodeType}
-          onChange={handleTypeChange}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          disabled={disabled}
-          required
-        >
-          {BARCODE_TYPE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-gray-600">{helpText}</p>
-      </div>
+      {!hideFields && (
+        <div>
+          <label
+            htmlFor="barcodeType"
+            className="mb-1 block text-sm font-medium text-gray-700"
+          >
+            Barcode Type
+          </label>
+          <select
+            id="barcodeType"
+            value={barcodeType}
+            onChange={handleTypeChange}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={disabled}
+            required
+          >
+            {BARCODE_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-gray-600">{helpText}</p>
+        </div>
+      )}
 
       {/* Barcode Value Input */}
-      <Input
-        label="Barcode Value"
-        value={barcodeValue}
-        onChange={handleValueChange}
-        error={validationError || fetcher.data?.error}
-        disabled={disabled}
-        placeholder="Enter barcode value"
-        required
-      />
+      {!hideFields && (
+        <Input
+          label="Barcode Value"
+          value={barcodeValue}
+          onChange={handleValueChange}
+          error={validationError || fetcher.data?.error}
+          disabled={disabled}
+          placeholder="Enter barcode value"
+          required
+        />
+      )}
+
+      {/* Show validation error even when fields are hidden */}
+      {hideFields && (validationError || fetcher.data?.error) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+          <p className="text-sm text-red-600">
+            {validationError || fetcher.data?.error}
+          </p>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-3 pt-4">

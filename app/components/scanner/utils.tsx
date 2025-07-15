@@ -282,6 +282,7 @@ export const processFrame = async ({
           onCodeDetectionSuccess,
           allowNonShelfCodes,
           paused,
+          barcodeType: detectedFormat as BarcodeType,
         });
       } else {
         // Unsupported barcode type - pause scanner and show error
@@ -326,11 +327,13 @@ export const handleDetection = async ({
   allowNonShelfCodes,
   onCodeDetectionSuccess,
   paused,
+  barcodeType,
 }: {
   result: string;
   allowNonShelfCodes: boolean;
   onCodeDetectionSuccess?: OnCodeDetectionSuccess;
   paused: boolean;
+  barcodeType?: BarcodeType;
 }) => {
   if (!result || paused) return;
 
@@ -366,6 +369,7 @@ export const handleDetection = async ({
     await onCodeDetectionSuccess?.({
       value: result.toUpperCase(),
       type: "barcode",
+      barcodeType: barcodeType || barcodeCheck.type,
     });
     return;
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -23,12 +24,14 @@ export type OnCodeDetectionSuccessProps = {
   value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
   type?: "qr" | "barcode"; // Code type - optional for backward compatibility
   error?: string;
+  barcodeType?: BarcodeType; // Specific barcode type when type is "barcode"
 };
 
 export type OnCodeDetectionSuccess = ({
   value,
   type,
   error,
+  barcodeType,
 }: OnCodeDetectionSuccessProps) => void | Promise<void>;
 
 // Legacy type aliases for backward compatibility
@@ -46,7 +49,7 @@ type CodeScannerProps = {
   paused: boolean;
   setPaused: (paused: boolean) => void;
   /** Custom message to show when scanner is paused after detecting a code */
-  scanMessage?: string;
+  scanMessage?: string | React.ReactNode;
 
   /** Error message to show when scanner encounters an unsupported barcode */
   errorMessage?: string;
@@ -60,6 +63,12 @@ type CodeScannerProps = {
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
 
   actionSwitcher?: React.ReactNode;
+
+  /** Force a specific mode and hide mode switching tabs */
+  forceMode?: Mode;
+
+  /** Control the overlay positioning for different contexts */
+  overlayPosition?: "fullscreen" | "centered";
 };
 
 type Mode = "camera" | "scanner";
@@ -80,15 +89,22 @@ export const CodeScanner = ({
   scannerModeCallback,
 
   actionSwitcher,
+  forceMode,
+  overlayPosition = "fullscreen",
 }: CodeScannerProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const { isMd } = useViewportHeight();
   const containerRef = useRef<HTMLDivElement>(null);
   const [action] = useAtom(scannerActionAtom);
 
-  const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
+  const [mode, setMode] = useState<Mode>(
+    forceMode || (isMd ? "scanner" : "camera")
+  );
 
   const handleModeChange = (mode: Mode) => {
+    // Don't allow mode changes if forceMode is set
+    if (forceMode) return;
+
     if (mode === "camera") {
       setIsLoading(true);
       setMode(mode);
@@ -111,52 +127,54 @@ export const CodeScanner = ({
       data-mode={mode}
     >
       <div className="relative size-full overflow-hidden">
-        <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
-          <div
-            className={tw(
-              // Different UI for mobile when actionSwitcher is present
-              actionSwitcher &&
-                !isMd &&
-                "flex w-full items-center justify-between gap-4"
-            )}
-          >
-            {!hideBackButtonText && (
-              <Link
-                to=".."
-                className={tw(
-                  "inline-flex items-center justify-start text-[11px] leading-[11px]",
-                  actionSwitcher && isMd
-                    ? "absolute bottom-[-20px] left-[2px] text-white"
-                    : ""
-                )}
-              >
-                <TriangleLeftIcon className="size-[14px]" />
-                <span>{backButtonText}</span>
-              </Link>
-            )}
+        {!forceMode && (
+          <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
+            <div
+              className={tw(
+                // Different UI for mobile when actionSwitcher is present
+                actionSwitcher &&
+                  !isMd &&
+                  "flex w-full items-center justify-between gap-4"
+              )}
+            >
+              {!hideBackButtonText && (
+                <Link
+                  to=".."
+                  className={tw(
+                    "inline-flex items-center justify-start text-[11px] leading-[11px]",
+                    actionSwitcher && isMd
+                      ? "absolute bottom-[-20px] left-[2px] text-white"
+                      : ""
+                  )}
+                >
+                  <TriangleLeftIcon className="size-[14px]" />
+                  <span>{backButtonText}</span>
+                </Link>
+              )}
 
-            {actionSwitcher && <div>{actionSwitcher}</div>}
-          </div>
-
-          {/* We only show option to switch to scanner on big screens. Its not possible on mobile */}
-          {isMd && (
-            <div>
-              <Tabs
-                defaultValue={mode}
-                onValueChange={(mode) => handleModeChange(mode as Mode)}
-              >
-                <TabsList>
-                  <TabsTrigger value="scanner" disabled={isLoading || paused}>
-                    <ScanQrCode className="mr-2 size-5" /> Scanner
-                  </TabsTrigger>
-                  <TabsTrigger value="camera" disabled={isLoading || paused}>
-                    <CameraIcon className="mr-2 size-5" /> Camera
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              {actionSwitcher && <div>{actionSwitcher}</div>}
             </div>
-          )}
-        </div>
+
+            {/* We only show option to switch to scanner on big screens and when not forced to a specific mode */}
+            {isMd && !forceMode && (
+              <div>
+                <Tabs
+                  defaultValue={mode}
+                  onValueChange={(mode) => handleModeChange(mode as Mode)}
+                >
+                  <TabsList>
+                    <TabsTrigger value="scanner" disabled={isLoading || paused}>
+                      <ScanQrCode className="mr-2 size-5" /> Scanner
+                    </TabsTrigger>
+                    <TabsTrigger value="camera" disabled={isLoading || paused}>
+                      <CameraIcon className="mr-2 size-5" /> Camera
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
+            )}
+          </div>
+        )}
 
         {isLoading && (
           <InfoOverlay>
@@ -190,11 +208,19 @@ export const CodeScanner = ({
         {paused && (
           <div
             className={tw(
-              "absolute left-1/2 top-[75px] h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 rounded ",
+              "absolute left-1/2 -translate-x-1/2 rounded",
+              overlayPosition === "fullscreen"
+                ? "top-[75px] h-[400px] w-11/12 max-w-[600px]"
+                : "top-1/2 max-h-[80%] w-11/12 max-w-[500px] -translate-y-1/2 overflow-y-auto",
               overlayClassName
             )}
           >
-            <div className="flex h-full flex-col items-center justify-center rounded bg-white p-4 text-center shadow-md">
+            <div
+              className={tw(
+                "flex flex-col items-center justify-center rounded bg-white p-4 text-center shadow-md",
+                overlayPosition === "fullscreen" ? "h-full" : "min-h-[200px]"
+              )}
+            >
               {errorMessage ? (
                 <>
                   <span className="mb-5 size-14 text-primary">
@@ -215,10 +241,17 @@ export const CodeScanner = ({
               ) : (
                 <>
                   <h5>Code detected</h5>
-                  <ClientOnly fallback={null}>
-                    {() => <SuccessAnimation />}
-                  </ClientOnly>
-                  <p>{scanMessage || "Scanner paused"}</p>
+
+                  {typeof scanMessage === "string" ? (
+                    <>
+                      <ClientOnly fallback={null}>
+                        {() => <SuccessAnimation />}
+                      </ClientOnly>
+                      <p>{scanMessage || "Scanner paused"}</p>
+                    </>
+                  ) : (
+                    scanMessage || <p>Scanner paused</p>
+                  )}
                 </>
               )}
             </div>
