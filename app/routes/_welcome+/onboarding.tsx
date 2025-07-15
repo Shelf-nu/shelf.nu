@@ -53,7 +53,7 @@ function createOnboardingSchema({
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
       referralSource: showHowDidYouFindUs
         ? z.string().min(5, "Field is required.")
-        : z.string().optional(),
+        : z.string().optional().nullable(),
     })
     .superRefine(
       ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
@@ -85,11 +85,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
     const userSignedUpWithPassword =
       authUser.user_metadata.signup_method === "email-password";
 
-    const showHowDidYouFindUs = config.showHowDidYouFindUs;
 
     const OnboardingFormSchema = createOnboardingSchema({
       userSignedUpWithPassword,
-      showHowDidYouFindUs,
+      showHowDidYouFindUs: config.showHowDidYouFindUs,
     });
 
     const title = "Set up your account";

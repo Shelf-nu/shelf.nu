@@ -1963,23 +1963,47 @@ export async function getBookingsForCalendar(params: {
     canSeeAllBookings,
     canSeeAllCustody,
   } = params;
-  const searchParams = getCurrentSearchParams(request);
+
+  const { searchParams, search, status, teamMemberIds, tags } =
+    await getBookingsFilterData({
+      request,
+      canSeeAllBookings,
+      organizationId,
+      userId,
+    });
 
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
+
+  // If start and end are not provided, default to current month
+  let startDate: Date;
+  let endDate: Date;
+
+  if (start && end) {
+    startDate = new Date(start);
+    endDate = new Date(end);
+  } else {
+    // Default to current month
+    const now = new Date();
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1); // First day of current month
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+  }
 
   try {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
       perPage: 1000,
+      search,
       userId,
-      bookingFrom: new Date(start),
-      bookingTo: new Date(end),
-      ...(!canSeeAllBookings && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: userId,
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
       }),
+      bookingFrom: startDate,
+      bookingTo: endDate,
+      custodianTeamMemberIds: teamMemberIds,
+      tags,
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,

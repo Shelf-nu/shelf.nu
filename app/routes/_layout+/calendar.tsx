@@ -1,13 +1,14 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useMemo } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
-import type { BookingStatus, Tag } from "@prisma/client";
+import { type BookingStatus, type Tag } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
+import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
@@ -20,8 +21,11 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
+import { useSearchParams } from "~/hooks/search-params";
+import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
@@ -70,13 +74,18 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { isSelfServiceOrBase, currentOrganization, organizationId } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const {
+      isSelfServiceOrBase,
+      currentOrganization,
+      organizationId,
+      canSeeAllBookings,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -95,7 +104,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, tagsData] = await Promise.all([
+    const [teamMembersData, tagsData, events] = await Promise.all([
       getTeamMemberForCustodianFilter({
         organizationId,
         selectedTeamMembers: teamMemberIds,
@@ -108,14 +117,28 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       getTagsForBookingTagsFilter({
         organizationId,
       }),
+      getBookingsForCalendar({
+        request,
+        organizationId,
+        userId,
+        canSeeAllBookings,
+        canSeeAllCustody,
+      }),
     ]);
+
+    const modelName = {
+      singular: "booking",
+      plural: "bookings",
+    };
 
     return json(
       data({
         header,
+        events,
         ...teamMembersData,
         currentOrganization,
         ...tagsData,
+        modelName,
       })
     );
   } catch (cause) {
@@ -131,8 +154,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function Calendar() {
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
-  const [_error, setError] = useState<string | null>(null);
-
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const { events } = useLoaderData<typeof loader>();
+  const isLoading = useDisabled();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
     subtitle?: string;
@@ -145,8 +170,16 @@ export default function Calendar() {
     isMd ? "dayGridMonth" : "listWeek"
   );
 
+  // Get initial date from URL params if available
+  const initialDate = useMemo(() => {
+    const startParam = searchParams.get("start");
+    if (startParam) {
+      return new Date(startParam);
+    }
+    return new Date(); // Default to current date
+  }, [searchParams]);
+
   const calendarRef = useRef<FullCalendar>(null);
-  const ripple = useRef<HTMLDivElement>(null);
 
   function updateTitle(viewType = calendarView) {
     const calendarApi = calendarRef.current?.getApi();
@@ -154,19 +187,6 @@ export default function Calendar() {
       setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
     }
   }
-
-  const toggleLoader = useCallback(
-    (state: boolean) => {
-      if (ripple.current) {
-        if (state) {
-          ripple.current.classList.remove("hidden");
-        } else {
-          ripple.current.classList.add("hidden");
-        }
-      }
-    },
-    [ripple]
-  );
 
   const handleWindowResize = () => {
     const calendar = calendarRef?.current?.getApi();
@@ -201,6 +221,8 @@ export default function Calendar() {
         />
       </Header>
 
+      <BookingFilters className="mt-4" hideSortBy />
+
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
           <div className="flex items-center gap-2">
@@ -209,9 +231,11 @@ export default function Calendar() {
               calendarSubtitle={calendarHeader.subtitle}
               calendarView={calendarView}
             />
-            <div ref={ripple} className="mr-3 flex justify-center">
-              <Spinner />
-            </div>
+            {isLoading && (
+              <div className="mr-3 flex justify-center">
+                <Spinner />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center">
@@ -239,17 +263,14 @@ export default function Calendar() {
               ref={calendarRef}
               plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
               initialView={calendarView}
+              initialDate={initialDate}
               expandRows={true}
               height="auto"
               firstDay={1}
               timeZone="local"
               nowIndicator
               headerToolbar={false}
-              events={{
-                url: "/calendar/events",
-                method: "GET",
-                failure: (err) => setError(err.message),
-              }}
+              events={events}
               slotEventOverlap={true}
               dayMaxEvents={3}
               dayMaxEventRows={4}
@@ -268,11 +289,25 @@ export default function Calendar() {
                 const calendarContainer = args.el;
                 const viewType = args.view.type;
                 updateViewClasses(calendarContainer, viewType);
+                updateTitle(viewType);
               }}
               datesSet={(args) => {
                 const calendarContainer = document.querySelector(".fc");
                 const viewType = args.view.type;
+
                 updateViewClasses(calendarContainer, viewType);
+
+                // Only update URL params after initial load
+                if (!isInitialLoad) {
+                  setSearchParams((prev) => {
+                    const newParams = new URLSearchParams(prev);
+                    newParams.set("start", args.start.toISOString());
+                    newParams.set("end", args.end.toISOString());
+                    return newParams;
+                  });
+                } else {
+                  setIsInitialLoad(false);
+                }
               }}
               eventClassNames={(eventInfo) => {
                 const viewType = eventInfo.view.type;
@@ -286,7 +321,6 @@ export default function Calendar() {
                   viewType
                 );
               }}
-              loading={toggleLoader}
             />
           )}
         </ClientOnly>

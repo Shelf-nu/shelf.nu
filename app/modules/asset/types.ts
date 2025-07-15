@@ -51,6 +51,7 @@ export interface UpdateAssetPayload {
 
 export interface CreateAssetFromContentImportPayload
   extends Record<string, any> {
+  key: string; // Unique identifier for the asset in the import (this is generated while parsing the csv file)
   title: string;
   description?: string;
   category?: string;
