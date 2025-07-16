@@ -1,3 +1,4 @@
+import type { Asset, Barcode } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -5,10 +6,12 @@ import { z } from "zod";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Card } from "~/components/shared/card";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, data } from "~/utils/http.server";
 import {
@@ -21,11 +24,8 @@ import { requirePermission } from "~/utils/roles.server";
 type KitWithOptionalBarcodes = ReturnType<
   typeof useLoaderData<typeof loader>
 >["kit"] & {
-  barcodes?: Array<{
-    id: string;
-    type: any;
-    value: string;
-  }>;
+  barcodes?: Pick<Barcode, "id" | "type" | "value">[];
+  assets?: Pick<Asset, "valuation">[];
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -37,13 +37,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, canUseBarcodes } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.kit,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      canUseBarcodes,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.read,
+    });
+    const { locale } = getClientHint(request);
 
     const kit = await getKit({
       id,
@@ -66,6 +71,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             timeStyle: "short",
           }).format(kit.createdAt),
         },
+        currentOrganization,
+        locale,
         header,
       })
     );
@@ -84,8 +91,15 @@ export const handle = {
 };
 
 export default function KitOverview() {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, currentOrganization, locale } = useLoaderData<typeof loader>();
   const { canUseBarcodes } = useBarcodePermissions();
+  const totalValue =
+    ("assets" in kit &&
+      kit?.assets?.reduce(
+        (total, asset) => total + (asset.valuation ?? 0),
+        0
+      )) ||
+    0;
 
   return (
     <Card className="mt-0 px-[-4] py-[-5] md:border">
@@ -115,6 +129,30 @@ export default function KitOverview() {
             </div>
           </li>
         ) : null}
+        <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+          <span className="w-1/4 text-[14px] font-medium text-gray-900">
+            Total value{" "}
+            <InfoTooltip
+              iconClassName="size-4"
+              content={
+                <>
+                  <h6>Total value</h6>
+                  <p>
+                    A sum of all assets' values in this kit. If no assets are
+                    present, this will be zero.
+                  </p>
+                </>
+              }
+            />
+          </span>
+          <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+            {formatCurrency({
+              value: totalValue,
+              locale,
+              currency: currentOrganization.currency,
+            })}
+          </div>
+        </li>
 
         {(() => {
           const kitWithBarcodes = kit as KitWithOptionalBarcodes;

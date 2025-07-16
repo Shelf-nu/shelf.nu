@@ -10,6 +10,11 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
           value: true,
         },
       },
+      assets: {
+        select: {
+          valuation: true,
+        },
+      },
     } satisfies Prisma.KitInclude;
   }
 
