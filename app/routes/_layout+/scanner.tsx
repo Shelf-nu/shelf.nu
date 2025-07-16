@@ -12,7 +12,7 @@ import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
@@ -123,6 +123,7 @@ const QRScanner = () => {
   const [scanMessage, setScanMessage] = useState<string>(
     "Processing QR code..."
   );
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
@@ -151,14 +152,20 @@ const QRScanner = () => {
       // Always use the ref value for the most current action
       if (actionRef.current === "View asset") {
         setPaused(value);
+
+        // Clear error message when unpausing (for "Continue Scanning" button)
+        if (!value) {
+          setErrorMessage(undefined);
+          setScanMessage("Processing QR code...");
+        }
       }
     },
     [] // No dependencies needed since we use the ref
   );
 
   // Define the handler using useCallback to prevent recreating it on every render
-  const handleQrDetectionSuccess = useCallback(
-    ({ qrId, error }: OnQrDetectionSuccessProps) => {
+  const handleCodeDetectionSuccess = useCallback(
+    ({ value, error, type }: OnCodeDetectionSuccessProps) => {
       // IMPORTANT: Always use the current value from the ref
       const currentAction = actionRef.current;
 
@@ -167,16 +174,31 @@ const QRScanner = () => {
           return;
         }
 
+        // Handle error case (unsupported barcode type)
+        if (error) {
+          handleSetPaused(true);
+          setErrorMessage(error);
+          setScanMessage(""); // Clear scan message for error state
+          return;
+        }
+
         isNavigating.current = true;
         handleSetPaused(true);
+        setErrorMessage(undefined); // Clear any previous errors
         setScanMessage("Redirecting to mapped asset...");
-        navigate(`/qr/${qrId}`);
+
+        // Navigate to appropriate route based on code type
+        if (type === "barcode") {
+          navigate(`/barcode/${encodeURIComponent(value)}`);
+        } else {
+          navigate(`/qr/${value}`);
+        }
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
         )
       ) {
-        addItem(qrId, error);
+        addItem(value, error, type);
       }
     },
     [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
@@ -190,10 +212,11 @@ const QRScanner = () => {
         style={{ height: `${height}px` }}
       >
         <CodeScanner
-          onQrDetectionSuccess={handleQrDetectionSuccess}
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
           paused={paused}
           setPaused={handleSetPaused}
           scanMessage={scanMessage}
+          errorMessage={errorMessage}
           actionSwitcher={<ActionSwitcher />}
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")

@@ -11,23 +11,24 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { BarcodeCard } from "~/components/barcode/barcode-card";
+import { CodePreview } from "~/components/code-preview/code-preview";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { QrPreview } from "~/components/qr/qr-preview";
-
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
+import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   getAsset,
   updateAssetBookingAvailability,
@@ -54,8 +55,19 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+type AssetWithOptionalBarcodes = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["asset"] & {
+  barcodes?: Array<{
+    id: string;
+    type: any;
+    value: string;
+  }>;
+};
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
@@ -73,13 +85,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, currentOrganization } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      currentOrganization,
+      canUseBarcodes,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
 
     const { locale, timeZone } = getClientHint(request);
 
@@ -88,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: ASSET_OVERVIEW_FIELDS,
+      include: getAssetOverviewFields(canUseBarcodes),
     });
 
     /**
@@ -270,6 +286,7 @@ export default function AssetOverview() {
     AvailabilityForBookingFormSchema
   );
   const { roles } = useUserRoleHelper();
+  const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
@@ -279,9 +296,9 @@ export default function AssetOverview() {
   return (
     <div>
       <ContextualModal />
-      <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex">
-        <div className="flex-1 overflow-hidden">
-          <Card className="my-3 px-[-4] py-[-5] md:border">
+      <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex ">
+        <div className="max-w-full flex-1 overflow-hidden">
+          <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
@@ -372,6 +389,49 @@ export default function AssetOverview() {
                         currency: asset.organization.currency,
                       })}{" "}
                     </div>
+                  </div>
+                </li>
+              ) : null}
+
+              {(() => {
+                const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
+                return (
+                  asset &&
+                  assetWithBarcodes.barcodes?.length &&
+                  assetWithBarcodes.barcodes.length > 0 &&
+                  canUseBarcodes
+                );
+              })() ? (
+                <li className="w-full max-w-full p-4 last:border-b-0 md:block">
+                  <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
+                    Barcodes (
+                    {(asset as AssetWithOptionalBarcodes).barcodes?.length})
+                    <InfoTooltip
+                      iconClassName="size-4"
+                      content={
+                        <>
+                          <h6>Barcodes support</h6>
+                          <p>
+                            Want to know more about barcodes? Check out our
+                            knowledge base article on{" "}
+                            <Button
+                              variant="link"
+                              target="_blank"
+                              to="https://www.shelf.nu/knowledge-base/alternative-barcodes"
+                            >
+                              barcode support
+                            </Button>
+                          </p>
+                        </>
+                      }
+                    />
+                  </span>
+                  <div className="flex flex-wrap gap-3">
+                    {(asset as AssetWithOptionalBarcodes).barcodes?.map(
+                      (barcode) => (
+                        <BarcodeCard key={barcode.id} barcode={barcode} />
+                      )
+                    )}
                   </div>
                 </li>
               ) : null}
@@ -531,9 +591,15 @@ export default function AssetOverview() {
           />
 
           {asset && (
-            <QrPreview
+            <CodePreview
               qrObj={qrObj}
+              barcodes={
+                canUseBarcodes
+                  ? (asset as AssetWithOptionalBarcodes).barcodes || []
+                  : []
+              }
               item={{
+                id: asset.id,
                 name: asset.title,
                 type: "asset",
               }}

@@ -85,7 +85,6 @@ export async function loader({ context }: LoaderFunctionArgs) {
     const userSignedUpWithPassword =
       authUser.user_metadata.signup_method === "email-password";
 
-
     const OnboardingFormSchema = createOnboardingSchema({
       userSignedUpWithPassword,
       showHowDidYouFindUs: config.showHowDidYouFindUs,
@@ -102,7 +101,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
         user,
         userSignedUpWithPassword,
         OnboardingFormSchema,
-        showHowDidYouFindUs,
+        showHowDidYouFindUs: config.showHowDidYouFindUs,
       })
     );
   } catch (cause) {

@@ -54,35 +54,47 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
   try {
     /** Validate permissions and fetch user */
-    const [{ organizationId, organizations, currentOrganization, role }, user] =
-      await Promise.all([
-        requirePermission({
-          userId,
-          request,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.read,
+    const [
+      {
+        organizationId,
+        organizations,
+        currentOrganization,
+        role,
+        canUseBarcodes,
+      },
+      user,
+    ] = await Promise.all([
+      requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      }),
+      db.user
+        .findUniqueOrThrow({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "We can't find your user data. Please try again or contact support.",
+            additionalData: { userId },
+            label: "Assets",
+          });
         }),
-        db.user
-          .findUniqueOrThrow({
-            where: {
-              id: userId,
-            },
-            select: {
-              firstName: true,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message:
-                "We can't find your user data. Please try again or contact support.",
-              additionalData: { userId },
-              label: "Assets",
-            });
-          }),
-      ]);
+    ]);
 
-    const settings = await getAssetIndexSettings({ userId, organizationId });
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+    });
     const mode = settings.mode;
 
     /** For base and self service users, we dont allow to view the advanced index */

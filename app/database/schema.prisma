@@ -148,6 +148,7 @@ model Asset {
   custody      Custody?
   notes        Note[]
   qrCodes      Qr[]
+  barcodes     Barcode[]
   reports      ReportFound[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
@@ -335,6 +336,48 @@ model Qr {
   @@index([batchId])
 }
 
+// Barcode model
+model Barcode {
+  id String @id @default(cuid())
+
+  // The actual barcode value (separate from DB ID)
+  value String // e.g., "BC001234", "ASSET-2024-001"
+
+  // Barcode type (matching zxing format names exactly)
+  type BarcodeType @default(Code128)
+
+  // Relationships
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Organization-scoped uniqueness for barcode values
+  @@unique([organizationId, value])
+  // Performance indexes for common queries
+  @@index([organizationId, value]) // Lightning fast lookup by org + value
+  @@index([assetId])
+  @@index([kitId])
+  @@index([organizationId]) // For org-level queries
+}
+
+
+// Barcode types matching zxing format names exactly
+enum BarcodeType {
+  Code128
+  Code39
+  DataMatrix
+}
+
+
 model PrintBatch {
   id String @id @default(cuid())
 
@@ -379,6 +422,7 @@ enum ErrorCorrection {
   Q
   H
 }
+
 
 model Scan {
   id String @id @default(cuid())
@@ -530,6 +574,10 @@ model Organization {
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
+  // Barcode feature (admin-managed, will later integrate with custom tier limits)
+  barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
+  barcodesEnabledAt DateTime? // Track when barcode feature was enabled
+
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
@@ -537,6 +585,7 @@ model Organization {
   categories        Category[]
   tags              Tag[]
   qrCodes           Qr[]
+  barcodes          Barcode[]
   invites           Invite[]
   userOrganizations UserOrganization[]
 
@@ -879,6 +928,7 @@ model Kit {
   assets  Asset[]
   custody KitCustody?
   qrCodes Qr[]
+  barcodes Barcode[]
   reports ReportFound[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)

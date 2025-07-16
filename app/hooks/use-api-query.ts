@@ -23,11 +23,16 @@ export default function useApiQuery<TData>({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [data, setData] = useState<TData | undefined>();
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
   const apiUrl = useMemo(
     () => (searchParams ? `${api}?${searchParams.toString()}` : api),
     [api, searchParams]
   );
+
+  const refetch = () => {
+    setRefetchTrigger((prev) => prev + 1);
+  };
 
   useEffect(
     function handleQuery() {
@@ -46,12 +51,13 @@ export default function useApiQuery<TData>({
           });
       }
     },
-    [apiUrl, enabled]
+    [apiUrl, enabled, refetchTrigger]
   );
 
   return {
     isLoading,
     error,
     data,
+    refetch,
   };
 }

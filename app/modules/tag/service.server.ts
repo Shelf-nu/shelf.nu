@@ -148,9 +148,9 @@ export async function createTagsIfNotExists({
 }): Promise<Record<string, TeamMember["id"]>> {
   try {
     const tags = data
-      .filter(({ tags }) => tags?.length > 0)
+      .filter(({ tags }) => tags && tags.length > 0)
       .reduce((acc: Record<string, string>, curr) => {
-        curr.tags.forEach((tag) => tag !== "" && (acc[tag.trim()] = ""));
+        curr.tags!.forEach((tag) => tag !== "" && (acc[tag.trim()] = ""));
         return acc;
       }, {});
     // Handle the case where there are no tags

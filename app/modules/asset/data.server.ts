@@ -58,6 +58,7 @@ Search assets based on asset fields. Separate your keywords by a comma(,) to sea
 - Custodian names (first or last name)
 - QR code value
 - Custom field values
+- Barcodes values
 `;
 
 export async function simpleModeLoader({
@@ -301,6 +302,7 @@ export async function advancedModeLoader({
       filters,
       settings,
       getBookings: view === "availability",
+      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
