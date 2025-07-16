@@ -31,7 +31,10 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
-import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
+import type {
+  ColumnLabelKey,
+  BarcodeField,
+} from "~/modules/asset-index-settings/helpers";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -43,9 +46,9 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
-import { QrPreviewDialog } from "../qr-preview-dialog";
 import AssetQuickActions from "./asset-quick-actions";
 // eslint-disable-next-line import/no-cycle
 import { ListItemTagsColumn } from "./assets-list";
@@ -168,8 +171,13 @@ export function AdvancedIndexColumn({
 
     case "qrId":
       return (
-        <QrPreviewDialog
-          asset={item}
+        <CodePreviewDialog
+          item={{
+            id: item.id,
+            title: item.title,
+            qrId: item.qrId,
+            type: "asset",
+          }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
               <Button variant="link-gray">{item.qrId}</Button>
@@ -261,6 +269,14 @@ export function AdvancedIndexColumn({
           <AssetQuickActions asset={item} />
         </Td>
       );
+
+    case "barcode_Code128":
+    case "barcode_Code39":
+    case "barcode_DataMatrix":
+      return <BarcodeColumn column={column} item={item} />;
+
+    default:
+      return <Td> </Td>;
   }
 }
 
@@ -412,6 +428,75 @@ function UpcomingReminderColumn({
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
         </TooltipContent>
       </Tooltip>
+    </Td>
+  );
+}
+
+function BarcodeColumn({
+  column,
+  item,
+}: {
+  column: BarcodeField;
+  item: AdvancedIndexAsset;
+}) {
+  // Map column names to actual enum values
+  const typeMapping: Record<string, string> = {
+    Code128: "Code128",
+    Code39: "Code39",
+    DataMatrix: "DataMatrix",
+  };
+
+  const columnType = column.split("_")[1];
+  const actualBarcodeType = typeMapping[columnType] || columnType;
+
+  const barcodes =
+    item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
+
+  if (barcodes.length === 0) {
+    return <Td> </Td>;
+  }
+
+  // If only one barcode, show as a single clickable link
+  if (barcodes.length === 1) {
+    const barcode = barcodes[0];
+    return (
+      <CodePreviewDialog
+        item={{
+          id: item.id,
+          title: item.title,
+          qrId: item.qrId,
+          type: "asset",
+        }}
+        selectedBarcodeId={barcode.id}
+        trigger={
+          <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
+            <Button variant="link-gray">{barcode.value}</Button>
+          </Td>
+        }
+      />
+    );
+  }
+
+  // If multiple barcodes, show as comma-separated clickable links
+  return (
+    <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
+      {barcodes.map((barcode, index) => (
+        <span key={barcode.id}>
+          <CodePreviewDialog
+            item={{
+              id: item.id,
+              title: item.title,
+              qrId: item.qrId,
+              type: "asset",
+            }}
+            selectedBarcodeId={barcode.id}
+            trigger={<Button variant="link-gray">{barcode.value}</Button>}
+          />
+          {index < barcodes.length - 1 && (
+            <span className="text-gray-400">, </span>
+          )}
+        </span>
+      ))}
     </Td>
   );
 }

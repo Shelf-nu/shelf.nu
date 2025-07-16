@@ -1,4 +1,5 @@
 import type {
+  Barcode,
   Booking,
   Kit,
   Organization,
@@ -18,6 +19,10 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+} from "~/modules/barcode/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -27,6 +32,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
   ShelfError,
+  VALIDATION_ERROR,
 } from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -58,8 +64,10 @@ export async function createKit({
   createdById,
   organizationId,
   qrId,
+  barcodes,
 }: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
   qrId?: Qr["id"];
+  barcodes?: Pick<Barcode, "type" | "value">[];
 }) {
   try {
     /** User connection data */
@@ -110,10 +118,49 @@ export async function createKit({
       qrCodes,
     };
 
+    /** If barcodes are passed, create them */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      Object.assign(data, {
+        barcodes: {
+          create: barcodesToAdd.map(({ type, value }) => ({
+            type,
+            value: value.toUpperCase(),
+            organizationId,
+          })),
+        },
+      });
+    }
+
     return await db.kit.create({
       data,
     });
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
+        const barcodesToAdd = barcodes.filter(
+          (barcode) => !!barcode.value && !!barcode.type
+        );
+        if (barcodesToAdd.length > 0) {
+          // Use existing validation function for detailed error messages
+          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, organizationId },
     });
@@ -129,9 +176,10 @@ export async function updateKit({
   status,
   createdById,
   organizationId,
+  barcodes,
 }: UpdateKitPayload) {
   try {
-    return await db.kit.update({
+    const kit = await db.kit.update({
       where: { id, organizationId },
       data: {
         name,
@@ -141,7 +189,27 @@ export async function updateKit({
         status,
       },
     });
+
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        kitId: id,
+        organizationId,
+        userId: createdById,
+      });
+    }
+
+    return kit;
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Kit", {
       additionalData: { userId: createdById, id },
     });
@@ -242,10 +310,17 @@ export async function getPaginatedAndFilterableKits<
     const where: Prisma.KitWhereInput = { organizationId };
 
     if (search) {
-      where.name = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
+      const searchTerm = search.toLowerCase().trim();
+      where.OR = [
+        // Search in kit name
+        { name: { contains: searchTerm, mode: "insensitive" } },
+        // Search in barcode values
+        {
+          barcodes: {
+            some: { value: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
+      ];
     }
 
     if (status) {
@@ -474,10 +549,17 @@ export async function getAssetsForKits({
     let where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
-      where.title = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
+      const searchTerm = search.toLowerCase().trim();
+      where.OR = [
+        // Search in asset title
+        { title: { contains: searchTerm, mode: "insensitive" } },
+        // Search in asset barcodes
+        {
+          barcodes: {
+            some: { value: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
+      ];
     }
 
     const finalQuery = {

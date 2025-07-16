@@ -16,71 +16,19 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type {
+  AssetFromScanner,
+  KitFromScanner,
+} from "~/utils/scanner-includes.server";
+import {
+  ASSET_INCLUDE,
+  KIT_INCLUDE,
+  QR_INCLUDE,
+} from "~/utils/scanner-includes.server";
 
-const CUSTODY_INCLUDE = {
-  custody: {
-    select: {
-      custodian: {
-        select: {
-          name: true,
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              profilePicture: true,
-            },
-          },
-        },
-      },
-    },
-  },
-};
-
-const ASSET_INCLUDE = {
-  bookings: true,
-  location: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
-  ...CUSTODY_INCLUDE,
-};
-
-const KIT_INCLUDE = {
-  _count: { select: { assets: true } },
-  assets: {
-    select: {
-      id: true,
-      status: true,
-      availableToBook: true,
-      custody: true,
-      bookings: { select: { id: true, status: true } },
-    },
-  },
-  ...CUSTODY_INCLUDE,
-};
-
-const QR_INCLUDE = {
-  asset: {
-    include: ASSET_INCLUDE,
-  },
-  kit: {
-    include: KIT_INCLUDE,
-  },
-};
-
-export type QrForScannerType = Prisma.QrGetPayload<{
-  include: typeof QR_INCLUDE;
-}>;
-
-export type KitFromQr = Prisma.KitGetPayload<{
-  include: typeof KIT_INCLUDE;
-}>;
-
-export type AssetFromQr = Prisma.AssetGetPayload<{
-  include: typeof ASSET_INCLUDE;
-}>;
+// Re-export types for backward compatibility
+export type AssetFromQr = AssetFromScanner;
+export type KitFromQr = KitFromScanner;
 
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -154,7 +102,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message:
-          "This QR code doesn't exist or it doesn't belong to your current organization.",
+          "This code doesn't exist or it doesn't belong to your current organization.",
         additionalData: { qrId, shouldSendNotification: false },
         label: "QR",
         shouldBeCaptured: false,
