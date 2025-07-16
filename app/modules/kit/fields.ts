@@ -1,24 +1,25 @@
 import type { Prisma } from "@prisma/client";
 
 export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
+  const fields: Prisma.KitInclude = {
+    assets: {
+      select: {
+        valuation: true,
+      },
+    },
+  };
+
   if (canUseBarcodes) {
-    return {
-      barcodes: {
-        select: {
-          id: true,
-          type: true,
-          value: true,
-        },
+    fields.barcodes = {
+      select: {
+        id: true,
+        type: true,
+        value: true,
       },
-      assets: {
-        select: {
-          valuation: true,
-        },
-      },
-    } satisfies Prisma.KitInclude;
+    };
   }
 
-  return {} satisfies Prisma.KitInclude;
+  return fields;
 };
 
 // Keep the original for backward compatibility
