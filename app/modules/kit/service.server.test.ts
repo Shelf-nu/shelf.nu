@@ -332,7 +332,33 @@ describe("updateKit", () => {
     expect(result).toEqual(updatedKit);
   });
 
-  it("should update kit without category when categoryId is null", async () => {
+  it("should disconnect category when categoryId is 'uncategorized'", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue(mockKitData);
+
+    await updateKit({
+      id: "kit-1",
+      name: "Updated Kit",
+      createdById: "user-1",
+      organizationId: "org-1",
+      categoryId: "uncategorized",
+    });
+
+    expect(db.kit.update).toHaveBeenCalledWith({
+      where: { id: "kit-1", organizationId: "org-1" },
+      data: {
+        name: "Updated Kit",
+        description: undefined,
+        image: undefined,
+        imageExpiration: undefined,
+        status: undefined,
+        category: { disconnect: true },
+      },
+    });
+  });
+
+  it("should not change category when categoryId is null", async () => {
     expect.assertions(1);
     //@ts-expect-error missing vitest type
     db.kit.update.mockResolvedValue(mockKitData);
@@ -353,7 +379,31 @@ describe("updateKit", () => {
         image: undefined,
         imageExpiration: undefined,
         status: undefined,
-        category: undefined,
+      },
+    });
+  });
+
+  it("should not change category when categoryId is undefined", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue(mockKitData);
+
+    await updateKit({
+      id: "kit-1",
+      name: "Updated Kit",
+      createdById: "user-1",
+      organizationId: "org-1",
+      categoryId: undefined,
+    });
+
+    expect(db.kit.update).toHaveBeenCalledWith({
+      where: { id: "kit-1", organizationId: "org-1" },
+      data: {
+        name: "Updated Kit",
+        description: undefined,
+        image: undefined,
+        imageExpiration: undefined,
+        status: undefined,
       },
     });
   });

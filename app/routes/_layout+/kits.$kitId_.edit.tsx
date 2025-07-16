@@ -141,7 +141,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: payload.name,
         description: payload.description,
         organizationId,
-        categoryId: payload.category ?? null,
+        categoryId: payload.category ? payload.category : "uncategorized",
         barcodes,
       }),
       updateKitImage({

@@ -1,4 +1,3 @@
--- Add performance indexes for kit category filtering                                                                                                                                    │ │
 -- Index for filtering kits by category within organization
 CREATE INDEX IF NOT EXISTS "Kit_categoryId_organizationId_idx" ON "Kit" ("categoryId", "organizationId");
 -- Index for filtering kits by category, organization, and status (common filtering pattern)
