@@ -52,7 +52,8 @@ export const BARCODE_LENGTHS = {
   CODE128_MIN: 4,
   CODE128_MAX: 40,
   CODE128_WARN_THRESHOLD: 30,
-  CODE39_LENGTH: 6,
+  CODE39_MIN: 4,
+  CODE39_MAX: 43,
   DATAMATRIX_MIN: 4,
   DATAMATRIX_MAX: 100,
   // Add your new type constants
@@ -135,7 +136,7 @@ export const BARCODE_TYPE_OPTIONS = [
     value: BarcodeType.Code39,
     label: "Code 39",
     description:
-      "Exactly 6 characters, letters and numbers only (e.g., ABC123)",
+      "4-43 characters, letters and numbers only (e.g., ABC123)",
   },
   {
     value: BarcodeType.DataMatrix,

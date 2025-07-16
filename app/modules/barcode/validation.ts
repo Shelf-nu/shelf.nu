@@ -6,7 +6,8 @@ export const BARCODE_LENGTHS = {
   CODE128_MIN: 4,
   CODE128_MAX: 40,
   CODE128_WARN_THRESHOLD: 30,
-  CODE39_LENGTH: 6,
+  CODE39_MIN: 4,
+  CODE39_MAX: 43,
   DATAMATRIX_MIN: 4,
   DATAMATRIX_MAX: 100,
 } as const;
@@ -39,15 +40,19 @@ const validateCode128 = (value: string) => {
 
 /**
  * Validation rules for Code39 barcodes
- * Asset management optimized: exactly 6 characters
+ * Asset management optimized: 4-43 characters
  */
 const validateCode39 = (value: string) => {
   if (!value || value.length === 0) {
     return "Barcode value is required";
   }
 
-  if (value.length !== BARCODE_LENGTHS.CODE39_LENGTH) {
-    return `Code39 barcode must be exactly ${BARCODE_LENGTHS.CODE39_LENGTH} characters`;
+  if (value.length < BARCODE_LENGTHS.CODE39_MIN) {
+    return `Code39 barcode must be at least ${BARCODE_LENGTHS.CODE39_MIN} characters`;
+  }
+
+  if (value.length > BARCODE_LENGTHS.CODE39_MAX) {
+    return `Code39 barcode too long (max ${BARCODE_LENGTHS.CODE39_MAX} characters)`;
   }
 
   // Code39 alphanumeric: A-Z, 0-9 (industry standard for asset tracking)

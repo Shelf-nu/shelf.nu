@@ -151,7 +151,7 @@ export const ImportContent = () => {
               supports letters, numbers, and symbols like dashes)
             </li>
             <li>
-              <b>barcode_Code39</b> - For Code39 barcodes (exactly 6 characters)
+              <b>barcode_Code39</b> - For Code39 barcodes (4-43 characters)
             </li>
             <li>
               <b>barcode_DataMatrix</b> - For DataMatrix barcodes (4-100
