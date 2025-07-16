@@ -5,6 +5,7 @@ import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { getKitOverviewFields } from "~/modules/kit/fields";
@@ -164,8 +165,27 @@ export default function KitOverview() {
           );
         })() ? (
           <li className="w-full p-4 last:border-b-0 md:block">
-            <span className="mb-3 block text-[14px] font-medium text-gray-900">
+            <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
               Barcodes ({(kit as KitWithOptionalBarcodes).barcodes?.length})
+              <InfoTooltip
+                iconClassName="size-4"
+                content={
+                  <>
+                    <h6>Barcodes support</h6>
+                    <p>
+                      Want to know more about barcodes? Check out our knowledge
+                      base article on{" "}
+                      <Button
+                        variant="link"
+                        target="_blank"
+                        to="https://www.shelf.nu/knowledge-base/alternative-barcodes"
+                      >
+                        barcode support
+                      </Button>
+                    </p>
+                  </>
+                }
+              />
             </span>
             <div className="flex flex-wrap gap-3">
               {(kit as KitWithOptionalBarcodes).barcodes?.map((barcode) => (

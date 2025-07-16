@@ -22,6 +22,7 @@ import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
@@ -402,9 +403,28 @@ export default function AssetOverview() {
                 );
               })() ? (
                 <li className="w-full max-w-full p-4 last:border-b-0 md:block">
-                  <span className="mb-3 block text-[14px] font-medium text-gray-900">
+                  <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
                     Barcodes (
                     {(asset as AssetWithOptionalBarcodes).barcodes?.length})
+                    <InfoTooltip
+                      iconClassName="size-4"
+                      content={
+                        <>
+                          <h6>Barcodes support</h6>
+                          <p>
+                            Want to know more about barcodes? Check out our
+                            knowledge base article on{" "}
+                            <Button
+                              variant="link"
+                              target="_blank"
+                              to="https://www.shelf.nu/knowledge-base/alternative-barcodes"
+                            >
+                              barcode support
+                            </Button>
+                          </p>
+                        </>
+                      }
+                    />
                   </span>
                   <div className="flex flex-wrap gap-3">
                     {(asset as AssetWithOptionalBarcodes).barcodes?.map(
