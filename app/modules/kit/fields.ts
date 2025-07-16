@@ -12,7 +12,6 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
         id: true,
         name: true,
         color: true,
-
       },
     },
   };

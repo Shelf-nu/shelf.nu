@@ -164,7 +164,7 @@ export default function KitsForm({
             initialDataKey="categories"
             countKey="totalCategories"
             closeOnSelect
-            selectionMode="set"
+            selectionMode="none"
             allowClear={true}
             extraContent={
               <Button
