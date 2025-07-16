@@ -134,12 +134,14 @@ export default function KitOverview() {
         ) : null}
 
         <When truthy={!!kit.category}>
-          <Card className="mb-3 mt-0 flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-600">Category</span>
-            <div className="max-w-[250px] font-medium">
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Category
+            </span>
+            <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
               <CategoryBadge category={kit.category} />
             </div>
-          </Card>
+          </li>
         </When>
 
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
