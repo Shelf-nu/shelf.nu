@@ -146,7 +146,7 @@ export default function KitsForm({
           rowLabel="Category"
           subHeading={
             <p>
-              Make it unique. Each asset can have 1 category. It will show on
+              Make it unique. Each kit can have 1 category. It will show on
               your index.
             </p>
           }
