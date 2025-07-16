@@ -7,7 +7,7 @@ export const BarcodeCard = ({
   barcode: Pick<Barcode, "id" | "value" | "type">;
 }) => (
   <div
-    className="flex w-full max-w-full shrink-0 flex-col rounded-lg border bg-gray-50 p-3 md:w-auto"
+    className="flex w-full max-w-full shrink-0 flex-col rounded-lg border bg-gray-50 p-3 md:w-auto md:max-w-[400px]"
     style={{ minWidth: "280px" }}
   >
     <div
