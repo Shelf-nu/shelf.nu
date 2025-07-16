@@ -135,8 +135,7 @@ export const BARCODE_TYPE_OPTIONS = [
   {
     value: BarcodeType.Code39,
     label: "Code 39",
-    description:
-      "4-43 characters, letters and numbers only (e.g., ABC123)",
+    description: "4-43 characters, letters and numbers only (e.g., ABC123)",
   },
   {
     value: BarcodeType.DataMatrix,

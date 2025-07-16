@@ -372,15 +372,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         } catch (cause) {
           // Handle constraint violations and other barcode creation errors
           const reason = makeShelfError(cause);
-          
+
           // Extract specific validation errors if they exist
-          const validationErrors = reason.additionalData?.validationErrors as any;
+          const validationErrors = reason.additionalData
+            ?.validationErrors as any;
           if (validationErrors && validationErrors["barcodes[0].value"]) {
-            return json(data({ error: validationErrors["barcodes[0].value"].message }), {
-              status: reason.status,
-            });
+            return json(
+              data({ error: validationErrors["barcodes[0].value"].message }),
+              {
+                status: reason.status,
+              }
+            );
           }
-          
+
           return json(data({ error: reason.message }), {
             status: reason.status,
           });
