@@ -176,14 +176,14 @@ export function WorkingHoursInfo({
     );
 
   const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
-  return (
+  return shouldShowWorkingHoursInfo ? (
     <InfoBox className={tw("py-2", className)}>
       {loading ? (
         <div className="flex items-center gap-2">
           <div>Loading working hours</div>
           <Spinner className="mt-1 size-4" />
         </div>
-      ) : shouldShowWorkingHoursInfo ? (
+      ) : (
         <div className="mt-1 text-sm text-gray-600">
           <p>
             <strong>Working days:</strong>{" "}
@@ -209,12 +209,7 @@ export function WorkingHoursInfo({
             <WorkingHoursPreviewDialog workingHoursData={workingHoursData} />
           </div>
         </div>
-      ) : (
-        <div className="mt-1 text-sm text-gray-600">
-          No specific working hours set. You can schedule your booking for any
-          day and time.
-        </div>
       )}
     </InfoBox>
-  );
+  ) : null;
 }
