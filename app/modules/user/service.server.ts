@@ -1,4 +1,9 @@
-import type { Organization, User, UserOrganization } from "@prisma/client";
+import type {
+  Organization,
+  TierId,
+  User,
+  UserOrganization,
+} from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
