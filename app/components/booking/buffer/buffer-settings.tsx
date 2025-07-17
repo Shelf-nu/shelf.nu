@@ -87,8 +87,8 @@ export function TimeSettings({
             rowLabel={`Maximum booking length (hours)`}
             subHeading={
               <div>
-                Set the maximum duration for a single booking. Leave empty for no limit.
-                This helps prevent excessively long bookings.
+                Set the maximum duration for a single booking. Leave empty for
+                no limit. This helps prevent excessively long bookings.
               </div>
             }
             className="border-b-0 pb-[10px]"

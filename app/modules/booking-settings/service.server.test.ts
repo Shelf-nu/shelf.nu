@@ -119,10 +119,10 @@ describe("getBookingSettingsForOrganization", () => {
 
   it("should handle missing organization id", async () => {
     expect.assertions(1);
-    
-    await expect(
-      getBookingSettingsForOrganization("")
-    ).rejects.toThrow(ShelfError);
+
+    await expect(getBookingSettingsForOrganization("")).rejects.toThrow(
+      ShelfError
+    );
   });
 });
 
@@ -259,8 +259,8 @@ describe("updateBookingSettings", () => {
 
     expect(db.bookingSettings.update).toHaveBeenCalledWith({
       where: { organizationId: mockOrganizationId },
-      data: { 
-        bufferStartTime: 12, 
+      data: {
+        bufferStartTime: 12,
         tagsRequired: false,
         maxBookingLength: 240,
       },
@@ -321,7 +321,7 @@ describe("updateBookingSettings", () => {
 
     expect(db.bookingSettings.update).toHaveBeenCalledWith({
       where: { organizationId: mockOrganizationId },
-      data: { 
+      data: {
         bufferStartTime: 0,
         maxBookingLength: 0,
       },
@@ -382,7 +382,7 @@ describe("updateBookingSettings", () => {
       })
     ).rejects.toMatchObject({
       message: "Failed to update booking settings configuration",
-      additionalData: { 
+      additionalData: {
         organizationId: mockOrganizationId,
         bufferStartTime: 24,
         tagsRequired: undefined,
@@ -413,7 +413,7 @@ describe("updateBookingSettings", () => {
       })
     ).rejects.toMatchObject({
       message: "Failed to update booking settings configuration",
-      additionalData: { 
+      additionalData: {
         organizationId: "non-existent-org",
         bufferStartTime: 24,
         tagsRequired: undefined,
@@ -424,7 +424,7 @@ describe("updateBookingSettings", () => {
 
   it("should handle missing organization id", async () => {
     expect.assertions(1);
-    
+
     await expect(
       updateBookingSettings({
         organizationId: "",
@@ -471,7 +471,7 @@ describe("updateBookingSettings", () => {
       })
     ).rejects.toMatchObject({
       message: "Failed to update booking settings configuration",
-      additionalData: { 
+      additionalData: {
         organizationId: mockOrganizationId,
         bufferStartTime: 48,
         tagsRequired: true,

@@ -142,13 +142,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "updateTimeSettings": {
-        const { bufferStartTime, maxBookingLength } = parseData(formData, TimeSettingsSchema, {
-          additionalData: {
-            intent,
-            organizationId,
-            formData: Object.fromEntries(formData),
-          },
-        });
+        const { bufferStartTime, maxBookingLength } = parseData(
+          formData,
+          TimeSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
 
         await updateBookingSettings({
           organizationId,
