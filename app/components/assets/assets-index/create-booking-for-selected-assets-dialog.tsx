@@ -32,7 +32,8 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime, tagsRequired } = useBookingSettings();
+  const { bufferStartTime, tagsRequired, maxBookingLength } =
+    useBookingSettings();
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
@@ -40,6 +41,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
       workingHours,
       bufferStartTime,
       tagsRequired,
+      maxBookingLength,
     })
   );
 

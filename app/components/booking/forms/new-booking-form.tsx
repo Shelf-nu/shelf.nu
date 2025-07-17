@@ -57,7 +57,8 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime, tagsRequired } = useBookingSettings();
+  const { bufferStartTime, tagsRequired, maxBookingLength } =
+    useBookingSettings();
   const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
     workingHours,
     bufferStartTime
@@ -73,6 +74,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       workingHours: workingHours,
       bufferStartTime,
       tagsRequired,
+      maxBookingLength,
     })
   );
 

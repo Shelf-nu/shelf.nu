@@ -7,8 +7,8 @@ import type {
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
-  BufferSettings,
-  BufferSettingsSchema,
+  TimeSettings,
+  TimeSettingsSchema,
 } from "~/components/booking/buffer/buffer-settings";
 import {
   TagsRequiredSettings,
@@ -124,7 +124,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (
       !intent ||
       ![
-        "updateBuffer",
+        "updateTimeSettings",
         "updateTagsRequired",
         "toggle",
         "updateSchedule",
@@ -141,18 +141,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     switch (intent) {
-      case "updateBuffer": {
-        const { bufferStartTime } = parseData(formData, BufferSettingsSchema, {
-          additionalData: {
-            intent,
-            organizationId,
-            formData: Object.fromEntries(formData),
-          },
-        });
+      case "updateTimeSettings": {
+        const { bufferStartTime, maxBookingLength } = parseData(
+          formData,
+          TimeSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
 
         await updateBookingSettings({
           organizationId,
           bufferStartTime,
+          maxBookingLength: maxBookingLength || null,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Booking time restrictions have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
 
         return json(data({ success: true }), { status: 200 });
@@ -338,14 +350,15 @@ export default function GeneralPage() {
         defaultValue={bookingSettings.tagsRequired}
       />
 
-      {/* Buffer settings form */}
-      <BufferSettings
+      {/* Time settings form */}
+      <TimeSettings
         header={{
-          title: "Minimum notice period",
+          title: "Booking time restrictions",
           subHeading:
-            "Set how far in advance users must reserve assets before their checkout time. This prevents last-minute bookings and ensures proper asset availability.",
+            "Control booking timing constraints including minimum advance notice and maximum booking duration.",
         }}
-        defaultValue={bookingSettings.bufferStartTime}
+        defaultBufferValue={bookingSettings.bufferStartTime}
+        defaultMaxLengthValue={bookingSettings.maxBookingLength}
       />
 
       {/* Enable working hours form */}
