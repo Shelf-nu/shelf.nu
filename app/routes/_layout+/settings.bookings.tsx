@@ -10,7 +10,10 @@ import {
   BufferSettings,
   BufferSettingsSchema,
 } from "~/components/booking/buffer/buffer-settings";
-import { TagsRequiredSettings } from "~/components/booking/tags-required/tags-required-settings";
+import {
+  TagsRequiredSettings,
+  TagsRequiredSettingsSchema,
+} from "~/components/booking/tags-required/tags-required-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
@@ -31,7 +34,6 @@ import type { WeeklyScheduleJson } from "~/modules/working-hours/types";
 import { parseWeeklyScheduleFromFormData } from "~/modules/working-hours/utils";
 import {
   CreateOverrideFormSchema,
-  TagsRequiredSettingsSchema,
   WeeklyScheduleSchema,
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";

@@ -195,7 +195,7 @@ export function BookingFormSchema({
       ),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
-    tags: tagsRequired 
+    tags: tagsRequired
       ? z.string().min(1, "At least one tag is required")
       : z.string().optional(),
   });

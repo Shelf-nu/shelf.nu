@@ -10,13 +10,6 @@ export const WorkingHoursToggleSchema = z.object({
     .default("false"),
 });
 
-export const TagsRequiredSettingsSchema = z.object({
-  tagsRequired: z
-    .string()
-    .transform((val) => val === "on")
-    .default("false"),
-});
-
 // Base time string schema with proper validation
 const TimeStringSchema = z
   .string()

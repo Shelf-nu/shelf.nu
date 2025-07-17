@@ -47,7 +47,8 @@ export async function updateBookingSettings({
 }) {
   try {
     const updateData: { bufferStartTime?: number; tagsRequired?: boolean } = {};
-    if (bufferStartTime !== undefined) updateData.bufferStartTime = bufferStartTime;
+    if (bufferStartTime !== undefined)
+      updateData.bufferStartTime = bufferStartTime;
     if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
 
     const bookingSettings = await db.bookingSettings.update({

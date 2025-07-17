@@ -1,11 +1,18 @@
 import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
+import z from "zod";
 import FormRow from "~/components/forms/form-row";
 import { Switch } from "~/components/forms/switch";
 import { Card } from "~/components/shared/card";
 import { useDisabled } from "~/hooks/use-disabled";
-import { TagsRequiredSettingsSchema } from "~/modules/working-hours/zod-utils";
 import { tw } from "~/utils/tw";
+
+export const TagsRequiredSettingsSchema = z.object({
+  tagsRequired: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
+});
 
 export function TagsRequiredSettings({
   header,
