@@ -146,8 +146,8 @@ export default function KitsForm({
           rowLabel="Category"
           subHeading={
             <p>
-              Make it unique. Each kit can have 1 category. It will show on
-              your index.
+              Make it unique. Each kit can have 1 category. It will show on your
+              index.
             </p>
           }
           className="border-b-0 pb-[10px]"
