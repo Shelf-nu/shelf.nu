@@ -954,7 +954,7 @@ async function getUsers({
 
     /** If tierId filter exists, add it to the where object */
     if (tierId) {
-      where.tierId = tierId as any;
+      where.tierId = tierId as TierId;
     }
 
     const [users, totalUsers] = await Promise.all([
