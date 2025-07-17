@@ -17,7 +17,7 @@ export function EnableWorkingHoursForm({
   const fetcher = useFetcher();
   const zo = useZorm("EnableWorkingHoursForm", WorkingHoursToggleSchema);
   return (
-    <Card>
+    <Card className="mt-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
@@ -34,7 +34,6 @@ export function EnableWorkingHoursForm({
               <div>Working hours will be enabled for your workspace.</div>
             }
             className="border-b-0 pb-[10px] pt-0"
-            required
           >
             <div className="flex flex-col items-center gap-2">
               <Switch

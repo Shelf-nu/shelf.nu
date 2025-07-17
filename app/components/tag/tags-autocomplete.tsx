@@ -11,11 +11,15 @@ export const TagsAutocomplete = ({
   suggestions,
   disabled = false,
   hideLabel = false,
+  error,
+  required = false,
 }: {
   existingTags: Tag[];
   suggestions: TagSuggestion[];
   disabled?: boolean;
   hideLabel?: boolean;
+  error?: string;
+  required?: boolean;
 }) => (
   <MultiSelect
     className="w-full"
@@ -27,5 +31,7 @@ export const TagsAutocomplete = ({
     name="tags"
     disabled={disabled}
     hideLabel={hideLabel}
+    error={error}
+    required={required}
   />
 );

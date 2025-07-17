@@ -134,6 +134,7 @@ interface BookingFormSchemaParams {
   status?: BookingStatus;
   workingHours: any; // Accept any type, normalize internally
   bufferStartTime: number; // Required buffer parameter
+  tagsRequired: boolean; // Whether tags are required for bookings
 }
 
 /**
@@ -163,6 +164,7 @@ export function BookingFormSchema({
   status,
   workingHours: rawWorkingHours,
   bufferStartTime,
+  tagsRequired,
 }: BookingFormSchemaParams) {
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -193,7 +195,9 @@ export function BookingFormSchema({
       ),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
-    tags: z.string().optional(),
+    tags: tagsRequired
+      ? z.string().min(1, "At least one tag is required")
+      : z.string().optional(),
   });
 
   // Create enhanced date schemas with working hours and buffer validation

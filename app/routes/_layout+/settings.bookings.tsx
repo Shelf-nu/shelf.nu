@@ -10,6 +10,10 @@ import {
   BufferSettings,
   BufferSettingsSchema,
 } from "~/components/booking/buffer/buffer-settings";
+import {
+  TagsRequiredSettings,
+  TagsRequiredSettingsSchema,
+} from "~/components/booking/tags-required/tags-required-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
@@ -121,6 +125,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       !intent ||
       ![
         "updateBuffer",
+        "updateTagsRequired",
         "toggle",
         "updateSchedule",
         "createOverride",
@@ -148,6 +153,33 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await updateBookingSettings({
           organizationId,
           bufferStartTime,
+        });
+
+        return json(data({ success: true }), { status: 200 });
+      }
+      case "updateTagsRequired": {
+        const { tagsRequired } = parseData(
+          formData,
+          TagsRequiredSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          tagsRequired,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Tags requirement setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
 
         return json(data({ success: true }), { status: 200 });
@@ -296,6 +328,16 @@ export default function GeneralPage() {
 
   return (
     <>
+      {/* Tags required settings form */}
+      <TagsRequiredSettings
+        header={{
+          title: "Tags requirement",
+          subHeading:
+            "Control whether users must add tags to their bookings. This helps with categorization and organization of bookings.",
+        }}
+        defaultValue={bookingSettings.tagsRequired}
+      />
+
       {/* Buffer settings form */}
       <BufferSettings
         header={{

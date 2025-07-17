@@ -34,6 +34,7 @@ import { getAllSelectedValuesFromFilters } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
+import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
@@ -111,6 +112,7 @@ export async function simpleModeLoader({
       teamMembers,
       totalTeamMembers,
     },
+    tagsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -143,6 +145,9 @@ export async function simpleModeLoader({
           : undefined,
       isSelfService,
       userId,
+    }),
+    getTagsForBookingTagsFilter({
+      organizationId,
     }),
   ]);
 
@@ -220,6 +225,8 @@ export async function simpleModeLoader({
        * */
       customFields: [],
       kits: [] as Kit[],
+      // Those tags are used for the tags autocomplete on the booking form
+      tagsData,
     }),
     {
       headers,
@@ -291,6 +298,7 @@ export async function advancedModeLoader({
     teamMembersData,
     kits,
     totalKits,
+    tagsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -329,6 +337,10 @@ export async function advancedModeLoader({
           : 12,
     }),
     db.kit.count({ where: { organizationId } }),
+    // Tags for booking form
+    getTagsForBookingTagsFilter({
+      organizationId,
+    }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -400,6 +412,7 @@ export async function advancedModeLoader({
       totalKits,
       tags,
       totalTags,
+      tagsData,
     }),
     {
       headers,

@@ -15,11 +15,13 @@ export async function getBookingSettingsForOrganization(
       update: {},
       create: {
         bufferStartTime: 0,
+        tagsRequired: false,
         organizationId,
       },
       select: {
         id: true,
         bufferStartTime: true,
+        tagsRequired: true,
       },
     });
 
@@ -37,17 +39,25 @@ export async function getBookingSettingsForOrganization(
 export async function updateBookingSettings({
   organizationId,
   bufferStartTime,
+  tagsRequired,
 }: {
   organizationId: string;
-  bufferStartTime: number;
+  bufferStartTime?: number;
+  tagsRequired?: boolean;
 }) {
   try {
+    const updateData: { bufferStartTime?: number; tagsRequired?: boolean } = {};
+    if (bufferStartTime !== undefined)
+      updateData.bufferStartTime = bufferStartTime;
+    if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
+
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
-      data: { bufferStartTime },
+      data: updateData,
       select: {
         id: true,
         bufferStartTime: true,
+        tagsRequired: true,
       },
     });
 
@@ -56,7 +66,7 @@ export async function updateBookingSettings({
     throw new ShelfError({
       cause,
       message: "Failed to update booking settings configuration",
-      additionalData: { organizationId, bufferStartTime },
+      additionalData: { organizationId, bufferStartTime, tagsRequired },
       label,
     });
   }
