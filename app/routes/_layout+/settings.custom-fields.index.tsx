@@ -111,8 +111,8 @@ export default function CustomFieldsIndexPage() {
 
   return (
     <>
-      <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
-        <h2 className=" text-lg text-gray-900">Custom Fields</h2>
+      <div className="mb-2.5 flex items-center justify-between bg-surface md:rounded md:border md:border-color-200 md:px-6 md:py-5">
+        <h2 className=" text-lg text-color-900">Custom Fields</h2>
         <Button
           to="new"
           role="link"
@@ -156,12 +156,12 @@ function TeamMemberRow({
       <Td className="w-full">
         <Link
           to={`${item.id}/edit`}
-          className="block text-text-sm font-medium text-gray-900"
+          className="block text-text-sm font-medium text-color-900"
         >
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
               <span className="block">{item.name}</span>
-              <span className="text-gray-600">
+              <span className="text-color-600">
                 {FIELD_TYPE_NAME[item.type]}
               </span>
             </div>
@@ -182,7 +182,7 @@ function TeamMemberRow({
         />
       </Td>
       <Td>
-        <span className="text-text-sm font-medium capitalize text-gray-600">
+        <span className="text-text-sm font-medium capitalize text-color-600">
           {item.required ? "Yes" : "No"}
         </span>
       </Td>

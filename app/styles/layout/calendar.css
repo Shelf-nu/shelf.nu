@@ -6,7 +6,7 @@
 }
 
 .fc {
-  @apply bg-white;
+  @apply bg-surface;
 }
 .fc-event {
   white-space: nowrap;
@@ -23,11 +23,11 @@
 }
 
 .fc-next-button {
-  @apply ml-0 rounded-tl-none rounded-bl-none border border-gray-400 bg-white text-gray-600 !important;
+  @apply ml-0 rounded-tl-none rounded-bl-none border border-gray-400 bg-surface text-color-600 !important;
 }
 
 .fc-today-button {
-  @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] border-x-0 !important;
+  @apply ml-0 rounded-none border border-gray-400 bg-surface text-black pt-[0.5em] border-x-0 !important;
 }
 
 .fc-timegrid-event-harness > a {
@@ -39,7 +39,7 @@
   @apply bg-none border-none !important;
 }
 .fc-prev-button {
-  @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-white text-gray-600 !important;
+  @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-surface text-color-600 !important;
 }
 
 .fc-event-main {

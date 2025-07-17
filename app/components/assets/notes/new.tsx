@@ -120,7 +120,7 @@ export const NewNote = ({
         ) : (
           <Input
             icon="write"
-            className="text-gray-700"
+            className="text-color-700"
             label=""
             placeholder="Leave a note"
             onFocus={() => setIsEditing(true)}

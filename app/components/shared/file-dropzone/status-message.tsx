@@ -32,7 +32,7 @@ export function StatusMessage({
   const styles = useMemo(
     () =>
       tw(
-        "flex max-w-full gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
+        "flex max-w-full gap-[14px] rounded-xl border bg-surface p-[14px] text-text-sm text-color-600", // default class
         isError && "border-error-300 bg-error-25 text-error-600" // Class indicating the current status
       ),
     [isError]
@@ -41,7 +41,7 @@ export function StatusMessage({
   const filenameStyles = useMemo(
     () =>
       tw(
-        "font-medium text-gray-700", // default style
+        "font-medium text-color-700", // default style
         isError && "text-error-700"
       ),
     [isError]

@@ -178,7 +178,7 @@ function ConditionalActionsDropdown() {
         <DropdownMenuContent
           ref={dropdownRef}
           asChild
-          className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"
+          className="order actions-dropdown w-screen rounded-b-none rounded-t bg-surface p-0 text-right md:static md:w-56"
         >
           <div className="fixed bottom-0 left-0">
             <When

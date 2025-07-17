@@ -37,7 +37,7 @@ const WeeklyScheduleGrid = ({ weeklySchedule }: WeeklyScheduleGridProps) => (
             "relative overflow-hidden border transition-all duration-200",
             isOpen
               ? "border-green-200 bg-gradient-to-b from-green-50 to-green-100 shadow-sm"
-              : "border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
+              : "border-color-200 bg-gradient-to-b from-gray-50 to-gray-100"
           )}
         >
           {/* Day header */}
@@ -46,13 +46,13 @@ const WeeklyScheduleGrid = ({ weeklySchedule }: WeeklyScheduleGridProps) => (
               "border-b px-3 py-2 text-center",
               isOpen
                 ? "border-green-200 bg-green-100"
-                : "border-gray-200 bg-gray-100"
+                : "border-color-200 bg-color-100"
             )}
           >
-            <div className="text-sm font-semibold text-gray-900">
+            <div className="text-sm font-semibold text-color-900">
               {DAY_ABBREVIATIONS[dayIndex]}
             </div>
-            <div className="mt-0.5 text-xs text-gray-600">
+            <div className="mt-0.5 text-xs text-color-600">
               {DAY_NAMES[dayIndex].slice(0, 3)}
             </div>
           </div>
@@ -65,21 +65,21 @@ const WeeklyScheduleGrid = ({ weeklySchedule }: WeeklyScheduleGridProps) => (
                   <Clock className="size-4 text-green-600" />
                 </div>
                 <div className="space-y-1 text-center">
-                  <div className="text-xs font-medium text-gray-900">
+                  <div className="text-xs font-medium text-color-900">
                     <TimeDisplay time={daySchedule.openTime} />
                   </div>
-                  <div className="text-xs text-gray-500">to</div>
-                  <div className="text-xs font-medium text-gray-900">
+                  <div className="text-xs text-color-500">to</div>
+                  <div className="text-xs font-medium text-color-900">
                     <TimeDisplay time={daySchedule.closeTime} />
                   </div>
                 </div>
               </>
             ) : (
               <div className="text-center">
-                <div className="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-gray-200">
+                <div className="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-color-200">
                   <div className="h-0.5 w-3 rounded bg-gray-400"></div>
                 </div>
-                <div className="text-xs font-medium text-gray-500">Closed</div>
+                <div className="text-xs font-medium text-color-500">Closed</div>
               </div>
             )}
           </div>
@@ -101,7 +101,7 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
 
   if (upcomingOverrides.length === 0) {
     return (
-      <div className="py-6 text-center text-gray-500">
+      <div className="py-6 text-center text-color-500">
         <CalendarDays className="mx-auto mb-2 size-8 opacity-50" />
         <p className="text-sm">No upcoming schedule changes</p>
       </div>
@@ -135,7 +135,7 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
 
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-gray-900">
+              <h4 className="text-sm font-semibold text-color-900">
                 <DateS
                   date={override.date}
                   options={{
@@ -159,20 +159,20 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
             </div>
 
             {override.isOpen && override.openTime && override.closeTime ? (
-              <p className="mb-1 text-sm text-gray-700">
+              <p className="mb-1 text-sm text-color-700">
                 <span className="font-medium">
                   <TimeDisplay time={override.openTime} /> -{" "}
                   <TimeDisplay time={override.closeTime} />
                 </span>
               </p>
             ) : (
-              <p className="mb-1 text-sm font-medium text-gray-700">
+              <p className="mb-1 text-sm font-medium text-color-700">
                 Closed all day
               </p>
             )}
 
             {override.reason && (
-              <p className="text-xs italic text-gray-600">{override.reason}</p>
+              <p className="text-xs italic text-color-600">{override.reason}</p>
             )}
           </div>
         </div>
@@ -215,14 +215,14 @@ export const WorkingHoursPreviewDialog = ({
           headerClassName="border-b"
           title={
             <div className="flex items-center space-x-3 pb-6">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-primary-100">
+              <div className="bg-primary-100 flex size-10 items-center justify-center rounded-lg">
                 <CalendarDays className="size-5 text-primary-600" />
               </div>
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-color-900">
                   Working Hours Schedule
                 </h2>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-color-600">
                   Review operating hours and upcoming changes
                 </p>
               </div>
@@ -233,15 +233,15 @@ export const WorkingHoursPreviewDialog = ({
             {isLoading ? (
               <div className="py-12 text-center">
                 <div className="animate-spin mx-auto mb-4 size-8 rounded-full border-2 border-blue-600 border-t-transparent" />
-                <p className="text-gray-600">Loading working hours...</p>
+                <p className="text-color-600">Loading working hours...</p>
               </div>
             ) : !workingHours?.enabled ? (
               <div className="py-12 text-center">
-                <Info className="mx-auto mb-4 size-12 text-gray-400" />
-                <h3 className="mb-2 text-lg font-medium text-gray-900">
+                <Info className="mx-auto mb-4 size-12 text-color-400" />
+                <h3 className="mb-2 text-lg font-medium text-color-900">
                   Working Hours Not Configured
                 </h3>
-                <p className="text-gray-600">
+                <p className="text-color-600">
                   This workspace doesn't have working hours restrictions. All
                   times are available for booking.
                 </p>
@@ -251,7 +251,7 @@ export const WorkingHoursPreviewDialog = ({
                 {/* Weekly Schedule Section */}
                 <div>
                   <div className="mb-4 flex items-center">
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-lg font-semibold text-color-900">
                       Weekly Schedule
                     </h3>
                   </div>
@@ -263,10 +263,10 @@ export const WorkingHoursPreviewDialog = ({
                 {/* Overrides Section */}
                 <div>
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-lg font-semibold text-color-900">
                       Upcoming Schedule Changes
                     </h3>
-                    <span className="text-sm text-gray-500">Next 30 days</span>
+                    <span className="text-sm text-color-500">Next 30 days</span>
                   </div>
                   <OverridesSection overrides={workingHours.overrides} />
                 </div>
@@ -275,9 +275,9 @@ export const WorkingHoursPreviewDialog = ({
           </div>
 
           {/* Footer */}
-          <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+          <div className="border-t border-color-200 bg-color-50 px-6 py-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-color-600">
                 Booking times are validated against these working hours
               </p>
               <Button

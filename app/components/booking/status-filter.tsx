@@ -47,7 +47,7 @@ export function StatusFilter({
       >
         <SelectTrigger
           aria-label="Filter by status"
-          className="mt-2 px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
+          className="mt-2 px-3.5 py-2 text-left text-base text-color-500 md:mt-0 md:max-w-fit"
         >
           <SelectValue placeholder="Filter by status" />
         </SelectTrigger>
@@ -61,9 +61,9 @@ export function StatusFilter({
               <SelectItem
                 value={value}
                 key={value}
-                className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+                className="rounded-none border-b border-color-200 px-6 py-4 pr-[5px]"
               >
-                <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
+                <span className="mr-4 block text-[14px] lowercase text-color-700 first-letter:uppercase">
                   {value.split("_").join(" ")}
                 </span>
               </SelectItem>

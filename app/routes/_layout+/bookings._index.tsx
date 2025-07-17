@@ -402,7 +402,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               {item.displayFrom[0]}
             </span>
-            <span className="block text-gray-600">{item.displayFrom[1]}</span>
+            <span className="block text-color-600">{item.displayFrom[1]}</span>
           </div>
         ) : null}
       </Td>
@@ -414,7 +414,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               {item.displayTo[0]}
             </span>
-            <span className="block text-gray-600">{item.displayTo[1]}</span>
+            <span className="block text-color-600">{item.displayTo[1]}</span>
           </div>
         ) : null}
       </Td>
@@ -424,7 +424,7 @@ const ListBookingsContent = ({
           items={item.tags}
           idKey="id"
           labelKey="name"
-          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
+          emptyMessage={<div className="text-sm text-color-500">No tags</div>}
         />
       </Td>
 
@@ -466,7 +466,7 @@ const ListBookingsContent = ({
 
 function UserBadge({ img, name }: { img?: string; name: string }) {
   return (
-    <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
+    <span className="inline-flex w-max items-center justify-center rounded-2xl bg-color-100 px-2 py-[2px] text-center text-[12px] font-medium text-color-700">
       <img
         src={img || "/static/images/default_pfp.jpg"}
         className="mr-1 size-4 rounded-full"

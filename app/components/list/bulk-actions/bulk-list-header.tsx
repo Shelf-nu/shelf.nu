@@ -66,7 +66,7 @@ export default function BulkListHeader({
     <Th
       className={tw(
         "md:pl-4 md:pr-3",
-        modeIsAdvanced ? "bg-gray-25" : "",
+        modeIsAdvanced ? "bg-color-25" : "",
         modeIsAdvanced && freezeColumn
           ? freezeColumnClassNames.checkboxHeader
           : ""
@@ -83,7 +83,10 @@ export default function BulkListHeader({
           />
         ) : (
           <FakeCheckbox
-            className={tw("text-white", allItemsSelected ? "text-primary" : "")}
+            className={tw(
+              "text-color-400",
+              allItemsSelected ? "text-primary" : ""
+            )}
             onClick={handleSelectAllIncomingItems}
             checked={allItemsSelected}
           />

@@ -1,5 +1,6 @@
 import { ShelfTypography } from "~/components/icons/library";
 import { config } from "~/config/shelf.config";
+import { useHints } from "~/utils/client-hints";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
 
@@ -9,18 +10,22 @@ import When from "../when/when";
  */
 export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
   const { logoPath } = config;
+  const { theme } = useHints();
 
   /** If a custom logo is used, we just use that instead of doing the dynamic shelf typograpy */
   if (logoPath) {
+    const symbolPath = theme === "dark" ? logoPath.symbolDark : logoPath.symbol;
+    const fullLogoPath =
+      theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
     return minimized ? (
       <img
-        src={logoPath.symbol}
+        src={symbolPath}
         alt="Shelf Logo"
         className="mx-1.5 inline h-[32px] transition duration-150 ease-linear"
       />
     ) : (
       <img
-        src={logoPath.fullLogo}
+        src={fullLogoPath}
         alt="Shelf Logo"
         className="mx-1.5 inline h-[32px] transition duration-150 ease-linear"
       />

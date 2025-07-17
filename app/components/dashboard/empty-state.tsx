@@ -6,7 +6,7 @@ export function EmptyState({ text }: { text: string }) {
         alt="Empty state"
         className="h-auto w-[45px]"
       />
-      <div className="text-center font-semibold text-gray-900">{text}</div>
+      <div className="text-center font-semibold text-color-900">{text}</div>
     </div>
   );
 }

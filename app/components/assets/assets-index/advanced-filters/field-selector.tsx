@@ -115,11 +115,11 @@ export function FieldSelector({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999] mt-2 max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[999999] mt-2 max-h-[400px] overflow-scroll rounded-md border border-color-200 bg-surface"
           )}
         >
           <div className="flex items-center border-b">
-            <Search className="ml-4 size-4 text-gray-500" />
+            <Search className="ml-4 size-4 text-color-500" />
             <input
               ref={searchInputRef}
               placeholder="Search column..."
@@ -134,17 +134,17 @@ export function FieldSelector({
               id={`column-option-${index}`}
               key={column.name + index}
               className={tw(
-                "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                "px-4 py-2 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
                 selectedIndex === index && [
-                  "bg-gray-50",
+                  "bg-color-50",
                   // Add borders only when item is selected
                   "relative",
                   // Top border - exclude for first item
                   index !== 0 &&
-                    "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                    "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-color-200",
                   // Bottom border - exclude for last item
                   index !== filteredColumns.length - 1 &&
-                    "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                    "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-color-200",
                 ]
               )}
               onClick={() => setFilter(column.name)}
@@ -152,13 +152,13 @@ export function FieldSelector({
               <span className="font-medium">
                 {parseColumnName(column.name)}
               </span>
-              <span className="ml-2 font-normal text-gray-500">
+              <span className="ml-2 font-normal text-color-500">
                 {getUIFieldType({ column, friendlyName: true })}
               </span>
             </div>
           ))}
           {filteredColumns.length === 0 && (
-            <div className="px-4 py-2 text-[14px] text-gray-500">
+            <div className="px-4 py-2 text-[14px] text-color-500">
               No columns found
             </div>
           )}

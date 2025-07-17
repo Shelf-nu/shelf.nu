@@ -90,18 +90,18 @@ export default function ConfigurableDrawer<T>({
     <>
       {expanded && (
         <div className="mb-4 rounded-full bg-primary-50 p-2">
-          <div className="rounded-full bg-primary-100 p-2 text-primary">
+          <div className="bg-primary-100 rounded-full p-2 text-primary">
             <AssetLabel className="size-6" />
           </div>
         </div>
       )}
       <div>
         {expanded && (
-          <div className="text-base font-semibold text-gray-900">
+          <div className="text-base font-semibold text-color-900">
             List is empty
           </div>
         )}
-        <p className="text-sm text-gray-600">Fill list by scanning codes...</p>
+        <p className="text-sm text-color-600">Fill list by scanning codes...</p>
       </div>
     </>
   );

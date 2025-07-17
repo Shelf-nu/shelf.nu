@@ -211,10 +211,10 @@ function ConditionalDropdown() {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-surface p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
           ref={dropdownRef}
         >
-          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-surface p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
               onClick={() => {
                 closeMenu();
@@ -224,7 +224,7 @@ function ConditionalDropdown() {
             >
               <Button
                 variant="link"
-                className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+                className="w-full justify-start px-4  py-3 text-color-700 hover:text-color-700"
                 width="full"
               >
                 <span className="flex items-center gap-2">
@@ -350,7 +350,7 @@ function ConditionalDropdown() {
                 <Button
                   role="button"
                   variant="secondary"
-                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  className="flex items-center justify-center text-color-700 hover:text-color-700 "
                   width="full"
                   onClick={() => setOpen(false)}
                 >

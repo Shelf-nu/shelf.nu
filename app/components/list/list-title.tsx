@@ -112,7 +112,7 @@ export default function ListTitle({
             {perPage < totalItems ? (
               <p>
                 {items.length} {items.length > 1 ? plural : singular}{" "}
-                <span className="text-gray-400">out of {totalItems}</span>
+                <span className="text-color-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>

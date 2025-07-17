@@ -13,12 +13,12 @@ export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
   return (
     <>
-      <div className="border border-b-0 border-gray-200">
+      <div className="border border-b-0 border-color-200">
         <div className="flex items-center justify-between">
-          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
             Newest assets
           </div>
-          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className=" p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -31,7 +31,7 @@ export default function NewestAssets() {
         </div>
       </div>
       {newAssets.length > 0 ? (
-        <Table className="border  border-gray-200">
+        <Table className="border  border-color-200">
           <tbody>
             {newAssets.map((asset) => (
               <Tr key={asset.id}>
@@ -65,7 +65,7 @@ export default function NewestAssets() {
           </tbody>
         </Table>
       ) : (
-        <div className="h-full flex-1 rounded-b border border-gray-200">
+        <div className="h-full flex-1 rounded-b border border-color-200">
           <EmptyState text="No assets in database" />
         </div>
       )}
@@ -105,7 +105,7 @@ const Row = ({
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover={true}
                 >

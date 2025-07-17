@@ -211,7 +211,7 @@ export const AssetImage = ({
               (imageFetcher.state === "submitting" && !thumbnailImage)))) && (
           <div
             className={tw(
-              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "absolute inset-0 flex items-center justify-center bg-color-100",
               "transition-opacity"
             )}
           >
@@ -244,8 +244,10 @@ export const AssetImage = ({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className="text-lg font-semibold text-gray-900">{alt}</div>
-                <div className="text-sm font-normal text-gray-600">
+                <div className="text-lg font-semibold text-color-900">
+                  {alt}
+                </div>
+                <div className="text-sm font-normal text-color-600">
                   1 image(s)
                 </div>
               </div>
@@ -253,10 +255,10 @@ export const AssetImage = ({
           >
             <div
               className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                "relative z-10 flex h-full flex-col bg-surface shadow-lg md:rounded"
               }
             >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-color-200 bg-color-50">
                 {/* Always use full-size image in the preview dialog */}
                 <img src={previewImageUrl} className={"max-h-full"} alt={alt} />
               </div>

@@ -79,13 +79,13 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           maxLength={maxLength}
           {...rest}
         />
-        <div className="flex items-center justify-between gap-2 rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
+        <div className="flex items-center justify-between gap-2 rounded-b border border-t-0 border-color-300 bg-color-50 px-2 py-1 text-text-xs">
           <p>
             This field supports{" "}
             <Link
               to="https://www.markdownguide.org/basic-syntax"
               target="_blank"
-              className="text-gray-800 underline"
+              className="text-color-800 underline"
               rel="nofollow noopener noreferrer"
             >
               markdown

@@ -15,7 +15,7 @@ export type NoteWithDate = WithDateFields<NoteType, string> & {
 };
 
 export const Note = ({ note }: { note: NoteWithDate }) => (
-  <li key={note.id} className="note mb-2 rounded border bg-white md:mb-4">
+  <li key={note.id} className="note mb-2 rounded border bg-surface md:mb-4">
     <Switch>
       <Comment when={note.type === "COMMENT"} note={note} />
       <Update when={note.type === "UPDATE"} note={note} />
@@ -36,12 +36,12 @@ export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => (
     <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
       <div>
         <Tag>{note.dateDisplay}</Tag>{" "}
-        <span className="commentator font-medium text-gray-900">
+        <span className="commentator font-medium text-color-900">
           {note.user
             ? `${note.user?.firstName} ${note.user?.lastName}`
             : "Unknown"}
         </span>{" "}
-        <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
+        <span className="text-color-600">{timeAgo(note.createdAt)}</span>
       </div>
       <ActionsDopdown noteId={note.id} />
     </header>

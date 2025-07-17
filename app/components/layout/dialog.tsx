@@ -29,10 +29,10 @@ export const Dialog = ({
       }}
     >
       <dialog className={tw("dialog", className)} open>
-        <div className="flex h-full flex-col bg-white">
+        <div className="flex h-full flex-col bg-surface">
           <div
             className={tw(
-              "dialog-header flex items-start justify-between bg-white px-6 py-3",
+              "dialog-header flex items-start justify-between bg-surface px-6 py-3",
               headerClassName
             )}
           >
@@ -40,7 +40,7 @@ export const Dialog = ({
             <Button
               onClick={onClose}
               variant="link"
-              className={"mt-2 leading-none text-gray-500 md:right-6"}
+              className={"mt-2 leading-none text-color-500 md:right-6"}
             >
               <XIcon />
             </Button>

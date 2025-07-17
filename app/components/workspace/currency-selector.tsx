@@ -106,18 +106,18 @@ export default function CurrencySelector({
           )}
         >
           <span>{selectedCurrency}</span>
-          <ChevronDownIcon className="inline-block size-4 text-gray-500" />
+          <ChevronDownIcon className="inline-block size-4 text-color-500" />
           <input type="hidden" name={name} value={selectedCurrency} />
         </button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
-          className="z-[999999] max-h-[400px] overflow-scroll rounded-md border bg-white"
+          className="z-[999999] max-h-[400px] overflow-scroll rounded-md border bg-surface"
           side="bottom"
           style={{ width: triggerRef?.current?.clientWidth }}
         >
           <div className="flex items-center border-b">
-            <SearchIcon className="ml-4 size-4 text-gray-500" />
+            <SearchIcon className="ml-4 size-4 text-color-500" />
             <input
               placeholder="Search currency..."
               className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
@@ -137,8 +137,8 @@ export default function CurrencySelector({
                 id={`currency-option-${index}`}
                 key={currency}
                 className={tw(
-                  "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                  isHovered && "bg-gray-50"
+                  "flex items-center justify-between px-4 py-3 text-sm text-color-600 hover:cursor-pointer hover:bg-color-50",
+                  isHovered && "bg-color-50"
                 )}
                 onClick={() => {
                   handleSelect(currency);
@@ -152,7 +152,7 @@ export default function CurrencySelector({
             );
           })}
           {filteredCurrencies.length === 0 && (
-            <div className="px-4 py-2 text-sm text-gray-500">
+            <div className="px-4 py-2 text-sm text-color-500">
               No currency found
             </div>
           )}

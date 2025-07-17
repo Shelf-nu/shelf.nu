@@ -38,9 +38,9 @@ export function ScanDetails({
           </div>
           <div
             className={tw(
-              "border-b-[1.1px] p-4 text-text-xs text-gray-600",
-              "[&>div>p:first-child]:text-xs [&>div>p:first-child]:font-medium [&>div>p:first-child]:text-gray-900", // Styles for left column
-              "[&>div>p:last-child]:text-right [&>div>p:last-child]:text-sm [&>div>p:last-child]:font-normal [&>div>p:last-child]:text-gray-600" // Styles for right column
+              "border-b-[1.1px] p-4 text-text-xs text-color-600",
+              "[&>div>p:first-child]:text-xs [&>div>p:first-child]:font-medium [&>div>p:first-child]:text-color-900", // Styles for left column
+              "[&>div>p:last-child]:text-right [&>div>p:last-child]:text-sm [&>div>p:last-child]:font-normal [&>div>p:last-child]:text-color-600" // Styles for right column
             )}
           >
             <div className="flex justify-between py-2">
@@ -81,13 +81,13 @@ export function ScanDetails({
                   icon={<HelpIcon />}
                   content={
                     <>
-                      <h6 className="mb-1 text-sm font-semibold text-gray-700">
+                      <h6 className="mb-1 text-sm font-semibold text-color-700">
                         Source of location data
                       </h6>
-                      <p className="text-xs font-medium text-gray-500">
+                      <p className="text-xs font-medium text-color-500">
                         The location data can be generated in 2 different ways:
                       </p>
-                      <ul className="text-xs font-medium text-gray-500 ">
+                      <ul className="text-xs font-medium text-color-500 ">
                         <li>
                           <strong>1. Manually updated:</strong> User manually
                           updated the location data.

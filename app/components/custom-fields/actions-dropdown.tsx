@@ -15,14 +15,14 @@ export function ActionsDropdown({ customField }: { customField: CustomField }) {
         className="outline-none focus-visible:border-0"
         aria-label="Actions Trigger"
       >
-        <i className="inline-block px-3 py-0 text-gray-400 ">
+        <i className="inline-block px-3 py-0 text-color-400 ">
           <VerticalDotsIcon />
         </i>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
         align="end"
-        className="order w-[180px] rounded-md bg-white p-0 text-right "
+        className="order w-[180px] rounded-md bg-surface p-0 text-right "
       >
         <DropdownMenuItem className="px-4 py-3">
           <Button
@@ -30,7 +30,7 @@ export function ActionsDropdown({ customField }: { customField: CustomField }) {
             icon="pen"
             role="link"
             variant="link"
-            className="justify-start text-gray-700 hover:text-gray-700"
+            className="justify-start text-color-700 hover:text-color-700"
             width="full"
           >
             Edit

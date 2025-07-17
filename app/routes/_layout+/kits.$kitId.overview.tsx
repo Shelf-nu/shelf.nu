@@ -108,26 +108,26 @@ export default function KitOverview() {
     <Card className="mt-0 px-[-4] py-[-5] md:border">
       <ul className="item-information">
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-          <span className="w-1/4 text-[14px] font-medium text-gray-900">
+          <span className="w-1/4 text-[14px] font-medium text-color-900">
             ID
           </span>
-          <div className="mt-1 w-3/5 text-gray-600 md:mt-0">{kit?.id}</div>
+          <div className="mt-1 w-3/5 text-color-600 md:mt-0">{kit?.id}</div>
         </li>
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-          <span className="w-1/4 text-[14px] font-medium text-gray-900">
+          <span className="w-1/4 text-[14px] font-medium text-color-900">
             Created
           </span>
-          <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+          <div className="mt-1 w-3/5 text-color-600 md:mt-0">
             {kit && kit.createdAt}
           </div>
         </li>
 
         {kit?.description ? (
           <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+            <span className="w-1/4 text-[14px] font-medium text-color-900">
               Description
             </span>
-            <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+            <div className="mt-1 whitespace-pre-wrap text-color-600 md:mt-0 md:w-3/5">
               {kit.description}
             </div>
           </li>
@@ -135,17 +135,17 @@ export default function KitOverview() {
 
         <When truthy={!!kit.category}>
           <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+            <span className="w-1/4 text-[14px] font-medium text-color-900">
               Category
             </span>
-            <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+            <div className="mt-1 whitespace-pre-wrap text-color-600 md:mt-0 md:w-3/5">
               <CategoryBadge category={kit.category} />
             </div>
           </li>
         </When>
 
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-          <span className="w-1/4 text-[14px] font-medium text-gray-900">
+          <span className="w-1/4 text-[14px] font-medium text-color-900">
             Total value{" "}
             <InfoTooltip
               iconClassName="size-4"
@@ -160,7 +160,7 @@ export default function KitOverview() {
               }
             />
           </span>
-          <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+          <div className="mt-1 whitespace-pre-wrap text-color-600 md:mt-0 md:w-3/5">
             {formatCurrency({
               value: totalValue,
               locale,
@@ -179,7 +179,7 @@ export default function KitOverview() {
           );
         })() ? (
           <li className="w-full p-4 last:border-b-0 md:block">
-            <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
+            <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-color-900">
               Barcodes ({(kit as KitWithOptionalBarcodes).barcodes?.length})
               <InfoTooltip
                 iconClassName="size-4"

@@ -103,11 +103,11 @@ export default function RelinkQrCodeDialog({
             <When truthy={currentState === "initial"}>
               <div>
                 <h3>Change QR Code</h3>
-                <p className="text-gray-600">{asset.title}</p>
+                <p className="text-color-600">{asset.title}</p>
               </div>
             </When>
             <When truthy={currentState === "qr-selected"}>
-              <div className="flex items-center justify-center rounded-lg border border-gray-200 p-4 shadow-lg">
+              <div className="flex items-center justify-center rounded-lg border border-color-200 p-4 shadow-lg">
                 <Icon icon="change" />
               </div>
             </When>
@@ -131,9 +131,9 @@ export default function RelinkQrCodeDialog({
               scannerModeCallback={() => {}}
             />
 
-            <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
+            <div className="flex items-center justify-center gap-4 border-b border-color-200 p-4">
               <div className="flex-1 truncate text-right">
-                <p className="uppercase text-gray-500">Current code</p>
+                <p className="uppercase text-color-500">Current code</p>
                 <p
                   className="truncate font-medium"
                   title={qrCode ? qrCode.id : "Not linked yet"}
@@ -141,11 +141,11 @@ export default function RelinkQrCodeDialog({
                   {qrCode ? qrCode.id : "Not linked yet"}
                 </p>
               </div>
-              <div className="flex items-center justify-center rounded-lg border border-gray-200 p-2.5 shadow-lg">
+              <div className="flex items-center justify-center rounded-lg border border-color-200 p-2.5 shadow-lg">
                 <ArrowRightIcon />
               </div>
               <div className="flex-1 truncate">
-                <p className="uppercase text-gray-500">New code</p>
+                <p className="uppercase text-color-500">New code</p>
                 <p
                   className="truncate font-medium"
                   title={newQrId ? newQrId : "Scan a QR code to link..."}
@@ -211,21 +211,21 @@ export default function RelinkQrCodeDialog({
               </p>
             </div>
 
-            <div className="mb-1 flex items-center gap-2.5 rounded border border-gray-200 p-2">
-              <div className="flex items-center justify-center rounded-lg border border-gray-200 p-2.5">
+            <div className="mb-1 flex items-center gap-2.5 rounded border border-color-200 p-2">
+              <div className="flex items-center justify-center rounded-lg border border-color-200 p-2.5">
                 <ArrowLeftIcon />
               </div>
               <div>
-                <p className="uppercase text-gray-600">Current code</p>
+                <p className="uppercase text-color-600">Current code</p>
                 <p className="font-medium">{qrCode ? qrCode.id : "N/A"}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2.5 rounded border border-gray-200 p-2">
-              <div className="flex items-center justify-center rounded-lg border border-gray-200 p-2.5">
+            <div className="flex items-center gap-2.5 rounded border border-color-200 p-2">
+              <div className="flex items-center justify-center rounded-lg border border-color-200 p-2.5">
                 <ArrowRightIcon />
               </div>
               <div>
-                <p className="uppercase text-gray-600">New code</p>
+                <p className="uppercase text-color-600">New code</p>
                 <p className="font-medium">{newQrId}</p>
               </div>
             </div>

@@ -109,7 +109,7 @@ export default function InviteUserDialog({
         <Dialog
           className={className}
           title={
-            <div className="mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <div className="bg-primary-100 mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 p-1.5 text-primary">
               <UserIcon />
             </div>
           }
@@ -142,7 +142,7 @@ export default function InviteUserDialog({
               <SelectGroup>
                 <SelectLabel className="pl-0">Workspace</SelectLabel>
                 <Select name="organizationId" defaultValue={organization.id}>
-                  <div className="flex h-10 w-full items-center justify-between truncate rounded-md border border-gray-300 bg-transparent px-3.5 py-3 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50  [&_span]:max-w-full [&_span]:truncate">
+                  <div className="flex h-10 w-full items-center justify-between truncate rounded-md border border-color-300 bg-transparent px-3.5 py-3 text-[16px] text-color-500 placeholder:text-color-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50  [&_span]:max-w-full [&_span]:truncate">
                     <SelectValue />
                   </div>
                   <SelectContent
@@ -163,7 +163,7 @@ export default function InviteUserDialog({
                             className="size-6 rounded-[2px] object-cover"
                           />
 
-                          <div className=" ml-px max-w-full truncate text-sm text-gray-900">
+                          <div className=" ml-px max-w-full truncate text-sm text-color-900">
                             {organization.name}
                           </div>
                         </div>
@@ -188,7 +188,7 @@ export default function InviteUserDialog({
                       {Object.entries(organizationRolesMap).map(([k, v]) => (
                         <SelectItem value={k} key={k} className="p-2">
                           <div className="flex items-center gap-2">
-                            <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">
+                            <div className=" ml-px block text-sm lowercase text-color-900 first-letter:uppercase">
                               {v}
                             </div>
                           </div>

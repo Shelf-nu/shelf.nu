@@ -83,8 +83,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
+  const theme = data?.requestInfo?.hints?.theme || "light";
+  const htmlClasses = `overflow-hidden ${
+    theme === "dark" ? "dark" : ""
+  }`.trim();
+
   return (
-    <html lang="en" className="overflow-hidden">
+    <html lang="en" className={htmlClasses}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />

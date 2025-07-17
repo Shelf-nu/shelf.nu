@@ -14,12 +14,12 @@ export default function AssetsByStatusChart() {
   const { chartData } = assetsByStatus;
 
   return (
-    <div className="w-full border border-gray-200 ">
+    <div className="w-full border border-color-200 ">
       <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
           Assets by status
         </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="border-b p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
           <InfoTooltip
             content={
               <>
@@ -59,8 +59,8 @@ export default function AssetsByStatusChart() {
                     return (
                       <li key={status}>
                         <Badge color={color} noBg>
-                          <span className="text-gray-600">
-                            <strong className="text-gray-900">{assets}</strong>{" "}
+                          <span className="text-color-600">
+                            <strong className="text-color-900">{assets}</strong>{" "}
                             {status}
                           </span>
                         </Badge>

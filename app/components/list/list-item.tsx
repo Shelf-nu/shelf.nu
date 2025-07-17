@@ -53,7 +53,7 @@ export const ListItem = ({
       }
     }}
     className={tw(
-      "hover:bg-gray-50",
+      "hover:bg-color-50",
       navigate ? "cursor-pointer" : "",
       className
     )}

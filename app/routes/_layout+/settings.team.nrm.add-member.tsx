@@ -97,7 +97,7 @@ export default function AddMember() {
   return (
     <>
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
+        <div className="bg-primary-100 mb-4 inline-flex size-8 items-center  justify-center rounded-full p-2 text-primary">
           <UserIcon />
         </div>
         <div className="mb-5">

@@ -188,7 +188,7 @@ export const CodePreview = ({
 
   return (
     <div
-      className={tw("mb-4 w-auto rounded border bg-white", className)}
+      className={tw("mb-4 w-auto rounded border bg-surface", className)}
       style={style}
     >
       {/* Code Selector */}
@@ -204,7 +204,7 @@ export const CodePreview = ({
               );
               onCodeChange?.(newSelectedCode || null);
             }}
-            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-color-300 bg-surface px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {availableCodes.map((code) => (
               <option key={code.id} value={code.id}>

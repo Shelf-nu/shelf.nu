@@ -96,7 +96,7 @@ export default function Error404Handler({
                 className="flex flex-col items-center"
               >
                 <Select name="organizationId" disabled={disabled}>
-                  <SelectTrigger className="mb-4 max-w-80 px-3.5 py-2 text-left text-gray-500">
+                  <SelectTrigger className="mb-4 max-w-80 px-3.5 py-2 text-left text-color-500">
                     <SelectValue placeholder="Select workspace to switch" />
                   </SelectTrigger>
                   <SelectContent

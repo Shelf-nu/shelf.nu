@@ -8,12 +8,12 @@ export default function MostScannedCategories() {
   const { mostScannedCategories } = useLoaderData<typeof loader>();
   return (
     <>
-      <div className="rounded-t border border-b-0 border-gray-200">
+      <div className="rounded-t border border-b-0 border-color-200">
         <div className="flex items-center justify-between">
-          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
             Most scanned categories
           </div>
-          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className=" p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -29,7 +29,7 @@ export default function MostScannedCategories() {
         </div>
       </div>
       {mostScannedCategories.length > 0 ? (
-        <Table className=" border border-gray-200">
+        <Table className=" border border-color-200">
           <tbody>
             {mostScannedCategories.map((category, i) => (
               <Tr key={category.name + i} className="h-[73px]">
@@ -43,7 +43,7 @@ export default function MostScannedCategories() {
           </tbody>
         </Table>
       ) : (
-        <div className="flex-1 rounded-b border border-gray-200 p-8">
+        <div className="flex-1 rounded-b border border-color-200 p-8">
           <EmptyState text="No assets scans available" />
         </div>
       )}
@@ -69,7 +69,7 @@ const Row = ({
             <span className="word-break mb-1 block font-medium">
               {item.name}
             </span>
-            <span className="block text-gray-600">
+            <span className="block text-color-600">
               {item.assetCount} Assets
             </span>
           </div>

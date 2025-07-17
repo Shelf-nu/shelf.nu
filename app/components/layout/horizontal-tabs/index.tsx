@@ -11,7 +11,7 @@ export default function HorizontalTabs({
     // eslint-disable-next-line tailwindcss/enforces-negative-arbitrary-values
     <div
       className={tw(
-        "horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b border-b-gray-200 bg-white pl-4 ",
+        "horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b  bg-surface pl-4 ",
         className
       )}
     >
@@ -25,7 +25,7 @@ export default function HorizontalTabs({
             } whitespace-nowrap py-[11px] text-text-sm font-semibold  ${
               isActive || item?.isActive?.(location?.pathname || "")
                 ? "border-b-2 border-b-primary-700 text-primary-700"
-                : " pb-[12px] text-gray-500"
+                : " pb-[12px] text-color-500"
             }`
           }
         >

@@ -52,7 +52,7 @@ export function UserDetailsForm({
     <Card className="my-0">
       <div className="mb-6">
         <h3 className="text-text-lg font-semibold">My details</h3>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-color-600">
           Update your photo and personal details here.
         </p>
       </div>

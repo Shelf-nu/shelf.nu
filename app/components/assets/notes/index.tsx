@@ -31,14 +31,14 @@ export const Notes = () => {
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
           {isFormProcessing(fetcher.state) ? (
-            <li className="note mb-2 rounded border bg-white md:mb-8">
+            <li className="note mb-2 rounded border bg-surface md:mb-8">
               <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
-                  <span className="commentator font-medium text-gray-900">
+                  <span className="commentator font-medium text-color-900">
                     {/* Here we just take the current user because this is just handling optimistic UI */}
                     {user?.firstName} {user?.lastName}
                   </span>{" "}
-                  <span className="text-gray-600">Just Now</span>
+                  <span className="text-color-600">Just Now</span>
                 </div>
               </header>
               <div className="message px-3.5 py-3">

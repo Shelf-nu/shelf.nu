@@ -11,12 +11,12 @@ export default function LocationRatioChart() {
   const assetsWithLocation = assets.filter((asset) => asset.locationId).length;
 
   return (
-    <div className="w-full border border-gray-200 ">
+    <div className="w-full border border-color-200 ">
       <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
           Location ratio
         </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="border-b p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
           <InfoTooltip
             content={
               <>
@@ -48,9 +48,9 @@ export default function LocationRatioChart() {
                     color="orange"
                     className="relative"
                   >
-                    <span className="block text-center text-xs font-medium text-gray-600">
+                    <span className="block text-center text-xs font-medium text-color-600">
                       Location known <br />
-                      <span className="block text-[14px] font-semibold leading-6 text-gray-900">
+                      <span className="block text-[14px] font-semibold leading-6 text-color-900">
                         {assetsWithLocation}/{totalAssets} assets
                       </span>
                     </span>
@@ -59,10 +59,10 @@ export default function LocationRatioChart() {
               </ClientOnly>
 
               <div>
-                <Text className="mb-2 !text-[14px] font-medium text-gray-600">
+                <Text className="mb-2 !text-[14px] font-medium text-color-600">
                   Location ratio
                 </Text>
-                <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
+                <Text className="mb-3 !text-[30px] font-semibold text-color-900">
                   {`${((assetsWithLocation / totalAssets) * 100).toFixed(2)}%`}
                 </Text>
               </div>

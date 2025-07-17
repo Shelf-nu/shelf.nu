@@ -309,10 +309,10 @@ const SidebarTrigger = forwardRef<
       {...props}
     >
       <SwitchIcon
-        className={tw("hidden size-5 text-gray-500 md:block", iconClassName)}
+        className={tw("hidden size-5 text-color-500 md:block", iconClassName)}
       />
       <MenuIcon
-        className={tw("block size-6 text-gray-500 md:hidden", iconClassName)}
+        className={tw("block size-6 text-color-500 md:hidden", iconClassName)}
       />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
@@ -358,7 +358,7 @@ const SidebarInset = forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
       <main
         ref={ref}
         className={tw(
-          "h-dvh w-full overflow-auto bg-gray-25 px-4",
+          "h-dvh w-full overflow-auto bg-color-25 px-4",
           isAvailabilityView ? (isKitIndex ? "pb-0" : "pb-[46px]") : "pb-10",
           className
         )}
@@ -535,7 +535,7 @@ const sidebarMenuButtonVariants = cva(
   {
     variants: {
       variant: {
-        default: " hover:bg-gray-100",
+        default: "hover:bg-color-100 dark:hover:bg-color-50",
         outline:
           "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
       },

@@ -153,11 +153,11 @@ export default function SubscriptionPage() {
    */
   if (isCustomTier && hasNoSubscription) {
     return (
-      <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-        <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+      <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
+        <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
           <InfoIcon />
         </div>
-        <p className="text-[14px] font-medium text-gray-700">
+        <p className="text-[14px] font-medium text-color-700">
           You’re currently using the{" "}
           {isEnterprise ? (
             <>
@@ -186,11 +186,11 @@ export default function SubscriptionPage() {
       <div className=" flex flex-col">
         {hasNoSubscription ? (
           <div className="mb-8 mt-3">
-            <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
+              <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
                 <InfoIcon />
               </div>
-              <p className="text-[14px] font-medium text-gray-700">
+              <p className="text-[14px] font-medium text-color-700">
                 You’re currently using the{" "}
                 <span className="font-semibold">FREE</span> version of Shelf
               </p>
@@ -201,7 +201,7 @@ export default function SubscriptionPage() {
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
           <div className="mb-8 lg:mb-0">
             <h3 className="text-text-lg font-semibold">{title}</h3>
-            <p className="text-sm text-gray-600">{subTitle}</p>
+            <p className="text-sm text-color-600">{subTitle}</p>
           </div>
           {!hasNoSubscription && (
             <CustomerPortalForm buttonText="Manage subscriptions" />

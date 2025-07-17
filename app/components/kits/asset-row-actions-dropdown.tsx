@@ -29,7 +29,7 @@ export default function AssetRowActionsDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+        className="order w-[180px] rounded-md bg-surface p-1.5 text-right "
       >
         <RemoveAssetFromKit asset={asset} />
       </DropdownMenuContent>

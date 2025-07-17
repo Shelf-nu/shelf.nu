@@ -101,7 +101,7 @@ export default function AssetActivity() {
       ) : (
         <div className="flex h-full flex-col justify-center">
           <div className="flex flex-col items-center justify-center  text-center">
-            <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
+            <div className="bg-primary-100 mb-4 inline-flex size-8 items-center  justify-center rounded-full p-2 text-primary-600">
               <NoPermissionsIcon />
             </div>
             <h5>Insufficient permissions</h5>

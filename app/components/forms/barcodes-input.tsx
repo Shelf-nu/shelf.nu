@@ -60,16 +60,16 @@ const BarcodeTypeTooltip = ({ type }: { type: BarcodeType }) => {
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <i className="absolute right-3 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-700">
+          <i className="absolute right-3 top-1/2 flex -translate-y-1/2 cursor-pointer text-color-400 hover:text-color-700">
             <HelpIcon />
           </i>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <div className="max-w-[260px] sm:max-w-[320px]">
-            <h6 className="mb-1 text-xs font-semibold text-gray-700">
+            <h6 className="mb-1 text-xs font-semibold text-color-700">
               {option.label}
             </h6>
-            <p className="text-xs font-medium text-gray-500">
+            <p className="text-xs font-medium text-color-500">
               {option.description}
             </p>
           </div>
@@ -220,7 +220,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                   <Popover>
                     <PopoverTrigger asChild>
                       <div className="w-full">
-                        <p className="inner-label mb-[6px] font-medium text-gray-700 lg:hidden">
+                        <p className="inner-label mb-[6px] font-medium text-color-700 lg:hidden">
                           Select barcode type
                         </p>
                         <Button
@@ -243,26 +243,26 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                       <PopoverContent
                         align="start"
                         className={tw(
-                          "z-[999999] mt-2 max-h-[400px]  max-w-[300px] rounded-md border border-gray-200 bg-white md:max-w-none"
+                          "z-[999999] mt-2 max-h-[400px]  max-w-[300px] rounded-md border border-color-200 bg-surface md:max-w-none"
                         )}
                       >
                         {BARCODE_TYPE_OPTIONS.map((option) => (
                           <div
                             key={option.value}
                             className={tw(
-                              "px-4 py-3 hover:cursor-pointer hover:bg-gray-50",
+                              "px-4 py-3 hover:cursor-pointer hover:bg-color-50",
                               barcode.type === option.value &&
-                                "bg-gray-50 font-medium"
+                                "bg-color-50 font-medium"
                             )}
                             onClick={() => {
                               barcodes[i].type = option.value as BarcodeType;
                               setBarcodes([...barcodes]);
                             }}
                           >
-                            <div className="font-medium text-gray-900">
+                            <div className="font-medium text-color-900">
                               {option.label}
                             </div>
-                            <div className="mt-1 text-sm text-gray-500">
+                            <div className="mt-1 text-sm text-color-500">
                               {option.description}
                             </div>
                           </div>

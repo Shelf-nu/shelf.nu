@@ -37,17 +37,17 @@ export default function Header({
   const header = data?.header;
 
   return header ? (
-    <header className={tw("-mx-4 bg-white", classNames)}>
+    <header className={tw("-mx-4 bg-surface", classNames)}>
       {!hideBreadcrumbs && (
         <>
-          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:min-h-[67px] md:py-3">
+          <div className="flex w-full items-center justify-between border-b border-color-200 px-4 py-2 md:min-h-[67px] md:py-3">
             <Breadcrumbs />
             {children && (
               <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
             )}
           </div>
           {children && (
-            <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
+            <div className="flex w-full items-center justify-between border-b border-color-200 px-4 py-2 md:hidden">
               <div className="header-buttons flex flex-1 shrink-0 gap-3">
                 {children}
               </div>
@@ -56,7 +56,7 @@ export default function Header({
         </>
       )}
       {!hidePageDescription && (
-        <div className="relative flex items-center border-b border-gray-200 px-4 py-3">
+        <div className="relative flex items-center border-b border-color-200 px-4 py-3">
           {slots?.["left-of-title"] ? (
             <div className="relative">{slots["left-of-title"]}</div>
           ) : null}

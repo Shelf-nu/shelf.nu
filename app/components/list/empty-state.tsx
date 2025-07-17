@@ -50,14 +50,14 @@ export const EmptyState = ({
         />
         {customContent ? (
           <div>
-            <div className="text-text-lg font-semibold text-gray-900">
+            <div className="text-text-lg font-semibold text-color-900">
               {customContent.title}
             </div>
             <div>{customContent.text}</div>
           </div>
         ) : (
           <div>
-            <div className="text-text-lg font-semibold text-gray-900">
+            <div className="text-text-lg font-semibold text-color-900">
               {texts.title}
             </div>
             <p>{texts.p}</p>

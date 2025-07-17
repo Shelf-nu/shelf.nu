@@ -31,7 +31,7 @@ const DeleteReminder = forwardRef<HTMLButtonElement, DeleteReminderProps>(
       <AlertDialog>
         <AlertDialogTrigger
           ref={ref}
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-700"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 font-medium text-color-700 hover:bg-color-100 hover:text-color-700"
         >
           <TrashIcon className="size-4" /> Delete
         </AlertDialogTrigger>

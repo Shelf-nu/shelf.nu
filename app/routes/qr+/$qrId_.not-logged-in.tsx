@@ -23,14 +23,14 @@ export default function QrNotLoggedIn() {
     <>
       <div className="flex flex-1 justify-center py-8">
         <div className="my-auto">
-          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary">
+          <div className="bg-primary-100 mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-2 text-primary">
             <CuboidIcon />
           </div>
           <div className="mb-8">
             <h1 className="mb-2 text-[24px] font-semibold">
               Thank you for scanning
             </h1>
-            <p className="text-gray-600">
+            <p className="text-color-600">
               Log in if you own this item. Contact the owner to report it found
               if it's lost.
             </p>
@@ -55,7 +55,7 @@ export default function QrNotLoggedIn() {
           </div>
         </div>
       </div>
-      <div className="mt-6 text-center text-sm text-gray-500">
+      <div className="mt-6 text-center text-sm text-color-500">
         Don't have an account?{" "}
         <Button
           variant="link"

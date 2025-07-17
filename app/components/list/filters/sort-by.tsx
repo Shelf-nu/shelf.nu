@@ -43,10 +43,10 @@ export function SortBy<T extends Record<string, string>>({
   return (
     <Popover>
       <PopoverTrigger
-        className="inline-flex items-center gap-2 text-gray-500"
+        className="inline-flex items-center gap-2 text-color-500"
         asChild
       >
-        <button className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
+        <button className="flex items-center justify-between whitespace-nowrap rounded border border-color-300 px-[14px] py-[10px] text-[16px] text-color-500 hover:cursor-pointer disabled:opacity-50">
           <span className="truncate whitespace-nowrap text-[14px]">
             {/* We only show the message if orderBy is present in params so in the default case we dont show it */}
             Sorted by: {sortingOptions[orderBy]}
@@ -57,7 +57,7 @@ export function SortBy<T extends Record<string, string>>({
       <PopoverPortal>
         <PopoverContent
           align="end"
-          className="z-[100]  flex flex-col gap-3 overflow-y-auto rounded-md border border-gray-300 bg-white p-4"
+          className="z-[100]  flex flex-col gap-3 overflow-y-auto rounded-md border border-color-300 bg-surface p-4"
         >
           <div>
             <h5>Sort by:</h5>
@@ -65,7 +65,7 @@ export function SortBy<T extends Record<string, string>>({
 
           <div className="flex flex-col gap-2">
             <select
-              className="w-full border-gray-300 text-[14px] text-gray-500"
+              className="w-full border-color-300 text-[14px] text-color-500"
               onChange={onValueChange}
               name="orderBy"
               defaultValue={orderBy}
@@ -79,7 +79,7 @@ export function SortBy<T extends Record<string, string>>({
             </select>
 
             <select
-              className="border-gray-300 text-[14px] text-gray-500"
+              className="border-color-300 text-[14px] text-color-500"
               name="orderDirection"
               disabled={disabled}
               defaultValue={orderDirection}

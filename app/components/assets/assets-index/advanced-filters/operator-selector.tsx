@@ -19,7 +19,7 @@ function FilterOperatorDisplay({
 }) {
   return (
     <div className="flex items-center gap-2 text-[14px] ">
-      <span className="font-semibold text-gray-500">{symbol}</span>
+      <span className="font-semibold text-color-500">{symbol}</span>
       <span className=" whitespace-nowrap font-normal">{text}</span>
     </div>
   );
@@ -92,7 +92,7 @@ export function OperatorSelector({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2  rounded-md border border-color-200 bg-surface"
           )}
         >
           {operators.map((operator, index) => {
@@ -101,7 +101,7 @@ export function OperatorSelector({
             return (
               <div
                 key={k + index}
-                className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                className="px-4 py-2 text-[14px] font-medium text-color-600 hover:cursor-pointer hover:bg-color-50"
                 onClick={() => {
                   setFilter(k as FilterOperator);
                   setIsPopoverOpen(false);

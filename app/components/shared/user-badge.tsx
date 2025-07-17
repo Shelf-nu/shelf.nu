@@ -16,14 +16,14 @@ export const UserBadge = ({
   <div className="h-6 max-w-[250px]">
     <span
       className={tw(
-        "ml-1 inline-flex w-max items-center rounded-2xl bg-gray-100 px-2 py-0.5",
+        "ml-1 inline-flex w-max items-center rounded-2xl bg-color-100 px-2 py-0.5",
         className
       )}
     >
       {img && (
         <img className={tw("size-4", imgClassName)} src={img} alt={name} />
       )}
-      <span className="ml-1.5 text-[12px] font-medium text-gray-700">
+      <span className="ml-1.5 text-[12px] font-medium text-color-700">
         {name}
       </span>
     </span>

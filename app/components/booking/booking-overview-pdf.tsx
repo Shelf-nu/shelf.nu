@@ -64,7 +64,7 @@ export const BookingOverviewPDF = ({
     <>
       <Button
         variant="link"
-        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
+        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-color-700 outline-none hover:bg-color-50 hover:text-color-700 md:block"
         width="full"
         name="generate pdf"
         onClick={handleOpenDialog}
@@ -117,7 +117,7 @@ export const BookingOverviewPDF = ({
       {/* Only for mobile */}
       <Button
         variant="link"
-        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
+        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-color-700 outline-none hover:bg-color-50 hover:text-color-700  md:hidden"
         width="full"
         name="generate pdf"
         disabled={disabled}
@@ -156,7 +156,7 @@ const BookingPDFPreview = ({
     isFromDifferentFromOriginal || isToDifferentFromOriginal;
 
   return (
-    <div className="border bg-gray-200 py-4">
+    <div className="border bg-color-200 py-4">
       <style>
         {`@media print {
           @page {
@@ -171,7 +171,7 @@ const BookingPDFPreview = ({
       }`}
       </style>
       <div
-        className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+        className="pdf-wrapper mx-auto w-[200mm] bg-surface p-[10mm] font-inter"
         ref={componentRef}
       >
         <div className="mb-5 flex justify-between">
@@ -183,31 +183,31 @@ const BookingPDFPreview = ({
                 className={tw("size-6 rounded-[2px] object-cover")}
                 updatedAt={organization.updatedAt}
               />
-              <h3 className="m-0 p-0 text-gray-600">{organization?.name}</h3>
+              <h3 className="m-0 p-0 text-color-600">{organization?.name}</h3>
             </div>
             <h1 className="mt-0.5 text-xl font-medium">
               Booking checklist for {booking?.name}
             </h1>
           </div>
-          <div className="text-gray-500">
+          <div className="text-color-500">
             {booking.name} | <DateS date={new Date()} />
           </div>
         </div>
 
-        <section className="mb-5 mt-2.5 border border-gray-300">
-          <div className="flex border-b border-gray-300 p-2">
+        <section className="mb-5 mt-2.5 border border-color-300">
+          <div className="flex border-b border-color-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Booking</span>
-            <span className="grow text-gray-600">{booking?.name}</span>
+            <span className="grow text-color-600">{booking?.name}</span>
           </div>
-          <div className="flex border-b border-gray-300 p-2">
+          <div className="flex border-b border-color-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Custodian</span>
-            <span className="grow text-gray-600">{custodianName}</span>
+            <span className="grow text-color-600">{custodianName}</span>
           </div>
-          <div className="flex border-b border-gray-300 p-2">
+          <div className="flex border-b border-color-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">
               Booking period
             </span>
-            <span className="grow text-gray-600">
+            <span className="grow text-color-600">
               {pdfMeta?.from && pdfMeta?.to
                 ? `${pdfMeta.from} - ${pdfMeta.to}`
                 : ""}
@@ -216,11 +216,11 @@ const BookingPDFPreview = ({
 
           {/* If from and to  */}
           <When truthy={isPeriodDifferentFromOriginal}>
-            <div className="flex border-b border-gray-300 p-2">
+            <div className="flex border-b border-color-300 p-2">
               <span className="min-w-[150px] text-sm font-medium">
                 Original period
               </span>
-              <span className="grow text-gray-600">{`${
+              <span className="grow text-color-600">{`${
                 isFromDifferentFromOriginal
                   ? pdfMeta.originalFrom
                   : pdfMeta.from
@@ -230,11 +230,11 @@ const BookingPDFPreview = ({
             </div>
           </When>
 
-          <div className="flex border-b border-gray-300 p-2">
+          <div className="flex border-b border-color-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">
               Description
             </span>
-            <span className="grow whitespace-pre-wrap text-gray-600">
+            <span className="grow whitespace-pre-wrap text-color-600">
               {booking?.description}
             </span>
           </div>
@@ -243,13 +243,13 @@ const BookingPDFPreview = ({
             <span className="min-w-[150px] text-sm font-medium">
               Total assets value
             </span>
-            <span className="grow whitespace-pre-wrap text-gray-600">
+            <span className="grow whitespace-pre-wrap text-color-600">
               {totalValue}
             </span>
           </div>
 
           <When truthy={booking.tags?.length > 0}>
-            <div className="flex items-center border-t border-gray-300 p-2">
+            <div className="flex items-center border-t border-color-300 p-2">
               <span className="min-w-[150px] text-sm font-medium">Tags</span>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -261,28 +261,28 @@ const BookingPDFPreview = ({
           </When>
         </section>
 
-        <table className="w-full border-collapse border border-gray-300">
+        <table className="w-full border-collapse border border-color-300">
           <thead>
             <tr>
-              <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-10 border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 #
               </th>
-              <th className="w-20 min-w-[76px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-20 min-w-[76px] border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Image
               </th>
-              <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-[30%] border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Name
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Kit
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Category
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="w-24 border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="min-w-[120px] border-b border-r border-color-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
@@ -294,13 +294,13 @@ const BookingPDFPreview = ({
                   key={asset.id}
                   className={tw(
                     "align-top",
-                    !asset.description && "border-b border-gray-300"
+                    !asset.description && "border-b border-color-300"
                   )}
                 >
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     {index + 1}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     <AssetImage
                       asset={{
                         id: asset.id,
@@ -312,19 +312,19 @@ const BookingPDFPreview = ({
                       className="!size-14 object-cover"
                     />
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     {asset?.title}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     {asset?.kit?.name}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     {asset?.category?.name}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     {asset?.location?.name}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-color-300 p-2.5 text-sm text-color-600">
                     <div className="flex items-center gap-3">
                       <img
                         src={assetIdToQrCodeMap[asset.id] || ""}
@@ -337,9 +337,9 @@ const BookingPDFPreview = ({
                 </tr>
 
                 <When truthy={!!asset.description}>
-                  <tr className="border-b border-gray-300 align-top">
+                  <tr className="border-b border-color-300 align-top">
                     <td colSpan={7} className="m-2 p-2">
-                      <div className="flex items-start gap-4 bg-gray-100 p-4">
+                      <div className="flex items-start gap-4 bg-color-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">
                           {asset.description}

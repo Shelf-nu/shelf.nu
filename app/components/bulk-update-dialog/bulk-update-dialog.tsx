@@ -89,7 +89,7 @@ function BulkUpdateDialogTrigger({
       <Button
         variant="link"
         className={tw(
-          "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+          "w-full justify-start px-4  py-3 text-color-700 hover:text-color-700"
         )}
         width="full"
         onClick={() => {
@@ -273,7 +273,7 @@ const BulkUpdateDialogContent = forwardRef<
         title={
           <div className="w-full">
             {type !== "cancel" ? (
-              <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+              <div className="bg-primary-100 mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-2 text-primary-600">
                 <Icon icon={type} />
               </div>
             ) : null}

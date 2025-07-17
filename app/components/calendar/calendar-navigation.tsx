@@ -28,7 +28,7 @@ export function CalendarNavigation({
       <ButtonGroup>
         <Button
           variant="secondary"
-          className="border-r p-[0.7em] text-gray-500"
+          className="border-r p-[0.7em] text-color-500"
           onClick={() => handleCalendarNavigation("prev")}
           aria-label="Previous month"
         >
@@ -36,7 +36,7 @@ export function CalendarNavigation({
         </Button>
         <Button
           variant="secondary"
-          className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
+          className="border-r px-3 py-2 text-sm font-semibold text-color-700"
           onClick={() => handleCalendarNavigation("today")}
           tooltip={"Go to today"}
         >
@@ -44,7 +44,7 @@ export function CalendarNavigation({
         </Button>
         <Button
           variant="secondary"
-          className="p-[0.7em] text-gray-500"
+          className="p-[0.7em] text-color-500"
           onClick={() => handleCalendarNavigation("next")}
           aria-label="Next month"
         >

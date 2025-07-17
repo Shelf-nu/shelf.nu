@@ -56,7 +56,7 @@ export default function TeamMembersSelector({
       style={style}
     >
       <div className="m-3 flex items-center gap-2 rounded border px-3 py-2">
-        <UserIcon className="size-4 text-gray-500" />
+        <UserIcon className="size-4 text-color-500" />
         <input
           type="text"
           placeholder="Find team members"
@@ -84,7 +84,10 @@ export default function TeamMembersSelector({
 
       <When truthy={isLoading}>
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="mb-1 h-14 w-full animate-pulse bg-gray-100" />
+          <div
+            key={i}
+            className="mb-1 h-14 w-full animate-pulse bg-color-100"
+          />
         ))}
       </When>
 
@@ -98,8 +101,8 @@ export default function TeamMembersSelector({
             <div
               key={teamMember.id}
               className={tw(
-                "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-gray-100",
-                isTeamMemberSelected && "bg-gray-100"
+                "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-color-100",
+                isTeamMemberSelected && "bg-color-100"
               )}
               onClick={() => {
                 setSelectedTeamMembers((prev) => {

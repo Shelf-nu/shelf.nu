@@ -374,11 +374,11 @@ export default function GeneralPage() {
 
       <Card className={tw("mb-0")}>
         <h4 className="text-text-lg font-semibold">Asset backup</h4>
-        <p className=" text-sm text-gray-600">
+        <p className=" text-sm text-color-600">
           Download a backup of your assets. If you want to restore a backup,
           please get in touch with support.
         </p>
-        <p className=" font-italic mb-2 text-sm text-gray-600">
+        <p className=" font-italic mb-2 text-sm text-color-600">
           IMPORTANT NOTE: QR codes will not be included in the export. Due to
           the nature of how Shelf's QR codes work, they currently cannot be
           exported with assets because they have unique ids. <br />

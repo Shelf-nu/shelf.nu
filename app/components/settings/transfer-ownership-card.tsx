@@ -77,7 +77,7 @@ export default function TransferOwnershipCard({
       <h4 className="mb-1 text-text-lg font-semibold">
         Transfer workspace ownership
       </h4>
-      <p className="mb-2 text-sm text-gray-600">
+      <p className="mb-2 text-sm text-color-600">
         Transfer workspace to another user. To transfer the workspace, the new
         owner must be already be part of the workspace as an admin.
       </p>
@@ -176,7 +176,7 @@ export default function TransferOwnershipCard({
                       setConfirmationInput(event.target.value);
                     }}
                   />
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-color-500">
                     Expected input: {currentOrganization?.name}
                   </p>
                 </div>

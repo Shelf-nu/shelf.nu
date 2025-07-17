@@ -69,7 +69,7 @@ export const Price = ({
       {features ? (
         <>
           {!isFreePlan ? (
-            <p className="mb-4 text-base font-semibold text-gray-900">
+            <p className="mb-4 text-base font-semibold text-color-900">
               All {previousPlanName || "Free"} features and ...
             </p>
           ) : null}
@@ -80,7 +80,7 @@ export const Price = ({
                 <i className="text-primary">
                   <AltCheckmarkIcon />
                 </i>
-                <span className="text-base text-gray-600">{feature}</span>
+                <span className="text-base text-color-600">{feature}</span>
               </li>
             ))}
             {isTeamPlan && (
@@ -88,7 +88,7 @@ export const Price = ({
                 <i className="text-primary">
                   <AltCheckmarkIcon />
                 </i>
-                <span className="text-base text-gray-600">
+                <span className="text-base text-color-600">
                   Optional: Single sign-on(SSO) -{" "}
                   <CrispButton
                     variant="link"

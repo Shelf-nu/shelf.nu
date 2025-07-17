@@ -301,28 +301,28 @@ export default function AssetOverview() {
           <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-color-900">
                   ID
                 </span>
-                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-color-600 md:mt-0">
                   {asset?.id}
                 </div>
               </li>
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-color-900">
                   Created
                 </span>
-                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-color-600 md:mt-0">
                   {asset && asset.createdAt}
                 </div>
               </li>
 
               {asset?.category ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Category
                   </span>
-                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  <div className="mt-1 text-color-600 md:mt-0 md:w-3/5">
                     <Badge color={asset.category?.color} withDot={false}>
                       {asset.category?.name}
                     </Badge>
@@ -330,10 +330,10 @@ export default function AssetOverview() {
                 </li>
               ) : (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Category
                   </span>
-                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  <div className="mt-1 text-color-600 md:mt-0 md:w-3/5">
                     <Badge color={"#808080"} withDot={false}>
                       Uncategorized
                     </Badge>
@@ -342,10 +342,10 @@ export default function AssetOverview() {
               )}
               {location ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Location
                   </span>
-                  <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  <div className="-ml-2 mt-1 text-color-600 md:mt-0 md:w-3/5">
                     <Tag key={location.id} className="ml-2">
                       {location.name}
                     </Tag>
@@ -354,20 +354,20 @@ export default function AssetOverview() {
               ) : null}
               {asset?.description ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Description
                   </span>
-                  <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+                  <div className="mt-1 whitespace-pre-wrap text-color-600 md:mt-0 md:w-3/5">
                     {asset.description}
                   </div>
                 </li>
               ) : null}
               {asset && asset?.tags?.length > 0 ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Tags
                   </span>
-                  <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  <div className="-ml-2 mt-1 text-color-600 md:mt-0 md:w-3/5">
                     {asset.tags.map((tag) => (
                       <Tag key={tag.id} className="ml-2">
                         {tag.name}
@@ -378,11 +378,11 @@ export default function AssetOverview() {
               ) : null}
               {asset?.organization && asset.valuation ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Value
                   </span>
                   <div className="-ml-2 md:w-3/5">
-                    <div className="ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                    <div className="ml-2 mt-1 text-color-600 md:mt-0 md:w-3/5">
                       {formatCurrency({
                         value: asset.valuation,
                         locale,
@@ -403,7 +403,7 @@ export default function AssetOverview() {
                 );
               })() ? (
                 <li className="w-full max-w-full p-4 last:border-b-0 md:block">
-                  <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
+                  <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-color-900">
                     Barcodes (
                     {(asset as AssetWithOptionalBarcodes).barcodes?.length})
                     <InfoTooltip
@@ -463,12 +463,12 @@ export default function AssetOverview() {
                         )}
                         key={field.id}
                       >
-                        <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                        <span className="w-1/4 text-[14px] font-medium text-color-900">
                           {field.customField.name}
                         </span>
                         <div
                           className={tw(
-                            "mt-1 text-gray-600 md:mt-0 md:w-3/5",
+                            "mt-1 text-color-600 md:mt-0 md:w-3/5",
                             field.customField.type !==
                               CustomFieldType.MULTILINE_TEXT && "max-w-[350px]"
                           )}
@@ -484,7 +484,7 @@ export default function AssetOverview() {
                             <Button
                               role="link"
                               variant="link"
-                              className="text-gray text-start font-normal underline hover:text-gray-600"
+                              className="text-gray text-start font-normal underline hover:text-color-600"
                               target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
@@ -520,10 +520,10 @@ export default function AssetOverview() {
               >
                 <div className="flex justify-between gap-3">
                   <div>
-                    <p className="text-[14px] font-medium text-gray-700">
+                    <p className="text-[14px] font-medium text-color-700">
                       Available for bookings
                     </p>
-                    <p className="text-[12px] text-gray-600">
+                    <p className="text-[12px] text-color-600">
                       Asset is available for being used in bookings
                     </p>
                   </div>
@@ -551,8 +551,8 @@ export default function AssetOverview() {
           {asset?.kit?.name ? (
             <Card className="my-3 py-3 md:border">
               <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
-                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                <div className="bg-color-100/50 flex size-11 items-center justify-center rounded-full">
+                  <div className="flex size-7 items-center justify-center rounded-full bg-color-200">
                     <Icon icon="kit" />
                   </div>
                 </div>
@@ -566,7 +566,7 @@ export default function AssetOverview() {
                     role="link"
                     variant="link"
                     className={tw(
-                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                      "justify-start text-sm font-normal text-color-700 underline hover:text-color-700"
                     )}
                     target="_blank"
                   >

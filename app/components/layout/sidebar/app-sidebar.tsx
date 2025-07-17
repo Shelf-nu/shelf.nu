@@ -1,3 +1,4 @@
+import { ThemeToggle } from "~/components/dev/theme-toggle";
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
 import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
 import { SidebarNoticeCard } from "./notice-card";
@@ -35,6 +36,7 @@ export default function AppSidebar(props: AppSidebarProps) {
 
       <SidebarFooter>
         {state !== "collapsed" && <SidebarNoticeCard />}
+        <ThemeToggle />
         <SidebarNav className="p-0" items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>

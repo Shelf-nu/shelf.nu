@@ -17,7 +17,7 @@ export const OTP_PAGE_MAP: OtpPageData = {
     SubHeading: ({ email }) => (
       <SubHeading className="-mt-4 text-center">
         We have sent a code to{" "}
-        <span className="font-bold text-gray-900">{email}</span>. Fill the code
+        <span className="font-bold text-color-900">{email}</span>. Fill the code
         below to log in.
       </SubHeading>
     ),
@@ -37,7 +37,7 @@ export const OTP_PAGE_MAP: OtpPageData = {
     SubHeading: ({ email }) => (
       <SubHeading className="-mt-4 text-center">
         We have sent a code to{" "}
-        <span className="font-bold text-gray-900">{email}</span>. Fill the code
+        <span className="font-bold text-color-900">{email}</span>. Fill the code
         below to confirm you email.
       </SubHeading>
     ),

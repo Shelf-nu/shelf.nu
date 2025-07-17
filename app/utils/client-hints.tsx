@@ -10,6 +10,7 @@ import { useRequestInfo } from "./request-info";
 export interface ClientHint {
   timeZone: string;
   locale: string;
+  theme: "light" | "dark";
 }
 
 export const clientHints = {
@@ -17,6 +18,11 @@ export const clientHints = {
     cookieName: "CH-time-zone",
     getValueCode: `Intl.DateTimeFormat().resolvedOptions().timeZone`,
     fallback: "UTC",
+  },
+  theme: {
+    cookieName: "CH-theme",
+    getValueCode: `window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'`,
+    fallback: "light",
   },
 };
 
@@ -79,6 +85,7 @@ export function getHints(request?: Request) {
 export const getClientHint = (request: Request): ClientHint => ({
   locale: getLocale(request),
   timeZone: getHints(request).timeZone,
+  theme: getHints(request).theme,
 });
 
 /**

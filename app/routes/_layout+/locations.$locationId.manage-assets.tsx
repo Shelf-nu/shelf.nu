@@ -547,10 +547,10 @@ const RowComponent = ({
       <Td>
         {item.location ? (
           <div
-            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
+            className="flex items-center gap-1 text-[12px] font-medium text-color-700"
             title={`Current location: ${item.location.name}`}
           >
-            <div className="size-2 rounded-full bg-gray-500"></div>
+            <div className="size-2 rounded-full bg-color-500"></div>
             <span>{item.location.name}</span>
           </div>
         ) : null}

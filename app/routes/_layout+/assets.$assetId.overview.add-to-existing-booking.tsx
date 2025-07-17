@@ -151,7 +151,7 @@ export default function ExistingBooking() {
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+        <div className="bg-primary-100 mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-2 text-primary-600">
           <CalendarCheck />
         </div>
         <div className="mb-5">
@@ -202,10 +202,10 @@ export default function ExistingBooking() {
               ) : null
             }
           />
-          <div className="mt-2 text-gray-500">
-            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
-            <span className="font-medium text-gray-600">Reserved</span> bookings
-            Shown
+          <div className="mt-2 text-color-500">
+            Only <span className="font-medium text-color-600">Draft</span> and{" "}
+            <span className="font-medium text-color-600">Reserved</span>{" "}
+            bookings Shown
           </div>
         </div>
         {actionData?.error && (

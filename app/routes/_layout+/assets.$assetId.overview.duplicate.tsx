@@ -140,7 +140,7 @@ export default function DuplicateAsset() {
   return (
     <Form ref={zo.ref} method="post">
       <div className="modal-content-wrapper">
-        <div className="inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+        <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-1.5 text-primary">
           <Icon icon="duplicate" />
         </div>
         <Header hideBreadcrumbs classNames="[&>div]:border-b-0" />

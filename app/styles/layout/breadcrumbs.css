@@ -1,6 +1,6 @@
 /** Breadcrumbs */
 .breadcrumbs {
-  @apply flex items-center font-semibold text-gray-600 max-w-full truncate;
+  @apply flex items-center font-semibold text-color-600 max-w-full truncate;
 }
 
 .breadcrumb {

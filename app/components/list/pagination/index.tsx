@@ -30,13 +30,13 @@ export const Pagination = ({ className }: { className?: string }) => {
         className
       )}
     >
-      <div className="inline-flex items-center rounded border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
+      <div className="inline-flex items-center rounded border border-color-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
         <Button
           variant="secondary"
           size="sm"
           onClick={() => goToPage(1)}
           disabled={prevDisabled}
-          className="rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          className="rounded-none border-y-0 border-l-0 border-r border-color-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           aria-label="Go to page 1"
         >
           <ChevronLeftDoubleIcon />
@@ -47,23 +47,23 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(page - 1)}
           disabled={prevDisabled}
-          className="h-8 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          className="h-8 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-color-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           aria-label="Go to previous page"
         >
           <ChevronRight />
         </Button>
 
-        <div className="flex items-center gap-2 px-2.5 py-[4px] leading-none text-gray-400">
-          <span className="whitespace-nowrap text-[14px] font-medium text-gray-500">
+        <div className="flex items-center gap-2 px-2.5 py-[4px] leading-none text-color-400">
+          <span className="whitespace-nowrap text-[14px] font-medium text-color-500">
             Page
           </span>
-          <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
+          <span className="whitespace-nowrap text-[14px] font-semibold text-color-700">
             {page}
           </span>
-          <span className="whitespace-nowrap text-[14px] font-medium text-gray-500">
+          <span className="whitespace-nowrap text-[14px] font-medium text-color-500">
             of
           </span>
-          <span className="whitespace-nowrap text-[14px] font-semibold text-gray-700">
+          <span className="whitespace-nowrap text-[14px] font-semibold text-color-700">
             {total === 0 ? 1 : total}
           </span>
         </div>
@@ -73,7 +73,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(page + 1)}
           disabled={nextDisabled}
-          className="h-8 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          className="h-8 w-10 rounded-none border-y-0 border-l border-r-0 border-color-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           aria-label="Go to next page"
         >
           <ChevronRight />
@@ -84,7 +84,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           size="sm"
           onClick={() => goToPage(totalPages)}
           disabled={nextDisabled}
-          className="rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
+          className="rotate-180 rounded-none border-y-0 border-l-0 border-r border-color-300 bg-transparent px-3 py-[4px] hover:bg-transparent"
           aria-label="Go to last page"
         >
           <ChevronLeftDoubleIcon />
@@ -92,7 +92,7 @@ export const Pagination = ({ className }: { className?: string }) => {
       </div>
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
-        <p className="hidden whitespace-nowrap text-[14px] font-medium text-gray-500 lg:block">
+        <p className="hidden whitespace-nowrap text-[14px] font-medium text-color-500 lg:block">
           <span className="capitalize">{modelName.plural}</span> per page
         </p>
       </div>

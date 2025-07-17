@@ -12,12 +12,12 @@ export default function MostScannedAssets() {
   const { mostScannedAssets } = useLoaderData<typeof loader>();
   return (
     <>
-      <div className="rounded-t border border-b-0 border-gray-200">
+      <div className="rounded-t border border-b-0 border-color-200">
         <div className="flex items-center justify-between">
-          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
             Most scanned assets
           </div>
-          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className=" p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -33,7 +33,7 @@ export default function MostScannedAssets() {
         </div>
       </div>
       {mostScannedAssets.length > 0 ? (
-        <Table className="rounded border border-gray-200">
+        <Table className="rounded border border-color-200">
           <tbody>
             {mostScannedAssets.map((asset) => (
               <Tr key={asset.id}>
@@ -60,7 +60,7 @@ export default function MostScannedAssets() {
           </tbody>
         </Table>
       ) : (
-        <div className="flex-1 rounded-b border border-gray-200 p-8">
+        <div className="flex-1 rounded-b border border-color-200 p-8">
           <EmptyState text="No assets scans available" />
         </div>
       )}
@@ -98,7 +98,7 @@ const Row = ({
               <Button
                 to={`/assets/${item.id}`}
                 variant="link"
-                className="text-left text-gray-900 hover:text-gray-700"
+                className="text-left text-color-900 hover:text-color-700"
                 target={"_blank"}
                 onlyNewTabIconOnHover={true}
               >

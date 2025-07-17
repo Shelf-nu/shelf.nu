@@ -34,7 +34,7 @@ export default function ChildNavItem({
           )}
         >
           <route.Icon
-            className={tw("size-4 text-gray-600", isActive && "text-primary")}
+            className={tw("size-4 text-color-600", isActive && "text-primary")}
           />
           <span>{route.title}</span>
         </NavLink>

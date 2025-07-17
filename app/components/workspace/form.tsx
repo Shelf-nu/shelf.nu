@@ -151,7 +151,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
                 <div className=" max-h-[320px] overflow-auto">
                   {curriences.map((value) => (
                     <SelectItem value={value} key={value}>
-                      <span className="mr-4 text-[14px] text-gray-700">
+                      <span className="mr-4 text-[14px] text-color-700">
                         {value}
                       </span>
                     </SelectItem>

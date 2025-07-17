@@ -106,31 +106,29 @@ function isLinkProps(props: ButtonProps): props is LinkButtonProps {
  */
 const variants: Record<ButtonVariant, string> = {
   primary: tw(
-    `border-primary-400 bg-primary-500 text-white focus:ring-2`,
-    "disabled:border-primary-300 disabled:bg-primary-300",
-    "enabled:hover:bg-primary-400"
+    `border-primary bg-primary text-white focus:ring-2`,
+    "disabled:opacity-50",
+    "enabled:hover:bg-primary-hover"
   ),
   secondary: tw(
-    `border-gray-300 bg-white text-gray-700`,
-    "disabled:text-gray-500",
-    "[&:is(button:enabled)]:hover:bg-gray-50",
-    "[&:is(a)]:hover:bg-gray-50"
+    `border-color-300 bg-surface text-color-700`,
+    "disabled:text-color-500",
+    "[&:is(button:enabled)]:hover:bg-color-50",
+    "[&:is(a)]:hover:bg-color-50"
   ),
   tertiary: tw(
-    `border-b border-primary/10 pb-1 leading-none`,
-    "disabled:text-gray-300"
+    `border-primary/10 border-b pb-1 leading-none`,
+    "disabled:text-color-300"
   ),
-  link: tw(
-    `border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800`
-  ),
+  link: tw(`border-none p-0 text-text-sm font-semibold text-primary`),
   "link-gray": tw(
-    "text-gray border-none p-0 text-text-sm font-normal underline hover:text-gray-500 "
+    "text-gray border-none p-0 text-text-sm font-normal underline hover:text-color-500 "
   ),
   "block-link": tw(
-    "-mt-1 border-none px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
+    "-mt-1 border-none px-2 py-1 text-[14px] font-normal text-primary hover:bg-primary-50"
   ),
   "block-link-gray": tw(
-    "-mt-1 border-none px-2 py-1 text-[14px] font-normal hover:bg-gray-50 hover:text-gray-600"
+    "-mt-1 border-none px-2 py-1 text-[14px] font-normal hover:bg-color-50 hover:text-color-600"
   ),
   danger: tw(
     `border-error-600 bg-error-600 text-white focus:ring-2`,

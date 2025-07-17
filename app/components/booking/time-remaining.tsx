@@ -40,9 +40,9 @@ export function TimeRemaining({
       const overdueMinutes = Math.floor((overdueMs % ONE_HOUR) / (1000 * 60));
 
       return (
-        <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
-          <Clock className="mr-1 size-4 text-gray-400" />
-          <span className="font-medium text-gray-900">
+        <div className="flex items-center text-sm text-color-600 md:ml-4 [&_span]:whitespace-nowrap">
+          <Clock className="mr-1 size-4 text-color-400" />
+          <span className="font-medium text-color-900">
             Overdue by {overdueDays} days
           </span>
           {overdueHours > 0 && (
@@ -72,9 +72,9 @@ export function TimeRemaining({
   // For upcoming bookings (DRAFT, RESERVED)
   if (isUpcoming) {
     return (
-      <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
-        <Clock className="mr-1 size-4 text-gray-400" />
-        <span className="font-medium text-gray-900">
+      <div className="flex items-center text-sm text-color-600 md:ml-4 [&_span]:whitespace-nowrap">
+        <Clock className="mr-1 size-4 text-color-400" />
+        <span className="font-medium text-color-900">
           Starts in: {remainingDays} days
         </span>
         {remainingHours > 0 && (
@@ -95,9 +95,9 @@ export function TimeRemaining({
 
   // For ONGOING status
   return (
-    <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">
-      <Clock className="mr-1 size-4 text-gray-400" />
-      <span className="font-medium text-gray-900">{remainingDays} days</span>
+    <div className="flex items-center text-sm text-color-600 md:ml-4 [&_span]:whitespace-nowrap">
+      <Clock className="mr-1 size-4 text-color-400" />
+      <span className="font-medium text-color-900">{remainingDays} days</span>
       {remainingHours > 0 && (
         <>
           <span className="mx-1">·</span>

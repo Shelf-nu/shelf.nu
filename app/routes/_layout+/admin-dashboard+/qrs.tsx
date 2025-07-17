@@ -182,7 +182,7 @@ const ListUserContent = ({
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <Link
           target="blank"
-          className="underline hover:text-gray-500"
+          className="underline hover:text-color-500"
           to={`/qr/${item.id}`}
         >
           {item.id}
@@ -204,7 +204,7 @@ const ListUserContent = ({
         {item.organization ? (
           <Link
             target="blank"
-            className="underline hover:text-gray-500"
+            className="underline hover:text-color-500"
             to={`/admin-dashboard/org/${item.organization.id}`}
           >
             {item.organization.name} ({item.organization.id})
@@ -219,7 +219,7 @@ const ListUserContent = ({
         {item.user ? (
           <Link
             target="blank"
-            className="underline hover:text-gray-500"
+            className="underline hover:text-color-500"
             to={`/admin-dashboard/${item.user.id}`}
           >
             {item.user.firstName} {item.user.lastName} ({item.user.email})
@@ -280,7 +280,7 @@ function BatchFilter({
         onValueChange={handleValueChange}
         disabled={disabled}
       >
-        <SelectTrigger className="mt-2 px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
+        <SelectTrigger className="mt-2 px-3.5 py-2 text-left text-base text-color-500 md:mt-0 md:max-w-fit">
           <SelectValue placeholder={`Filter by batch number`} />
         </SelectTrigger>
         <SelectContent
@@ -295,9 +295,9 @@ function BatchFilter({
                   <SelectItem
                     value={typeof b === "string" ? b : b.id}
                     key={typeof b === "string" ? b : b.id}
-                    className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+                    className="rounded-none border-b border-color-200 px-6 py-4 pr-[5px]"
                   >
-                    <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
+                    <span className="mr-4 block text-[14px] lowercase text-color-700 first-letter:uppercase">
                       {typeof b === "string" ? b : b.name}
                     </span>
                   </SelectItem>

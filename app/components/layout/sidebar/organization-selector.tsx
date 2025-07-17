@@ -74,7 +74,7 @@ export default function OrganizationSelector() {
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               className={tw(
-                "size-full truncate !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50",
+                "size-full truncate !p-1 data-[state=open]:bg-color-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-color-50",
                 open || openMobile ? "border" : ""
               )}
             >
@@ -121,9 +121,8 @@ export default function OrganizationSelector() {
               <DropdownMenuItem
                 key={organization.id}
                 className={tw(
-                  "gap-2 rounded-sm p-2",
-                  currentOrganization.id === organization.id &&
-                    "bg-gray-50 text-sidebar-accent-foreground"
+                  "gap-2 rounded-sm p-2 hover:bg-color-50 focus:bg-color-50",
+                  currentOrganization.id === organization.id && "bg-color-50 "
                 )}
                 onClick={() => {
                   if (organization.id !== currentOrganizationId) {
@@ -144,12 +143,13 @@ export default function OrganizationSelector() {
                 {organization.name}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
+            {/* Separator */}
+            <div className="my-1 h-px border-t border-color-200" />
             <Button
               to="/account-details/workspace"
               icon="settings"
               variant="link"
-              className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none  hover:bg-gray-50 hover:text-gray-800 "
+              className=" hover:text-color-800 w-full select-none justify-start rounded p-2 text-left font-medium text-color-900  outline-none hover:bg-color-50 "
               onClick={closeDropdown}
             >
               Manage workspaces

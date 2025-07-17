@@ -401,7 +401,7 @@ export default function UserPage() {
           <Card className="my-0">
             <div className="mb-6">
               <h3 className="text-text-lg font-semibold">Password</h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-color-600">
                 Update your password here.
               </p>
             </div>
@@ -416,7 +416,7 @@ export default function UserPage() {
           </Card>
           <Card className="my-0">
             <h3 className="text-text-lg font-semibold">Delete account</h3>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-color-600">
               Send a request to delete your account.
             </p>
             <RequestDeleteUser />

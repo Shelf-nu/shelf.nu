@@ -19,7 +19,7 @@ export default function AssetsForEachMonth() {
                   <span className="mb-2 block text-[14px] font-medium">
                     Total inventory
                   </span>
-                  <span className="block text-[30px] font-semibold text-gray-900">
+                  <span className="block text-[30px] font-semibold text-color-900">
                     {totalAssets} assets
                   </span>
                 </span>

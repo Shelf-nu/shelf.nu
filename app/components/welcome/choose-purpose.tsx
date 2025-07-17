@@ -31,7 +31,7 @@ export function ChoosePurpose() {
             selectedPlan={selectedPlan}
             setSelectedPlan={setSelectedPlan}
           >
-            <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
               <Icon icon="profile" />
             </div>
             <div>
@@ -47,7 +47,7 @@ export function ChoosePurpose() {
             selectedPlan={selectedPlan}
             setSelectedPlan={setSelectedPlan}
           >
-            <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
               <Icon icon="profile" />
             </div>
             <div>

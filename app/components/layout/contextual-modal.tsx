@@ -32,7 +32,7 @@ const Dialog = ({
       <dialog className="dialog" open={true}>
         <div
           className={tw(
-            "relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
+            "relative z-10 size-full  bg-surface p-6 shadow-lg md:max-h-[85vh] md:rounded",
             noScroll ? "md:h-[85vh]" : "overflow-y-auto"
           )}
         >
@@ -40,7 +40,7 @@ const Dialog = ({
             to={prevRoute}
             variant="link"
             className={
-              "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
+              "absolute right-4 top-[16px] leading-none text-color-500 md:right-6 md:top-[26px]"
             }
           >
             <XIcon />

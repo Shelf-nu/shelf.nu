@@ -9,6 +9,33 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      textColor: {
+        "color-300": "var(--text-color-300)",
+        "color-400": "var(--text-color-400)",
+        "color-500": "var(--text-color-500)",
+        "color-600": "var(--text-color-600)",
+        "color-700": "var(--text-color-700)",
+        "color-900": "var(--text-color-900)",
+        "primary-700": "#EF6820",
+        "primary-hover": "var(--primary-color-hover)",
+      },
+      backgroundColor: {
+        "color-25": "var(--bg-color-25)",
+        "color-50": "var(--bg-color-50)",
+        "color-100": "var(--bg-color-100)",
+        "color-200": "var(--bg-color-200)",
+        "color-500": "var(--bg-color-500)",
+        surface: "var(--bg-surface)",
+        primary: "var(--primary-bg)",
+        "primary-hover": "var(--primary-bg-hover)",
+        "primary-50": "#FEF6EE",
+        "primary-200": "#F9DBAF",
+      },
+      borderColor: {
+        "color-200": "var(--border-color-200)",
+        "color-300": "var(--border-color-300)",
+        "primary-200": "#F9DBAF",
+      },
       fontSize: {
         "text-xs": [
           "0.75rem",
@@ -106,8 +133,27 @@ export default {
           800: "#1D2939",
           900: "#101828",
         },
+        // Semantic Color Tokens (using CSS variables)
+        "text-color": {
+          300: "var(--text-color-300)",
+          400: "var(--text-color-400)",
+          500: "var(--text-color-500)",
+          600: "var(--text-color-600)",
+          700: "var(--text-color-700)",
+          900: "var(--text-color-900)",
+        },
+        "bg-color": {
+          50: "var(--bg-color-50)",
+          100: "var(--bg-color-100)",
+          200: "var(--bg-color-200)",
+        },
+        "bg-surface": "var(--bg-surface)",
+        "border-color": {
+          200: "var(--border-color-200)",
+          300: "var(--border-color-300)",
+        },
         primary: {
-          DEFAULT: "#EF6820",
+          DEFAULT: "var(--primary-color)",
           25: "#FEFAF5",
           50: "#FEF6EE",
           100: "#FDEAD7",
@@ -354,6 +400,24 @@ export default {
       pattern:
         /^(fill-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950))$/,
     },
+    // Add semantic color tokens to safelist
+    {
+      pattern: /^(text-color-(?:300|400|500|600|700|900))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(bg-color-(?:50|100|200))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(border-color-(?:200|300))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(bg-color-(?:25|50|100|200|500))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    "bg-surface",
   ],
   plugins: [
     require("@tailwindcss/typography"),

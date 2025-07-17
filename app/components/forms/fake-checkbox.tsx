@@ -19,7 +19,14 @@ export const FakeCheckbox = ({
       xmlns="http://www.w3.org/2000/svg"
       {...svgProps}
     >
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill={fillColor} />
+      <rect
+        x="0.5"
+        y="0.5"
+        width="19"
+        height="19"
+        rx="5.5"
+        fill="var(--bg-color-50)"
+      />
       <path
         d="M14.6668 6.5L8.25016 12.9167L5.3335 10"
         stroke="currentColor"
@@ -51,8 +58,15 @@ export const FakeCheckbox = ({
         width="19"
         height="19"
         rx="5.5"
-        fill="currentColor"
+        fill="var(--bg-color-50)"
       />
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#D0D5DD" />
+      <rect
+        x="0.5"
+        y="0.5"
+        width="19"
+        height="19"
+        rx="5.5"
+        stroke="var(--border-color-300)"
+      />
     </svg>
   );

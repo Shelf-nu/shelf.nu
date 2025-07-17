@@ -91,8 +91,8 @@ export function FileDropzone({
   const style = useMemo(
     () =>
       tw(
-        "flex flex-col items-center rounded-xl border-2 border-dashed border-gray-200 p-4", // default dropzone styles
-        isDragActive && "border-solid border-primary bg-gray-50" // classes added when draggin item on top
+        "flex flex-col items-center rounded-xl border-2 border-dashed border-color-200 p-4", // default dropzone styles
+        isDragActive && "border-solid border-primary bg-color-50" // classes added when draggin item on top
       ),
     [isDragActive]
   );
@@ -102,7 +102,7 @@ export function FileDropzone({
       tw(
         "text-text-sm font-semibold  text-primary-700 hover:cursor-pointer hover:text-primary-800", // base
         isPending &&
-          "border-gray-200 bg-gray-50 text-gray-300 hover:pointer-events-none" // disabled state
+          "border-color-200 bg-color-50 text-color-300 hover:pointer-events-none" // disabled state
       ),
     [isPending]
   );

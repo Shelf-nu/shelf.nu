@@ -107,7 +107,7 @@ export default function SelectPlan() {
           </PlanBox>
         ))}
       </div>
-      <p className="mb-4 text-[12px] text-gray-600">
+      <p className="mb-4 text-[12px] text-color-600">
         You will not be directly billed. When the trial period has ended your
         subscription will be paused until you decide to continue. You can always
         change your plan at a later point in time. No long term contracts. Need

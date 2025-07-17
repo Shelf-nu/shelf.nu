@@ -13,13 +13,13 @@ export const NoSubscription = () => {
   return (
     <div className="flex size-full items-center justify-center">
       <div className="text-center">
-        <div className="mb-2 inline-flex scale-125 items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+        <div className="bg-primary-100 mb-2 inline-flex scale-125 items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
           <i className=" inline-flex min-h-[30px] min-w-[30px] items-center justify-center">
             {plansIconsMap["tier_2"]}
           </i>
         </div>
         <h2 className="mb-2">Workspace disabled</h2>
-        <p className="max-w-[550px] text-gray-600">
+        <p className="max-w-[550px] text-color-600">
           {userIsOwner
             ? "The subscription for this workspace has expired and is therefore set to inactive. Renew your subscription to start using this Team workspace again."
             : "The subscription for this workspace has expired and is therefore set to inactive. Please contact the owner of the workspace for more information."}

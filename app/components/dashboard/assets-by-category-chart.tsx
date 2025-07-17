@@ -30,12 +30,12 @@ export default function AssetsByCategoryChart() {
   ];
 
   return (
-    <div className="border border-gray-200">
+    <div className="border border-color-200">
       <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
           Assets by category (top 6)
         </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="border-b p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
           <InfoTooltip
             content={
               <>
@@ -72,11 +72,13 @@ export default function AssetsByCategoryChart() {
                     <Button
                       to={`/assets?category=${cd.id}`}
                       variant="link"
-                      className="border text-gray-700 hover:text-gray-500"
+                      className="border text-color-700 hover:text-color-500"
                     >
                       <Badge color={correspondingChartColorsHex[i]} noBg>
-                        <span className="text-gray-600">
-                          <strong className="text-gray-900">{cd.assets}</strong>{" "}
+                        <span className="text-color-600">
+                          <strong className="text-color-900">
+                            {cd.assets}
+                          </strong>{" "}
                           {cd.category}
                         </span>
                       </Badge>
