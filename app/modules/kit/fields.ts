@@ -7,6 +7,13 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
         valuation: true,
       },
     },
+    category: {
+      select: {
+        id: true,
+        name: true,
+        color: true,
+      },
+    },
   };
 
   if (canUseBarcodes) {

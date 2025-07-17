@@ -9,6 +9,7 @@ import type {
 import { Link, useLoaderData } from "@remix-run/react";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -124,6 +125,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               }),
             },
           },
+          category: true,
         },
       }),
       db.teamMember
@@ -318,6 +320,7 @@ export default function KitsIndexPage() {
             bulkActions={isBase ? undefined : <BulkActionsDropdown />}
             headerChildren={
               <>
+                <Th>Category</Th>
                 <Th>Description</Th>
                 <Th>Assets</Th>
                 <Th className="flex items-center gap-1 whitespace-nowrap">
@@ -360,6 +363,7 @@ function ListContent({
         assets: {
           select: { id: true; availableToBook: true; status: true };
         };
+        category: true;
       }
     >;
   }>;
@@ -401,6 +405,11 @@ function ListContent({
           </div>
         </Link>
       </Td>
+
+      <Td>
+        <CategoryBadge category={item.category} />
+      </Td>
+
       <Td className="max-w-62 md:max-w-96">
         {item.description ? (
           <LineBreakText

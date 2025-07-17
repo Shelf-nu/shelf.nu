@@ -1,5 +1,5 @@
 import React from "react";
-import type { BookingStatus, Kit } from "@prisma/client";
+import type { BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -12,12 +12,14 @@ import { Td } from "../table";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
+import { CategoryBadge } from "../assets/category-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import When from "../when/when";
 
 type KitRowProps = {
   kit: Pick<Kit, "id" | "name" | "image"> & {
     imageExpiration: string | Date | null;
+    category: Pick<Category, "name" | "id" | "color"> | null;
   };
   isExpanded: boolean;
   bookingStatus: BookingStatus;
@@ -86,7 +88,9 @@ export default function KitRow({
           </Td>
         </When>
 
-        <Td> </Td>
+        <Td>
+          <CategoryBadge category={kit.category} />
+        </Td>
 
         <Td className="pr-4 text-right align-middle">
           <div className="flex items-center justify-end gap-5">

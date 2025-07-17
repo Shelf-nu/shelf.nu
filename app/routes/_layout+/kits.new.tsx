@@ -5,6 +5,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import { useSearchParams } from "~/hooks/search-params";
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import { createKit, updateKitImage } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
@@ -26,15 +27,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.create,
     });
+
+    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
+      {
+        request,
+        organizationId,
+      }
+    );
+
     return json(
       data({
         header,
+        categories,
+        totalCategories,
       })
     );
   } catch (cause) {
@@ -86,6 +97,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       description: payload.description ?? "",
       createdById: userId,
       organizationId,
+      categoryId: payload.category ?? null,
       barcodes,
     });
 

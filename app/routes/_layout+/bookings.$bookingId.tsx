@@ -272,6 +272,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+              },
+            },
             _count: { select: { assets: true } },
           },
         }),
@@ -293,7 +300,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const allCategories = booking.assets
+    const assetCategories = booking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -301,6 +308,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // Find the index of the first occurrence of this category ID
           index === self.findIndex((c) => c.id === category.id)
       );
+    const kitCategories = kits
+      .map((kit) => kit.category)
+      .filter((category) => category !== null && category !== undefined)
+      .filter(
+        (category, index, self) =>
+          // Find the index of the first occurrence of this category ID
+          index === self.findIndex((c) => c.id === category.id)
+      );
+
+    const allCategories = [...assetCategories, ...kitCategories];
 
     const modelName = {
       singular: "asset",

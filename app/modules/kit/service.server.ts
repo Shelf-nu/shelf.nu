@@ -64,8 +64,12 @@ export async function createKit({
   createdById,
   organizationId,
   qrId,
+  categoryId,
   barcodes,
-}: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
+}: Pick<
+  Kit,
+  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+> & {
   qrId?: Qr["id"];
   barcodes?: Pick<Barcode, "type" | "value">[];
 }) {
@@ -110,12 +114,13 @@ export async function createKit({
             ],
           };
 
-    const data = {
+    const data: Prisma.KitCreateInput = {
       name,
       description,
       createdBy: user,
       organization,
       qrCodes,
+      category: categoryId ? { connect: { id: categoryId } } : undefined,
     };
 
     /** If barcodes are passed, create them */
@@ -176,18 +181,41 @@ export async function updateKit({
   status,
   createdById,
   organizationId,
+  categoryId,
   barcodes,
 }: UpdateKitPayload) {
   try {
+    const data = {
+      name,
+      description,
+      image,
+      imageExpiration,
+      status,
+    };
+
+    /** If uncategorized is passed, disconnect the category */
+    if (categoryId === "uncategorized") {
+      Object.assign(data, {
+        category: {
+          disconnect: true,
+        },
+      });
+    }
+
+    // If category id is passed and is different than uncategorized, connect the category
+    if (categoryId && categoryId !== "uncategorized") {
+      Object.assign(data, {
+        category: {
+          connect: {
+            id: categoryId,
+          },
+        },
+      });
+    }
+
     const kit = await db.kit.update({
       where: { id, organizationId },
-      data: {
-        name,
-        description,
-        image,
-        imageExpiration,
-        status,
-      },
+      data,
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */

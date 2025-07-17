@@ -225,6 +225,7 @@ model Category {
 
   // Relationships
   assets Asset[]
+  kits   Kit[]
   user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
@@ -935,6 +936,9 @@ model Kit {
 
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
+
+  category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -475,18 +475,20 @@ export default function KitDetails() {
         {/* Right column */}
         <div className="w-full md:w-[360px] lg:ml-4">
           {/* Kit Custody */}
-          <CustodyCard
-            className="mt-0"
-            // @ts-expect-error - we are passing the correct props
-            booking={currentBooking || undefined}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: kit?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-            custody={kit.custody}
-          />
+          <When truthy={!!kit.custody}>
+            <CustodyCard
+              className="mt-0"
+              // @ts-expect-error - we are passing the correct props
+              booking={currentBooking || undefined}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: kit?.custody?.custodian?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+              custody={kit.custody}
+            />
+          </When>
 
           <CodePreview
             qrObj={qrObj}

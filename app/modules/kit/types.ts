@@ -1,7 +1,15 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 
 export type UpdateKitPayload = Partial<
-  Pick<Kit, "name" | "description" | "status" | "image" | "imageExpiration">
+  Pick<
+    Kit,
+    | "name"
+    | "description"
+    | "status"
+    | "image"
+    | "imageExpiration"
+    | "categoryId"
+  >
 > & {
   id: Kit["id"];
   organizationId: Kit["organizationId"];

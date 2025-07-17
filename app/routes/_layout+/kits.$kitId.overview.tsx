@@ -3,11 +3,13 @@ import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import When from "~/components/when/when";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -130,6 +132,18 @@ export default function KitOverview() {
             </div>
           </li>
         ) : null}
+
+        <When truthy={!!kit.category}>
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Category
+            </span>
+            <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
+              <CategoryBadge category={kit.category} />
+            </div>
+          </li>
+        </When>
+
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-gray-900">
             Total value{" "}

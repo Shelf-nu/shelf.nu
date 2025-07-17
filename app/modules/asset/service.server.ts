@@ -706,7 +706,7 @@ export async function createAsset({
       mainImageExpiration,
     };
 
-    /** If a categoryId is passed, link the category to the asset. */
+    /** If a kitId is passed, link the kit to the asset. */
     if (kitId && kitId !== "uncategorized") {
       Object.assign(data, {
         kit: {
