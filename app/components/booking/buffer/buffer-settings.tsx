@@ -16,14 +16,22 @@ export const TimeSettingsSchema = z.object({
     .number()
     .min(0, "Buffer must be at least 0 hours")
     .max(168, "Buffer cannot exceed 168 hours (7 days)"),
+  maxBookingLength: z.coerce
+    .number()
+    .min(1, "Maximum booking length must be at least 1 hour")
+    .max(8760, "Maximum booking length cannot exceed 8760 hours (1 year)")
+    .optional()
+    .or(z.literal("")),
 });
 
 export function TimeSettings({
   header,
-  defaultValue = 0,
+  defaultBufferValue = 0,
+  defaultMaxLengthValue = null,
 }: {
   header: { title: string; subHeading?: string };
-  defaultValue: number;
+  defaultBufferValue: number;
+  defaultMaxLengthValue: number | null;
 }) {
   const disabled = useDisabled();
   const zo = useZorm("EnableWorkingHoursForm", TimeSettingsSchema);
@@ -61,7 +69,7 @@ export function TimeSettings({
               type="number"
               name={zo.fields.bufferStartTime()}
               disabled={disabled}
-              defaultValue={defaultValue}
+              defaultValue={defaultBufferValue}
               required
               title={"Minimum advance notice (hours)"}
               min={0}
@@ -75,11 +83,41 @@ export function TimeSettings({
             />
           </FormRow>
 
+          <FormRow
+            rowLabel={`Maximum booking length (hours)`}
+            subHeading={
+              <div>
+                Set the maximum duration for a single booking. Leave empty for no limit.
+                This helps prevent excessively long bookings.
+              </div>
+            }
+            className="border-b-0 pb-[10px]"
+          >
+            <Input
+              label="Maximum booking length (hours)"
+              hideLabel
+              type="number"
+              name={zo.fields.maxBookingLength()}
+              disabled={disabled}
+              defaultValue={defaultMaxLengthValue || ""}
+              placeholder="No limit"
+              title={"Maximum booking length (hours)"}
+              min={1}
+              max={8760}
+              step={1}
+              inputClassName="w-24"
+              error={
+                validationErrors?.maxBookingLength?.message ||
+                zo.errors.maxBookingLength()?.message
+              }
+            />
+          </FormRow>
+
           <div className="text-right">
             <Button
               type="submit"
               disabled={disabled}
-              value="updateBuffer"
+              value="updateTimeSettings"
               name="intent"
             >
               {disabled ? <Spinner /> : "Save settings"}

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -42,16 +43,20 @@ export async function updateBookingSettings({
   organizationId,
   bufferStartTime,
   tagsRequired,
+  maxBookingLength,
 }: {
   organizationId: string;
   bufferStartTime?: number;
   tagsRequired?: boolean;
+  maxBookingLength?: number | null;
 }) {
   try {
-    const updateData: { bufferStartTime?: number; tagsRequired?: boolean } = {};
+    const updateData: Prisma.BookingSettingsUpdateInput = {};
     if (bufferStartTime !== undefined)
       updateData.bufferStartTime = bufferStartTime;
     if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
+    if (maxBookingLength !== undefined)
+      updateData.maxBookingLength = maxBookingLength;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
@@ -60,6 +65,7 @@ export async function updateBookingSettings({
         id: true,
         bufferStartTime: true,
         tagsRequired: true,
+        maxBookingLength: true,
       },
     });
 
@@ -68,7 +74,12 @@ export async function updateBookingSettings({
     throw new ShelfError({
       cause,
       message: "Failed to update booking settings configuration",
-      additionalData: { organizationId, bufferStartTime, tagsRequired },
+      additionalData: {
+        organizationId,
+        bufferStartTime,
+        tagsRequired,
+        maxBookingLength,
+      },
       label,
     });
   }
