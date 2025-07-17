@@ -10,7 +10,6 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
 import { getValidationErrors } from "~/utils/http";
-import { tw } from "~/utils/tw";
 
 export const TimeSettingsSchema = z.object({
   bufferStartTime: z.coerce
@@ -36,7 +35,7 @@ export function TimeSettings({
   );
 
   return (
-    <Card className={tw("my-0")}>
+    <Card>
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>

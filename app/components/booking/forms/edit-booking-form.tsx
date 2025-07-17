@@ -105,7 +105,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
-  const { bufferStartTime } = useBookingSettings();
+  const { bufferStartTime, tagsRequired } = useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -115,6 +115,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       status,
       workingHours: workingHours,
       bufferStartTime,
+      tagsRequired,
     })
   );
 
@@ -365,6 +366,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   }
                   existingTags={tags}
                   className="mb-2.5"
+                  required={tagsRequired}
+                  error={
+                    validationErrors?.tags?.message || zo.errors.tags()?.message
+                  }
                 />
 
                 <DescriptionField

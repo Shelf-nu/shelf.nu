@@ -57,7 +57,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime } = useBookingSettings();
+  const { bufferStartTime, tagsRequired } = useBookingSettings();
   const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
     workingHours,
     bufferStartTime
@@ -72,6 +72,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bufferStartTime,
+      tagsRequired,
     })
   );
 
@@ -102,6 +103,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     fetcher.data?.error
   );
+
   return (
     <div>
       <fetcher.Form ref={zo.ref} method="post" action={action}>
@@ -155,6 +157,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                 <TagsAutocomplete
                   existingTags={[]}
                   suggestions={tagsSuggestions}
+                  required={tagsRequired}
+                  error={
+                    validationErrors?.tags?.message || zo.errors.tags()?.message
+                  }
                 />
               </Card>
               <Card className="m-0">
