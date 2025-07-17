@@ -330,8 +330,7 @@ export default function Area51UserPage() {
     }
   };
   const hasSubscription =
-    customer?.subscriptions?.total_count &&
-    customer?.subscriptions?.total_count > 0;
+    (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
     <div>
