@@ -882,12 +882,14 @@ export const getPaginatedAndFilterableUsers = async ({
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);
+  const tierId = searchParams.get("tierId");
 
   try {
     const { users, totalUsers } = await getUsers({
       page,
       perPage: 25,
       search,
+      tierId,
     });
     const totalPages = Math.ceil(totalUsers / 25);
 
@@ -895,6 +897,7 @@ export const getPaginatedAndFilterableUsers = async ({
       page,
       perPage: 25,
       search,
+      tierId,
       totalUsers,
       users,
       totalPages,
@@ -903,7 +906,7 @@ export const getPaginatedAndFilterableUsers = async ({
     throw new ShelfError({
       cause,
       message: "Failed to get paginated and filterable users",
-      additionalData: { page, search },
+      additionalData: { page, search, tierId },
       label,
     });
   }
@@ -913,6 +916,7 @@ async function getUsers({
   page = 1,
   perPage = 8,
   search,
+  tierId,
 }: {
   /** Page number. Starts at 1 */
   page: number;
@@ -921,6 +925,7 @@ async function getUsers({
   perPage?: number;
 
   search?: string | null;
+  tierId?: string | null;
 }) {
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -947,6 +952,11 @@ async function getUsers({
       ];
     }
 
+    /** If tierId filter exists, add it to the where object */
+    if (tierId) {
+      where.tierId = tierId as any;
+    }
+
     const [users, totalUsers] = await Promise.all([
       /** Get the users */
       db.user.findMany({
@@ -954,6 +964,9 @@ async function getUsers({
         take,
         where,
         orderBy: { createdAt: "desc" },
+        include: {
+          tier: true,
+        },
       }),
 
       /** Count them */
@@ -965,7 +978,7 @@ async function getUsers({
     throw new ShelfError({
       cause,
       message: "Failed to get users",
-      additionalData: { page, perPage, search },
+      additionalData: { page, perPage, search, tierId },
       label,
     });
   }
