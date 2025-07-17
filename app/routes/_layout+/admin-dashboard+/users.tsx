@@ -1,7 +1,9 @@
 import type { User } from "@prisma/client";
+import { TierId } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { useNavigate, useLoaderData } from "@remix-run/react";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -21,7 +23,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     await requireAdmin(userId);
 
-    const { search, totalUsers, perPage, page, users, totalPages } =
+    const { search, totalUsers, perPage, page, users, totalPages, tierId } =
       await getPaginatedAndFilterableUsers({
         request,
       });
@@ -35,6 +37,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "users",
     };
 
+    const tierItems = {
+      free: TierId.free,
+      tier_1: TierId.tier_1,
+      tier_2: TierId.tier_2,
+      custom: TierId.custom,
+    };
+
     return json(
       data({
         header,
@@ -45,6 +54,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         modelName,
+        tierId,
+        tierItems,
       })
     );
   } catch (cause) {
@@ -55,12 +66,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function Area51() {
   const navigate = useNavigate();
+  const { tierItems } = useLoaderData<typeof loader>();
   return (
     <div>
       <h1>Admin dashboard</h1>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
-        <Filters>
-          <Pagination />
+        <Filters
+          slots={{
+            "left-of-search": (
+              <StatusFilter statusItems={tierItems} name="tierId" />
+            ),
+          }}
+        >
+          <Pagination className="flex-nowrap" />
         </Filters>
         <List
           ItemComponent={ListUserContent}
@@ -68,6 +86,7 @@ export default function Area51() {
           headerChildren={
             <>
               <Th>Email</Th>
+              <Th>Tier</Th>
               <Th>Created at</Th>
             </>
           }
@@ -77,12 +96,19 @@ export default function Area51() {
   );
 }
 
-const ListUserContent = ({ item }: { item: User }) => (
+const ListUserContent = ({
+  item,
+}: {
+  item: User & { tier: { name: string } };
+}) => (
   <>
     <Td>
       {item.firstName} {item.lastName}
     </Td>
     <Td>{item.email}</Td>
+    <Td>
+      <span className="capitalize">{item.tier.name}</span>
+    </Td>
     <Td>
       <DateS
         date={item.createdAt}

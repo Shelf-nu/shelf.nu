@@ -23,6 +23,7 @@ import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
+import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
@@ -39,7 +40,13 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
-import { createStripeCustomer } from "~/utils/stripe.server";
+import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+import {
+  createStripeCustomer,
+  getOrCreateCustomerId,
+  getStripeCustomer,
+  getStripePricesAndProducts,
+} from "~/utils/stripe.server";
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -148,11 +155,20 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       {} as Record<string, number>
     );
 
+    /** Get the Stripe customer */
+    const customer = (await getStripeCustomer(
+      await getOrCreateCustomerId(user)
+    )) as CustomerWithSubscriptions;
+
+    /* Get the prices and products from Stripe */
+    const prices = await getStripePricesAndProducts();
     return json(
       data({
         user,
         organizations: userOrganizations.map((uo) => uo.organization),
         ssoUsersByDomain,
+        customer,
+        prices,
       })
     );
   } catch (cause) {
@@ -274,7 +290,8 @@ export default function Area51UserPage() {
   // Get the loader data type
   type LoaderData = SerializeFrom<typeof loader>;
 
-  const { user, organizations, ssoUsersByDomain } = useLoaderData<LoaderData>();
+  const { user, organizations, ssoUsersByDomain, customer, prices } =
+    useLoaderData<LoaderData>();
 
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
@@ -312,6 +329,8 @@ export default function Area51UserPage() {
           : null;
     }
   };
+  const hasSubscription =
+    (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
     <div>
@@ -345,6 +364,14 @@ export default function Area51UserPage() {
           )}
           <div>
             <SsoUsersByDomainTable ssoUsersByDomain={ssoUsersByDomain} />
+          </div>
+          <div>
+            <h3>User subscriptions</h3>
+            {!hasSubscription ? (
+              <div>No subscription found</div>
+            ) : (
+              <SubscriptionsOverview customer={customer} prices={prices} />
+            )}
           </div>
         </div>
       </div>

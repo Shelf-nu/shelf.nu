@@ -92,7 +92,7 @@ export const Pagination = ({ className }: { className?: string }) => {
       </div>
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
-        <p className="hidden text-[14px] font-medium text-gray-500 lg:block">
+        <p className="hidden whitespace-nowrap text-[14px] font-medium text-gray-500 lg:block">
           <span className="capitalize">{modelName.plural}</span> per page
         </p>
       </div>
