@@ -902,6 +902,7 @@ model BookingSettings {
   id String @id @default(cuid())
 
   bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
+  tagsRequired Boolean @default(false) // Whether tags are required for bookings
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)

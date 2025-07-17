@@ -12,6 +12,7 @@ import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
@@ -22,15 +23,24 @@ import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
-  const { currentOrganization, teamMembers } =
+  const { currentOrganization, teamMembers, tagsData } =
     useLoaderData<AssetIndexLoaderData>();
+  const tagsSuggestions = tagsData.tags.map((tag) => ({
+    label: tag.name,
+    value: tag.id,
+  }));
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime } = useBookingSettings();
+  const { bufferStartTime, tagsRequired } = useBookingSettings();
   const zo = useZorm(
     "CreateBookingWithAssets",
-    BookingFormSchema({ action: "new", workingHours, bufferStartTime })
+    BookingFormSchema({
+      action: "new",
+      workingHours,
+      bufferStartTime,
+      tagsRequired,
+    })
   );
 
   const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
@@ -121,7 +131,19 @@ export default function CreateBookingForSelectedAssetsDialog() {
                 }
               />
             </Card>
-            <Card className="m-0 mb-2">
+
+            <Card className="m-0 mb-2 overflow-visible">
+              <TagsAutocomplete
+                existingTags={[]}
+                suggestions={tagsSuggestions}
+                required={tagsRequired}
+                error={
+                  validationErrors?.tags?.message || zo.errors.tags()?.message
+                }
+              />
+            </Card>
+
+            <Card className="m-0">
               <DescriptionField
                 description={undefined}
                 fieldName={zo.fields.description()}

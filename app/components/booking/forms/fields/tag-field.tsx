@@ -8,12 +8,16 @@ type TagFieldProps = {
   className?: string;
   existingTags: Pick<Tag, "id" | "name">[];
   disabled?: boolean;
+  required?: boolean;
+  error?: string;
 };
 
 export default function TagField({
   className,
   existingTags,
   disabled,
+  required = false,
+  error,
 }: TagFieldProps) {
   const { tags } = useLoaderData<{ tags: Tag[] }>();
 
@@ -39,6 +43,8 @@ export default function TagField({
         valueKey="value"
         name="tags"
         disabled={disabled}
+        required={required}
+        error={error}
       />
     </FormRow>
   );
