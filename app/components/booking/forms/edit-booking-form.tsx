@@ -105,7 +105,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
-  const { bufferStartTime, tagsRequired } = useBookingSettings();
+  const { bufferStartTime, tagsRequired, maxBookingLength } =
+    useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -116,6 +117,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       workingHours: workingHours,
       bufferStartTime,
       tagsRequired,
+      maxBookingLength,
     })
   );
 

@@ -949,6 +949,10 @@ model Kit {
   // Indexes for foreign keys
   @@index([createdById])
   @@index([organizationId])
+  @@index([categoryId, organizationId]) //for basic category/organization lookups
+  @@index([categoryId, organizationId, createdAt]) //for time-based queries
+  @@index([categoryId, organizationId, name]) //for name-based searches
+  @@index([categoryId, organizationId, status]) //for status filtering
 }
 
 enum KitStatus {

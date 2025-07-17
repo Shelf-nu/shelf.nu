@@ -124,7 +124,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (
       !intent ||
       ![
-        "updateBuffer",
+        "updateTimeSettings",
         "updateTagsRequired",
         "toggle",
         "updateSchedule",
@@ -141,8 +141,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     switch (intent) {
-      case "updateBuffer": {
-        const { bufferStartTime } = parseData(formData, TimeSettingsSchema, {
+      case "updateTimeSettings": {
+        const { bufferStartTime, maxBookingLength } = parseData(formData, TimeSettingsSchema, {
           additionalData: {
             intent,
             organizationId,
@@ -153,6 +153,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await updateBookingSettings({
           organizationId,
           bufferStartTime,
+          maxBookingLength: maxBookingLength || null,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Booking time restrictions have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
 
         return json(data({ success: true }), { status: 200 });

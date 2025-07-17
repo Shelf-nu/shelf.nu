@@ -456,7 +456,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       select: { id: true, status: true },
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
-    const { bufferStartTime, tagsRequired } =
+    const { bufferStartTime, tagsRequired, maxBookingLength } =
       await getBookingSettingsForOrganization(organizationId);
     switch (intent) {
       case "save": {
@@ -470,6 +470,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             bufferStartTime,
             tagsRequired,
+            maxBookingLength,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -528,6 +529,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             bufferStartTime,
             tagsRequired,
+            maxBookingLength,
           }),
           {
             additionalData: { userId, id, organizationId, role },

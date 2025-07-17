@@ -1,5 +1,5 @@
 import { BookingStatus } from "@prisma/client";
-import { format, parseISO, addHours } from "date-fns";
+import { format, parseISO, addHours, differenceInHours } from "date-fns";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
@@ -135,6 +135,7 @@ interface BookingFormSchemaParams {
   workingHours: any; // Accept any type, normalize internally
   bufferStartTime: number; // Required buffer parameter
   tagsRequired: boolean; // Whether tags are required for bookings
+  maxBookingLength: number | null; // Maximum booking length in hours
 }
 
 /**
@@ -165,6 +166,7 @@ export function BookingFormSchema({
   workingHours: rawWorkingHours,
   bufferStartTime,
   tagsRequired,
+  maxBookingLength,
 }: BookingFormSchemaParams) {
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -250,6 +252,21 @@ export function BookingFormSchema({
         message: "End date cannot be earlier than start date",
         path: ["endDate"],
       });
+    }
+
+    // Validate maximum booking length if configured
+    if (maxBookingLength && data.endDate && data.startDate) {
+      const startDate = new Date(data.startDate);
+      const endDate = new Date(data.endDate);
+      const durationInHours = differenceInHours(endDate, startDate);
+
+      if (durationInHours > maxBookingLength) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Booking duration cannot exceed ${maxBookingLength} hours`,
+          path: ["endDate"],
+        });
+      }
     }
   };
 
