@@ -272,6 +272,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+              },
+            },
             _count: { select: { assets: true } },
           },
         }),
