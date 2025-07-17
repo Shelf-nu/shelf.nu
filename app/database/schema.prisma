@@ -903,6 +903,8 @@ model BookingSettings {
 
   bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
 
+  maxBookingLength Int? // Maximum booking length in hours. NULL means no limit
+
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String       @unique

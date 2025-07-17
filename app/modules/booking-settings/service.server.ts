@@ -15,11 +15,13 @@ export async function getBookingSettingsForOrganization(
       update: {},
       create: {
         bufferStartTime: 0,
+        maxBookingLength: null,
         organizationId,
       },
       select: {
         id: true,
         bufferStartTime: true,
+        maxBookingLength: true,
       },
     });
 

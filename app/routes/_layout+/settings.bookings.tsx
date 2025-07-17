@@ -7,8 +7,8 @@ import type {
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
-  BufferSettings,
-  BufferSettingsSchema,
+  TimeSettings,
+  TimeSettingsSchema,
 } from "~/components/booking/buffer/buffer-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -137,7 +137,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "updateBuffer": {
-        const { bufferStartTime } = parseData(formData, BufferSettingsSchema, {
+        const { bufferStartTime } = parseData(formData, TimeSettingsSchema, {
           additionalData: {
             intent,
             organizationId,
@@ -297,7 +297,7 @@ export default function GeneralPage() {
   return (
     <>
       {/* Buffer settings form */}
-      <BufferSettings
+      <TimeSettings
         header={{
           title: "Minimum notice period",
           subHeading:

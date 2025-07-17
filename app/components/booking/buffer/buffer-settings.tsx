@@ -12,14 +12,14 @@ import type { BookingSettingsActionData } from "~/routes/_layout+/settings.booki
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 
-export const BufferSettingsSchema = z.object({
+export const TimeSettingsSchema = z.object({
   bufferStartTime: z.coerce
     .number()
     .min(0, "Buffer must be at least 0 hours")
     .max(168, "Buffer cannot exceed 168 hours (7 days)"),
 });
 
-export function BufferSettings({
+export function TimeSettings({
   header,
   defaultValue = 0,
 }: {
@@ -27,11 +27,11 @@ export function BufferSettings({
   defaultValue: number;
 }) {
   const disabled = useDisabled();
-  const zo = useZorm("EnableWorkingHoursForm", BufferSettingsSchema);
+  const zo = useZorm("EnableWorkingHoursForm", TimeSettingsSchema);
 
   const actionData = useActionData<BookingSettingsActionData>();
   /** This handles server side errors in case client side validation fails */
-  const validationErrors = getValidationErrors<typeof BufferSettingsSchema>(
+  const validationErrors = getValidationErrors<typeof TimeSettingsSchema>(
     actionData?.error
   );
 
