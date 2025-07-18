@@ -50,6 +50,7 @@ export function BookingPageContent() {
             totalValue={totalValue}
             allCategories={allCategories}
             tags={booking.tags}
+            creator={booking.creator}
           />
         </Card>
       </div>
