@@ -47,6 +47,7 @@ import {
   getCustomerActiveSubscription,
   getStripeCustomer,
   stripe,
+  validateSubscriptionIsActive,
 } from "~/utils/stripe.server";
 import { canUseBookings } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -91,6 +92,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       )) as CustomerWithSubscriptions;
       /** Find the active subscription for the Stripe customer */
       subscription = getCustomerActiveSubscription({ customer });
+      await validateSubscriptionIsActive({ user, subscription });
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
