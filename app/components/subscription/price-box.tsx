@@ -30,7 +30,7 @@ export const PriceBox = ({ price }: { price: Price }) => {
       key={price.id}
     >
       <div className="text-center">
-        <div className="bg-primary-100 mb-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
+        <div className="mb-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <i className=" inline-flex min-h-[20px] min-w-[20px] items-center justify-center">
             {shelf_tier ? plansIconsMap[shelf_tier] : plansIconsMap["free"]}
           </i>

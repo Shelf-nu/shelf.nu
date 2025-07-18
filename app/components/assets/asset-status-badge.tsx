@@ -14,7 +14,10 @@ export const userFriendlyAssetStatus = (status: AssetStatus) => {
   }
 };
 
-export const assetStatusColorMap = (status: AssetStatus, theme: "light" | "dark" = "light") => {
+export const assetStatusColorMap = (
+  status: AssetStatus,
+  theme: "light" | "dark" = "light"
+) => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
       return theme === "dark" ? "#60A5FA" : "#2E90FA"; // Lighter blue for dark mode
@@ -33,7 +36,7 @@ export function AssetStatusBadge({
   availableToBook: boolean;
 }) {
   const theme = useTheme();
-  
+
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
   return (

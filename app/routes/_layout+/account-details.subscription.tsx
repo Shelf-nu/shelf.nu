@@ -154,7 +154,7 @@ export default function SubscriptionPage() {
   if (isCustomTier && hasNoSubscription) {
     return (
       <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
-        <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
+        <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <InfoIcon />
         </div>
         <p className="text-[14px] font-medium text-color-700">
@@ -187,7 +187,7 @@ export default function SubscriptionPage() {
         {hasNoSubscription ? (
           <div className="mb-8 mt-3">
             <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
-              <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
+              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                 <InfoIcon />
               </div>
               <p className="text-[14px] font-medium text-color-700">

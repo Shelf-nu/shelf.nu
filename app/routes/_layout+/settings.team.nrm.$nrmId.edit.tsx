@@ -102,7 +102,7 @@ export default function EditNrm() {
 
   return (
     <div className="modal-content-wrapper">
-      <div className="bg-primary-100 mb-4 inline-flex size-8 items-center  justify-center rounded-full p-2 text-primary-600">
+      <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
         <UserIcon />
       </div>
 

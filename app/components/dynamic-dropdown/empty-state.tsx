@@ -9,7 +9,7 @@ export const EmptyState = ({
 }) => (
   <div className="my-16 flex flex-col items-center px-3 text-center">
     <div className="mb-4 rounded-full bg-primary-50  p-2">
-      <div className=" bg-primary-100 rounded-full p-2 text-primary">
+      <div className=" rounded-full bg-primary-100 p-2 text-primary">
         <SearchIcon className="h-auto" />
       </div>
     </div>

@@ -215,7 +215,7 @@ export const WorkingHoursPreviewDialog = ({
           headerClassName="border-b"
           title={
             <div className="flex items-center space-x-3 pb-6">
-              <div className="bg-primary-100 flex size-10 items-center justify-center rounded-lg">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-primary-100">
                 <CalendarDays className="size-5 text-primary-600" />
               </div>
               <div>

@@ -146,7 +146,7 @@ export default function QrLink() {
       {isLinkPage ? (
         <div className="flex flex-1 justify-center py-8">
           <div className="my-auto">
-            <div className="bg-primary-100 mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-2 text-primary">
+            <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary">
               <UnlinkIcon />
             </div>
             <div className="mb-8">

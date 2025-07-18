@@ -31,14 +31,17 @@ Instead of using hardcoded Tailwind classes like `bg-gray-100`, we use semantic 
 ### 2. System Components
 
 **CSS Variables** (`app/styles/global.css`):
+
 - Define color values for light and dark modes
 - Automatically switch via `.dark` class
 
 **Tailwind Configuration** (`tailwind.config.ts`):
+
 - Maps semantic tokens to CSS variables
 - Ensures classes are generated correctly
 
 **Client Hints** (`app/utils/client-hints.tsx`):
+
 - Detects system preference and user overrides
 - Stores theme preference in localStorage
 
@@ -46,53 +49,53 @@ Instead of using hardcoded Tailwind classes like `bg-gray-100`, we use semantic 
 
 ### Text Colors
 
-| Class | Usage | Light Mode | Dark Mode |
-|-------|-------|------------|-----------|
-| `text-color-900` | Primary text | `#101828` | `#dfdfd6` |
-| `text-color-700` | Secondary text | `#344054` | `#c7c7c0` |
-| `text-color-600` | Body text | `#475467` | `#98989f` |
-| `text-color-500` | Muted text | `#667085` | `#8c8c93` |
-| `text-color-400` | Subtle text | `#98a2b3` | `#6a6a71` |
-| `text-color-300` | Disabled text | `#d0d5dd` | `#52525b` |
+| Class            | Usage          | Light Mode | Dark Mode |
+| ---------------- | -------------- | ---------- | --------- |
+| `text-color-900` | Primary text   | `#101828`  | `#dfdfd6` |
+| `text-color-700` | Secondary text | `#344054`  | `#c7c7c0` |
+| `text-color-600` | Body text      | `#475467`  | `#98989f` |
+| `text-color-500` | Muted text     | `#667085`  | `#8c8c93` |
+| `text-color-400` | Subtle text    | `#98a2b3`  | `#6a6a71` |
+| `text-color-300` | Disabled text  | `#d0d5dd`  | `#52525b` |
 
 ### Background Colors
 
-| Class | Usage | Light Mode | Dark Mode |
-|-------|-------|------------|-----------|
-| `bg-surface` | Main background | `#ffffff` | `#1b1b1f` |
-| `bg-color-50` | Secondary background | `#f9fafb` | `#27272a` |
-| `bg-color-100` | Card background | `#f2f4f7` | `#18181b` |
-| `bg-color-200` | Elevated background | `#eaecf0` | `#18181b` |
+| Class          | Usage                | Light Mode | Dark Mode |
+| -------------- | -------------------- | ---------- | --------- |
+| `bg-surface`   | Main background      | `#ffffff`  | `#1b1b1f` |
+| `bg-color-50`  | Secondary background | `#f9fafb`  | `#27272a` |
+| `bg-color-100` | Card background      | `#f2f4f7`  | `#18181b` |
+| `bg-color-200` | Elevated background  | `#eaecf0`  | `#18181b` |
 
 ### Adaptive Colors (Recommended)
 
 These use opacity to blend with any background:
 
-| Class | Usage | Opacity | Example Use |
-|-------|-------|---------|-------------|
-| `bg-soft` | Very subtle overlay | 4% | Hover states |
-| `bg-muted` | Subtle background | 8% | Badges, pills |
-| `bg-subtle` | Visible sections | 12% | Cards, panels |
-| `bg-overlay` | Modal backdrops | 50% | Overlays |
+| Class        | Usage               | Opacity | Example Use   |
+| ------------ | ------------------- | ------- | ------------- |
+| `bg-soft`    | Very subtle overlay | 4%      | Hover states  |
+| `bg-muted`   | Subtle background   | 8%      | Badges, pills |
+| `bg-subtle`  | Visible sections    | 12%     | Cards, panels |
+| `bg-overlay` | Modal backdrops     | 50%     | Overlays      |
 
 ### Border Colors
 
-| Class | Usage | Light Mode | Dark Mode |
-|-------|-------|------------|-----------|
-| `border-color-200` | Primary borders | `#eaecf0` | `#2e2e32` |
-| `border-color-300` | Subtle borders | `#d0d5dd` | `#3c3f44` |
-| `border-color-400` | Medium borders | `#98a2b3` | `#6a6a71` |
-| `border-color-600` | Strong borders | `#475467` | `#98989f` |
+| Class              | Usage           | Light Mode | Dark Mode |
+| ------------------ | --------------- | ---------- | --------- |
+| `border-color-200` | Primary borders | `#eaecf0`  | `#2e2e32` |
+| `border-color-300` | Subtle borders  | `#d0d5dd`  | `#3c3f44` |
+| `border-color-400` | Medium borders  | `#98a2b3`  | `#6a6a71` |
+| `border-color-600` | Strong borders  | `#475467`  | `#98989f` |
 
 ### Primary Colors
 
-| Class | Usage | Light Mode | Dark Mode |
-|-------|-------|------------|-----------|
-| `bg-primary` | Primary buttons | `#ef6820` | `#ff8a50` |
-| `bg-primary-50` | Primary backgrounds | `#fef6ee` | `#2a1f1a` |
-| `bg-primary-100` | Primary highlights | `#fdead7` | `#3a2b22` |
-| `text-primary` | Primary text | `#ef6820` | `#ff8a50` |
-| `text-primary-700` | Primary accent | `#ef6820` | `#ff8a50` |
+| Class              | Usage               | Light Mode | Dark Mode |
+| ------------------ | ------------------- | ---------- | --------- |
+| `bg-primary`       | Primary buttons     | `#ef6820`  | `#ff8a50` |
+| `bg-primary-50`    | Primary backgrounds | `#fef6ee`  | `#2a1f1a` |
+| `bg-primary-100`   | Primary highlights  | `#fdead7`  | `#3a2b22` |
+| `text-primary`     | Primary text        | `#ef6820`  | `#ff8a50` |
+| `text-primary-700` | Primary accent      | `#ef6820`  | `#ff8a50` |
 
 ## Theme Management
 
@@ -117,10 +120,11 @@ For development, use the `ThemeToggle` component:
 import { ThemeToggle } from "~/components/dev/theme-toggle";
 
 // Only shows in development
-<ThemeToggle />
+<ThemeToggle />;
 ```
 
 The toggle:
+
 - Stores preference in `localStorage`
 - Updates client hint cookie
 - Applies theme class immediately
@@ -128,6 +132,7 @@ The toggle:
 ### Theme Persistence
 
 Theme preference is stored in:
+
 1. **localStorage** - `theme` key (`"light"` or `"dark"`)
 2. **Cookie** - `CH-theme` for server-side rendering
 3. **HTML class** - `.dark` class on `<html>` element
@@ -160,6 +165,7 @@ Theme preference is stored in:
 ### 3. Test Both Modes
 
 Always test components in both light and dark modes:
+
 - Use the development theme toggle
 - Check hover states and interactions
 - Verify text contrast and readability
@@ -170,9 +176,7 @@ Always test components in both light and dark modes:
 // ✅ Good layering
 <div className="bg-surface">
   <div className="bg-muted">
-    <div className="bg-subtle">
-      Content
-    </div>
+    <div className="bg-subtle">Content</div>
   </div>
 </div>
 ```
@@ -183,9 +187,7 @@ Always test components in both light and dark modes:
 
 ```tsx
 // Gray badge with adaptive background
-<span className="bg-muted text-color-700 px-2 py-1 rounded">
-  Badge
-</span>
+<span className="bg-muted text-color-700 px-2 py-1 rounded">Badge</span>
 ```
 
 ### Cards and Panels
@@ -193,9 +195,7 @@ Always test components in both light and dark modes:
 ```tsx
 // Card with proper layering
 <div className="bg-surface border border-color-200 rounded-lg">
-  <div className="bg-soft p-4">
-    Card content
-  </div>
+  <div className="bg-soft p-4">Card content</div>
 </div>
 ```
 
@@ -205,7 +205,7 @@ Always test components in both light and dark modes:
 // Primary button
 <button className="bg-primary text-white hover:bg-primary-hover">
 
-// Secondary button  
+// Secondary button
 <button className="bg-surface border border-color-300 text-color-700 hover:bg-color-50">
 ```
 
@@ -262,18 +262,18 @@ When updating existing components:
 
 ### Common Replacements
 
-| Old Class | New Class | Better Alternative |
-|-----------|-----------|-------------------|
-| `bg-gray-100` | `bg-color-100` | `bg-muted` |
-| `bg-gray-50` | `bg-color-50` | `bg-soft` |
-| `text-gray-700` | `text-color-700` | - |
-| `border-gray-200` | `border-color-200` | - |
-| `bg-gray-700/50` | `bg-overlay` | - |
+| Old Class         | New Class          | Better Alternative |
+| ----------------- | ------------------ | ------------------ |
+| `bg-gray-100`     | `bg-color-100`     | `bg-muted`         |
+| `bg-gray-50`      | `bg-color-50`      | `bg-soft`          |
+| `text-gray-700`   | `text-color-700`   | -                  |
+| `border-gray-200` | `border-color-200` | -                  |
+| `bg-gray-700/50`  | `bg-overlay`       | -                  |
 
 ## Implementation Status
 
 - ✅ System preference detection
-- ✅ Semantic color token system  
+- ✅ Semantic color token system
 - ✅ VitePress-inspired dark mode colors
 - ✅ Development theme toggle
 - ✅ Adaptive opacity-based colors

@@ -30,21 +30,22 @@ export const Badge = ({
   className?: string;
 }) => {
   const theme = useTheme();
-  
+
   // Convert hex color to RGB for better control
   const rgb = hexToRgb(color);
-  
+
   // Create appropriate background and text colors based on theme
-  const backgroundColor = !noBg && rgb
-    ? theme === "dark"
-      ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)` // More subtle in dark mode
-      : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)`   // Light mode
-    : undefined;
-    
+  const backgroundColor =
+    !noBg && rgb
+      ? theme === "dark"
+        ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)` // More subtle in dark mode
+        : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)` // Light mode
+      : undefined;
+
   const textColor = rgb
     ? theme === "dark"
-      ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`  // Slightly dimmed in dark mode
-      : color                                        // Full color in light mode
+      ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)` // Slightly dimmed in dark mode
+      : color // Full color in light mode
     : color;
 
   return (

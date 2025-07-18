@@ -28,7 +28,11 @@ import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import styles from "./tailwind.css?url";
-import { ClientHintCheck, getClientHint, ThemeScript } from "./utils/client-hints";
+import {
+  ClientHintCheck,
+  getClientHint,
+  ThemeScript,
+} from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";

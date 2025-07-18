@@ -11,11 +11,13 @@ export function useTheme() {
     // Get initial theme from localStorage or system preference
     const getTheme = () => {
       if (typeof window === "undefined") return "light";
-      
+
       const stored = localStorage.getItem("theme") as "light" | "dark" | null;
       if (stored) return stored;
-      
-      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     };
 
     // Set initial theme
@@ -46,7 +48,7 @@ export function useTheme() {
     // Set up listeners
     window.addEventListener("storage", handleStorageChange);
     mediaQuery.addEventListener("change", handleSystemThemeChange);
-    
+
     // MutationObserver to watch for class changes on html element
     const observer = new MutationObserver(handleClassChange);
     observer.observe(document.documentElement, {

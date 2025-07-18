@@ -27,7 +27,7 @@ export default function BlockInteractions({
       />
       <div className="flex size-full items-center justify-center bg-surface shadow-xl">
         <div className="max-w-[400px] p-6 text-center">
-          <div className="bg-primary-100 mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 p-2 text-primary">
+          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary">
             {iconsMap[icon]}
           </div>
           <h1 className="text-[18px] font-semibold leading-7">{title}</h1>

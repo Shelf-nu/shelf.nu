@@ -185,7 +185,7 @@ function Item({
 
   return (
     <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
-      <div className="bg-primary-100 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
+      <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
         <InfoIcon />
       </div>
       <div></div>

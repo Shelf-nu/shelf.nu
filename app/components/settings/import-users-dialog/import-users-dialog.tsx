@@ -91,7 +91,7 @@ export default function ImportUsersDialog({
           open={isDialogOpen}
           onClose={closeDialog}
           title={
-            <div className="bg-primary-100 mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 p-1.5 text-primary">
+            <div className="mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
               <UploadIcon />
             </div>
           }

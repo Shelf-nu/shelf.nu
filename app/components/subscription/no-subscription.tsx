@@ -13,7 +13,7 @@ export const NoSubscription = () => {
   return (
     <div className="flex size-full items-center justify-center">
       <div className="text-center">
-        <div className="bg-primary-100 mb-2 inline-flex scale-125 items-center justify-center rounded-full border-[5px] border-solid border-primary-50 p-1.5 text-primary">
+        <div className="mb-2 inline-flex scale-125 items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <i className=" inline-flex min-h-[30px] min-w-[30px] items-center justify-center">
             {plansIconsMap["tier_2"]}
           </i>

@@ -156,7 +156,7 @@ export default function BulkDownloadQrDialog({
         onClose={handleClose}
         className={className}
         title={
-          <div className="bg-primary-100 flex items-center justify-center rounded-full border-8 border-primary-50 p-2 text-primary-600">
+          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
             <DownloadIcon />
           </div>
         }

@@ -56,7 +56,8 @@ export const ShelfMobileLogo = () => {
   const theme = useTheme();
 
   if (logoPath) {
-    const fullLogoPath = theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
+    const fullLogoPath =
+      theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
     return <img src={fullLogoPath} alt="Shelf Logo" className="h-full" />;
   }
 
@@ -96,7 +97,8 @@ export const ShelfFullLogo = ({ className }: { className?: string }) => {
   const classes = tw(className);
 
   if (logoPath) {
-    const fullLogoPath = theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
+    const fullLogoPath =
+      theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
     return <img src={fullLogoPath} alt="Shelf Logo" className={classes} />;
   }
 
