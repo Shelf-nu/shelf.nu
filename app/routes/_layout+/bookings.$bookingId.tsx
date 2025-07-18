@@ -137,7 +137,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userOrganizations,
         request,
         extraInclude: {
-          creator: { select: { id: true, firstName: true, lastName: true } },
+          creator: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+            },
+          },
         },
       }),
       db.tag.findMany({

@@ -3,6 +3,7 @@ import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Separator } from "../shared/separator";
+import { UserBadge } from "../shared/user-badge";
 
 export function BookingStatistics({
   duration,
@@ -21,7 +22,7 @@ export function BookingStatistics({
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<Tag, "id" | "name">[];
-  creator: Pick<User, "id" | "firstName" | "lastName">;
+  creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
 }) {
   return (
     <div className="m-0">
@@ -92,9 +93,11 @@ export function BookingStatistics({
 
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Created by</span>
-          <div className="text-right font-medium">
-            {creator.firstName} {creator.lastName}
-          </div>
+
+          <UserBadge
+            name={`${creator.firstName} ${creator.lastName}`}
+            img={creator.profilePicture}
+          />
         </div>
       </div>
     </div>
