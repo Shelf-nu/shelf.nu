@@ -500,7 +500,11 @@ async function generateReturnUrl({
     : `${domainUrl}/account-details/subscription?${urlSearchParams.toString()}`;
 }
 
-/** Validates if the user's subscription is active on */
+/** 
+ * Validates if the user's subscription is active based on their current tier 
+ * and the provided subscription details. If the subscription is inactive 
+ * and the user is not on the "free" tier, their tier is downgraded to "free."
+ */
 export async function validateSubscriptionIsActive({
   user,
   subscription,
