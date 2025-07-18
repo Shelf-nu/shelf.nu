@@ -1,4 +1,5 @@
 import { BookingStatus } from "@prisma/client";
+import { useTheme } from "~/hooks/use-theme";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { bookingStatusColorMap } from "~/utils/bookings";
@@ -20,6 +21,7 @@ export function BookingStatusBadge({
 }) {
   const { isBase } = useUserRoleHelper();
   const user = useUserData();
+  const theme = useTheme();
 
   /**
    * This is used to show the extra info tooltip when the booking is
@@ -33,7 +35,7 @@ export function BookingStatusBadge({
     custodianUserId === user?.id;
 
   return (
-    <Badge color={bookingStatusColorMap[status]}>
+    <Badge color={bookingStatusColorMap(status, theme)}>
       {shouldShowExtraInfo ? (
         <ExtraInfoTooltip>
           <span className="block whitespace-nowrap lowercase first-letter:uppercase">

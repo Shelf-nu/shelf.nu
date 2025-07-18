@@ -8,7 +8,7 @@ export const MapPlaceholder = ({
   title?: string;
   description?: string;
 }) => (
-  <div className="rounded-md border-0 bg-surface py-14">
+  <div className="rounded-md border-0 bg-surface py-10">
     <div className="z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(

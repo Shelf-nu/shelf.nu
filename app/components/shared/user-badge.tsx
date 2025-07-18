@@ -1,31 +1,20 @@
-import { tw } from "~/utils/tw";
+import { GrayBadge } from "./gray-badge";
 
-type UserBadgeProps = {
-  className?: string;
-  img?: string | null;
-  imgClassName?: string;
-  name: string;
-};
-
-export const UserBadge = ({
-  className,
+export function UserBadge({
   img,
-  imgClassName,
   name,
-}: UserBadgeProps) => (
-  <div className="h-6 max-w-[250px]">
-    <span
-      className={tw(
-        "ml-1 inline-flex w-max items-center rounded-2xl bg-color-100 px-2 py-0.5",
-        className
-      )}
-    >
-      {img && (
-        <img className={tw("size-4", imgClassName)} src={img} alt={name} />
-      )}
-      <span className="ml-1.5 text-[12px] font-medium text-color-700">
-        {name}
-      </span>
-    </span>
-  </div>
-);
+}: {
+  img?: string | null;
+  name: string;
+}) {
+  return (
+    <GrayBadge>
+      <img
+        src={img || "/static/images/default_pfp.jpg"}
+        className="mr-1 size-4 rounded-full"
+        alt=""
+      />
+      <span className="mt-px">{name}</span>
+    </GrayBadge>
+  );
+}

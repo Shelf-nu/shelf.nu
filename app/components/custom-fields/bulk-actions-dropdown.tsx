@@ -65,7 +65,7 @@ function ConditionalDropdown() {
       {open && (
         <div
           className={tw(
-            "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-700/50  transition duration-300 ease-in-out md:hidden"
+            "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-overlay  transition duration-300 ease-in-out md:hidden"
           )}
         />
       )}

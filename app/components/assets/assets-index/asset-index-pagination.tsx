@@ -45,7 +45,7 @@ export function AssetIndexPagination() {
   return (
     <div
       className={tw(
-        "asset-index-pagination flex flex-col items-center justify-between border-t border-color-200 bg-surface transition-all delay-75 ease-in-out md:flex-row",
+        "asset-index-pagination flex flex-col items-center justify-between border-t border-color-200 bg-surface transition-all delay-75 ease-in-out dark:border-color-300 md:flex-row",
         isMd ? "fixed bottom-0 right-0 z-[12]" : "",
         state === "collapsed" ? "lg:left-[48px]" : "lg:left-[256px]"
       )}

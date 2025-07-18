@@ -179,13 +179,13 @@ export default function DynamicDropdown({
 
               {/* Top Divider */}
               <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
-                <div className="h-2 w-full  bg-color-50" />
+                <div className="h-2 w-full  bg-muted" />
               </When>
 
               <When truthy={!!allowSelectAll}>
                 <label
                   key="select-all"
-                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-50 focus:bg-color-50"
+                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted"
                   onClick={handleSelectAll}
                 >
                   <span className="pr-2">Select all</span>
@@ -197,9 +197,9 @@ export default function DynamicDropdown({
                   key={withoutValueItem?.id}
                   htmlFor={withoutValueItem?.id}
                   className={tw(
-                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-50 focus:bg-color-50",
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted",
                     selectedItems.includes(withoutValueItem?.id ?? "") &&
-                      "bg-color-50"
+                      "bg-muted"
                   )}
                 >
                   <span className="pr-2 normal-case">
@@ -230,7 +230,7 @@ export default function DynamicDropdown({
 
               {/* Bottom Divider */}
               <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
-                <div className="h-2 w-full  bg-color-50" />
+                <div className="h-2 w-full  bg-muted" />
               </When>
 
               {items.map((item) => {
@@ -240,8 +240,8 @@ export default function DynamicDropdown({
                     key={item.id}
                     htmlFor={item.id}
                     className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-50 focus:bg-color-50",
-                      checked && "bg-color-50"
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted",
+                      checked && "bg-muted"
                     )}
                   >
                     <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
@@ -274,7 +274,7 @@ export default function DynamicDropdown({
                 <button
                   disabled={isSearching}
                   onClick={getAllEntries}
-                  className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-50 focus:bg-color-50"
+                  className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted"
                 >
                   Show all
                   <span>

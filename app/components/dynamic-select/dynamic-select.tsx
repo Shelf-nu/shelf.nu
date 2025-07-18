@@ -288,8 +288,8 @@ export default function DynamicSelect({
                     <div
                       key={item.id}
                       className={tw(
-                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
-                        item.id === selectedValue && "bg-color-100"
+                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted",
+                        item.id === selectedValue && "bg-muted"
                       )}
                       onClick={() => {
                         handleItemChange(item.id);
@@ -313,7 +313,7 @@ export default function DynamicSelect({
                       type="button"
                       disabled={isSearching}
                       onClick={getAllEntries}
-                      className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100"
+                      className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-muted focus:bg-muted"
                     >
                       Show all
                       <span>

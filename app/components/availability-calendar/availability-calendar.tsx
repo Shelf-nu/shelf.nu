@@ -13,6 +13,7 @@ import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { useTheme } from "~/hooks/use-theme";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
   getCalendarTitleAndSubtitle,
@@ -44,7 +45,7 @@ export default function AvailabilityCalendar({
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
-
+  const theme = useTheme();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
     subtitle?: string;
@@ -193,7 +194,7 @@ export default function AvailabilityCalendar({
               slotLabelClassNames="font-normal text-color-600"
               slotMinWidth={100}
               resourceLabelContent={resourceLabelContent}
-              eventContent={renderEventCard}
+              eventContent={(event) => renderEventCard({ ...event, theme })}
               eventClassNames={(eventInfo) => {
                 const viewType = eventInfo.view.type;
                 const isOneDay = isOneDayEvent(

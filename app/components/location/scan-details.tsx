@@ -5,6 +5,7 @@ import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
+import { Card } from "../shared/card";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export function ScanDetails({
@@ -22,7 +23,7 @@ export function ScanDetails({
   }
 
   return (
-    <div className="mt-4 rounded-md border lg:mb-0">
+    <Card className="mt-4 rounded-md border lg:mb-0">
       {lastScan ? (
         <>
           {" "}
@@ -123,6 +124,6 @@ export function ScanDetails({
           description="Scan your asset’s QR code with a phone, grant location permissions. Wait a few seconds and see the first scan location on a map!"
         />
       )}
-    </div>
+    </Card>
   );
 }

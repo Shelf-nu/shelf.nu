@@ -73,7 +73,7 @@
 }
 
 .react-tags__tag:hover::after {
-  @apply bg-gray-600;
+  @apply bg-color-600;
 }
 
 .react-tags__combobox {

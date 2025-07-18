@@ -24,6 +24,7 @@ import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useTheme } from "~/hooks/use-theme";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -158,6 +159,7 @@ export default function Calendar() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const { events } = useLoaderData<typeof loader>();
   const isLoading = useDisabled();
+  const theme = useTheme();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
     subtitle?: string;
@@ -279,7 +281,7 @@ export default function Calendar() {
               eventMouseLeave={handleEventMouseLeave("dayGridMonth")}
               eventClick={handleEventClick}
               windowResize={handleWindowResize}
-              eventContent={renderEventCard}
+              eventContent={(event) => renderEventCard({ ...event, theme })}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",

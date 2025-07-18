@@ -26,11 +26,13 @@ export const DATE_FORMAT_OPTIONS = {
   minute: "2-digit",
 } as const;
 
-export default function renderEventCard({ event }: EventCardProps) {
+export default function renderEventCard({
+  event,
+  theme,
+}: EventCardProps & { theme: "light" | "dark" }) {
   const viewType = event._context.calendarApi.view.type;
   const booking = event.extendedProps as CalendarExtendedProps;
   const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
-
   // Ref callback to set up scroll tracking
   const triggerRefCallback = (element: HTMLDivElement | null) => {
     if (!element) return;
@@ -192,7 +194,7 @@ export default function renderEventCard({ event }: EventCardProps) {
             "!hover:bg-purple-100 flex items-center gap-1 whitespace-normal bg-transparent lg:truncate",
             event.extendedProps?.className
           )}
-          style={{ color: bookingStatusColorMap[booking.status] }}
+          style={{ color: bookingStatusColorMap(booking.status, theme) }}
         >
           <div
             ref={triggerRefCallback}

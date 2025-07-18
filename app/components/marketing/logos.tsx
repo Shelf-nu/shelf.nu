@@ -1,6 +1,6 @@
 import { ShelfTypography } from "~/components/icons/library";
 import { config } from "~/config/shelf.config";
-import { useHints } from "~/utils/client-hints";
+import { useTheme } from "~/hooks/use-theme";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
 
@@ -10,7 +10,7 @@ import When from "../when/when";
  */
 export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
   const { logoPath } = config;
-  const { theme } = useHints();
+  const theme = useTheme();
 
   /** If a custom logo is used, we just use that instead of doing the dynamic shelf typograpy */
   if (logoPath) {
@@ -53,9 +53,11 @@ export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
  */
 export const ShelfMobileLogo = () => {
   const { logoPath } = config;
+  const theme = useTheme();
 
   if (logoPath) {
-    return <img src={logoPath.fullLogo} alt="Shelf Logo" className="h-full" />;
+    const fullLogoPath = theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
+    return <img src={fullLogoPath} alt="Shelf Logo" className="h-full" />;
   }
 
   return (
@@ -72,10 +74,12 @@ export const ShelfMobileLogo = () => {
  */
 export const ShelfSymbolLogo = ({ className }: { className?: string }) => {
   const { logoPath } = config;
+  const theme = useTheme();
   const classes = tw("mx-auto mb-2 size-12", className);
 
   if (logoPath) {
-    return <img src={logoPath.symbol} alt="Shelf Logo" className={classes} />;
+    const symbolPath = theme === "dark" ? logoPath.symbolDark : logoPath.symbol;
+    return <img src={symbolPath} alt="Shelf Logo" className={classes} />;
   }
 
   return (
@@ -88,10 +92,12 @@ export const ShelfSymbolLogo = ({ className }: { className?: string }) => {
  */
 export const ShelfFullLogo = ({ className }: { className?: string }) => {
   const { logoPath } = config;
+  const theme = useTheme();
   const classes = tw(className);
 
   if (logoPath) {
-    return <img src={logoPath.fullLogo} alt="Shelf Logo" className={classes} />;
+    const fullLogoPath = theme === "dark" ? logoPath.fullLogoDark : logoPath.fullLogo;
+    return <img src={fullLogoPath} alt="Shelf Logo" className={classes} />;
   }
 
   return (

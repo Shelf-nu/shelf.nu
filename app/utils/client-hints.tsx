@@ -13,6 +13,11 @@ export interface ClientHint {
   theme: "light" | "dark";
 }
 
+export interface LocaleHint {
+  timeZone: string;
+  locale: string;
+}
+
 export const clientHints = {
   timeZone: {
     cookieName: "CH-time-zone",
@@ -21,7 +26,7 @@ export const clientHints = {
   },
   theme: {
     cookieName: "CH-theme",
-    getValueCode: `window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'`,
+    getValueCode: `localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`,
     fallback: "light",
   },
 };
@@ -85,7 +90,7 @@ export function getHints(request?: Request) {
 export const getClientHint = (request: Request): ClientHint => ({
   locale: getLocale(request),
   timeZone: getHints(request).timeZone,
-  theme: getHints(request).theme,
+  theme: (getHints(request).theme as "light" | "dark") || "light",
 });
 
 /**
@@ -94,6 +99,31 @@ export const getClientHint = (request: Request): ClientHint => ({
 export function useHints() {
   const requestInfo = useRequestInfo();
   return requestInfo.hints;
+}
+
+/**
+ * @returns inline script element that prevents theme flash by applying theme class immediately
+ */
+export function ThemeScript({ nonce }: { nonce: string }) {
+  return (
+    <script
+      nonce={nonce}
+      dangerouslySetInnerHTML={{
+        __html: `
+(function() {
+  try {
+    const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+  } catch (e) {
+    // Ignore errors in case localStorage is not available
+  }
+})();
+        `,
+      }}
+    />
+  );
 }
 
 /**
@@ -152,7 +182,7 @@ export function getDateTimeFormat(
 ) {
   const locale = getLocale(request);
 
-  const hints: ClientHint = {
+  const hints: LocaleHint = {
     locale,
     timeZone: getHints(request).timeZone,
   };
@@ -160,7 +190,7 @@ export function getDateTimeFormat(
 }
 
 export function getDateTimeFormatFromHints(
-  hints: ClientHint,
+  hints: LocaleHint,
   options?: Intl.DateTimeFormatOptions
 ) {
   // change your default options here

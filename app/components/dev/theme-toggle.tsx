@@ -5,15 +5,24 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    // Check current theme on mount
-    const isDark = document.documentElement.classList.contains("dark");
-    setTheme(isDark ? "dark" : "light");
+    // Check current theme on mount from localStorage or system preference
+    const storedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    const currentTheme = storedTheme || systemTheme;
+    setTheme(currentTheme);
   }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === "light" ? "dark" : "light";
     setTheme(newTheme);
 
+    // Store preference in localStorage
+    localStorage.setItem("theme", newTheme);
+    
+    // Update the client hint cookie
+    document.cookie = `CH-theme=${encodeURIComponent(newTheme)};path=/`;
+    
+    // Apply theme class immediately
     if (newTheme === "dark") {
       document.documentElement.classList.add("dark");
     } else {

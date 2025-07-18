@@ -1,6 +1,6 @@
 import type { Category } from "@prisma/client";
-import { useHints } from "~/utils/client-hints";
 import { Badge } from "../shared/badge";
+import { GrayBadge } from "../shared/gray-badge";
 
 export function CategoryBadge({
   category,
@@ -9,18 +9,11 @@ export function CategoryBadge({
   category: Pick<Category, "id" | "name" | "color"> | null;
   className?: string;
 }) {
-  const { theme } = useHints();
   return category ? (
     <Badge color={category.color} withDot={false} className={className}>
       {category.name}
     </Badge>
   ) : (
-    <Badge
-      color={theme === "light" ? "#575757" : "#D9D9D9"}
-      withDot={false}
-      className={className}
-    >
-      Uncategorized
-    </Badge>
+    <GrayBadge className={className}>Uncategorized</GrayBadge>
   );
 }

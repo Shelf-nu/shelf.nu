@@ -16,16 +16,35 @@
   --bg-color-300: #d0d5dd; /* gray-300 */
   --bg-color-400: #98a2b3; /* gray-400 */
   --bg-color-500: #667085; /* gray-500 */
+  --bg-color-600: #475467; /* gray-600 */
+  --bg-overlay: rgba(52, 64, 84, 0.5); /* gray-700/50 - for overlays */
   --bg-surface: #ffffff; /* white */
 
   --border-color-200: #eaecf0; /* gray-200 (unified border color) */
   --border-color-300: #d0d5dd; /* gray-300 */
+  --border-color-400: #98a2b3; /* gray-400 */
+  --border-color-600: #475467; /* gray-600 */
 
   /* Primary color */
   --primary-color: #ef6820;
   --primary-color-hover: #d92d20;
   --primary-bg: #ef6820;
   --primary-bg-hover: #f38744;
+  --primary-bg-50: #fef6ee;
+  --primary-bg-100: #fdead7;
+  --primary-bg-200: #f9dbaf;
+  --primary-bg-700: #ef6820;
+  --primary-text-600: #ef6820;
+  --primary-text-700: #ef6820;
+  --primary-text-800: #932f19;
+  --primary-border-50: #fef6ee;
+  --primary-border-200: #f9dbaf;
+  --primary-border-600: #ef6820;
+
+  /* Opacity-based adaptive colors */
+  --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);
+  --bg-muted: color-mix(in srgb, var(--text-color-900) 8%, transparent);
+  --bg-subtle: color-mix(in srgb, var(--text-color-900) 12%, transparent);
 
   /* Sidebar tokens */
   --sidebar-background: var(--bg-surface);
@@ -34,7 +53,7 @@
   --sidebar-primary-foreground: 0 0% 98%;
   --sidebar-accent: 240 4.8% 95.9%;
   --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-border: 220 13% 91%;
+  --sidebar-border: 225 15% 27%; /* Equivalent to border-color-300 in HSL */
 }
 
 .dark {
@@ -55,16 +74,35 @@
   --bg-color-100: #18181b; /* Alt background */
   --bg-color-200: #18181b; /* Same as 100 for simplicity */
   --bg-color-300: #18181b; /* Same as 100 for simplicity */
+  --bg-color-600: #98989f; /* VitePress text-2 (secondary) */
+  --bg-overlay: rgba(24, 24, 27, 0.5); /* Dark overlay for backdrops */
   --bg-surface: #1b1b1f; /* Main background */
 
   --border-color-200: #2e2e32; /* Subtle borders */
   --border-color-300: #3c3f44; /* VitePress border */
+  --border-color-400: #6a6a71; /* Slightly lighter than text-400 */
+  --border-color-600: #98989f; /* Slightly lighter than text-600 */
 
   /* Primary color */
   --primary-color: #ff8a50;
   --primary-color-hover: #ef6820;
   --primary-bg: #ff8a50;
   --primary-bg-hover: #ef6820;
+  --primary-bg-50: #2a1f1a; /* Dark variant of primary-50 */
+  --primary-bg-100: #3a2b22; /* Dark variant of primary-100 */
+  --primary-bg-200: #4a3b2f; /* Dark variant of primary-200 */
+  --primary-bg-700: #ff8a50;
+  --primary-text-600: #ff8a50;
+  --primary-text-700: #ff8a50;
+  --primary-text-800: #ffb380;
+  --primary-border-50: #2a1f1a;
+  --primary-border-200: #4a3b2f;
+  --primary-border-600: #ff8a50;
+
+  /* Opacity-based adaptive colors - same as light mode, automatically adapt */
+  --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);
+  --bg-muted: color-mix(in srgb, var(--text-color-900) 8%, transparent);
+  --bg-subtle: color-mix(in srgb, var(--text-color-900) 12%, transparent);
 
   /* Sidebar tokens */
   --sidebar-background: var(--bg-surface);
@@ -73,7 +111,7 @@
   --sidebar-primary-foreground: 210 11% 15%;
   --sidebar-accent: 210 11% 15%;
   --sidebar-accent-foreground: 87 0% 87%;
-  --sidebar-border: 210 11% 15%;
+  --sidebar-border: var(--border-color-300);
 }
 
 html {
@@ -97,6 +135,7 @@ html {
 .dark input[type="tel"],
 .dark input[type="url"],
 .dark input[type="date"],
+.dark input[type="datetime-local"],
 .dark input:where(:not([type])),
 .dark textarea,
 .dark select {
@@ -366,7 +405,7 @@ dialog {
   top: 8px;
   bottom: 11px;
   width: 60px;
-  background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
+  background: linear-gradient(to right, transparent 0%, var(--bg-surface) 100%);
   pointer-events: none;
   z-index: 1;
   display: none;

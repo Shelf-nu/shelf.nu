@@ -22,6 +22,7 @@ import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -300,7 +301,7 @@ export default function AssetOverview() {
         <div className="max-w-full flex-1 overflow-hidden">
           <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-color-900">
                   ID
                 </span>
@@ -308,7 +309,7 @@ export default function AssetOverview() {
                   {asset?.id}
                 </div>
               </li>
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-color-900">
                   Created
                 </span>
@@ -318,7 +319,7 @@ export default function AssetOverview() {
               </li>
 
               {asset?.category ? (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Category
                   </span>
@@ -329,19 +330,17 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Category
                   </span>
                   <div className="mt-1 text-color-600 md:mt-0 md:w-3/5">
-                    <Badge color={"#808080"} withDot={false}>
-                      Uncategorized
-                    </Badge>
+                    <GrayBadge>Uncategorized</GrayBadge>
                   </div>
                 </li>
               )}
               {location ? (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Location
                   </span>
@@ -353,7 +352,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset?.description ? (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Description
                   </span>
@@ -363,7 +362,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset && asset?.tags?.length > 0 ? (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Tags
                   </span>
@@ -377,7 +376,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset?.organization && asset.valuation ? (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-color-900">
                     Value
                   </span>
@@ -459,7 +458,7 @@ export default function AssetOverview() {
                     return (
                       <li
                         className={tw(
-                          "w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex"
+                          "w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex"
                         )}
                         key={field.id}
                       >

@@ -1,4 +1,5 @@
 import { AssetStatus } from "@prisma/client";
+import { useTheme } from "~/hooks/use-theme";
 import { Badge } from "../shared/badge";
 import { UnavailableBadge } from "../shared/unavailable-badge";
 
@@ -13,14 +14,14 @@ export const userFriendlyAssetStatus = (status: AssetStatus) => {
   }
 };
 
-export const assetStatusColorMap = (status: AssetStatus) => {
+export const assetStatusColorMap = (status: AssetStatus, theme: "light" | "dark" = "light") => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
-      return "#2E90FA";
+      return theme === "dark" ? "#60A5FA" : "#2E90FA"; // Lighter blue for dark mode
     case AssetStatus.CHECKED_OUT:
-      return "#5925DC";
+      return theme === "dark" ? "#A78BFA" : "#5925DC"; // Much lighter purple for dark mode
     default:
-      return "#12B76A";
+      return theme === "dark" ? "#34D399" : "#12B76A"; // Lighter green for dark mode
   }
 };
 
@@ -31,11 +32,13 @@ export function AssetStatusBadge({
   status: AssetStatus;
   availableToBook: boolean;
 }) {
+  const theme = useTheme();
+  
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
   return (
     <div className="flex items-center gap-[6px]">
-      <Badge color={assetStatusColorMap(status)}>
+      <Badge color={assetStatusColorMap(status, theme)}>
         {userFriendlyAssetStatus(status)}
       </Badge>
       {!availableToBook && (
