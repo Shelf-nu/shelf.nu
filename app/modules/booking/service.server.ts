@@ -9,7 +9,7 @@ import type {
   UserOrganization,
   Tag,
 } from "@prisma/client";
-import { isBefore } from "date-fns";
+import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -2734,4 +2734,54 @@ export async function loadBookingsData({
     ids,
     hints,
   };
+}
+
+/**
+ *
+ */
+export async function duplicateBooking({
+  bookingId,
+  organizationId,
+  userId,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}) {
+  try {
+    const bookingToDuplicate = await getBooking({
+      id: bookingId,
+      organizationId,
+    });
+
+    const newBooking = await db.booking.create({
+      data: {
+        name: bookingToDuplicate.name + " (Copy)",
+        description: bookingToDuplicate.description,
+        from: new Date(),
+        to: addDays(new Date(), 1),
+        organizationId,
+        creatorId: userId,
+        status: BookingStatus.DRAFT,
+        custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
+        custodianUserId: bookingToDuplicate.custodianUserId,
+        assets: {
+          connect: bookingToDuplicate.assets.map((asset) => ({ id: asset.id })),
+        },
+        tags: {
+          connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
+        },
+      },
+    });
+
+    return newBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while duplicating booking.",
+      label,
+    });
+  }
 }

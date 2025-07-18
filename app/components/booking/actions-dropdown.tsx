@@ -139,6 +139,17 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             </DropdownMenuItem>
           </When>
 
+          <DropdownMenuItem asChild>
+            <Button
+              variant="link"
+              className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
+              width="full"
+              to="duplicate"
+            >
+              Make a copy
+            </Button>
+          </DropdownMenuItem>
+
           {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
 
           <When
