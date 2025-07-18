@@ -58,7 +58,7 @@ export function getDomainUrl(request: Request) {
     });
   }
 
-  const protocol = host.includes("localhost") ? "https" : "https";
+  const protocol = host.includes("localhost") ? "http" : "https";
 
   return `${protocol}://${host}`;
 }
