@@ -110,11 +110,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       email,
       ...user,
     });
+    const domainUrl = getDomainUrl(request);
 
     const stripeRedirectUrl = await createStripeCheckoutSession({
       userId,
       priceId,
-      domainUrl: getDomainUrl(request),
+      domainUrl,
       customerId: customerId,
       intent,
       shelfTier,

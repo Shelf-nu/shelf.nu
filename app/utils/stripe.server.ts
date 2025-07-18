@@ -4,7 +4,10 @@ import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import {
+  getOrganizationTierLimit,
+  updateUserTierId,
+} from "~/modules/tier/service.server";
 import { STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -495,4 +498,23 @@ async function generateReturnUrl({
   return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace
     ? `${domainUrl}/account-details/workspace/new?${urlSearchParams.toString()}`
     : `${domainUrl}/account-details/subscription?${urlSearchParams.toString()}`;
+}
+
+/** 
+ * Validates if the user's subscription is active based on their current tier 
+ * and the provided subscription details. If the subscription is inactive 
+ * and the user is not on the "free" tier, their tier is downgraded to "free."
+ */
+export async function validateSubscriptionIsActive({
+  user,
+  subscription,
+}: {
+  user: User;
+  subscription: Stripe.Subscription | null;
+}) {
+  if (user.skipSubscriptionCheck) return;
+
+  if (!subscription && user.tierId !== "free") {
+    await updateUserTierId(user.id, "free");
+  }
 }
