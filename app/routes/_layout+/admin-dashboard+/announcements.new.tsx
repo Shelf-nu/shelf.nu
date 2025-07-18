@@ -69,7 +69,7 @@ export default function NewAnnouncement() {
       <Form method="post" className="flex flex-col gap-4">
         <Input label={"name"} name="name" required />
         <div>
-          <label className="mb-[6px] text-text-sm font-medium text-gray-700">
+          <label className="mb-[6px] text-text-sm font-medium text-color-700">
             Announcement Content
           </label>
           <MarkdownEditor
@@ -85,7 +85,7 @@ export default function NewAnnouncement() {
         <Input label={"Link"} name="link" required />
         <Input label={"Link text"} name="linkText" required />
         <div className="">
-          <label className="font-medium text-gray-700">
+          <label className="font-medium text-color-700">
             <span>Published</span>
           </label>
           <div>

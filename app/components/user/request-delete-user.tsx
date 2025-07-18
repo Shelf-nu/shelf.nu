@@ -68,7 +68,7 @@ export const RequestDeleteUser = () => {
               final and cannot be undone.
               <br />
               <br />
-              <strong className="text-gray-900">
+              <strong className="text-color-900">
                 Deleting the user will also delete:
               </strong>
             </AlertDialogDescription>

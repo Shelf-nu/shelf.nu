@@ -87,7 +87,7 @@ export default function SidebarNav({
                 className="font-semibold"
                 tooltip={navItem.title}
               >
-                <navItem.Icon className="size-4 text-gray-600" />
+                <navItem.Icon className="size-4 text-color-600" />
                 <span>{navItem.title}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>

@@ -64,7 +64,7 @@ export default function BaseDrawer({
     <Portal>
       <div
         className={tw(
-          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-white transition-all duration-300 ease-in-out lg:right-[20px]",
+          "fixed inset-x-0 bottom-0 rounded-t-3xl border bg-surface transition-all duration-300 ease-in-out lg:right-[20px]",
           minimizedSidebar ? "lg:left-[68px]" : "lg:left-[278px]",
           className
         )}
@@ -96,7 +96,7 @@ export default function BaseDrawer({
               {/* Drag me */}
               <ChevronUpIcon
                 className={tw(
-                  "mx-auto text-gray-500",
+                  "mx-auto text-color-500",
                   expanded && "rotate-180 "
                 )}
               />
@@ -110,7 +110,7 @@ export default function BaseDrawer({
                 <Button
                   variant="block-link-gray"
                   onClick={onClear}
-                  className="text-[12px] font-normal text-gray-500"
+                  className="text-[12px] font-normal text-color-500"
                 >
                   Clear list
                 </Button>

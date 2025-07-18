@@ -35,7 +35,7 @@ export default function TitleContainer({
         {titleToRender}
       </div>
       {!isMd || calendarView.endsWith("Week") ? (
-        <div className="text-gray-600">{calendarSubtitle}</div>
+        <div className="text-color-600">{calendarSubtitle}</div>
       ) : null}
     </div>
   );

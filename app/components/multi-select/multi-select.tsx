@@ -94,12 +94,12 @@ export default function MultiSelect<T>({
           <When truthy={!!tooltip}>
             <Tooltip>
               <TooltipTrigger>
-                <InfoIcon className="size-4 text-gray-500" />
+                <InfoIcon className="size-4 text-color-500" />
               </TooltipTrigger>
 
               <TooltipContent className="max-w-xs">
                 <h6>{tooltip?.title}</h6>
-                <p className="text-sm text-gray-600">{tooltip?.content}</p>
+                <p className="text-sm text-color-600">{tooltip?.content}</p>
               </TooltipContent>
             </Tooltip>
           </When>
@@ -118,9 +118,9 @@ export default function MultiSelect<T>({
           renderRoot={({ children, isDisabled }) => (
             <div
               className={tw(
-                "relative w-full max-w-full rounded border border-gray-300 text-base text-gray-900 shadow outline-none placeholder:text-gray-900 focus:border-primary-300 focus:ring-0",
+                "relative w-full max-w-full rounded border border-color-300 text-base text-color-900 shadow outline-none placeholder:text-color-900 focus:border-primary-300 focus:ring-0",
                 isDisabled &&
-                  "cursor-not-allowed border-gray-300 bg-gray-50 placeholder:text-gray-300",
+                  "cursor-not-allowed border-color-300 bg-color-50 placeholder:text-color-300",
                 selected.length === 0 ? "px-3.5 py-2" : "px-3.5 py-1.5"
               )}
             >
@@ -130,7 +130,7 @@ export default function MultiSelect<T>({
           renderInput={({ ...props }) => (
             <input
               {..._.omit(props, ["inputWidth", "classNames"])}
-              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-gray-300"
+              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-color-300"
               disabled={disabled}
             />
           )}

@@ -278,21 +278,21 @@ export default function LocationPage() {
         <div className="w-full md:w-[360px] lg:ml-4">
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">
-              <p className=" text-gray-600">{location.description}</p>
+              <p className=" text-color-600">{location.description}</p>
             </Card>
           ) : null}
 
           <TextualDivider text="Details" className="my-8 lg:hidden" />
 
-          <div className="flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
-            <span className=" text-xs font-medium text-gray-600">Address</span>
+          <div className="flex items-start justify-between gap-10 rounded border border-color-200 bg-surface px-4 py-5">
+            <span className=" text-xs font-medium text-color-600">Address</span>
             <span className="font-medium">{location.address ?? "-"}</span>
           </div>
 
           {mapData ? (
             <div className="mb-10 mt-4 border">
               <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
-              <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
+              <div className="border border-color-200 p-4 text-center text-text-xs text-color-600">
                 <p>
                   <Button
                     to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
@@ -355,7 +355,7 @@ const ListAssetContent = ({
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
+                  className="text-left text-color-900 hover:text-color-700"
                   target="_blank"
                   onlyNewTabIconOnHover={true}
                 >

@@ -116,7 +116,7 @@ export const AssetsList = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ delay: 0.2 }}
-          className="absolute inset-0 z-[100] flex flex-col items-center  bg-gray-25/95 pt-[30vh]"
+          className="bg-color-25/95 absolute inset-0 z-[100] flex flex-col  items-center pt-[30vh]"
         >
           <Spinner />
           <p className="mt-2">Changing mode...</p>
@@ -154,7 +154,7 @@ export const AssetsList = ({
                         <Button
                           to={`/assets/${resource.id}`}
                           variant="link"
-                          className="text-left font-medium text-gray-900 hover:text-gray-700"
+                          className="text-left font-medium text-color-900 hover:text-color-700"
                           target={"_blank"}
                           onlyNewTabIconOnHover={true}
                         >
@@ -238,7 +238,7 @@ const ListAssetContent = ({
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-gray-200">
+                      <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-color-200">
                         <KitIcon className="size-2" />
                       </div>
                     </TooltipTrigger>
@@ -255,7 +255,7 @@ const ListAssetContent = ({
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                 >
                   {item.title}
                 </Button>

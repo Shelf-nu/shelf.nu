@@ -41,7 +41,7 @@ export default function KitRowActionsDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+        className="order w-[180px] rounded-md bg-surface p-1.5 text-right "
       >
         <RemoveKitFromBooking kit={kit} />
       </DropdownMenuContent>
@@ -61,7 +61,7 @@ function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
           variant="link"
           icon="trash"
           className={tw(
-            "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none  hover:bg-slate-100 hover:text-gray-700"
+            "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-color-700 outline-none  hover:bg-color-50 hover:text-color-700"
           )}
           title={
             isArchived || isCompleted

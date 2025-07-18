@@ -24,6 +24,7 @@ import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useTheme } from "~/hooks/use-theme";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -158,6 +159,7 @@ export default function Calendar() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const { events } = useLoaderData<typeof loader>();
   const isLoading = useDisabled();
+  const theme = useTheme();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
     subtitle?: string;
@@ -224,7 +226,7 @@ export default function Calendar() {
       <BookingFilters className="mt-4" hideSortBy />
 
       <div className="mt-4">
-        <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-4 rounded-t-md border bg-surface px-4 py-3">
           <div className="flex items-center gap-2">
             <TitleContainer
               calendarTitle={calendarHeader.title}
@@ -279,7 +281,7 @@ export default function Calendar() {
               eventMouseLeave={handleEventMouseLeave("dayGridMonth")}
               eventClick={handleEventClick}
               windowResize={handleWindowResize}
-              eventContent={renderEventCard}
+              eventContent={(event) => renderEventCard({ ...event, theme })}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",

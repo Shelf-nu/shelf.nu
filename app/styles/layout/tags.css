@@ -1,6 +1,6 @@
 .react-tags {
   cursor: text;
-  @apply relative w-full self-start rounded border border-gray-300 px-[14px] py-2 text-[16px];
+  @apply relative w-full self-start rounded border border-color-200 px-[14px] py-2 text-[16px];
 }
 
 .react-tags.is-active {
@@ -41,7 +41,7 @@
 }
 
 .react-tags__tag {
-  @apply mr-2 inline-flex items-center gap-1 rounded-2xl bg-gray-100 py-[2px] pl-[6px] pr-2 text-[12px] font-medium text-gray-700;
+  @apply mr-2 inline-flex items-center gap-1 rounded-2xl bg-color-100 py-[2px] pl-[6px] pr-2 text-[12px] font-medium text-color-700;
 }
 
 /* .react-tags__tag:hover {
@@ -69,11 +69,11 @@
     50% 40%
   );
   font-size: 0.875rem;
-  @apply ml-1 bg-gray-500;
+  @apply ml-1 bg-color-500;
 }
 
 .react-tags__tag:hover::after {
-  @apply bg-gray-600;
+  @apply bg-color-600;
 }
 
 .react-tags__combobox {
@@ -121,15 +121,15 @@
 }
 
 .react-tags__listbox-option {
-  @apply px-6 py-4 focus:bg-gray-100 hover:bg-gray-100 rounded-lg text-sm font-medium outline-none;
+  @apply px-6 py-4 focus:bg-color-100 hover:bg-color-100 rounded-lg text-sm font-medium outline-none;
 }
 
 .react-tags__listbox-option:hover {
-  @apply cursor-pointer bg-gray-100;
+  @apply cursor-pointer bg-color-100;
 }
 
 .react-tags__listbox-option:not([aria-disabled="true"]).is-active {
-  @apply bg-gray-200;
+  @apply bg-color-200;
 }
 
 .react-tags__listbox-option[aria-disabled="true"] {

@@ -20,7 +20,7 @@ export const FilterInput = ({
       label="Search categories"
       placeholder="Search categories"
       hideLabel
-      className="mb-2 text-gray-500"
+      className="mb-2 text-color-500"
       icon="coins"
       value={filter}
       onChange={handleFilter}

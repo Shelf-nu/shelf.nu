@@ -53,19 +53,21 @@ export default function AdminOrgQrCodes() {
         </div>
       </div>
       <Table className="mt-5">
-        <thead className="bg-gray-100">
+        <thead className="bg-color-100">
           <tr className="font-semibold">
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">ID</th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
+            <th className="border-b p-4 text-left text-color-600 md:px-6">
+              ID
+            </th>
+            <th className="border-b p-4 text-left text-color-600 md:px-6">
               Name
             </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
+            <th className="border-b p-4 text-left text-color-600 md:px-6">
               Email
             </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
+            <th className="border-b p-4 text-left text-color-600 md:px-6">
               Role
             </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
+            <th className="border-b p-4 text-left text-color-600 md:px-6">
               Created At
             </th>
           </tr>
@@ -77,7 +79,7 @@ export default function AdminOrgQrCodes() {
               <Td>
                 <Link
                   to={`/admin-dashboard/${member.id}`}
-                  className="underline hover:text-gray-500"
+                  className="underline hover:text-color-500"
                 >
                   {member.id}
                 </Link>

@@ -26,7 +26,7 @@ export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => (
     </DropdownMenuTrigger>
     <DropdownMenuContent
       align="end"
-      className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+      className="order w-[180px] rounded-md bg-surface p-1.5 text-right "
     >
       <RemoveAssetFromBooking asset={asset} />
     </DropdownMenuContent>

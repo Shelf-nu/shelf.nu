@@ -121,7 +121,7 @@ export function BookingAssetsColumn() {
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* This is a fake table header */}
-          <div className="-mx-4 flex justify-between border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
+          <div className="-mx-4 flex justify-between border border-b-0 bg-surface px-4 pb-3 pt-4 text-left font-normal text-color-600 md:mx-0 md:rounded-t md:px-6">
             <ListTitle
               title="Assets & Kits"
               hasBulkActions
@@ -151,7 +151,7 @@ export function BookingAssetsColumn() {
             </When>
           </div>
 
-          <div className="-mx-4 overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
+          <div className="-mx-4 overflow-x-auto border border-b-0 border-color-200 bg-surface md:mx-0 md:rounded-b">
             {!hasItems ? (
               <EmptyState
                 className="py-10"

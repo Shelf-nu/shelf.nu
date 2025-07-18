@@ -195,18 +195,18 @@ export default function AdminOrgQrCodes() {
       </div>
       <div className="w-full max-w-full overflow-scroll">
         <Table className="mt-5 max-w-full overflow-scroll">
-          <thead className="bg-gray-100">
+          <thead className="bg-color-100">
             <tr className="font-semibold">
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 QR code id
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Asset
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Kit
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Created At
               </th>
             </tr>
@@ -218,7 +218,7 @@ export default function AdminOrgQrCodes() {
                 <Td>
                   <Link
                     to={`/qr/${qrCode.id}`}
-                    className="underline hover:text-gray-500"
+                    className="underline hover:text-color-500"
                   >
                     {qrCode.id}
                   </Link>

@@ -27,23 +27,23 @@ export function BookingStatistics({
       <div className="mt-4 flex flex-col gap-4">
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Booking duration</span>
+          <span className="text-sm text-color-500">Booking duration</span>
           <span className="text-right font-medium">{duration}</span>
         </div>
 
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Assets</span>
+          <span className="text-sm text-color-500">Assets</span>
           <span className="text-right font-medium">{assetsCount}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Kits</span>
+          <span className="text-sm text-color-500">Kits</span>
           <span className="text-right font-medium">{kitsCount}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1 text-sm text-gray-500">
+          <span className="flex items-center gap-1 text-sm text-color-500">
             Total assets{" "}
             <InfoTooltip
               iconClassName="size-4"
@@ -59,12 +59,12 @@ export function BookingStatistics({
         </div>
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Total value</span>
+          <span className="text-sm text-color-500">Total value</span>
           <span className="text-right font-medium">{totalValue}</span>
         </div>
         <Separator />
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Categories</span>
+          <span className="text-sm text-color-500">Categories</span>
           <div className="text-right">
             <ItemsWithViewMore
               items={allCategories}
@@ -77,7 +77,7 @@ export function BookingStatistics({
         </div>
         <Separator />
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Tags</span>
+          <span className="text-sm text-color-500">Tags</span>
           <div className="text-right">
             <ItemsWithViewMore
               items={tags}

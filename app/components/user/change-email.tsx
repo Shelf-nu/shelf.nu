@@ -124,7 +124,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
         size="sm"
         onClick={() => setOpen(true)}
         type="button"
-        className="text-gray-500 hover:text-gray-700"
+        className="text-color-500 hover:text-color-700"
       >
         <PenIcon className="size-4" />
       </Button>
@@ -139,7 +139,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                   ? "Verify Email Change"
                   : "Change Email Address"}
               </h4>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-color-500">
                 {formState.isAwaitingOtp
                   ? `Enter the verification code sent to ${formState.newEmail}`
                   : `Current email: ${currentEmail}`}

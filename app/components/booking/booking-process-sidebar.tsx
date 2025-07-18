@@ -63,7 +63,7 @@ export default function BookingProcessSidebar({
 
       <SheetContent
         hideCloseButton
-        className={tw("border-l-0 bg-white p-0", className)}
+        className={tw("border-l-0 bg-surface p-0", className)}
       >
         <div className="flex items-center justify-between bg-blue-500 p-4 text-white">
           <div className="flex items-center gap-2 text-lg font-bold">
@@ -107,7 +107,7 @@ export default function BookingProcessSidebar({
             ))}
           </div>
 
-          <div className="rounded-md bg-gray-50 p-4">
+          <div className="rounded-md bg-color-50 p-4">
             <h3 className="mb-1">Important Notes</h3>
 
             <ul className="list-inside list-disc">

@@ -57,10 +57,10 @@ const getTriggerClasses = (
   className?: string
 ) =>
   tw(
-    "font-normal text-gray-500",
-    open ? "bg-gray-50" : "",
+    "font-normal text-color-500",
+    open ? "bg-color-50" : "",
     activeItems > 0
-      ? "whitespace-nowrap border-primary bg-primary-25 text-primary"
+      ? "bg-primary-25 whitespace-nowrap border-primary text-primary"
       : "",
     className
   );
@@ -154,7 +154,7 @@ function AdvancedFilter() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2 w-[580px] rounded-md border border-color-200 bg-surface"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -261,7 +261,7 @@ function AdvancedFilter() {
 
                       <Button
                         variant="block-link-gray"
-                        className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
+                        className="mt-[5px] shrink-0 text-[10px] font-normal text-color-600"
                         icon="x"
                         onClick={() => {
                           setFilters((prev) =>
@@ -409,7 +409,7 @@ function AdvancedSorting() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2 w-[480px] rounded-md border border-color-200 bg-surface"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -424,11 +424,11 @@ function AdvancedSorting() {
                   <Reorder.Item key={s.name} value={s}>
                     <div className="flex items-center justify-between">
                       <div className="flex h-full items-center gap-2 py-[6px]">
-                        <div className="inline-block h-auto w-[10px] text-gray-500 hover:text-gray-600">
+                        <div className="inline-block h-auto w-[10px] text-color-500 hover:text-color-600">
                           <HandleIcon />
                         </div>
                         <div className="mt-[-2px]">
-                          <span className="text-gray-500 ">
+                          <span className="text-color-500 ">
                             {index === 0 ? "sort" : "then"} by
                           </span>{" "}
                           {parseColumnName(s.name)}
@@ -438,7 +438,7 @@ function AdvancedSorting() {
                         <div className="flex items-center gap-2">
                           <label
                             htmlFor={`sort-${s.name}`}
-                            className="text-[12px] text-gray-500"
+                            className="text-[12px] text-color-500"
                           >
                             ascending:{" "}
                           </label>
@@ -458,7 +458,7 @@ function AdvancedSorting() {
                         </div>
                         <Button
                           variant="block-link-gray"
-                          className="mt-[2px] text-[10px] font-normal text-gray-600"
+                          className="mt-[2px] text-[10px] font-normal text-color-600"
                           icon="x"
                           onClick={() => removeSort(s.name)}
                         />
@@ -606,7 +606,7 @@ function PickAColumnToSortBy({
       <PopoverTrigger asChild>
         <Button
           variant="block-link-gray"
-          className="text-[14px] font-normal text-gray-600"
+          className="text-[14px] font-normal text-color-600"
           disabled={
             availableColumns.length === 0
               ? {
@@ -624,11 +624,11 @@ function PickAColumnToSortBy({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-color-200 bg-surface"
           )}
         >
           <div className="flex items-center border-b">
-            <Search className="ml-4 size-4 text-gray-500" />
+            <Search className="ml-4 size-4 text-color-500" />
             <input
               ref={searchInputRef}
               placeholder="Search column..."
@@ -644,14 +644,14 @@ function PickAColumnToSortBy({
                 id={`sort-option-${index}`}
                 key={option.name}
                 className={tw(
-                  "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  "px-4 py-2 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
                   selectedIndex === index && [
-                    "bg-gray-50",
+                    "bg-color-50",
                     "relative",
                     index !== 0 &&
-                      "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                      "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-color-200",
                     index !== filteredOptions.length - 1 &&
-                      "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                      "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-color-200",
                   ]
                 )}
                 onClick={() => addSort(option)}
@@ -660,7 +660,7 @@ function PickAColumnToSortBy({
               </div>
             ))}
             {filteredOptions.length === 0 && (
-              <div className="px-4 py-2 text-[14px] text-gray-500">
+              <div className="px-4 py-2 text-[14px] text-color-500">
                 No columns found
               </div>
             )}
