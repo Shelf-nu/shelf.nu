@@ -27,11 +27,11 @@ import { SubscriptionsOverview } from "~/components/subscription/subscriptions-o
 import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
@@ -205,6 +205,7 @@ export const action = async ({
           "updateCustomTierDetails",
           "createCustomerId",
           "deleteUser",
+          "toggleSubscriptionCheck",
         ]),
       })
     );
@@ -277,6 +278,29 @@ export const action = async ({
         });
         return json(data(null));
       }
+      case "toggleSubscriptionCheck": {
+        const { skipSubscriptionCheck } = parseData(
+          await request.formData(),
+          z.object({
+            skipSubscriptionCheck: z.coerce.boolean(),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { skipSubscriptionCheck },
+        });
+
+        sendNotification({
+          title: "Subscription check updated",
+          message: `The user's subscription check has been ${
+            skipSubscriptionCheck ? "disabled" : "enabled"
+          } successfully`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
     }
 
     return json(data(null));
@@ -292,7 +316,6 @@ export default function Area51UserPage() {
 
   const { user, organizations, ssoUsersByDomain, customer, prices } =
     useLoaderData<LoaderData>();
-
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
@@ -320,6 +343,12 @@ export default function Area51UserPage() {
               {value}
             </Button>
           </>
+        );
+      case "skipSubscriptionCheck":
+        return (
+          <SubscriptionCheckUpdateForm
+            skipSubscriptionCheck={user.skipSubscriptionCheck}
+          />
         );
       default:
         return typeof value === "string"
@@ -427,7 +456,7 @@ export default function Area51UserPage() {
 
 function TierUpdateForm({ tierId }: { tierId: TierId }) {
   const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled(fetcher);
   return (
     <fetcher.Form
       method="post"
@@ -452,6 +481,34 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
         ))}
       </select>
       {disabled && <Spinner />}
+    </fetcher.Form>
+  );
+}
+
+function SubscriptionCheckUpdateForm({
+  skipSubscriptionCheck,
+}: {
+  skipSubscriptionCheck: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleSubscriptionCheck" />
+
+      <input
+        type="checkbox"
+        name="skipSubscriptionCheck"
+        defaultChecked={skipSubscriptionCheck}
+        disabled={disabled}
+      />
     </fetcher.Form>
   );
 }
