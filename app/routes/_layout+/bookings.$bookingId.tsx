@@ -136,6 +136,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId: organizationId,
         userOrganizations,
         request,
+        extraInclude: {
+          creator: { select: { id: true, firstName: true, lastName: true } },
+        },
       }),
       db.tag.findMany({
         where: {
