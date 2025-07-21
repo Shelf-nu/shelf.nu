@@ -142,7 +142,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <DropdownMenuItem asChild>
             <Button
               variant="link"
-              className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
+              className="justify-start text-color-700 hover:cursor-pointer "
               width="full"
               to="duplicate"
             >

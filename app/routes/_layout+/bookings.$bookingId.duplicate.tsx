@@ -94,8 +94,7 @@ export default function DuplicateBooking() {
 
       <div className="mb-4 text-sm text-gray-500">
         <p className="mb-2">
-          You're about to duplicate the booking{" "}
-          <strong className="text-black">{booking.name}</strong>.
+          You're about to duplicate the booking <strong>{booking.name}</strong>.
         </p>
         <p>
           All current booking details will be copied. You can review and edit

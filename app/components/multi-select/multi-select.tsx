@@ -130,7 +130,9 @@ export default function MultiSelect<T>({
           renderInput={({ ...props }) => (
             <input
               {..._.omit(props, ["inputWidth", "classNames"])}
-              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-color-300"
+              className={tw(
+                "border-none !bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-color-300"
+              )}
               disabled={disabled}
             />
           )}
