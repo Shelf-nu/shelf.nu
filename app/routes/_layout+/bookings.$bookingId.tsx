@@ -794,12 +794,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "extend-booking": {
         const hints = getClientHint(request);
-        
+
         // Debug: Check what's actually in the form data
-        console.log("=== EXTEND BOOKING DEBUG ===");
-        console.log("FormData entries:", Object.fromEntries(formData));
-        
-        const { startDate, endDate } = parseData(
+
+        const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,

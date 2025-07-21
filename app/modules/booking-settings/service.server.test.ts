@@ -52,6 +52,7 @@ describe("getBookingSettingsForOrganization", () => {
         bufferStartTime: 0,
         tagsRequired: false,
         maxBookingLength: null,
+        maxBookingLengthSkipClosedDays: false,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -59,6 +60,7 @@ describe("getBookingSettingsForOrganization", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(mockBookingSettingsData);
@@ -87,6 +89,7 @@ describe("getBookingSettingsForOrganization", () => {
         bufferStartTime: 0,
         tagsRequired: false,
         maxBookingLength: null,
+        maxBookingLengthSkipClosedDays: false,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -94,6 +97,7 @@ describe("getBookingSettingsForOrganization", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(defaultSettings);
@@ -153,6 +157,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -180,6 +185,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -207,6 +213,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -234,6 +241,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -269,6 +277,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -298,6 +307,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -330,6 +340,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -357,6 +368,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -451,6 +463,7 @@ describe("updateBookingSettings", () => {
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
     expect(result).toEqual(updatedSettings);

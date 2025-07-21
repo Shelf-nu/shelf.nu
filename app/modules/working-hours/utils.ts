@@ -1,4 +1,10 @@
-import { addHours, addDays, format, parseISO, differenceInHours } from "date-fns";
+import {
+  addHours,
+  addDays,
+  format,
+  parseISO,
+  differenceInHours,
+} from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
@@ -407,16 +413,8 @@ export function calculateEffectiveEndDate(
   workingHoursData: WorkingHoursData | null | undefined,
   skipClosedDays: boolean
 ): Date {
-  console.log("=== calculateEffectiveEndDate DEBUG ===");
-  console.log("skipClosedDays:", skipClosedDays);
-  console.log("workingHoursData?.enabled:", workingHoursData?.enabled);
-  console.log("startDate:", startDate);
-  console.log("endDate:", endDate);
-  
   // If not skipping closed days or no working hours data, use original endDate
   if (!skipClosedDays || !workingHoursData?.enabled) {
-    console.log("Early return - not skipping or no working hours");
-    console.log("========================================");
     return endDate;
   }
 
@@ -455,18 +453,13 @@ export function calculateEffectiveEndDate(
 
   // Extend the end date by the number of closed days
   const finalEndDate = addDays(originalEndDate, closedDaysCount);
-  
-  console.log("Closed days found:", closedDaysCount);
-  console.log("Original end date:", originalEndDate);
-  console.log("Final effective end date:", finalEndDate);
-  console.log("========================================");
-  
+
   return finalEndDate;
 }
 
 /**
  * Calculates the effective booking duration by subtracting closed days from calendar hours.
- * 
+ *
  * Example: Fri 3PM → Mon 3PM = 72 calendar hours
  * If Sat/Sun closed: 72 hours - 48 hours (2 closed days) = 24 hours
  *
@@ -483,23 +476,18 @@ export function calculateBusinessHoursDuration(
   // Start with total calendar hours
   const totalCalendarHours = differenceInHours(endDate, startDate);
   let closedDaysHours = 0;
-  
-  console.log("=== calculateBusinessHoursDuration DEBUG ===");
-  console.log("Start:", startDate);
-  console.log("End:", endDate);
-  console.log("Total calendar hours:", totalCalendarHours);
-  
+
   const currentDate = new Date(startDate);
-  
+
   // Process each day from start to end to count closed days
   while (currentDate < endDate) {
     const nextDay = addDays(currentDate, 1);
     nextDay.setHours(0, 0, 0, 0); // Start of next day
-    
+
     // Get the actual time window for this day (intersection of booking with day)
     const windowStart = currentDate;
     const windowEnd = nextDay > endDate ? endDate : nextDay;
-    
+
     // Check if this day is closed
     const dateString = format(windowStart, "yyyy-MM-dd");
     const dayOfWeek = windowStart.getDay().toString();
@@ -517,25 +505,18 @@ export function calculateBusinessHoursDuration(
       const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
       isOpen = daySchedule?.isOpen || false;
     }
-    
+
     if (!isOpen) {
       // This day is closed, subtract its hours from the total
       const hoursInThisDay = differenceInHours(windowEnd, windowStart);
       closedDaysHours += hoursInThisDay;
-      console.log(`Day ${dateString}: CLOSED - subtracting ${hoursInThisDay} hours`);
-    } else {
-      const hoursInThisDay = differenceInHours(windowEnd, windowStart);
-      console.log(`Day ${dateString}: OPEN - keeping ${hoursInThisDay} hours`);
     }
-    
+
     // Move to next day
     currentDate.setTime(nextDay.getTime());
   }
-  
+
   const effectiveHours = totalCalendarHours - closedDaysHours;
-  console.log("Closed days hours:", closedDaysHours);
-  console.log("Effective hours (calendar - closed):", effectiveHours);
-  console.log("=============================================");
-  
+
   return effectiveHours;
 }

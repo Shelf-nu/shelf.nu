@@ -58,10 +58,11 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { startDate: defaultStartDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
-    workingHours,
-    bookingSettings.bufferStartTime
-  );
+  const { startDate: defaultStartDate, endDate: defaultEndDate } =
+    getBookingDefaultStartEndTimes(
+      workingHours,
+      bookingSettings.bufferStartTime
+    );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);

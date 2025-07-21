@@ -423,7 +423,6 @@ export function ExtendBookingSchema({
           durationInHours = differenceInHours(endDate, startDate);
         }
 
-
         if (durationInHours > maxBookingLength) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

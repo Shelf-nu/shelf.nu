@@ -62,7 +62,8 @@ export async function updateBookingSettings({
     if (maxBookingLength !== undefined)
       updateData.maxBookingLength = maxBookingLength;
     if (maxBookingLengthSkipClosedDays !== undefined)
-      updateData.maxBookingLengthSkipClosedDays = maxBookingLengthSkipClosedDays;
+      updateData.maxBookingLengthSkipClosedDays =
+        maxBookingLengthSkipClosedDays;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
