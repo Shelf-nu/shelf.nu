@@ -2763,12 +2763,16 @@ export async function duplicateBooking({
         name: bookingToDuplicate.name + " (Copy)",
         description: bookingToDuplicate.description,
         from: DateTime.fromFormat(
-          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(DATE_TIME_FORMAT),
+          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
+            DATE_TIME_FORMAT
+          ),
           DATE_TIME_FORMAT,
           { zone: hints.timeZone }
         ).toJSDate(),
         to: DateTime.fromFormat(
-          DateTime.fromJSDate(addDays(new Date(), 1), { zone: hints.timeZone }).toFormat(DATE_TIME_FORMAT),
+          DateTime.fromJSDate(addDays(new Date(), 1), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT),
           DATE_TIME_FORMAT,
           { zone: hints.timeZone }
         ).toJSDate(),
