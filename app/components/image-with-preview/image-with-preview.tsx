@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -26,6 +27,7 @@ export default function ImageWithPreview({
   const [isImageError, setIsImageError] = useState(false);
 
   const [open, setOpen] = useState(false);
+  const placeholderImage = usePlaceholderImage();
 
   function handleOpenDialog() {
     if (!imageUrl) {
@@ -75,7 +77,7 @@ export default function ImageWithPreview({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
-          src={thumbnailUrl ?? "/static/images/asset-placeholder.jpg"}
+          src={thumbnailUrl ?? placeholderImage}
           className={tw(
             "size-full object-cover",
             withPreview && "cursor-pointer"

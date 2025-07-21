@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactById } from "~/modules/user-contact/service.server";
@@ -129,6 +130,8 @@ export default function UserPage() {
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
   ];
+  const placeholderImage = usePlaceholderImage();
+
   /**
    * We assume that the user has only one role in the organization
    * and we get the first role
@@ -142,11 +145,7 @@ export default function UserPage() {
         slots={{
           "left-of-title": (
             <img
-              src={
-                user.profilePicture
-                  ? user.profilePicture
-                  : "/static/images/asset-placeholder.jpg"
-              }
+              src={user.profilePicture ? user.profilePicture : placeholderImage}
               alt="team-member"
               className="mr-4 size-14 rounded"
             />

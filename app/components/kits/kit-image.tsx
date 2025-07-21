@@ -2,6 +2,7 @@ import type { ImgHTMLAttributes } from "react";
 import { useEffect, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import type { action } from "~/routes/api+/kit.refresh-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -29,14 +30,14 @@ export default function KitImage({
   const fetcher = useFetcher<typeof action>();
 
   const { kitId, image, imageExpiration, alt } = kit;
+  const placeholderImage = usePlaceholderImage();
 
   const updatedKitImage = fetcher.data?.error ? null : fetcher.data?.kit.image;
   const [isLoading, setIsLoading] = useState(true);
   const handleImageLoad = () => {
     setIsLoading(false);
   };
-  const url =
-    image ?? updatedKitImage ?? "/static/images/asset-placeholder.jpg";
+  const url = image ?? updatedKitImage ?? placeholderImage;
 
   useEffect(function refreshImageIfExpired() {
     if (image && imageExpiration) {

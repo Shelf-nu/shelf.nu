@@ -4,6 +4,7 @@ import { useFetcher } from "@remix-run/react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import type { loader as refreshImageLoader } from "~/routes/api+/asset.refresh-main-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -22,6 +23,7 @@ export const AssetImage = ({
 }: AssetImageProps) => {
   const imageFetcher = useFetcher<typeof refreshImageLoader>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
+  const placeholderImage = usePlaceholderImage();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isImageError, setIsImageError] = useState(false);
@@ -63,12 +65,12 @@ export const AssetImage = ({
   const imageUrl =
     (useThumbnail && currentThumbnail
       ? currentThumbnail
-      : currentMainImage || "/static/images/asset-placeholder.jpg") +
+      : currentMainImage || placeholderImage) +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   // For preview dialog, also add cache buster only when needed
   const previewImageUrl =
-    (currentMainImage || "/static/images/asset-placeholder.jpg") +
+    (currentMainImage || placeholderImage) +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   // Safe refresh function that prevents loops
