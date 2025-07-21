@@ -124,7 +124,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
     const hints = getHints(request);
     const workingHours = await getWorkingHoursForOrganization(organizationId);
-    const { bufferStartTime, tagsRequired, maxBookingLength } =
+    const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const payload = parseData(
       formData,
@@ -132,9 +132,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         hints,
         action: "new",
         workingHours,
-        bufferStartTime,
-        tagsRequired,
-        maxBookingLength,
+        bookingSettings,
       }),
       {
         additionalData: { userId, organizationId },

@@ -16,6 +16,7 @@ export function DatesFields({
   startDateName,
   disabled,
   startDateError,
+  setStartDate,
   endDate,
   endDateName,
   endDateError,
@@ -27,6 +28,7 @@ export function DatesFields({
   startDateName: string;
   disabled: boolean;
   startDateError?: string;
+  setStartDate?: React.Dispatch<React.SetStateAction<string>>;
   endDate: string | undefined;
   endDateName: string;
   endDateError?: string;
@@ -57,6 +59,11 @@ export function DatesFields({
           placeholder="Booking"
           required
           onChange={(event) => {
+            // Update start date state to persist user's selection
+            if (setStartDate) {
+              setStartDate(event.target.value);
+            }
+            
             /**
              * When user changes the startDate and the new startDate is greater than the endDate
              * in that case, we have to update endDate to be the endDay date of startDate.

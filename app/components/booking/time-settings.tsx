@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useActionData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import z from "zod";
@@ -22,19 +23,26 @@ export const TimeSettingsSchema = z.object({
     .max(8760, "Maximum booking length cannot exceed 8760 hours (1 year)")
     .optional()
     .or(z.literal("")),
+  maxBookingLengthSkipClosedDays: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
 });
 
 export function TimeSettings({
   header,
   defaultBufferValue = 0,
   defaultMaxLengthValue = null,
+  defaultMaxBookingLengthSkipClosedDays = false,
 }: {
   header: { title: string; subHeading?: string };
   defaultBufferValue: number;
   defaultMaxLengthValue: number | null;
+  defaultMaxBookingLengthSkipClosedDays: boolean;
 }) {
   const disabled = useDisabled();
   const zo = useZorm("EnableWorkingHoursForm", TimeSettingsSchema);
+  const maxBookingLengthSkipClosedDaysRef = useRef<HTMLInputElement>(null);
 
   const actionData = useActionData<BookingSettingsActionData>();
   /** This handles server side errors in case client side validation fails */
@@ -93,24 +101,60 @@ export function TimeSettings({
             }
             className="border-b-0 pb-[10px]"
           >
-            <Input
-              label="Maximum booking length (hours)"
-              hideLabel
-              type="number"
-              name={zo.fields.maxBookingLength()}
-              disabled={disabled}
-              defaultValue={defaultMaxLengthValue || ""}
-              placeholder="No limit"
-              title={"Maximum booking length (hours)"}
-              min={1}
-              max={8760}
-              step={1}
-              inputClassName="w-24"
-              error={
-                validationErrors?.maxBookingLength?.message ||
-                zo.errors.maxBookingLength()?.message
-              }
-            />
+            <div className="flex flex-col">
+              <Input
+                label="Maximum booking length (hours)"
+                hideLabel
+                type="number"
+                name={zo.fields.maxBookingLength()}
+                disabled={disabled}
+                defaultValue={defaultMaxLengthValue || ""}
+                placeholder="No limit"
+                title={"Maximum booking length (hours)"}
+                min={1}
+                max={8760}
+                step={1}
+                inputClassName="w-24"
+                error={
+                  validationErrors?.maxBookingLength?.message ||
+                  zo.errors.maxBookingLength()?.message
+                }
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  id="maxBookingLengthSkipClosedDays"
+                  label="Skip closed days"
+                  hideLabel
+                  type="checkbox"
+                  name={zo.fields.maxBookingLengthSkipClosedDays()}
+                  disabled={disabled}
+                  defaultChecked={
+                    defaultMaxBookingLengthSkipClosedDays || false
+                  }
+                  title={"Skip closed days"}
+                  error={
+                    validationErrors?.maxBookingLengthSkipClosedDays?.message ||
+                    zo.errors.maxBookingLengthSkipClosedDays()?.message
+                  }
+                  className="inline-block w-[18px]"
+                  inputClassName="px-[9px]"
+                  ref={maxBookingLengthSkipClosedDaysRef}
+                />
+                <span
+                  onClick={() => {
+                    if (maxBookingLengthSkipClosedDaysRef.current) {
+                      maxBookingLengthSkipClosedDaysRef.current.click();
+                    }
+                  }}
+                  className="cursor-default"
+                >
+                  Skip closed days
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-gray-500">
+                Closed days will not be considered for calculations.
+              </p>
+            </div>
           </FormRow>
 
           <div className="text-right">

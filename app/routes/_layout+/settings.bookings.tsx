@@ -7,13 +7,13 @@ import type {
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
-  TimeSettings,
-  TimeSettingsSchema,
-} from "~/components/booking/buffer/buffer-settings";
-import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
 } from "~/components/booking/tags-required/tags-required-settings";
+import {
+  TimeSettings,
+  TimeSettingsSchema,
+} from "~/components/booking/time-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
@@ -142,22 +142,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "updateTimeSettings": {
-        const { bufferStartTime, maxBookingLength } = parseData(
-          formData,
-          TimeSettingsSchema,
-          {
-            additionalData: {
-              intent,
-              organizationId,
-              formData: Object.fromEntries(formData),
-            },
-          }
-        );
+        const {
+          bufferStartTime,
+          maxBookingLength,
+          maxBookingLengthSkipClosedDays,
+        } = parseData(formData, TimeSettingsSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
 
         await updateBookingSettings({
           organizationId,
           bufferStartTime,
           maxBookingLength: maxBookingLength || null,
+          maxBookingLengthSkipClosedDays,
         });
 
         sendNotification({
@@ -359,6 +360,9 @@ export default function GeneralPage() {
         }}
         defaultBufferValue={bookingSettings.bufferStartTime}
         defaultMaxLengthValue={bookingSettings.maxBookingLength}
+        defaultMaxBookingLengthSkipClosedDays={
+          bookingSettings.maxBookingLengthSkipClosedDays
+        }
       />
 
       {/* Enable working hours form */}

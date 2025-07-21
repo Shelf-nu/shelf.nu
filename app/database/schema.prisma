@@ -906,6 +906,7 @@ model BookingSettings {
   tagsRequired Boolean @default(false) // Whether tags are required for bookings
 
   maxBookingLength Int? // Maximum booking length in hours. NULL means no limit
+  maxBookingLengthSkipClosedDays Boolean @default(false) // If true, the max booking length will skip closed days
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)

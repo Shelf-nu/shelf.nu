@@ -57,13 +57,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime, tagsRequired, maxBookingLength } =
-    useBookingSettings();
-  const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
+  const bookingSettings = useBookingSettings();
+  const { startDate: defaultStartDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
     workingHours,
-    bufferStartTime
+    bookingSettings.bufferStartTime
   );
 
+  const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
 
   const zo = useZorm(
@@ -72,9 +72,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       hints,
       action: "new",
       workingHours: workingHours,
-      bufferStartTime,
-      tagsRequired,
-      maxBookingLength,
+      bookingSettings,
     })
   );
 
@@ -131,6 +129,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                     validationErrors?.startDate?.message ||
                     zo.errors.startDate()?.message
                   }
+                  setStartDate={setStartDate}
                   endDate={endDate}
                   endDateName={zo.fields.endDate()}
                   endDateError={
@@ -159,7 +158,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                 <TagsAutocomplete
                   existingTags={[]}
                   suggestions={tagsSuggestions}
-                  required={tagsRequired}
+                  required={bookingSettings.tagsRequired}
                   error={
                     validationErrors?.tags?.message || zo.errors.tags()?.message
                   }

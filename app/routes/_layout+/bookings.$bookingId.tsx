@@ -466,7 +466,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       select: { id: true, status: true },
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
-    const { bufferStartTime, tagsRequired, maxBookingLength } =
+    const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     switch (intent) {
       case "save": {
@@ -478,9 +478,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             hints,
             workingHours,
-            bufferStartTime,
-            tagsRequired,
-            maxBookingLength,
+            bookingSettings,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -537,9 +535,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
-            bufferStartTime,
-            tagsRequired,
-            maxBookingLength,
+            bookingSettings,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -798,12 +794,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "extend-booking": {
         const hints = getClientHint(request);
-        const { endDate } = parseData(
+        
+        // Debug: Check what's actually in the form data
+        console.log("=== EXTEND BOOKING DEBUG ===");
+        console.log("FormData entries:", Object.fromEntries(formData));
+        
+        const { startDate, endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
             timeZone: hints.timeZone,
-            bufferStartTime,
+            bookingSettings,
           }),
           {
             additionalData: { userId, organizationId },

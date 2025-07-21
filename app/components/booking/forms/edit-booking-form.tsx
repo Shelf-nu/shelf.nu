@@ -71,7 +71,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const {
     id,
     name,
-    startDate,
+    startDate: incomingStartDate,
     endDate: incomingEndDate,
     custodianRef,
     bookingFlags,
@@ -83,6 +83,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const bookingStatus = useBookingStatusHelpers(status);
   const { teamMembers, userId, currentOrganization } =
     useLoaderData<BookingPageLoaderData>();
+  const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
@@ -105,8 +106,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
         bookingStatus?.isOverdue ||
         bookingStatus?.isCancelled
     );
-  const { bufferStartTime, tagsRequired, maxBookingLength } =
-    useBookingSettings();
+  const bookingSettings = useBookingSettings();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -115,9 +115,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,
-      bufferStartTime,
-      tagsRequired,
-      maxBookingLength,
+      bookingSettings,
     })
   );
 
@@ -322,6 +320,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     validationErrors?.startDate?.message ||
                     zo.errors.startDate()?.message
                   }
+                  setStartDate={setStartDate}
                   endDate={endDate}
                   endDateName={zo.fields.endDate()}
                   endDateError={
@@ -368,7 +367,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   }
                   existingTags={tags}
                   className="mb-2.5"
-                  required={tagsRequired}
+                  required={bookingSettings.tagsRequired}
                   error={
                     validationErrors?.tags?.message || zo.errors.tags()?.message
                   }

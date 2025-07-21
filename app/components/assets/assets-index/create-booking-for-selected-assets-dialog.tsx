@@ -32,23 +32,21 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
-  const { bufferStartTime, tagsRequired, maxBookingLength } =
-    useBookingSettings();
+  const bookingSettings = useBookingSettings();
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
       action: "new",
       workingHours,
-      bufferStartTime,
-      tagsRequired,
-      maxBookingLength,
+      bookingSettings,
     })
   );
 
-  const { startDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
+  const { startDate: defaultStartDate, endDate: defaultEndDate } = getBookingDefaultStartEndTimes(
     workingHours,
-    bufferStartTime
+    bookingSettings.bufferStartTime
   );
+  const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
@@ -109,6 +107,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
                   validationErrors?.startDate?.message ||
                   zo.errors.startDate()?.message
                 }
+                setStartDate={setStartDate}
                 endDate={endDate}
                 endDateName={zo.fields.endDate()}
                 endDateError={
@@ -138,7 +137,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               <TagsAutocomplete
                 existingTags={[]}
                 suggestions={tagsSuggestions}
-                required={tagsRequired}
+                required={bookingSettings.tagsRequired}
                 error={
                   validationErrors?.tags?.message || zo.errors.tags()?.message
                 }

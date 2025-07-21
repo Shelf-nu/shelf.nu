@@ -1,8 +1,12 @@
+import type { BookingSettings } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { format, parseISO, addHours, differenceInHours } from "date-fns";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
-import { normalizeWorkingHoursForValidation } from "~/modules/working-hours/utils";
+import {
+  calculateBusinessHoursDuration,
+  normalizeWorkingHoursForValidation,
+} from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
 
 type ValidationResult = { isValid: true } | { isValid: false; message: string };
@@ -133,9 +137,12 @@ interface BookingFormSchemaParams {
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
   workingHours: any; // Accept any type, normalize internally
-  bufferStartTime: number; // Required buffer parameter
-  tagsRequired: boolean; // Whether tags are required for bookings
-  maxBookingLength: number | null; // Maximum booking length in hours
+  bookingSettings: {
+    bufferStartTime: number; // Required buffer parameter
+    tagsRequired: boolean; // Whether tags are required for bookings
+    maxBookingLength: number | null; // Maximum booking length in hours
+    maxBookingLengthSkipClosedDays: boolean; // Whether to skip closed days in max booking length calculation
+  };
 }
 
 /**
@@ -164,10 +171,14 @@ export function BookingFormSchema({
   action,
   status,
   workingHours: rawWorkingHours,
-  bufferStartTime,
-  tagsRequired,
-  maxBookingLength,
+  bookingSettings,
 }: BookingFormSchemaParams) {
+  const {
+    bufferStartTime,
+    tagsRequired,
+    maxBookingLength,
+    maxBookingLengthSkipClosedDays,
+  } = bookingSettings;
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
@@ -258,7 +269,20 @@ export function BookingFormSchema({
     if (maxBookingLength && data.endDate && data.startDate) {
       const startDate = new Date(data.startDate);
       const endDate = new Date(data.endDate);
-      const durationInHours = differenceInHours(endDate, startDate);
+
+      let durationInHours: number;
+
+      if (maxBookingLengthSkipClosedDays && workingHours?.enabled) {
+        // When skipping closed days, calculate only the business hours duration
+        durationInHours = calculateBusinessHoursDuration(
+          startDate,
+          endDate,
+          workingHours
+        );
+      } else {
+        // Standard calendar hours calculation
+        durationInHours = differenceInHours(endDate, startDate);
+      }
 
       if (durationInHours > maxBookingLength) {
         ctx.addIssue({
@@ -319,59 +343,96 @@ export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
 interface ExtendBookingSchemaParams {
   workingHours?: any;
   timeZone?: string;
-  bufferStartTime: number; // Required buffer parameter
+  bookingSettings: Pick<
+    BookingSettings,
+    "bufferStartTime" | "maxBookingLength" | "maxBookingLengthSkipClosedDays"
+  >;
 }
 
 export function ExtendBookingSchema({
   workingHours: rawWorkingHours,
   timeZone,
-  bufferStartTime,
+  bookingSettings,
 }: ExtendBookingSchemaParams) {
+  const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
+    bookingSettings;
   // Transform and validate working hours data (same as BookingFormSchema)
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
-  return z.object({
-    endDate: z.string().superRefine((dateString, ctx) => {
-      // Convert string to Date for validation purposes
-      const dateTime = new Date(dateString);
+  return z
+    .object({
+      startDate: z.string(), // Hidden field with booking start date
+      endDate: z.string().superRefine((dateString, ctx) => {
+        // Convert string to Date for validation purposes
+        const dateTime = new Date(dateString);
 
-      if (isNaN(dateTime.getTime())) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Invalid date format",
-        });
-        return;
-      }
-
-      // 1. Validate future date with buffer using existing function
-      const futureValidation = validateFutureDate(
-        dateTime,
-        bufferStartTime,
-        timeZone
-      );
-      if (!futureValidation.isValid) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: futureValidation.message,
-        });
-        return;
-      }
-
-      // 2. Validate working hours using existing function
-      if (workingHours) {
-        const workingHoursValidation = validateWorkingHours(
-          dateTime,
-          workingHours
-        );
-        if (!workingHoursValidation.isValid) {
+        if (isNaN(dateTime.getTime())) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: workingHoursValidation.message,
+            message: "Invalid date format",
+          });
+          return;
+        }
+
+        // 1. Validate future date with buffer using existing function
+        const futureValidation = validateFutureDate(
+          dateTime,
+          bufferStartTime,
+          timeZone
+        );
+        if (!futureValidation.isValid) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: futureValidation.message,
+          });
+          return;
+        }
+
+        // 2. Validate working hours using existing function
+        if (workingHours) {
+          const workingHoursValidation = validateWorkingHours(
+            dateTime,
+            workingHours
+          );
+          if (!workingHoursValidation.isValid) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: workingHoursValidation.message,
+            });
+          }
+        }
+      }),
+    })
+    .superRefine((data, ctx) => {
+      // Cross-field validation for maximum booking length
+      if (maxBookingLength && data.startDate && data.endDate) {
+        const startDate = new Date(data.startDate);
+        const endDate = new Date(data.endDate);
+
+        let durationInHours: number;
+
+        if (maxBookingLengthSkipClosedDays && workingHours?.enabled) {
+          // When skipping closed days, calculate only the business hours duration
+          durationInHours = calculateBusinessHoursDuration(
+            startDate,
+            endDate,
+            workingHours
+          );
+        } else {
+          // Standard calendar hours calculation
+          durationInHours = differenceInHours(endDate, startDate);
+        }
+
+
+        if (durationInHours > maxBookingLength) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Booking duration cannot exceed ${maxBookingLength} hours`,
+            path: ["endDate"],
           });
         }
       }
-    }),
-  });
+    });
 }
 
 export type ExtendBookingSchemaType = ReturnType<typeof ExtendBookingSchema>;

@@ -17,6 +17,7 @@ export async function getBookingSettingsForOrganization(
       create: {
         bufferStartTime: 0,
         maxBookingLength: null,
+        maxBookingLengthSkipClosedDays: false,
         tagsRequired: false,
         organizationId,
       },
@@ -24,6 +25,7 @@ export async function getBookingSettingsForOrganization(
         id: true,
         bufferStartTime: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
         tagsRequired: true,
       },
     });
@@ -44,11 +46,13 @@ export async function updateBookingSettings({
   bufferStartTime,
   tagsRequired,
   maxBookingLength,
+  maxBookingLengthSkipClosedDays,
 }: {
   organizationId: string;
   bufferStartTime?: number;
   tagsRequired?: boolean;
   maxBookingLength?: number | null;
+  maxBookingLengthSkipClosedDays?: boolean;
 }) {
   try {
     const updateData: Prisma.BookingSettingsUpdateInput = {};
@@ -57,6 +61,8 @@ export async function updateBookingSettings({
     if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
     if (maxBookingLength !== undefined)
       updateData.maxBookingLength = maxBookingLength;
+    if (maxBookingLengthSkipClosedDays !== undefined)
+      updateData.maxBookingLengthSkipClosedDays = maxBookingLengthSkipClosedDays;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
@@ -66,6 +72,7 @@ export async function updateBookingSettings({
         bufferStartTime: true,
         tagsRequired: true,
         maxBookingLength: true,
+        maxBookingLengthSkipClosedDays: true,
       },
     });
 
@@ -79,6 +86,7 @@ export async function updateBookingSettings({
         bufferStartTime,
         tagsRequired,
         maxBookingLength,
+        maxBookingLengthSkipClosedDays,
       },
       label,
     });
