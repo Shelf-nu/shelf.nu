@@ -9,7 +9,7 @@ import type {
   UserOrganization,
   Tag,
 } from "@prisma/client";
-import { isBefore } from "date-fns";
+import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -22,6 +22,7 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
   getDateTimeFormatFromHints,
+  getHints,
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -2734,4 +2735,69 @@ export async function loadBookingsData({
     ids,
     hints,
   };
+}
+
+/**
+ *
+ */
+export async function duplicateBooking({
+  bookingId,
+  organizationId,
+  userId,
+  request,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  request: Request;
+}) {
+  try {
+    const bookingToDuplicate = await getBooking({
+      id: bookingId,
+      organizationId,
+    });
+    const hints = getHints(request);
+
+    const newBooking = await db.booking.create({
+      data: {
+        name: bookingToDuplicate.name + " (Copy)",
+        description: bookingToDuplicate.description,
+        from: DateTime.fromFormat(
+          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
+            DATE_TIME_FORMAT
+          ),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
+        to: DateTime.fromFormat(
+          DateTime.fromJSDate(addDays(new Date(), 1), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
+        organizationId,
+        creatorId: userId,
+        status: BookingStatus.DRAFT,
+        custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
+        custodianUserId: bookingToDuplicate.custodianUserId,
+        assets: {
+          connect: bookingToDuplicate.assets.map((asset) => ({ id: asset.id })),
+        },
+        tags: {
+          connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
+        },
+      },
+    });
+
+    return newBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while duplicating booking.",
+      label,
+    });
+  }
 }
