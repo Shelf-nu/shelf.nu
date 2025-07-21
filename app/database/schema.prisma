@@ -45,6 +45,7 @@ model User {
   customerId        String? @unique // Stripe customer id
   sso               Boolean @default(false)
   createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
 
   // Datetime
   createdAt DateTime @default(now())
