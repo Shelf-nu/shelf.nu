@@ -298,3 +298,96 @@ export function Table({
 ```
 
 In this example hook detects if the table content exceeds the container's width. When it does, isOverflowing becomes true, adding the overflowing class to the outer div. This class can trigger visual indicators like gradients to show users there's more content to scroll through.
+
+## useTheme
+
+**Overview**
+
+The `useTheme` hook is a client-side theme management hook that provides real-time theme detection and updates. Unlike server-side theme detection, this hook immediately reacts to theme changes and provides the current theme state for components that need to adapt their behavior based on the active theme.
+
+**Features**
+
+- Detects initial theme from localStorage or system preference
+- Listens for theme changes via localStorage (cross-tab synchronization)
+- Monitors system preference changes when no manual theme is set
+- Watches for DOM class changes for immediate updates
+- Provides reliable client-side theme state
+
+**Returns:**
+
+- `theme`: A string value of either `"light"` or `"dark"` representing the current active theme.
+
+**Usage:**
+
+```typescript
+import React from "react";
+import { useTheme } from "~/hooks/use-theme";
+
+export function ThemeAwareComponent() {
+  const theme = useTheme();
+
+  return (
+    <div>
+      <p>Current theme: {theme}</p>
+      {theme === "dark" ? (
+        <DarkModeSpecificComponent />
+      ) : (
+        <LightModeSpecificComponent />
+      )}
+    </div>
+  );
+}
+```
+
+**Implementation Details:**
+
+The hook handles multiple theme change scenarios:
+- **Initial Load**: Checks localStorage first, falls back to system preference
+- **Storage Changes**: Responds to theme changes from other tabs/windows
+- **System Changes**: Updates when system preference changes (only if no manual theme is set)
+- **DOM Changes**: Watches for immediate class changes on the HTML element
+
+This ensures that components using this hook stay synchronized with the current theme state across all possible theme change scenarios.
+
+## usePlaceholderImage
+
+**Overview**
+
+The `usePlaceholderImage` hook provides theme-aware placeholder image URLs for assets. It automatically returns the appropriate placeholder image based on the current theme, ensuring that placeholder images blend well with both light and dark mode interfaces.
+
+**Returns:**
+
+- `string`: The URL path to the appropriate placeholder image for the current theme.
+  - Light theme: `/static/images/asset-placeholder.jpg`
+  - Dark theme: `/static/images/asset-placeholder-dark.jpeg`
+
+**Usage:**
+
+```typescript
+import React from "react";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
+
+export function AssetImage({ src, alt }: { src?: string; alt: string }) {
+  const placeholderSrc = usePlaceholderImage();
+
+  return (
+    <img
+      src={src || placeholderSrc}
+      alt={alt}
+      onError={(e) => {
+        e.currentTarget.src = placeholderSrc;
+      }}
+    />
+  );
+}
+```
+
+**Dependencies:**
+
+- `useTheme`: Used internally to determine the current theme and select the appropriate placeholder image.
+
+This hook is particularly useful for:
+- Asset images that may fail to load
+- Default images for new assets
+- Consistent placeholder appearance across theme changes
+- Maintaining visual consistency in image galleries and asset lists
