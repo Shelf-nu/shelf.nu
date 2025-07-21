@@ -22,6 +22,7 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
   getDateTimeFormatFromHints,
+  getHints,
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -2743,23 +2744,34 @@ export async function duplicateBooking({
   bookingId,
   organizationId,
   userId,
+  request,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
   userId: User["id"];
+  request: Request;
 }) {
   try {
     const bookingToDuplicate = await getBooking({
       id: bookingId,
       organizationId,
     });
+    const hints = getHints(request);
 
     const newBooking = await db.booking.create({
       data: {
         name: bookingToDuplicate.name + " (Copy)",
         description: bookingToDuplicate.description,
-        from: new Date(),
-        to: addDays(new Date(), 1),
+        from: DateTime.fromFormat(
+          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(DATE_TIME_FORMAT),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
+        to: DateTime.fromFormat(
+          DateTime.fromJSDate(addDays(new Date(), 1), { zone: hints.timeZone }).toFormat(DATE_TIME_FORMAT),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
         organizationId,
         creatorId: userId,
         status: BookingStatus.DRAFT,

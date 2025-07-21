@@ -146,7 +146,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               width="full"
               to="duplicate"
             >
-              Make a copy
+              Duplicate booking
             </Button>
           </DropdownMenuItem>
 

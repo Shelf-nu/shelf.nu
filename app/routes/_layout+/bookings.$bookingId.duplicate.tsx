@@ -65,6 +65,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId,
+      request,
     });
 
     sendNotification({
@@ -96,7 +97,6 @@ export default function DuplicateBooking() {
           You're about to duplicate the booking{" "}
           <strong className="text-black">{booking.name}</strong>.
         </p>
-        <p>Description: {booking.description}</p>
         <p>
           All current booking details will be copied. You can review and edit
           them later.
