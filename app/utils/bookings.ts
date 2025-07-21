@@ -44,8 +44,8 @@ export const bookingStatusColorMap = (
       dark: "#A78BFA", // lighter purple for dark mode
     },
     OVERDUE: {
-      light: "#B54708", // orange-700
-      dark: "#F59E0B", // lighter orange for dark mode
+      light: "#DC2626", // red-600
+      dark: "#F87171", // red-400 for dark mode
     },
     COMPLETE: {
       light: "#17B26A", // green-600

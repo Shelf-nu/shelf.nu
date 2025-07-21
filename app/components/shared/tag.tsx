@@ -11,7 +11,7 @@ export const Tag = ({
 }) => (
   <span
     className={tw(
-      "mb-1 inline-flex justify-center rounded-2xl bg-color-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-color-700",
+      "mb-1 inline-flex justify-center rounded-2xl bg-muted px-[8px] py-[2px] text-center text-[12px] font-medium text-color-700",
       className
     )}
     title={title}

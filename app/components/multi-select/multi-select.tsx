@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import _ from "lodash";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, X } from "lucide-react";
 import { ReactTags } from "react-tag-autocomplete";
 import type { Tag } from "react-tag-autocomplete";
 import { tw } from "~/utils/tw";
@@ -133,6 +133,17 @@ export default function MultiSelect<T>({
               className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-color-300"
               disabled={disabled}
             />
+          )}
+          renderTag={({ tag, ...props }) => (
+            <span className="mb-1 inline-flex items-center justify-center rounded-2xl bg-muted px-[8px] py-[2px] text-center text-[12px] font-medium text-color-700">
+              {tag.label}
+              <button
+                {...props}
+                className="ml-1 inline-flex items-center justify-center rounded-full hover:bg-soft focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
           )}
         />
 

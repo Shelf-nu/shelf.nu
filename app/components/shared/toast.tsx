@@ -18,7 +18,7 @@ export const Toaster = () => {
   const { open, title, message, icon } = notification;
 
   const variants = {
-    primary: tw(`bg-primary-100 border-primary-50 text-primary`),
+    primary: tw(`border-primary-50 bg-primary-100 text-primary`),
     gray: tw(`border-color-50 bg-color-100 text-color-700`),
     success: tw(`border-success-50 bg-success-100 text-success-600`),
     error: tw(`border-error-50 bg-error-100 text-error-600`),
