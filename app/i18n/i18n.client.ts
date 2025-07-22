@@ -1,6 +1,6 @@
-import Backend from "i18next-fs-backend";
 import { config } from "~/config/shelf.config";
 
+// Client-side i18n configuration (no fs-backend)
 export default {
   // This is the list of languages your application supports
   supportedLngs: config.SUPPORTED_LANGUAGES,
@@ -12,5 +12,5 @@ export default {
   backend: {
     loadPath: "/locales/{{lng}}/{{ns}}.json",
   },
-  plugins: [Backend],
+  // No plugins array - backends are added dynamically
 };

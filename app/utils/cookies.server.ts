@@ -8,7 +8,7 @@ import type {
   AllowedPathname,
 } from "~/hooks/search-params";
 import { cleanParamsForCookie } from "~/hooks/search-params";
-import i18n from "~/i18n/i18n";
+import i18n from "~/i18n/i18n.server";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getCurrentSearchParams } from "./http.server";

@@ -7,6 +7,7 @@ import { flatRoutes } from "remix-flat-routes";
 import { cjsInterop } from "vite-plugin-cjs-interop";
 import { init } from "@paralleldrive/cuid2";
 import fs from "node:fs";
+import { i18nTranslations } from "./vite-plugins/i18n-translations";
 
 const createHash = init({
   length: 8,
@@ -57,6 +58,9 @@ export default defineConfig({
     },
   },
   plugins: [
+    i18nTranslations({
+      outputDir: 'public/locales',
+    }),
     cjsInterop({
       // List of CJS dependencies that require interop
       dependencies: [
