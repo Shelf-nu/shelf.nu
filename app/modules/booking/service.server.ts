@@ -1965,7 +1965,7 @@ export async function getBookingsForCalendar(params: {
     canSeeAllCustody,
   } = params;
 
-  const { searchParams, search, status, teamMemberIds, tags } =
+  const { searchParams, search, status, teamMemberIds, tags, selfServiceData } =
     await getBookingsFilterData({
       request,
       canSeeAllBookings,
@@ -2004,6 +2004,7 @@ export async function getBookingsForCalendar(params: {
       bookingFrom: startDate,
       bookingTo: endDate,
       custodianTeamMemberIds: teamMemberIds,
+      ...selfServiceData,
       tags,
       extraInclude: {
         custodianTeamMember: true,
