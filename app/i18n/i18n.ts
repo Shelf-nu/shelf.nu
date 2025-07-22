@@ -1,6 +1,6 @@
-import * as path from "path";
 import Backend from "i18next-fs-backend";
 import { config } from "~/config/shelf.config";
+
 export default {
   // This is the list of languages your application supports
   supportedLngs: config.SUPPORTED_LANGUAGES,
@@ -10,8 +10,7 @@ export default {
   // The default namespace of i18next is "translation", but you can customize it here
   defaultNS: "common",
   backend: {
-    // Absolute path recommended
-    loadPath: path.resolve("./public/locales/{{lng}}/{{ns}}.json"),
+    loadPath: "/locales/{{lng}}/{{ns}}.json",
   },
   plugins: [Backend],
 };

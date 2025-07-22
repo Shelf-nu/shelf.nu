@@ -16,7 +16,7 @@ async function hydrate() {
     .use(LanguageDetector)
     .init({
       ...i18n,
-      debug: true,
+      debug: process.env.NODE_ENV === "development",
     });
   console.log("i18next initialized", i18next);
   React.startTransition(() => {

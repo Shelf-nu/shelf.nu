@@ -2,11 +2,11 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
+import { parse } from "cookie";
 import type {
   ALLOWED_FILTER_PATHNAMES,
   AllowedPathname,
 } from "~/hooks/search-params";
-import { parse } from "cookie";
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import i18n from "~/i18n/i18n";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
