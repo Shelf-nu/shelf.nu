@@ -47,7 +47,7 @@ export function DatesFields({
         required
       >
         <Input
-          key={startDate}
+          key="start-date-input"
           label="Start Date"
           type="datetime-local"
           hideLabel
@@ -68,12 +68,34 @@ export function DatesFields({
              * When user changes the startDate and the new startDate is greater than the endDate
              * in that case, we have to update endDate to be the endDay date of startDate.
              */
-            const newStartDate = new Date(event.target.value);
-            if (isNewBooking && endDate && newStartDate > new Date(endDate)) {
-              const newEndDate = dateForDateTimeInputValue(
-                new Date(newStartDate.setHours(18, 0, 0))
-              );
-              setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+            const inputValue = event.target.value;
+            if (isNewBooking && endDate && inputValue) {
+              try {
+                // Safari-friendly date parsing: datetime-local format is YYYY-MM-DDTHH:mm
+                const newStartDate = new Date(inputValue);
+                const currentEndDate = new Date(endDate);
+
+                // Check if dates are valid before comparing
+                if (
+                  !isNaN(newStartDate.getTime()) &&
+                  !isNaN(currentEndDate.getTime()) &&
+                  newStartDate > currentEndDate
+                ) {
+                  // Create new end date at 6 PM on the same day as start date
+                  const endDateTime = new Date(newStartDate);
+                  endDateTime.setHours(18, 0, 0, 0);
+
+                  const newEndDate = dateForDateTimeInputValue(endDateTime);
+                  setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+                }
+              } catch (error) {
+                // If date parsing fails, just update the start date without affecting end date
+                // eslint-disable-next-line no-console
+                console.warn(
+                  "Date parsing failed in start date onChange:",
+                  error
+                );
+              }
             }
           }}
         />
