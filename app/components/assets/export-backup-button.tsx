@@ -10,7 +10,9 @@ export const ExportBackupButton = ({
   const { totalItems } = useLoaderData<AssetIndexLoaderData>();
   return (
     <Button
-      to={`/assets/export/assets-${new Date().toISOString().slice(0, 10)}.csv`}
+      to={`/assets/export/assets-${new Date()
+        .toISOString()
+        .slice(0, 10)}-${new Date().getTime()}.csv`}
       variant="secondary"
       download
       reloadDocument

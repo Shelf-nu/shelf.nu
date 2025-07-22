@@ -45,7 +45,7 @@ export const GenerateBatchQr = () => {
           to={`/admin-dashboard/qrs/codes.zip?${new URLSearchParams({
             amount: String(amount),
             batchName,
-          })}`}
+          })}-${new Date().getTime()}`}
           reloadDocument
           download
           variant="secondary"
