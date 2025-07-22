@@ -19,13 +19,11 @@ export const UserBadge = ({
       className
     )}
   >
-    {img && (
-      <img
-        className={tw("mr-1 size-4 rounded-full", imgClassName)}
-        src={img}
-        alt={name}
-      />
-    )}
+    <img
+      className={tw("mr-1 size-4 rounded-full", imgClassName)}
+      src={img || "/static/images/default_pfp.jpg"}
+      alt={name}
+    />
     <span className="mt-px">{name}</span>
   </span>
 );
