@@ -59,7 +59,7 @@ export default defineConfig({
   },
   plugins: [
     i18nTranslations({
-      outputDir: 'public/locales',
+      outputDir: "public/locales",
     }),
     cjsInterop({
       // List of CJS dependencies that require interop

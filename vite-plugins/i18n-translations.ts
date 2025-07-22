@@ -20,11 +20,11 @@ export function i18nTranslations(
 
   const compileSingleFile = async (tsFilePath: string) => {
     const outputPath = resolve(root, outputDir);
-    const relativePath = tsFilePath.replace(resolve(root, sourceDir), '');
-    const pathParts = relativePath.split('/').filter(Boolean);
-    
+    const relativePath = tsFilePath.replace(resolve(root, sourceDir), "");
+    const pathParts = relativePath.split("/").filter(Boolean);
+
     if (pathParts.length !== 2) return; // Should be lang/file.ts
-    
+
     const [lang, filename] = pathParts;
     const namespace = basename(filename, ".ts");
     const outputLangDir = join(outputPath, lang);
@@ -124,7 +124,7 @@ export function i18nTranslations(
   let compiled = false;
   let compiling = new Set<string>();
   let debounceTimers = new Map<string, NodeJS.Timeout>();
-  
+
   return {
     name: "i18n-translations",
     configResolved(config) {
@@ -162,7 +162,7 @@ export function i18nTranslations(
 
             compiling.add(file);
             console.log(`[i18n] Translation changed: ${basename(file)}`);
-            
+
             try {
               await compileSingleFile(file);
               // Trigger full page reload since translations affect the entire app

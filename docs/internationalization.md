@@ -5,6 +5,7 @@ Shelf.nu uses i18next with TypeScript support for internationalization. This gui
 ## Overview
 
 The i18n system provides:
+
 - **TypeScript-first translations** with full type safety
 - **Automatic compilation** from TypeScript to JSON during development and build
 - **Hot reloading** in development mode
@@ -83,6 +84,7 @@ export default fr;
 ```
 
 **Key Benefits:**
+
 - TypeScript ensures all keys from the source language are translated
 - Compiler errors if translations are missing or have typos
 - IntelliSense autocomplete for translation keys
@@ -98,11 +100,13 @@ export default fr;
 The i18n system uses a custom Vite plugin (`vite-plugins/i18n-translations.ts`) that:
 
 ### Development Mode
+
 - Watches TypeScript translation files for changes
 - Automatically recompiles to JSON when files change
 - Triggers hot reloading to update translations instantly
 
 ### Build Mode
+
 - Compiles all TypeScript translations to JSON during build
 - Ensures production has all necessary translation files
 
@@ -116,8 +120,8 @@ import { i18nTranslations } from "./vite-plugins/i18n-translations";
 export default defineConfig({
   plugins: [
     i18nTranslations({
-      sourceDir: 'app/locales',     // TypeScript files location
-      outputDir: 'public/locales',  // JSON output location
+      sourceDir: "app/locales", // TypeScript files location
+      outputDir: "public/locales", // JSON output location
     }),
     // ... other plugins
   ],
@@ -133,7 +137,7 @@ import { useTranslation } from "react-i18next";
 
 export function LoginForm() {
   const { t } = useTranslation();
-  
+
   return (
     <div>
       <h1>{t("login.title")}</h1>
@@ -152,7 +156,7 @@ import { initTranslationLoader } from "~/i18n/i18next.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const t = await initTranslationLoader(request);
-  
+
   return json({
     message: t("dashboard.welcome"),
   });
@@ -206,18 +210,18 @@ The system prevents common i18n errors:
 
 ```typescript
 // ✅ Valid - key exists
-t("login.title")
+t("login.title");
 
-// ❌ TypeScript error - key doesn't exist  
-t("login.nonexistent")
+// ❌ TypeScript error - key doesn't exist
+t("login.nonexistent");
 
 // ❌ TypeScript error - missing translation in French file
 const fr: typeof en = {
   login: {
     title: "...",
     // Missing: subtitle, button
-  }
-}
+  },
+};
 ```
 
 ## Best Practices
@@ -229,17 +233,23 @@ Use nested objects for organization:
 ```typescript
 const en = {
   // Group by feature/page
-  login: { /* ... */ },
-  dashboard: { /* ... */ },
-  assets: { /* ... */ },
-  
+  login: {
+    /* ... */
+  },
+  dashboard: {
+    /* ... */
+  },
+  assets: {
+    /* ... */
+  },
+
   // Group by component type
   buttons: {
     save: "Save",
     cancel: "Cancel",
     delete: "Delete",
   },
-  
+
   // Group by message type
   errors: {
     required: "This field is required",
@@ -262,8 +272,8 @@ const en = {
 };
 
 // Usage
-t("messages.welcome", { name: "John" })
-t("messages.itemCount", { count: 5 })
+t("messages.welcome", { name: "John" });
+t("messages.itemCount", { count: 5 });
 ```
 
 ### 3. Namespace Organization
@@ -283,16 +293,19 @@ app/locales/en/
 ### Common Issues
 
 **Plugin not compiling files:**
+
 - Ensure `i18nTranslations()` is first in the Vite plugins array
 - Check that TypeScript files have valid syntax
 - Verify the `sourceDir` path is correct
 
 **Missing translations in browser:**
+
 - Check that JSON files are generated in `public/locales/`
 - Verify the `loadPath` in i18n configuration matches output location
 - Ensure language codes match between TypeScript files and configuration
 
 **Type errors:**
+
 - Make sure all target language files import and extend the source language type
 - Verify all required keys are present in translation objects
 - Check for typos in translation keys

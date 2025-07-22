@@ -18,7 +18,7 @@ async function hydrate() {
       ...i18n,
       debug: false, // Disable all i18next logging in production
     });
-  
+
   React.startTransition(() => {
     hydrateRoot(
       document,
