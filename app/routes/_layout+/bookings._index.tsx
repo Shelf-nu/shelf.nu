@@ -20,6 +20,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
+import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -463,18 +464,5 @@ const ListBookingsContent = ({
     </>
   );
 };
-
-function UserBadge({ img, name }: { img?: string; name: string }) {
-  return (
-    <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-      <img
-        src={img || "/static/images/default_pfp.jpg"}
-        className="mr-1 size-4 rounded-full"
-        alt=""
-      />
-      <span className="mt-px">{name}</span>
-    </span>
-  );
-}
 
 export const ErrorBoundary = () => <ErrorContent />;

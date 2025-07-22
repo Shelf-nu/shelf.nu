@@ -13,19 +13,19 @@ export const UserBadge = ({
   imgClassName,
   name,
 }: UserBadgeProps) => (
-  <div className="h-6 max-w-[250px]">
-    <span
-      className={tw(
-        "ml-1 inline-flex w-max items-center rounded-2xl bg-gray-100 px-2 py-0.5",
-        className
-      )}
-    >
-      {img && (
-        <img className={tw("size-4", imgClassName)} src={img} alt={name} />
-      )}
-      <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-        {name}
-      </span>
-    </span>
-  </div>
+  <span
+    className={tw(
+      "inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700",
+      className
+    )}
+  >
+    {img && (
+      <img
+        className={tw("mr-1 size-4 rounded-full", imgClassName)}
+        src={img}
+        alt={name}
+      />
+    )}
+    <span className="mt-px">{name}</span>
+  </span>
 );
