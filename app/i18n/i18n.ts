@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import * as path from 'path';
 import Backend from "i18next-fs-backend";
 import { config } from "~/config/shelf.config";
 export default {
@@ -11,7 +11,7 @@ export default {
   defaultNS: "common",
   backend: {
     // Absolute path recommended
-    loadPath: resolve("./public/locales/{{lng}}/{{ns}}.js"),
+    loadPath: path.resolve("./public/locales/{{lng}}/{{ns}}.js"),
   },
   plugins: [Backend],
 };

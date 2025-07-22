@@ -26,7 +26,7 @@ export async function createI18nInstance(
   const instance = createInstance();
   const ns = remixI18n.getRouteNamespaces(remixContext);
   const lng = getLng(request);
-  console.log(lng)
+  console.log(lng);
   await instance
     .use(initReactI18next)
     .use(Backend)

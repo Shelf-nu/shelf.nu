@@ -2,7 +2,7 @@ import React from "react";
 
 import { RemixBrowser } from "@remix-run/react";
 import i18next from "i18next";
-import LanguageDetector from 'i18next-browser-languagedetector';
+import LanguageDetector from "i18next-browser-languagedetector";
 import Backend from "i18next-fs-backend";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
@@ -17,7 +17,6 @@ async function hydrate() {
     .init({
       ...i18n,
       debug: true,
-
     });
   console.log("i18next initialized", i18next);
   React.startTransition(() => {
