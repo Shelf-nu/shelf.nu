@@ -1,10 +1,10 @@
-import type { Asset } from "@prisma/client";
+import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { Badge } from "../shared/badge";
+import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
@@ -38,6 +38,13 @@ export default function NewestAssets() {
                 <Row
                   item={{
                     ...asset,
+                    category: asset?.category
+                      ? {
+                          id: asset.category.id,
+                          name: asset.category?.name || "Uncategorized",
+                          color: asset.category?.color || "#575757",
+                        }
+                      : null,
                     mainImageExpiration: asset.mainImageExpiration
                       ? new Date(asset.mainImageExpiration)
                       : null,
@@ -70,10 +77,7 @@ const Row = ({
   item,
 }: {
   item: Asset & {
-    category?: {
-      color: string;
-      name: string;
-    } | null;
+    category: Pick<Category, "id" | "name" | "color"> | null;
   };
 }) => {
   const { category } = item;
@@ -121,15 +125,7 @@ const Row = ({
 
       {/* Category */}
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : (
-          <Badge color={"#808080"} withDot={false}>
-            {"Uncategorized"}
-          </Badge>
-        )}
+        <CategoryBadge category={category} />
       </Td>
     </>
   );

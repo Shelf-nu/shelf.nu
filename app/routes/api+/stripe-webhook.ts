@@ -184,9 +184,9 @@ export async function action({ request }: ActionFunctionArgs) {
             status: 500,
           });
         }
-        /** Check whether the paused subscription is higher tier and the current one and only then cancel */
+        /** Check whether the paused subscription is higher tier or equal tier and the current one and only then cancel */
         const pausedSubscriptionIsHigherTier =
-          subscriptionTiersPriority[tierId as TierId] >
+          subscriptionTiersPriority[tierId as TierId] >=
           subscriptionTiersPriority[user.tierId];
 
         /** When its a trial subscription, update the tier of the user
@@ -269,9 +269,9 @@ export async function action({ request }: ActionFunctionArgs) {
         // Occurs whenever a customer’s subscription ends.
         const { customerId, tierId } = await getDataFromStripeEvent(event);
 
-        /** Check whether the deleted subscription is higher tier and the current one and only then cancel */
+        /** Check whether the deleted subscription is higher tier or equal tier and the current one and only then cancel */
         const deletedSubscriptionIsHigherTier =
-          subscriptionTiersPriority[tierId as TierId] >
+          subscriptionTiersPriority[tierId as TierId] >=
           subscriptionTiersPriority[user.tierId];
 
         if (deletedSubscriptionIsHigherTier) {

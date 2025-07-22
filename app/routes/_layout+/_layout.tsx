@@ -26,6 +26,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { config } from "~/config/shelf.config";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
@@ -46,6 +47,7 @@ import {
   getCustomerActiveSubscription,
   getStripeCustomer,
   stripe,
+  validateSubscriptionIsActive,
 } from "~/utils/stripe.server";
 import { canUseBookings } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -90,6 +92,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       )) as CustomerWithSubscriptions;
       /** Find the active subscription for the Stripe customer */
       subscription = getCustomerActiveSubscription({ customer });
+      await validateSubscriptionIsActive({ user, subscription });
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
@@ -126,6 +129,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user,
         organizations,
         currentOrganizationId: organizationId,
+        bookingSettings: await getBookingSettingsForOrganization(
+          currentOrganization.id
+        ),
         currentOrganization,
         currentOrganizationUserRoles: user?.userOrganizations.find(
           (userOrg) => userOrg.organization.id === organizationId

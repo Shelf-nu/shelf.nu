@@ -10,6 +10,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Form } from "~/components/custom-form";
@@ -24,7 +25,9 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import {
   toggleOrganizationSso,
   toggleWorkspaceDisabled,
+  toggleBarcodeEnabled,
 } from "~/modules/organization/service.server";
+import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -56,6 +59,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           },
           owner: true,
           ssoDetails: true,
+          workingHours: true,
         },
       })
       .catch((cause) => {
@@ -68,6 +72,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           label: "Admin dashboard",
         });
       });
+
+    if (!organization.workingHours) {
+      await createDefaultWorkingHours(organization.id);
+    }
 
     return json(data({ organization }));
   } catch (cause) {
@@ -99,6 +107,7 @@ export const action = async ({
           "updateSsoDetails",
           "content",
           "disableWorkspace",
+          "toggleBarcodes",
         ]),
       })
     );
@@ -133,6 +142,23 @@ export const action = async ({
         return json(
           data({
             message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
+          })
+        );
+      case "toggleBarcodes":
+        const { barcodesEnabled } = parseData(
+          await request.formData(),
+          z.object({
+            barcodesEnabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await toggleBarcodeEnabled({ organizationId, barcodesEnabled });
+
+        return json(
+          data({
+            message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
           })
         );
       case "updateSsoDetails":
@@ -227,11 +253,20 @@ export default function OrgPage() {
   return (
     <div>
       <h1>{organization.name}</h1>
-      <h3>
-        {" "}
-        Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
-        {organization.owner.email}
-      </h3>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="secondary"
+          to={`/admin-dashboard/${organization.owner.id}`}
+          className={"p-2"}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <h3>
+          {" "}
+          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          {organization.owner.email}
+        </h3>
+      </div>
 
       {/* @ts-ignore */}
       {actionData && actionData.message && (
@@ -244,13 +279,18 @@ export default function OrgPage() {
         <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
           <h4>Organization details</h4>
           <ol className="">
-            {Object.entries(organization).map(([key, value]) => (
-              <li key={key}>
-                <span className="font-semibold">{key}</span>:{" "}
-                {typeof value === "string" ? value : null}
-                {typeof value === "boolean" ? String(value) : null}
-              </li>
-            ))}
+            {Object.entries(organization).map(
+              ([key, value]) =>
+                !["workingHours", "ssoDetails", "owner", "qrCodes"].includes(
+                  key
+                ) && (
+                  <li key={key}>
+                    <span className="font-semibold">{key}</span>:{" "}
+                    {typeof value === "string" ? value : null}
+                    {typeof value === "boolean" ? String(value) : null}
+                  </li>
+                )
+            )}
           </ol>
           <hr className="border-1 border-gray-700" />
           <h4>Enable SSO</h4>
@@ -273,6 +313,29 @@ export default function OrgPage() {
                 title={"Toggle SSO"}
               />
               <input type="hidden" value="toggleSso" name="intent" />
+            </div>
+          </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disable Barcodes</h4>
+          <p>Enable or disable barcode functionality for this workspace</p>
+          <fetcher.Form
+            method="post"
+            onChange={(e) => fetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Enable Barcodes
+                </p>
+              </div>
+              <Switch
+                name={"barcodesEnabled"}
+                disabled={isFormProcessing(fetcher.state)}
+                defaultChecked={organization.barcodesEnabled}
+                required
+                title={"Toggle Barcodes"}
+              />
+              <input type="hidden" value="toggleBarcodes" name="intent" />
             </div>
           </fetcher.Form>
           <hr className="border-1 border-gray-700" />
@@ -427,6 +490,7 @@ export default function OrgPage() {
             { to: "assets", content: "Assets" },
             { to: "qr-codes", content: "QR codes" },
             { to: "members", content: "Members" },
+            { to: "transfer-ownership", content: "Transfer Ownership" },
           ]}
         />
         <div>

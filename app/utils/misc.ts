@@ -1,3 +1,5 @@
+import _ from "lodash";
+
 /**
  * .email() has an issue with validating email
  * addresses where the there is a subdomain and a dash included:
@@ -49,4 +51,35 @@ export function sanitizeFilename(filename: string): string {
     s = "_" + s;
   }
   return s;
+}
+
+export async function getImageAsBase64(url: string) {
+  try {
+    // Fetch the image data
+    const response = await fetch(url);
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    // Convert the image data to a Base64-encoded string
+    const base64Image = Buffer.from(arrayBuffer).toString("base64");
+
+    return base64Image;
+
+    // Convert the image data to a Base64-encoded string
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Error fetching image:", error);
+    return null;
+  }
+}
+
+/**
+ * Converts the given enum case string to title case
+ *
+ * @param value - The enum case string to convert
+ * @returns The title case string
+ * @example SOME_ENUM_CASE -> Some Enum Case
+ */
+export function formatEnum(value: string) {
+  return _.startCase(_.toLower(value));
 }

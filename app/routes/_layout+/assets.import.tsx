@@ -27,12 +27,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
-    });
+    const { organizationId, organizations, canUseBarcodes } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.import,
+      });
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
@@ -63,6 +64,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       data: contentData,
       userId,
       organizationId,
+      canUseBarcodes,
     });
     return json(data(null));
   } catch (cause) {

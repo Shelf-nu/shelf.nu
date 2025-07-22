@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { type loader } from "~/routes/_layout+/bookings";
+import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
@@ -13,7 +13,7 @@ export const BulkCancelBookingsSchema = z.object({
 });
 
 export default function BulkCancelDialog() {
-  const { totalItems } = useLoaderData<typeof loader>();
+  const { totalItems } = useLoaderData<BookingsIndexLoaderData>();
 
   const bookingsSelected = useAtomValue(selectedBulkItemsAtom);
   const totalSelected = isSelectingAllItems(bookingsSelected)

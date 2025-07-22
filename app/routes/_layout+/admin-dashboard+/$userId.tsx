@@ -5,6 +5,7 @@ import {
   type Qr,
   type User,
   type CustomTierLimit,
+  OrganizationRoles,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -22,14 +23,15 @@ import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
-import { Table, Td, Tr } from "~/components/table";
+import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
+import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
@@ -38,7 +40,13 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
-import { createStripeCustomer } from "~/utils/stripe.server";
+import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+import {
+  createStripeCustomer,
+  getOrCreateCustomerId,
+  getStripeCustomer,
+  getStripePricesAndProducts,
+} from "~/utils/stripe.server";
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -82,7 +90,23 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           userId: shelfUserId,
         },
         select: {
-          organization: true,
+          organization: {
+            include: {
+              ssoDetails: true,
+              userOrganizations: {
+                // Include ALL users in each org with SSO enabled so we cna count them
+                where: {
+                  user: {
+                    sso: true,
+                  },
+                },
+                select: {
+                  userId: true,
+                },
+              },
+            },
+          },
+          roles: true,
         },
       })
       .catch((cause) => {
@@ -94,10 +118,57 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
+    /** Which organizations of the user have SSO enabled */
+    const organizationsOwnedByUserWithSso = userOrganizations.filter(
+      (uo) =>
+        uo.organization.enabledSso &&
+        uo.organization.ssoDetails &&
+        uo.roles.some((role) => role === OrganizationRoles.OWNER)
+    );
+
+    /** Process the data you already have - no second query needed! */
+    const usersByDomain = organizationsOwnedByUserWithSso.reduce(
+      (acc, uo) => {
+        const domain = uo.organization.ssoDetails?.domain;
+
+        if (domain) {
+          if (!acc[domain]) {
+            acc[domain] = new Set<string>();
+          }
+          // Add all SSO users from this organization
+          uo.organization.userOrganizations.forEach((userOrg) => {
+            acc[domain].add(userOrg.userId);
+          });
+        }
+
+        return acc;
+      },
+      {} as Record<string, Set<string>>
+    );
+
+    /** Convert Sets to counts */
+    const ssoUsersByDomain = Object.entries(usersByDomain).reduce(
+      (acc, [domain, userSet]) => {
+        acc[domain] = userSet.size;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    /** Get the Stripe customer */
+    const customer = (await getStripeCustomer(
+      await getOrCreateCustomerId(user)
+    )) as CustomerWithSubscriptions;
+
+    /* Get the prices and products from Stripe */
+    const prices = await getStripePricesAndProducts();
     return json(
       data({
         user,
         organizations: userOrganizations.map((uo) => uo.organization),
+        ssoUsersByDomain,
+        customer,
+        prices,
       })
     );
   } catch (cause) {
@@ -134,6 +205,7 @@ export const action = async ({
           "updateCustomTierDetails",
           "createCustomerId",
           "deleteUser",
+          "toggleSubscriptionCheck",
         ]),
       })
     );
@@ -206,6 +278,29 @@ export const action = async ({
         });
         return json(data(null));
       }
+      case "toggleSubscriptionCheck": {
+        const { skipSubscriptionCheck } = parseData(
+          await request.formData(),
+          z.object({
+            skipSubscriptionCheck: z.coerce.boolean(),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { skipSubscriptionCheck },
+        });
+
+        sendNotification({
+          title: "Subscription check updated",
+          message: `The user's subscription check has been ${
+            skipSubscriptionCheck ? "disabled" : "enabled"
+          } successfully`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
     }
 
     return json(data(null));
@@ -219,8 +314,8 @@ export default function Area51UserPage() {
   // Get the loader data type
   type LoaderData = SerializeFrom<typeof loader>;
 
-  const { user, organizations } = useLoaderData<LoaderData>();
-
+  const { user, organizations, ssoUsersByDomain, customer, prices } =
+    useLoaderData<LoaderData>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
@@ -249,6 +344,12 @@ export default function Area51UserPage() {
             </Button>
           </>
         );
+      case "skipSubscriptionCheck":
+        return (
+          <SubscriptionCheckUpdateForm
+            skipSubscriptionCheck={user.skipSubscriptionCheck}
+          />
+        );
       default:
         return typeof value === "string"
           ? value
@@ -257,6 +358,7 @@ export default function Area51UserPage() {
           : null;
     }
   };
+  const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
     <div>
@@ -265,7 +367,7 @@ export default function Area51UserPage() {
           <h1>User: {user?.email}</h1>
           <DeleteUser />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-4">
           <div className="w-[400px]">
             <ul className="mt-5">
               {user
@@ -288,6 +390,17 @@ export default function Area51UserPage() {
               <CustomTierDetailsForm customTierLimit={user.customTierLimit!} />
             </div>
           )}
+          <div>
+            <SsoUsersByDomainTable ssoUsersByDomain={ssoUsersByDomain} />
+          </div>
+          <div>
+            <h3>User subscriptions</h3>
+            {!hasSubscription ? (
+              <div>No subscription found</div>
+            ) : (
+              <SubscriptionsOverview customer={customer} prices={prices} />
+            )}
+          </div>
         </div>
       </div>
       <div className="mt-10">
@@ -305,6 +418,9 @@ export default function Area51UserPage() {
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Is Owner
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                SSO
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Workspace disabled
@@ -327,6 +443,7 @@ export default function Area51UserPage() {
                   <DateS date={org.createdAt} />
                 </Td>
                 <Td>{org.userId === user.id ? "yes" : "no"}</Td>
+                <Td>{org.enabledSso ? "yes" : "no"}</Td>
                 <Td>{org.workspaceDisabled ? "yes" : "no"}</Td>
               </Tr>
             ))}
@@ -339,7 +456,7 @@ export default function Area51UserPage() {
 
 function TierUpdateForm({ tierId }: { tierId: TierId }) {
   const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = useDisabled(fetcher);
   return (
     <fetcher.Form
       method="post"
@@ -364,6 +481,34 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
         ))}
       </select>
       {disabled && <Spinner />}
+    </fetcher.Form>
+  );
+}
+
+function SubscriptionCheckUpdateForm({
+  skipSubscriptionCheck,
+}: {
+  skipSubscriptionCheck: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleSubscriptionCheck" />
+
+      <input
+        type="checkbox"
+        name="skipSubscriptionCheck"
+        defaultChecked={skipSubscriptionCheck}
+        disabled={disabled}
+      />
     </fetcher.Form>
   );
 }
@@ -423,3 +568,60 @@ function CustomTierDetailsForm({
     </div>
   );
 }
+
+interface SsoUsersByDomainTableProps {
+  ssoUsersByDomain: Record<string, number>;
+}
+const SsoUsersByDomainTable = ({
+  ssoUsersByDomain,
+}: SsoUsersByDomainTableProps) => {
+  // Convert object to array and sort by domain name for consistent display
+  const sortedDomains = Object.entries(ssoUsersByDomain).sort(
+    ([domainA], [domainB]) => domainA.localeCompare(domainB)
+  );
+
+  if (sortedDomains.length === 0) {
+    return (
+      <div className="p-4 text-center text-gray-500">
+        No SSO users found in workspaces owned by this user.
+      </div>
+    );
+  }
+
+  const totalUsers = sortedDomains.reduce((sum, [, count]) => sum + count, 0);
+
+  return (
+    <div className="flex flex-col bg-gray-200 p-4">
+      <h4>SSO user count</h4>
+
+      <div className="">
+        <table className="w-full border">
+          <thead className="bg-gray-50">
+            <Tr>
+              <Th className="">Domain</Th>
+              <Th className="whitespace-nowrap">SSO Users</Th>
+            </Tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {sortedDomains.map(([domain, userCount]) => (
+              <Tr key={domain} className="transition-colors hover:bg-gray-50">
+                <Td className="max-w-none">{domain}</Td>
+                <Td className="text-right">{userCount.toLocaleString()}</Td>
+              </Tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t-2 border-gray-200 bg-gray-50">
+            <Tr>
+              <Td className="px-4 py-3 text-sm font-semibold text-gray-800">
+                Total
+              </Td>
+              <Td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">
+                {totalUsers.toLocaleString()}
+              </Td>
+            </Tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+};

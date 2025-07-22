@@ -9,6 +9,7 @@ import {
 } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import {
   setCookie,
@@ -28,7 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings";
+import BookingsIndexPage from "./bookings._index";
 
 const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.DRAFT,
@@ -69,6 +70,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy,
       orderDirection,
       selfServiceData,
+      tags: filterTags,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings,
@@ -76,32 +78,40 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
     });
 
-    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
-      getBookings({
-        organizationId,
-        page,
-        perPage,
-        search,
-        userId: authSession?.userId,
-        assetIds: [assetId],
-        statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-        ...selfServiceData,
-        orderBy,
-        orderDirection,
-        custodianTeamMemberIds: teamMemberIds,
-      }),
+    const [{ bookings, bookingCount }, teamMembersData, tagsData] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId: authSession?.userId,
+          assetIds: [assetId],
+          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+          ...selfServiceData,
+          orderBy,
+          orderDirection,
+          custodianTeamMemberIds: teamMemberIds,
+          tags: filterTags,
+          extraInclude: {
+            tags: { select: { id: true, name: true } },
+          },
+        }),
 
-      // team members/custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
-        userId,
-      }),
-    ]);
+        // team members/custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
+          userId,
+        }),
+        getTagsForBookingTagsFilter({
+          organizationId,
+        }),
+      ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -127,6 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...teamMembersData,
+        ...tagsData,
       }),
       {
         headers: [

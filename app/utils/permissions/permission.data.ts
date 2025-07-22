@@ -28,12 +28,14 @@ export enum PermissionEntity {
   teamMemberProfile = "teamMemberProfile",
   dashboard = "dashboard",
   generalSettings = "generalSettings",
+  workingHours = "workingHours",
   subscription = "subscription",
   kit = "kit",
   note = "note",
   scan = "scan",
   custody = "custody",
   assetReminders = "assetReminders",
+  userData = "user-data", // This is for the user to load their own data.
 }
 
 //this will come from DB eventually
@@ -61,12 +63,17 @@ export const Role2PermissionMap: {
     [PermissionEntity.workspace]: [],
     [PermissionEntity.dashboard]: [],
     [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.workingHours]: [PermissionAction.read],
     [PermissionEntity.subscription]: [],
     [PermissionEntity.kit]: [PermissionAction.read],
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -93,11 +100,16 @@ export const Role2PermissionMap: {
     [PermissionEntity.workspace]: [],
     [PermissionEntity.dashboard]: [],
     [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.workingHours]: [PermissionAction.read],
     [PermissionEntity.subscription]: [],
     [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
     [PermissionEntity.note]: [],
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
 };

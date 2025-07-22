@@ -16,6 +16,7 @@ import {
 } from "~/utils/cookies.server";
 import { data, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -33,6 +34,7 @@ import { getAllSelectedValuesFromFilters } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
+import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
@@ -46,6 +48,19 @@ interface Props {
   user: { firstName: string | null };
   settings: AssetIndexSettings;
 }
+
+const searchFieldTooltipText = `
+Search assets based on asset fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
+- Name
+- Description
+- Category
+- Location
+- Tags
+- Custodian names (first or last name)
+- QR code value
+- Custom field values
+- Barcodes values
+`;
 
 export async function simpleModeLoader({
   request,
@@ -64,12 +79,18 @@ export async function simpleModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getFiltersFromRequest(request, organizationId);
+  } = await getFiltersFromRequest(request, organizationId, {
+    name: "assetFilter",
+    path: "/assets",
+  });
 
   if (filters && redirectNeeded) {
     const cookieParams = new URLSearchParams(filters);
     return redirect(`/assets?${cookieParams.toString()}`);
   }
+
+  const searchParams = getCurrentSearchParams(request);
+  const view = searchParams.get("view") ?? "table";
 
   /** Query tierLimit, assets & Asset index settings */
   let [
@@ -91,6 +112,7 @@ export async function simpleModeLoader({
       teamMembers,
       totalTeamMembers,
     },
+    tagsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -100,8 +122,32 @@ export async function simpleModeLoader({
       request,
       organizationId,
       filters,
+      extraInclude:
+        view === "availability"
+          ? {
+              bookings: {
+                where: {
+                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                },
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  from: true,
+                  to: true,
+                  description: true,
+                  custodianTeamMember: true,
+                  custodianUser: true,
+                  tags: { select: { id: true, name: true } },
+                },
+              },
+            }
+          : undefined,
       isSelfService,
       userId,
+    }),
+    getTagsForBookingTagsFilter({
+      organizationId,
     }),
   ]);
 
@@ -159,7 +205,7 @@ export async function simpleModeLoader({
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
+        text: parseMarkdownToReact(searchFieldTooltipText),
       },
       totalCategories,
       totalTags,
@@ -179,6 +225,8 @@ export async function simpleModeLoader({
        * */
       customFields: [],
       kits: [] as Kit[],
+      // Those tags are used for the tags autocomplete on the booking form
+      tagsData,
     }),
     {
       headers,
@@ -212,6 +260,7 @@ export async function advancedModeLoader({
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
+  const view = searchParams.get("view") ?? "table";
 
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
@@ -249,6 +298,7 @@ export async function advancedModeLoader({
     teamMembersData,
     kits,
     totalKits,
+    tagsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -259,6 +309,8 @@ export async function advancedModeLoader({
       organizationId,
       filters,
       settings,
+      getBookings: view === "availability",
+      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
@@ -285,6 +337,10 @@ export async function advancedModeLoader({
           : 12,
     }),
     db.kit.count({ where: { organizationId } }),
+    // Tags for booking form
+    getTagsForBookingTagsFilter({
+      organizationId,
+    }),
   ]);
 
   if (role === OrganizationRoles.SELF_SERVICE) {
@@ -334,10 +390,10 @@ export async function advancedModeLoader({
           entity: PermissionEntity.asset,
           action: PermissionAction.import,
         })),
-      searchFieldLabel: "Search by asset name",
+      searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
+        text: parseMarkdownToReact(searchFieldTooltipText),
       },
       filters,
       organizationId,
@@ -356,6 +412,7 @@ export async function advancedModeLoader({
       totalKits,
       tags,
       totalTags,
+      tagsData,
     }),
     {
       headers,

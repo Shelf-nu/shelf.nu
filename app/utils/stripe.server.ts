@@ -4,7 +4,10 @@ import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import {
+  getOrganizationTierLimit,
+  updateUserTierId,
+} from "~/modules/tier/service.server";
 import { STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -229,6 +232,41 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
   }
 
   return groupedPrices;
+}
+
+/**
+ * We create the stripe customer on onboarding,
+ * however we keep this to double check in case something went wrong
+ * If the customerId is not found, we create a new customer in Stripe
+ * and return the customerId.
+ * @param user - The user object containing id, email, firstName, lastName, and customerId
+ * @returns The customerId of the user in Stripe
+ * @throws ShelfError if no customerId is found for the user
+ */
+export async function getOrCreateCustomerId(
+  user: Pick<User, "id" | "email" | "firstName" | "lastName" | "customerId">
+) {
+  /**
+   * We create the stripe customer on onboarding,
+   * however we keep this to double check in case something went wrong
+   */
+  const customerId = user.customerId
+    ? user.customerId
+    : await createStripeCustomer({
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        userId: user.id,
+      });
+
+  if (!customerId) {
+    throw new ShelfError({
+      cause: null,
+      message: "No customer ID found for user",
+      additionalData: { user },
+      label: "Subscription",
+    });
+  }
+  return customerId;
 }
 
 /** Creates customer entry in stripe */
@@ -460,4 +498,23 @@ async function generateReturnUrl({
   return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace
     ? `${domainUrl}/account-details/workspace/new?${urlSearchParams.toString()}`
     : `${domainUrl}/account-details/subscription?${urlSearchParams.toString()}`;
+}
+
+/**
+ * Validates if the user's subscription is active based on their current tier
+ * and the provided subscription details. If the subscription is inactive
+ * and the user is not on the "free" tier, their tier is downgraded to "free."
+ */
+export async function validateSubscriptionIsActive({
+  user,
+  subscription,
+}: {
+  user: User;
+  subscription: Stripe.Subscription | null;
+}) {
+  if (user.skipSubscriptionCheck) return;
+
+  if (!subscription && user.tierId !== "free") {
+    await updateUserTierId(user.id, "free");
+  }
 }

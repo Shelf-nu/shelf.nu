@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -12,9 +12,13 @@ import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
+import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
-import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
+import {
+  BookingFormSchema,
+  ExtendBookingSchema,
+} from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
 import { TimeRemaining } from "~/components/booking/time-remaining";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -45,13 +49,17 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
+import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -61,7 +69,11 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import {
+  ShelfError,
+  isZodValidationError,
+  makeShelfError,
+} from "~/utils/error";
 import {
   data,
   error,
@@ -118,12 +130,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     // Get the booking with basic asset information
-    const booking = await getBooking({
-      id: bookingId,
-      organizationId: organizationId,
-      userOrganizations,
-      request,
-    });
+    const [booking, tags] = await Promise.all([
+      getBooking({
+        id: bookingId,
+        organizationId: organizationId,
+        userOrganizations,
+        request,
+        extraInclude: {
+          creator: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+            },
+          },
+        },
+      }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: TagUseFor.BOOKING } },
+          ],
+        },
+      }),
+    ]);
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
@@ -181,7 +214,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     // Execute all necessary queries in parallel
-    const [teamMembersData, assetDetails, totalAssets, bookingFlags, kits] =
+    const [teamMembersData, assetDetails, bookingFlags, kits] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -231,13 +264,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         }),
 
-        /** Count all assets in the booking */
-        db.asset.count({
-          where: {
-            id: { in: booking.assets.map((a) => a.id) },
-          },
-        }),
-
         /** Calculate booking flags considering all assets */
         getBookingFlags({
           id: booking.id,
@@ -256,6 +282,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
           include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+              },
+            },
             _count: { select: { assets: true } },
           },
         }),
@@ -277,7 +310,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const allCategories = booking.assets
+    const assetCategories = booking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -285,6 +318,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // Find the index of the first occurrence of this category ID
           index === self.findIndex((c) => c.id === category.id)
       );
+    const kitCategories = kits
+      .map((kit) => kit.category)
+      .filter((category) => category !== null && category !== undefined)
+      .filter(
+        (category, index, self) =>
+          // Find the index of the first occurrence of this category ID
+          index === self.findIndex((c) => c.id === category.id)
+      );
+
+    const allCategories = [...assetCategories, ...kitCategories];
 
     const modelName = {
       singular: "asset",
@@ -303,20 +346,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         paginatedItems: enrichedPaginatedItems,
         page,
-        totalItems: totalAssets,
+        totalItems: totalPaginationItems,
         totalPaginationItems,
         perPage,
         totalPages,
         ...teamMembersData,
         bookingFlags,
         totalKits: Object.keys(assetsByKit).length,
-        totalValue: booking.assets.reduce(
-          (acc, asset) => acc + (asset.valuation || 0),
-          0
-        ),
+        totalValue: calculateTotalValueOfAssets({
+          assets: booking.assets,
+          currency: currentOrganization.currency,
+          locale: getClientHint(request).locale,
+        }),
         /** Assets inside the booking without kits */
         assetsCount: individualAssets.length,
         allCategories,
+        tags,
+        totalTags: tags.length,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -344,6 +390,8 @@ export const handle = {
   name: "bookings.$bookingId",
 };
 
+export type BookingPageActionData = typeof action;
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { bookingId: id } = getParams(
@@ -370,6 +418,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "removeKit",
           "revert-to-draft",
           "extend-booking",
+          "bulk-remove-asset-or-kit",
         ]),
         nameChangeOnly: z
           .string()
@@ -395,6 +444,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.update,
+      "bulk-remove-asset-or-kit": PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -415,17 +465,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       where: { id },
       select: { id: true, status: true },
     });
-
+    const workingHours = await getWorkingHoursForOrganization(organizationId);
+    const { bufferStartTime, tagsRequired } =
+      await getBookingSettingsForOrganization(organizationId);
     switch (intent) {
       case "save": {
         const hints = getHints(request);
-
         const payload = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
             hints,
+            workingHours,
+            bufferStartTime,
+            tagsRequired,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -447,6 +501,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }).toJSDate()
           : undefined;
 
+        const tags = buildTagsSet(payload.tags).set;
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -456,6 +512,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           to: formattedTo,
           custodianUserId: payload.custodian?.userId,
           custodianTeamMemberId: payload.custodian?.id,
+          tags,
         });
 
         sendNotification({
@@ -478,6 +535,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             hints,
             action: "reserve",
             status: basicBookingInfo.status,
+            workingHours,
+            bufferStartTime,
+            tagsRequired,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -486,6 +546,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
+        const tags = buildTagsSet(payload.tags).set;
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
@@ -510,6 +571,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: payload.custodian?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
+          tags,
         });
 
         sendNotification({
@@ -687,12 +749,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(
-          { success: true },
-          {
-            headers,
-          }
-        );
+        return json(data({ success: true }), {
+          headers,
+        });
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
@@ -736,16 +795,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json(data({ success: true }));
       }
       case "extend-booking": {
-        const endDate = formData.get("endDate")!.toString()!;
-        if (!endDate) {
-          throw new ShelfError({
-            cause: null,
-            label: "Booking",
-            message: "End date is required.",
-          });
-        }
-
         const hints = getClientHint(request);
+        const { endDate } = parseData(
+          formData,
+          ExtendBookingSchema({
+            workingHours,
+            timeZone: hints.timeZone,
+            bufferStartTime,
+          }),
+          {
+            additionalData: { userId, organizationId },
+          }
+        );
 
         const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
           zone: hints.timeZone,
@@ -767,13 +828,55 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         return json(data({ success: true }));
       }
+      case "bulk-remove-asset-or-kit": {
+        const { assetOrKitIds } = parseData(
+          formData,
+          BulkRemoveAssetsAndKitSchema
+        );
+
+        /**
+         * From frontend, we get both assetIds and kitIds,
+         * here we are separating them
+         * */
+        const assetIds = await db.asset.findMany({
+          where: { id: { in: assetOrKitIds } },
+          select: { id: true },
+        });
+
+        const kitIds = await db.kit.findMany({
+          where: { id: { in: assetOrKitIds } },
+          select: { id: true },
+        });
+
+        const b = await removeAssets({
+          booking: { id, assetIds: assetIds.map((a) => a.id) },
+          kitIds: kitIds.map((k) => k.id),
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          userId,
+          organizationId,
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Your kit has been removed from the booking",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ booking: b, success: true }), { headers });
+      }
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
       }
     }
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, id });
+    const reason = makeShelfError(
+      cause,
+      { userId, id },
+      !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }

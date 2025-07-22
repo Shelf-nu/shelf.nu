@@ -15,6 +15,10 @@ tsconfig.tsbuildinfo
 /prisma/data.db
 /prisma/data.db-journal
 
+# Claude Code development notes (local only)
+CLAUDE.md
+.claude-notes/
+claude-switch.sh
 
 /coverage
 
@@ -39,8 +43,14 @@ desktop-app/portable
 
 .vscode
 
+
 # Sentry Config File
 .sentryclirc
 
 .cert
+# VitePress
+docs/.vitepress/cache
+docs/.vitepress/dist
+.vercel
+
 i18n.cache

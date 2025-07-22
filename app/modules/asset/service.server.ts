@@ -12,12 +12,14 @@ import type {
   Kit,
   AssetIndexSettings,
   UserOrganization,
+  BarcodeType,
 } from "@prisma/client";
 import {
   AssetStatus,
   BookingStatus,
   ErrorCorrection,
   Prisma,
+  TagUseFor,
 } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import { LRUCache } from "lru-cache";
@@ -27,6 +29,11 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  updateBarcodes,
+  validateBarcodeUniqueness,
+  parseBarcodesFromImportData,
+} from "~/modules/barcode/service.server";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -62,6 +69,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -232,6 +240,7 @@ async function getAssets(params: {
    * - assets that are checkedout
    * */
   hideUnavailableToAddToKit?: boolean;
+  assetKitFilter?: string | null;
 }) {
   let {
     organizationId,
@@ -250,6 +259,7 @@ async function getAssets(params: {
     unhideAssetsBookigIds,
     teamMemberIds,
     extraInclude,
+    assetKitFilter,
   } = params;
 
   try {
@@ -292,6 +302,28 @@ async function getAssets(params: {
                     },
                   },
                 ],
+              },
+            },
+          },
+          // Search qr code id
+          {
+            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
+          },
+          // Search barcode values
+          {
+            barcodes: {
+              some: { value: { contains: term, mode: "insensitive" } },
+            },
+          },
+          // Search in custom fields
+          {
+            customFields: {
+              some: {
+                value: {
+                  path: ["valueText"],
+                  string_contains: term,
+                  mode: "insensitive",
+                },
               },
             },
           },
@@ -436,6 +468,12 @@ async function getAssets(params: {
       ];
     }
 
+    if (assetKitFilter === "NOT_IN_KIT") {
+      where.kit = null;
+    } else if (assetKitFilter === "IN_OTHER_KITS") {
+      where.kit = { isNot: null };
+    }
+
     const [assets, totalAssets] = await Promise.all([
       db.asset.findMany({
         skip,
@@ -482,6 +520,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters = "",
   takeAll = false,
   assetIds,
+  getBookings = false,
+  canUseBarcodes = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -489,6 +529,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
+  getBookings?: boolean;
+  canUseBarcodes?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -518,10 +560,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const paginationClause = takeAll
       ? Prisma.empty
       : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-
     const query = Prisma.sql`
       WITH asset_query AS (
-        ${assetQueryFragment}
+        ${assetQueryFragment({
+          withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
+        })}
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
@@ -538,7 +582,10 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       )
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment}
+        ${assetReturnFragment({
+          withBookings: getBookings,
+          withBarcodes: canUseBarcodes,
+        })}
       FROM sorted_asset_query aq;
     `;
 
@@ -546,7 +593,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
-
     return {
       search,
       totalAssets,
@@ -585,6 +631,7 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
+  barcodes,
   id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
@@ -596,6 +643,7 @@ export async function createAsset({
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  barcodes?: { type: BarcodeType; value: string }[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
   id?: Asset["id"]; // Make ID optional
@@ -658,7 +706,7 @@ export async function createAsset({
       mainImageExpiration,
     };
 
-    /** If a categoryId is passed, link the category to the asset. */
+    /** If a kitId is passed, link the kit to the asset. */
     if (kitId && kitId !== "uncategorized") {
       Object.assign(data, {
         kit: {
@@ -738,6 +786,26 @@ export async function createAsset({
       });
     }
 
+    /** If barcodes are passed, validate them and include them in asset creation */
+    if (barcodes && barcodes.length > 0) {
+      const barcodesToAdd = barcodes.filter(
+        (barcode) => !!barcode.value && !!barcode.type
+      );
+
+      // Let Prisma handle unique constraint violations for performance
+      if (barcodesToAdd.length > 0) {
+        Object.assign(data, {
+          barcodes: {
+            create: barcodesToAdd.map(({ type, value }) => ({
+              type,
+              value: value.toUpperCase(),
+              organizationId,
+            })),
+          },
+        });
+      }
+    }
+
     return await db.asset.create({
       data,
       include: {
@@ -747,6 +815,28 @@ export async function createAsset({
       },
     });
   } catch (cause) {
+    // If it's a Prisma unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      const prismaError = cause as any;
+      const target = prismaError.meta?.target;
+
+      if (
+        target &&
+        target.includes("value") &&
+        barcodes &&
+        barcodes.length > 0
+      ) {
+        const barcodesToAdd = barcodes.filter(
+          (barcode) => !!barcode.value && !!barcode.type
+        );
+        if (barcodesToAdd.length > 0) {
+          // Use existing validation function for detailed error messages
+          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+        }
+      }
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, organizationId },
     });
@@ -767,6 +857,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  barcodes,
   organizationId,
 }: UpdateAssetPayload) {
   try {
@@ -878,6 +969,16 @@ export async function updateAsset({
       include: { location: true, tags: true },
     });
 
+    /** If barcodes are passed, update existing barcodes efficiently */
+    if (barcodes !== undefined) {
+      await updateBarcodes({
+        barcodes,
+        assetId: id,
+        organizationId,
+        userId,
+      });
+    }
+
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {
       /**
@@ -925,6 +1026,14 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // If it's already a ShelfError with validation errors, re-throw as is
+    if (
+      cause instanceof ShelfError &&
+      cause.additionalData?.[VALIDATION_ERROR]
+    ) {
+      throw cause;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
@@ -1282,6 +1391,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId,
   request,
   defaults,
+  tagUseFor,
 }: {
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
@@ -1290,6 +1400,7 @@ export async function getAllEntriesForCreateAndEdit({
     tag?: string | null;
     location?: string | null;
   };
+  tagUseFor?: TagUseFor;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const categorySelected =
@@ -1300,51 +1411,40 @@ export async function getAllEntriesForCreateAndEdit({
 
   try {
     const [
-      categoryExcludedSelected,
-      selectedCategories,
-      totalCategories,
+      { categories, totalCategories },
       tags,
-      locationExcludedSelected,
-      selectedLocation,
-      totalLocations,
+      { locations, totalLocations },
     ] = await Promise.all([
-      /** Get the categories */
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { notIn: categorySelected }
-            : { not: categorySelected },
-        },
-        take: getAllEntries.includes("category") ? undefined : 12,
+      getCategoriesForCreateAndEdit({
+        request,
+        organizationId,
+        defaultCategory: defaults?.category,
       }),
-      db.category.findMany({
-        where: {
-          organizationId,
-          id: Array.isArray(categorySelected)
-            ? { in: categorySelected }
-            : categorySelected,
-        },
-      }),
-      db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
-      db.tag.findMany({ where: { organizationId } }),
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            ...(tagUseFor ? [{ useFor: { has: tagUseFor } }] : []),
+          ],
+        },
+      }),
 
       /** Get the locations */
-      db.location.findMany({
-        where: { organizationId, id: { not: locationSelected } },
-        take: getAllEntries.includes("location") ? undefined : 12,
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+        defaultLocation: defaults?.location,
       }),
-      db.location.findMany({ where: { organizationId, id: locationSelected } }),
-      db.location.count({ where: { organizationId } }),
     ]);
 
     return {
-      categories: [...selectedCategories, ...categoryExcludedSelected],
+      categories,
       totalCategories,
       tags,
-      locations: [...selectedLocation, ...locationExcludedSelected],
+      locations,
       totalLocations,
     };
   } catch (cause) {
@@ -1411,6 +1511,7 @@ export async function getPaginatedAndFilterableAssets({
     unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
+    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1457,6 +1558,7 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
+      assetKitFilter,
     });
 
     const totalPages = Math.ceil(totalAssets / perPage);
@@ -1668,10 +1770,12 @@ export async function createAssetsFromContentImport({
   data,
   userId,
   organizationId,
+  canUseBarcodes,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
+  canUseBarcodes?: boolean;
 }) {
   try {
     // Create cache instance for this import operation
@@ -1685,6 +1789,35 @@ export async function createAssetsFromContentImport({
       organizationId,
       userId,
     });
+
+    // Check if any assets have barcode data and if barcodes are enabled
+    const hasBarcodesData = data.some(
+      (asset) =>
+        asset.barcode_Code128 ||
+        asset.barcode_Code39 ||
+        asset.barcode_DataMatrix
+    );
+
+    if (hasBarcodesData && !canUseBarcodes) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Your workspace doesn't have barcodes enabled. Please contact sales to learn more about barcodes.",
+        additionalData: { userId, organizationId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Parse barcode data if barcodes are enabled
+    const barcodesPerAsset = canUseBarcodes
+      ? await parseBarcodesFromImportData({
+          data,
+          organizationId,
+          userId,
+        })
+      : [];
 
     // Create all required related entities
     const [kits, categories, locations, teamMembers, tags, { customFields }] =
@@ -1793,9 +1926,13 @@ export async function createAssetsFromContentImport({
         }
       }
 
+      // Get barcodes for this asset if any
+      const assetBarcodes =
+        barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
-        qrId: qrCodesPerAsset.find((item) => item?.title === asset.title)?.qrId,
+        qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
         organizationId,
         title: asset.title,
         description: asset.description || "",
@@ -1805,7 +1942,7 @@ export async function createAssetsFromContentImport({
         locationId: asset.location ? locations?.[asset.location] : undefined,
         custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
         tags:
-          asset?.tags?.length > 0
+          asset?.tags && asset.tags.length > 0
             ? {
                 set: asset.tags
                   .filter((t) => tags[t])
@@ -1817,6 +1954,8 @@ export async function createAssetsFromContentImport({
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,
         mainImageExpiration: mainImageExpiration || null,
+        // Add barcodes if present
+        barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
       });
     }
   } catch (cause) {
@@ -2838,7 +2977,8 @@ export async function getUserAssetsTabLoaderData({
   try {
     const { filters, redirectNeeded } = await getFiltersFromRequest(
       request,
-      organizationId
+      organizationId,
+      { name: "assetFilter", path: "/assets" }
     );
 
     if (filters && redirectNeeded) {
@@ -2951,13 +3091,35 @@ export async function getEntitiesWithSelectedValues({
 
     /** Tags start */
     db.tag.findMany({
-      where: { organizationId, id: { notIn: selectedTagIds } },
+      where: {
+        organizationId,
+        id: { notIn: selectedTagIds },
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
       take: allSelectedEntries.includes("tag") ? undefined : 12,
     }),
     db.tag.findMany({
-      where: { organizationId, id: { in: selectedTagIds } },
+      where: {
+        organizationId,
+        id: { in: selectedTagIds },
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
     }),
-    db.tag.count({ where: { organizationId } }),
+    db.tag.count({
+      where: {
+        organizationId,
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
+    }),
     /** Tags end */
 
     /** Location start */
@@ -2980,4 +3142,96 @@ export async function getEntitiesWithSelectedValues({
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
   };
+}
+
+export async function getCategoriesForCreateAndEdit({
+  organizationId,
+  request,
+  defaultCategory,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultCategory?: string | string[] | null;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaultCategory ?? "";
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  try {
+    const [categoryExcludedSelected, selectedCategories, totalCategories] =
+      await Promise.all([
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { notIn: categorySelected }
+              : { not: categorySelected },
+          },
+          take: getAllEntries.includes("category") ? undefined : 12,
+        }),
+        db.category.findMany({
+          where: {
+            organizationId,
+            id: Array.isArray(categorySelected)
+              ? { in: categorySelected }
+              : categorySelected,
+          },
+        }),
+        db.category.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      categories: [...selectedCategories, ...categoryExcludedSelected],
+      totalCategories,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching categories",
+      additionalData: { organizationId, categorySelected },
+      label,
+    });
+  }
+}
+
+export async function getLocationsForCreateAndEdit({
+  organizationId,
+  request,
+  defaultLocation,
+}: {
+  organizationId: Organization["id"];
+  request: Request;
+  defaultLocation?: string | null;
+}) {
+  try {
+    const searchParams = getCurrentSearchParams(request);
+    const locationSelected =
+      searchParams.get("location") ?? defaultLocation ?? "";
+    const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+    const [locationExcludedSelected, selectedLocation, totalLocations] =
+      await Promise.all([
+        db.location.findMany({
+          where: { organizationId, id: { not: locationSelected } },
+          take: getAllEntries.includes("location") ? undefined : 12,
+        }),
+        db.location.findMany({
+          where: { organizationId, id: locationSelected },
+        }),
+        db.location.count({ where: { organizationId } }),
+      ]);
+
+    return {
+      locations: [...selectedLocation, ...locationExcludedSelected],
+      totalLocations,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching tags",
+      additionalData: { organizationId, defaultLocation },
+      label,
+    });
+  }
 }

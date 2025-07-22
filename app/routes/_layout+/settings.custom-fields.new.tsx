@@ -8,7 +8,7 @@ import {
   NewCustomFieldFormSchema,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
-import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 
 import { createCustomField } from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -42,7 +42,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
+    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
       {
         organizationId,
         request,

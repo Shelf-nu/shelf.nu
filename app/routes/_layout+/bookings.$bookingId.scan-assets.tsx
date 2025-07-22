@@ -12,7 +12,7 @@ import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import type { OnQrDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
@@ -148,12 +148,13 @@ export default function ScanAssetsForBookings() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
-  function handleQrDetectionSuccess({
-    qrId,
+  function handleCodeDetectionSuccess({
+    value: qrId,
     error,
-  }: OnQrDetectionSuccessProps) {
+    type,
+  }: OnCodeDetectionSuccessProps) {
     /** WE send the error to the item. addItem will automatically handle the data based on its value */
-    addItem(qrId, error);
+    addItem(qrId, error, type);
   }
 
   return (
@@ -165,7 +166,7 @@ export default function ScanAssetsForBookings() {
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner
           isLoading={isLoading}
-          onQrDetectionSuccess={handleQrDetectionSuccess}
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Booking"
           allowNonShelfCodes
           paused={false}

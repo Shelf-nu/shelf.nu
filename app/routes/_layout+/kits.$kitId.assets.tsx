@@ -2,7 +2,9 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -10,7 +12,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
@@ -26,7 +27,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { ListItemTagsColumn } from "./assets._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -188,11 +188,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
       </Td>
 
       <Td>
-        {category ? (
-          <Badge color={category.color} withDot={false}>
-            {category.name}
-          </Badge>
-        ) : null}
+        <CategoryBadge category={category} />
       </Td>
 
       <Td>

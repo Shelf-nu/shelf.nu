@@ -67,11 +67,18 @@ You should end up with your claims looking like this:
 ### Step 7.2: Add new attributes
 
 The table below shows which values you need to use for each attribute. To add a new one, just click on _+ Add new claim_
+If you would like to sync contact information, you will have to inform your account manager.
 
-| Name      | Source attribute |
-| --------- | ---------------- |
-| firstname | `user.givenname` |
-| lastname  | `user.surname`   |
+| Name          | Source attribute     | Required |
+| ------------- | -------------------- | -------- |
+| firstname     | `user.givenname`     | yes      |
+| lastname      | `user.surname`       | yes      |
+| mobilephone   | `user.mobilephone`   | no       |
+| streetaddress | `user.streetaddress` | no       |
+| city          | `user.city`          | no       |
+| stateprovince | `user.state`         | no       |
+| postalcode    | `user.postalcode`    | no       |
+| country       | `user.country`       | no       |
 
 Example of adding a claim for `firstname`:
 

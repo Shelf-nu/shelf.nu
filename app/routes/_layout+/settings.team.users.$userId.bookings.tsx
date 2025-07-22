@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -21,7 +22,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings";
+import BookingsIndexPage from "./bookings._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -44,25 +45,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status } =
-      getParamsValues(searchParams);
+    const {
+      page,
+      perPageParam,
+      search,
+      status,
+      tags: filterTags,
+    } = getParamsValues(searchParams);
 
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { bookings, bookingCount } = await getBookings({
-      organizationId,
-      page,
-      perPage,
-      search,
-      userId: authSession?.userId,
-      custodianUserId: selectedUserId, // Here we just hardcode the userId because user profiles cannot be seen by other selfService or Base users
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+    const [{ bookings, bookingCount }, tagsData] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: authSession?.userId,
+        custodianUserId: selectedUserId, // Here we just hardcode the userId because user profiles cannot be seen by other selfService or Base users
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
+        }),
+        tags: filterTags,
+        extraInclude: {
+          tags: { select: { id: true, name: true } },
+        },
       }),
-    });
-
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
+    ]);
     const totalPages = Math.ceil(bookingCount / perPage);
 
     const header: HeaderData = {
@@ -86,6 +100,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        ...tagsData,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -102,5 +117,5 @@ export const handle = {
 };
 
 export default function UserBookingsPage() {
-  return <BookingsIndexPage className="!mt-0" disableBulkActions />;
+  return <BookingsIndexPage disableBulkActions />;
 }

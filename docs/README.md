@@ -1,18 +1,30 @@
-# Shelf.nu documentation
+# Shelf.nu Documentation Has Moved! 📚
 
-Here you can find the documentation for shelf.
+The Shelf.nu documentation is now hosted at **[docs.shelf.nu](https://docs.shelf.nu)** with a much better experience!
 
-# Top Pages
+## 🚀 **New Documentation Site Features:**
 
-- [Getting Started](./get-started.md) - Instructions for how to get started
-  with Shelf.
-- [Response and Error handling](./handling-errors.md) - Guide on how to handle responses and errors in actions/loaders and services
-- [Shelf Config file](./shelf.config.ts.md) - Shelf configuration file
-- [Asset Search](./asset-search.md) - Asset search via Prisma Full text search
-- [Advanced Asset Index](./advanced-index/README.md) - Advanced asset index
-- [Single sign-on](./sso/README.md) - Single sign-on powered by Supabase
-- [Docker](./docker.md) - Run shelf via docker
-- [Hooks](./hooks.md) - Shelf's utility hooks
-- [DB: Protected indexes](./protected-indexes.md) - Shelf's utility hooks
-- [URL Shortener](./url-shortener.md) - Shelf's url shortener for QR codes
-- [Contributing](../CONTRIBUTING.md) - Contributing to Shelf.
+- 🔍 **Powerful search** - Find what you need instantly
+- 📱 **Mobile-friendly** - Perfect on any device
+- 🎨 **Beautiful design** - Clean, modern interface
+- ⚡ **Fast navigation** - Instant page loads
+- 🌙 **Dark mode** - Easy on the eyes
+
+## 📖 **Quick Links:**
+
+- **🏠 [Documentation Home](https://docs.shelf.nu)** - Start here
+- **💻 [Local Development](https://docs.shelf.nu/local-development)** - Get started coding
+- **🗄️ [Supabase Setup](https://docs.shelf.nu/supabase-setup)** - Database configuration
+- **🚀 [Deployment Guide](https://docs.shelf.nu/deployment)** - Go to production
+
+## 🔧 **For Developers:**
+
+This folder still contains the source files for the documentation site. If you want to:
+
+- **Contribute to docs** - Edit the `.md` files in this folder
+- **Run docs locally** - Use `npm run docs:dev`
+- **Build docs** - Use `npm run docs:build`
+
+---
+
+**👉 Visit [docs.shelf.nu](https://docs.shelf.nu) for the best documentation experience!**

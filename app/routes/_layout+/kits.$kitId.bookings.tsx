@@ -5,6 +5,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
@@ -20,7 +21,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings";
+import BookingsIndexPage from "./bookings._index";
 
 const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.DRAFT,
@@ -43,36 +44,51 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, status, teamMemberIds } =
-      getParamsValues(searchParams);
+    const {
+      page,
+      perPageParam,
+      search,
+      status,
+      teamMemberIds,
+      tags: filterTags,
+    } = getParamsValues(searchParams);
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
-    const [{ bookings, bookingCount }, teamMembersData] = await Promise.all([
-      getBookings({
-        organizationId,
-        page,
-        perPage,
-        search,
-        userId,
-        statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-        ...(!canSeeAllBookings && {
-          // If the user is self service, we only show bookings that belong to that user)
-          custodianUserId: userId,
+    const [{ bookings, bookingCount }, teamMembersData, tagsData] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId,
+          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+          ...(!canSeeAllBookings && {
+            // If the user is self service, we only show bookings that belong to that user)
+            custodianUserId: userId,
+          }),
+          custodianTeamMemberIds: teamMemberIds,
+          kitId,
+          tags: filterTags,
+          extraInclude: {
+            tags: { select: { id: true, name: true } },
+          },
         }),
-        custodianTeamMemberIds: teamMemberIds,
-      }),
 
-      // TeamMember data for custodian
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        userId,
-      }),
-    ]);
+        // TeamMember data for custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          userId,
+        }),
+        getTagsForBookingTagsFilter({
+          organizationId,
+        }),
+      ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -98,6 +114,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         modelName,
         ...teamMembersData,
+        ...tagsData,
       })
     );
   } catch (cause) {

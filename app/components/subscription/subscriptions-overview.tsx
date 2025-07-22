@@ -24,7 +24,7 @@ export function SubscriptionsOverview({
     [key: string]: PriceWithProduct[];
   };
 }) {
-  const subscriptionsData = customer?.subscriptions.data;
+  const subscriptionsData = customer?.subscriptions?.data;
   if (!customer) {
     return (
       <div>

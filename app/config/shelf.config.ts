@@ -4,6 +4,7 @@ import {
   ENABLE_PREMIUM_FEATURES,
   FREE_TRIAL_DAYS,
   SEND_ONBOARDING_EMAIL,
+  SHOW_HOW_DID_YOU_FIND_US,
   SUPPORTED_LANGUAGES,
   FALLBACK_LANGUAGE,
 } from "~/utils/env";
@@ -24,4 +25,5 @@ export const config: Config = {
   },
   faviconPath: "/static/favicon.ico",
   emailPrimaryColor: "#EF6820",
+  showHowDidYouFindUs: SHOW_HOW_DID_YOU_FIND_US || false,
 };

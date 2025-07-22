@@ -27,6 +27,10 @@ model Image {
 
   user   User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
+
+  // Indexes for foreign keys
+  @@index([ownerOrgId])
+  @@index([userId])
 }
 
 model User {
@@ -41,6 +45,7 @@ model User {
   customerId        String? @unique // Stripe customer id
   sso               Boolean @default(false)
   createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
 
   // Datetime
   createdAt DateTime @default(now())
@@ -71,6 +76,9 @@ model User {
   tierId            TierId             @default(free)
   tier              Tier               @relation(fields: [tierId], references: [id])
   assetReminders    AssetReminder[]
+  contact           UserContact?
+
+  referralSource String? // "How did you hear about us?" field.
 
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
@@ -80,6 +88,35 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
+  // Index for foreign key
+  @@index([tierId])
+}
+
+model UserContact {
+  id String @id @default(cuid())
+
+  phone         String?
+  street        String?
+  city          String?
+  stateProvince String?
+  zipPostalCode String?
+  countryRegion String?
+
+  // Relationships
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @unique
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for efficient querying
+  @@index([userId]) // Foreign key index
+  @@index([phone]) // For phone number lookups
+  @@index([city, stateProvince]) // For location-based queries
+  @@index([countryRegion]) // For country-based filtering
+  @@index([zipPostalCode]) // For postal code searches
+  @@index([city, countryRegion]) // For city within country queries
 }
 
 model Asset {
@@ -112,6 +149,7 @@ model Asset {
   custody      Custody?
   notes        Note[]
   qrCodes      Qr[]
+  barcodes     Barcode[]
   reports      ReportFound[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
@@ -128,6 +166,8 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
+  // Index for foreign key
+  @@index([userId])
 }
 
 enum AssetStatus {
@@ -165,6 +205,8 @@ model AssetIndexSettings {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, organizationId])
+  // Index for foreign key
+  @@index([organizationId])
 }
 
 enum AssetIndexMode {
@@ -184,6 +226,7 @@ model Category {
 
   // Relationships
   assets Asset[]
+  kits   Kit[]
   user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
@@ -193,12 +236,22 @@ model Category {
   organizationId String
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
+}
+
+enum TagUseFor {
+  ASSET
+  BOOKING
 }
 
 model Tag {
   id          String  @id @default(cuid())
   name        String
   description String?
+
+  useFor TagUseFor[] @default([ASSET])
 
   //relations
   assets Asset[]
@@ -208,11 +261,16 @@ model Tag {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
+  bookings Booking[]
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Note {
@@ -229,6 +287,10 @@ model Note {
   userId  String?
   asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
+
+  // Indexes for foreign keys
+  @@index([assetId])
+  @@index([userId])
 }
 
 enum NoteType {
@@ -268,7 +330,54 @@ model Qr {
   scans     Scan[]
 
   @@index([assetId], name: "Qr_assetId_idx")
+  // Indexes for foreign keys
+  @@index([kitId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([batchId])
 }
+
+// Barcode model
+model Barcode {
+  id String @id @default(cuid())
+
+  // The actual barcode value (separate from DB ID)
+  value String // e.g., "BC001234", "ASSET-2024-001"
+
+  // Barcode type (matching zxing format names exactly)
+  type BarcodeType @default(Code128)
+
+  // Relationships
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Organization-scoped uniqueness for barcode values
+  @@unique([organizationId, value])
+  // Performance indexes for common queries
+  @@index([organizationId, value]) // Lightning fast lookup by org + value
+  @@index([assetId])
+  @@index([kitId])
+  @@index([organizationId]) // For org-level queries
+}
+
+
+// Barcode types matching zxing format names exactly
+enum BarcodeType {
+  Code128
+  Code39
+  DataMatrix
+}
+
 
 model PrintBatch {
   id String @id @default(cuid())
@@ -302,6 +411,10 @@ model ReportFound {
 
   kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   kitId String?
+
+  // Indexes for foreign keys
+  @@index([assetId])
+  @@index([kitId])
 }
 
 enum ErrorCorrection {
@@ -310,6 +423,7 @@ enum ErrorCorrection {
   Q
   H
 }
+
 
 model Scan {
   id String @id @default(cuid())
@@ -335,6 +449,10 @@ model Scan {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([qrId])
+  @@index([userId])
 }
 
 model Location {
@@ -342,6 +460,9 @@ model Location {
   name        String
   description String?
   address     String?
+
+  imageUrl     String?
+  thumbnailUrl String?
 
   image   Image?  @relation(fields: [imageId], references: [id])
   imageId String? @unique
@@ -360,11 +481,14 @@ model Location {
   assets Asset[]
 
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 // Master data for roles
 model Role {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name Roles  @unique @default(USER)
 
   createdAt DateTime @default(now())
@@ -379,7 +503,7 @@ enum Roles {
 }
 
 model TeamMember {
-  id   String @id @unique @default(cuid())
+  id   String @id @default(cuid())
   name String
 
   organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -398,6 +522,9 @@ model TeamMember {
 
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Custody {
@@ -414,10 +541,12 @@ model Custody {
   updatedAt DateTime @updatedAt
 
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
+  // Index for foreign key
+  @@index([teamMemberId])
 }
 
 model Organization {
-  id   String           @id @unique @default(cuid())
+  id   String           @id @default(cuid())
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
@@ -433,23 +562,31 @@ model Organization {
 
   // Not required. It will only be created for orgs that need sso
   // We can know if an org has SSO by checking the ssoDetailsId
-  enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
-  ssoDetailsId String?
-  ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
+  enabledSso      Boolean          @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
+  ssoDetailsId    String?
+  ssoDetails      SsoDetails?      @relation(fields: [ssoDetailsId], references: [id])
+  workingHours    WorkingHours?
+  bookingSettings BookingSettings?
 
   // Permissions configuration
   // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
-  selfServiceCanSeeCustody Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeCustody  Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
   selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
-  baseUserCanSeeCustody   Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
-  baseUserCanSeeBookings  Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+  baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
+  // Barcode feature (admin-managed, will later integrate with custom tier limits)
+  barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
+  barcodesEnabledAt DateTime? // Track when barcode feature was enabled
+
+  // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
   locations         Location[]
   categories        Category[]
   tags              Tag[]
   qrCodes           Qr[]
+  barcodes          Barcode[]
   invites           Invite[]
   userOrganizations UserOrganization[]
 
@@ -462,12 +599,13 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
 
-
+  // Indexes for foreign keys
+  @@index([userId])
+  @@index([ssoDetailsId])
 }
 
-
 model UserOrganization {
-  id String @id @unique @default(cuid())
+  id String @id @default(cuid())
 
   user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   userId         String
@@ -479,6 +617,8 @@ model UserOrganization {
   updatedAt DateTime            @updatedAt
 
   @@unique([userId, organizationId])
+  // Index for foreign key
+  @@index([organizationId])
 }
 
 enum OrganizationType {
@@ -546,7 +686,7 @@ model TierLimit {
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @unique @default(cuid())
+  id               String   @id @default(cuid())
   user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId           String?  @unique // This is the foreign key
   canImportAssets  Boolean  @default(true)
@@ -560,7 +700,7 @@ model CustomTierLimit {
 }
 
 model CustomField {
-  id       String  @id @unique @default(cuid())
+  id       String  @id @default(cuid())
   name     String
   helpText String?
   required Boolean @default(false)
@@ -584,6 +724,9 @@ model CustomField {
   assetCustomFieldsValues AssetCustomFieldValue[]
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // Indexes for foreign keys
+  @@index([organizationId])
+  @@index([userId])
 }
 
 enum CustomFieldType {
@@ -613,6 +756,8 @@ model AssetCustomFieldValue {
   updatedAt DateTime @updatedAt
 
   @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
+  // Index for foreign key
+  @@index([customFieldId])
 }
 
 enum Currency {
@@ -677,6 +822,12 @@ model Invite {
   expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([inviteeUserId])
+  @@index([inviterId])
+  @@index([organizationId])
+  @@index([teamMemberId])
 }
 
 model Announcement {
@@ -728,6 +879,8 @@ model Booking {
 
   assets Asset[]
 
+  tags Tag[]
+
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
@@ -738,6 +891,30 @@ model Booking {
   // dates here and updated the from and to dates to current date (if users agrees to change) 
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
+
+  // Indexes for foreign keys
+  @@index([creatorId])
+  @@index([custodianTeamMemberId])
+  @@index([custodianUserId])
+  @@index([organizationId])
+}
+
+model BookingSettings {
+  id String @id @default(cuid())
+
+  bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
+  tagsRequired Boolean @default(false) // Whether tags are required for bookings
+
+  // Relationships
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String       @unique
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Index for foreign key
+  @@index([organizationId])
 }
 
 model Kit {
@@ -753,6 +930,7 @@ model Kit {
   assets  Asset[]
   custody KitCustody?
   qrCodes Qr[]
+  barcodes Barcode[]
   reports ReportFound[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -761,8 +939,15 @@ model Kit {
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
 
+  category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([createdById])
+  @@index([organizationId])
 }
 
 enum KitStatus {
@@ -782,6 +967,9 @@ model KitCustody {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Index for foreign key
+  @@index([custodianId])
 }
 
 model AssetReminder {
@@ -802,8 +990,61 @@ model AssetReminder {
 
   // Optimized indexes
   @@index([assetId, alertDateTime])
+  // Keeping these indexes as they were added for a purpose
   @@index([name(ops: raw("gin_trgm_ops")), message(ops: raw("gin_trgm_ops"))], type: Gin)
   @@index([organizationId, alertDateTime, assetId])
   // For scheduler related queries
   @@index([alertDateTime, activeSchedulerReference])
+  // Index for foreign key
+  @@index([createdById])
+}
+
+model WorkingHours {
+  id String @id @default(cuid())
+
+  // Global enable/disable for the organization
+  enabled Boolean @default(false)
+
+  // Weekly schedule stored as JSON for better performance
+  // Format: { "0": { "isOpen": true, "openTime": "09:00", "closeTime": "17:00" }, ... }
+  // Keys are day numbers (0=Sunday, 1=Monday, etc.)
+  // Times are stored in "HH:MM" format (24-hour) in UTC
+  weeklySchedule Json @default("{\"0\":{\"isOpen\":false},\"1\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"2\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"3\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"4\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"5\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"6\":{\"isOpen\":false}}")
+
+  // Relationships
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String       @unique
+
+  // Only overrides need separate table for better querying
+  overrides WorkingHoursOverride[]
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Index for foreign key
+  @@index([organizationId])
+}
+
+// Keep overrides separate for efficient date-based queries
+model WorkingHoursOverride {
+  id String @id @default(cuid())
+
+  date   DateTime @db.Date
+  isOpen Boolean  @default(false)
+
+  // Times stored in "HH:MM" format (24-hour) in UTC
+  openTime  String? // Format: "09:00"
+  closeTime String? // Format: "17:00"
+  reason    String?
+
+  workingHours   WorkingHours @relation(fields: [workingHoursId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  workingHoursId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workingHoursId, date])
+  @@index([workingHoursId, date])
+  @@index([date, isOpen])
 }

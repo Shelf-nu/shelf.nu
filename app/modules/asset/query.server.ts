@@ -36,9 +36,30 @@ export function generateWhereClause(
       .filter(Boolean);
 
     if (words.length > 0) {
-      // Create OR conditions for each search term
+      // Create OR conditions for each search term, searching across multiple fields
       const searchConditions = words.map(
-        (term) => Prisma.sql`a.title ILIKE ${`%${term}%`}`
+        (term) => Prisma.sql`(
+          a.title ILIKE ${`%${term}%`} OR
+          a.description ILIKE ${`%${term}%`} OR
+          c.name ILIKE ${`%${term}%`} OR
+          l.name ILIKE ${`%${term}%`} OR
+          t.name ILIKE ${`%${term}%`} OR
+          tm.name ILIKE ${`%${term}%`} OR
+          u."firstName" ILIKE ${`%${term}%`} OR
+          u."lastName" ILIKE ${`%${term}%`} OR
+          EXISTS (
+            SELECT 1 FROM public."Qr" q 
+            WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
+          ) OR
+          EXISTS (
+            SELECT 1 FROM public."Barcode" b 
+            WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
+          ) OR
+          EXISTS (
+            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
+            WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
+          )
+        )`
       );
 
       // Combine all search terms with OR
@@ -53,7 +74,10 @@ export function generateWhereClause(
   for (const filter of filters) {
     switch (filter.type) {
       case "string":
-        if (["location", "kit", "category", "qrId"].includes(filter.name)) {
+        if (
+          ["location", "kit", "category", "qrId"].includes(filter.name) ||
+          filter.name.startsWith("barcode_")
+        ) {
           whereClause = addRelationFilter(whereClause, filter);
         } else {
           whereClause = addStringFilter(whereClause, filter);
@@ -647,6 +671,47 @@ function addRelationFilter(
     }
   }
 
+  // Special handling for barcode fields
+  if (filter.name.startsWith("barcode_")) {
+    const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, DataMatrix, etc.)
+
+    // Normalize filter value to uppercase to match how barcodes are stored
+    const normalizedValue =
+      typeof filter.value === "string"
+        ? filter.value.toUpperCase()
+        : filter.value;
+
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ${normalizedValue})`;
+      case "isNot":
+        return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ${normalizedValue})`;
+      case "contains":
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value ILIKE ${`%${normalizedValue}%`})`;
+      case "matchesAny": {
+        const values = (filter.value as string)
+          .split(",")
+          .map((v) => v.trim().toUpperCase());
+        const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ANY(${valuesArray}::text[]))`;
+      }
+      case "containsAny": {
+        const values = (filter.value as string)
+          .split(",")
+          .map((v) => v.trim().toUpperCase());
+        const likeConditions = values.map(
+          (value) => Prisma.sql`b.value ILIKE ${`%${value}%`}`
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND (${Prisma.join(
+          likeConditions,
+          " OR "
+        )}))`;
+      }
+      default:
+        return whereClause;
+    }
+  }
+
   switch (filter.operator) {
     case "is":
       return Prisma.sql`${whereClause} AND ${Prisma.raw(alias)}.name = ${
@@ -1103,6 +1168,12 @@ export function parseSortingOptions(sortBy: string[]): {
       orderByParts.push(
         getNormalizedSortExpression(`custody->>'name'`, field.direction)
       );
+    } else if (field.name.startsWith("barcode_")) {
+      // Handle barcode column sorting
+      const barcodeType = field.name.replace("barcode_", "");
+      orderByParts.push(
+        getNormalizedSortExpression(`barcode_${barcodeType}`, field.direction)
+      );
     } else if (field.name.startsWith("cf_")) {
       const customFieldName = field.name.slice(3);
       const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
@@ -1117,6 +1188,8 @@ export function parseSortingOptions(sortBy: string[]): {
       if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
         // Direct sort for dates and booleans
         orderByParts.push(`${alias} ${field.direction}`);
+      } else if (field.fieldType === "AMOUNT") {
+        orderByParts.push(`${alias}::numeric ${field.direction}`);
       } else {
         // Natural sort for text-based custom fields
         orderByParts.push(getNormalizedSortExpression(alias, field.direction));
@@ -1126,9 +1199,17 @@ export function parseSortingOptions(sortBy: string[]): {
       console.warn(`Unknown sort field: ${field.name}`);
     }
   }
+  if (orderByParts.length === 0) {
+    // Default sort: Most recent assets first, with stable secondary sort by ID
+    // This provides a logical default while ensuring deterministic results
+    orderByParts.push(
+      '"assetCreatedAt" DESC', // Primary: Newest assets first
+      '"assetId" ASC' // Secondary: Stable sort for identical timestamps
+    );
+  }
 
-  const orderByClause =
-    orderByParts.length > 0 ? `ORDER BY ${orderByParts.join(", ")}` : "";
+  // Always generate an ORDER BY clause for predictable results
+  const orderByClause: string = `ORDER BY ${orderByParts.join(", ")}`;
 
   return { orderByClause, customFieldSortings };
 }
@@ -1174,123 +1255,234 @@ export function generateCustomFieldSelect(
 }
 
 // 3. Data
-export const assetQueryFragment = Prisma.sql`
-  SELECT 
-    a.id AS "assetId",
+
+// TypeScript types for options
+export type AssetQueryOptions = {
+  withBookings?: boolean;
+  withBarcodes?: boolean;
+};
+
+export type AssetReturnOptions = {
+  withBookings?: boolean;
+  withBarcodes?: boolean;
+};
+
+// Convert to functions that accept options
+export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
+  const { withBookings = false, withBarcodes = false } = options;
+
+  const bookingsSelect = withBookings
+    ? Prisma.sql`,
     (
-      SELECT q.id
-      FROM public."Qr" q
-      WHERE q."assetId" = a.id
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', bk.id,
+            'name', bk.name,
+            'status', bk.status,
+            'from', bk."from",
+            'to', bk."to",
+            'description', bk.description,
+            'custodianTeamMember', CASE 
+              WHEN bk."custodianTeamMemberId" IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', ctm.id,
+                  'name', ctm.name,
+                  'user', CASE 
+                    WHEN ctm."userId" IS NOT NULL THEN
+                      jsonb_build_object(
+                        'id', ctmu.id,
+                        'firstName', ctmu."firstName",
+                        'lastName', ctmu."lastName",
+                        'email', ctmu.email,
+                        'profilePicture', ctmu."profilePicture"
+                      )
+                    ELSE NULL
+                  END
+                )
+              ELSE NULL
+            END,
+            'custodianUser', CASE 
+              WHEN bk."custodianUserId" IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', cu.id,
+                  'firstName', cu."firstName",
+                  'lastName', cu."lastName",
+                  'email', cu.email,
+                  'profilePicture', cu."profilePicture"
+                )
+              ELSE NULL
+            END
+          )
+        ),
+        '[]'::jsonb
+      )
+      FROM public."_AssetToBooking" atb
+      JOIN public."Booking" bk ON atb."B" = bk.id
+      LEFT JOIN public."TeamMember" ctm ON bk."custodianTeamMemberId" = ctm.id
+      LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
+      LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
+      WHERE 
+        atb."A" = a.id 
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+    ) AS bookings`
+    : Prisma.sql``;
+
+  const barcodesSelect = withBarcodes
+    ? Prisma.sql`,
+    (
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', b.id,
+            'type', b.type,
+            'value', b.value
+          )
+        ),
+        '[]'::jsonb
+      )
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id
+    ) AS barcodes,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'Code128'
       LIMIT 1
-    ) AS "qrId",
-    a.title AS "assetTitle",
-    a.description AS "assetDescription",
-    a."createdAt" AS "assetCreatedAt",
-    a."updatedAt" AS "assetUpdatedAt",
-    a."userId" AS "assetUserId",
-    a."mainImage" AS "assetMainImage",
-    a."thumbnailImage" AS "assetThumbnailImage",
-    a."mainImageExpiration" AS "assetMainImageExpiration",
-    a."locationId" AS "assetLocationId",
-    a."organizationId" AS "assetOrganizationId",
-    a.status AS "assetStatus",
-    a.value AS "assetValue",
-    a."availableToBook" AS "assetAvailableToBook",
-    a."kitId" AS "assetKitId",
-    a."categoryId" AS "assetCategoryId",
-    k.id AS "kitId",
-    k.name AS "kitName",
-    c.id AS "categoryId",
-    c.name AS "categoryName",
-    c.color AS "categoryColor",
-    CASE 
-      WHEN l.name IS NOT NULL THEN l.name
-      ELSE NULL
-    END AS "locationName",
-    COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
-    COALESCE(
-      CASE 
-        WHEN cu.id IS NOT NULL THEN
-          jsonb_build_object(
-            'name', tm.name,
-            'custodian', jsonb_build_object(
-              'name', tm.name,
-              'user', CASE 
-                WHEN u.id IS NOT NULL THEN
-                  jsonb_build_object(
-                    'id', u.id,
-                    'firstName', u."firstName",
-                    'lastName', u."lastName",
-                    'profilePicture', u."profilePicture",
-                    'email', u.email
-                  )
-                ELSE NULL
-              END
-            )
-          )
-        WHEN b.id IS NOT NULL THEN
-          jsonb_build_object(
-            'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
-            'custodian', jsonb_build_object(
-              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
-              'user', CASE 
-                WHEN bu.id IS NOT NULL THEN
-                  jsonb_build_object(
-                    'id', u.id,
-                    'firstName', bu."firstName",
-                    'lastName', bu."lastName",
-                    'profilePicture', bu."profilePicture",
-                    'email', bu.email
-                  )
-                ELSE NULL
-              END
-            )
-          )
-        ELSE NULL
-      END,
-      NULL
-    ) AS custody,
+    ) AS barcode_Code128,
     (
-      SELECT jsonb_agg(
-        jsonb_build_object(
-          'id', acfv.id,
-          'value', acfv.value,
-          'customField', jsonb_build_object(
-            'id', cf.id,
-            'name', cf.name,
-            'helpText', cf."helpText",
-            'required', cf.required,
-            'type', cf.type,
-            'options', cf.options,
-            'categories', (
-              SELECT jsonb_agg(jsonb_build_object('id', cat.id, 'name', cat.name))
-              FROM public."_CategoryToCustomField" ccf
-              JOIN public."Category" cat ON ccf."A" = cat.id
-              WHERE ccf."B" = cf.id
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'Code39'
+      LIMIT 1
+    ) AS barcode_Code39,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'DataMatrix'
+      LIMIT 1
+    ) AS barcode_DataMatrix`
+    : Prisma.sql``;
+
+  return Prisma.sql`
+    SELECT 
+      a.id AS "assetId",
+      (
+        SELECT q.id
+        FROM public."Qr" q
+        WHERE q."assetId" = a.id
+        LIMIT 1
+      ) AS "qrId",
+      a.title AS "assetTitle",
+      a.description AS "assetDescription",
+      a."createdAt" AS "assetCreatedAt",
+      a."updatedAt" AS "assetUpdatedAt",
+      a."userId" AS "assetUserId",
+      a."mainImage" AS "assetMainImage",
+      a."thumbnailImage" AS "assetThumbnailImage",
+      a."mainImageExpiration" AS "assetMainImageExpiration",
+      a."locationId" AS "assetLocationId",
+      a."organizationId" AS "assetOrganizationId",
+      a.status AS "assetStatus",
+      a.value AS "assetValue",
+      a."availableToBook" AS "assetAvailableToBook",
+      a."kitId" AS "assetKitId",
+      a."categoryId" AS "assetCategoryId",
+      k.id AS "kitId",
+      k.name AS "kitName",
+      k.status AS "kitStatus",
+      c.id AS "categoryId",
+      c.name AS "categoryName",
+      c.color AS "categoryColor",
+      CASE 
+        WHEN l.name IS NOT NULL THEN l.name
+        ELSE NULL
+      END AS "locationName",
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
+      COALESCE(
+        CASE 
+          WHEN cu.id IS NOT NULL THEN
+            jsonb_build_object(
+              'name', tm.name,
+              'custodian', jsonb_build_object(
+                'name', tm.name,
+                'user', CASE 
+                  WHEN u.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', u.id,
+                      'firstName', u."firstName",
+                      'lastName', u."lastName",
+                      'profilePicture', u."profilePicture",
+                      'email', u.email
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          WHEN b.id IS NOT NULL THEN
+            jsonb_build_object(
+              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+              'custodian', jsonb_build_object(
+                'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+                'user', CASE 
+                  WHEN bu.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', u.id,
+                      'firstName', bu."firstName",
+                      'lastName', bu."lastName",
+                      'profilePicture', bu."profilePicture",
+                      'email', bu.email
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          ELSE NULL
+        END,
+        NULL
+      ) AS custody,
+      (
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'id', acfv.id,
+            'value', acfv.value,
+            'customField', jsonb_build_object(
+              'id', cf.id,
+              'name', cf.name,
+              'helpText', cf."helpText",
+              'required', cf.required,
+              'type', cf.type,
+              'options', cf.options,
+              'categories', (
+                SELECT jsonb_agg(jsonb_build_object('id', cat.id, 'name', cat.name))
+                FROM public."_CategoryToCustomField" ccf
+                JOIN public."Category" cat ON ccf."A" = cat.id
+                WHERE ccf."B" = cf.id
+              )
             )
           )
         )
-      )
-      FROM public."AssetCustomFieldValue" acfv
-      JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-      WHERE acfv."assetId" = a.id AND cf.active = true
-    ) AS "customFields",
-    (
-      SELECT jsonb_build_object(
-        'id', ar.id,
-        'name', ar.name,
-        'message', ar.message,
-        'alertDateTime', ar."alertDateTime"
-      )
-      FROM public."AssetReminder" ar
-      WHERE 
-        ar."assetId" = a.id 
-        AND ar."alertDateTime" >= NOW() AT TIME ZONE 'UTC'
-      ORDER BY 
-        ar."alertDateTime" ASC
-      LIMIT 1
-    ) AS upcomingReminder
-`;
+        FROM public."AssetCustomFieldValue" acfv
+        JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
+        WHERE acfv."assetId" = a.id AND cf.active = true
+      ) AS "customFields",
+      (
+        SELECT jsonb_build_object(
+          'id', ar.id,
+          'name', ar.name,
+          'message', ar.message,
+          'alertDateTime', ar."alertDateTime"
+        )
+        FROM public."AssetReminder" ar
+        WHERE 
+          ar."assetId" = a.id 
+          AND ar."alertDateTime" >= NOW() AT TIME ZONE 'UTC'
+        ORDER BY 
+          ar."alertDateTime" ASC
+        LIMIT 1
+      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}
+  `;
+};
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
@@ -1315,38 +1507,54 @@ export const assetQueryJoins = Prisma.sql`
 
 /**
  * Returns SQL fragment for building assets array, ensuring proper handling of empty results
+ * @param {AssetReturnOptions} options - Options for the return fragment
+ * @param {boolean} options.withBookings - Whether to include bookings in the result
  * @returns Prisma.Sql fragment that safely handles no results
  */
-export const assetReturnFragment = Prisma.sql`
-  COALESCE(
-    json_agg(
-      jsonb_build_object(
-        'id', aq."assetId",
-        'qrId', aq."qrId",
-        'title', aq."assetTitle",
-        'description', aq."assetDescription",
-        'createdAt', aq."assetCreatedAt",
-        'updatedAt', aq."assetUpdatedAt",
-        'userId', aq."assetUserId", 
-        'mainImage', aq."assetMainImage",
-        'thumbnailImage', aq."assetThumbnailImage",
-        'mainImageExpiration', aq."assetMainImageExpiration",
-        'categoryId', aq."assetCategoryId",
-        'locationId', aq."assetLocationId",
-        'organizationId', aq."assetOrganizationId",
-        'status', aq."assetStatus",
-        'valuation', aq."assetValue",
-        'availableToBook', aq."assetAvailableToBook",
-        'kitId', aq."assetKitId",
-        'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName") ELSE NULL END,
-        'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
-        'tags', aq.tags,
-        'location', jsonb_build_object('name', aq."locationName"),
-        'custody', aq.custody,
-        'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-        'upcomingReminder', aq.upcomingReminder
-      )
-    ) FILTER (WHERE aq."assetId" IS NOT NULL),
-    '[]'
-  ) AS assets
-`;
+export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
+  const { withBookings = false, withBarcodes = false } = options;
+
+  const bookingsField = withBookings
+    ? Prisma.sql`,
+        'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  const barcodesField = withBarcodes
+    ? Prisma.sql`,
+        'barcodes', COALESCE(aq.barcodes, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  return Prisma.sql`
+    COALESCE(
+      json_agg(
+        jsonb_build_object(
+          'id', aq."assetId",
+          'qrId', aq."qrId",
+          'title', aq."assetTitle",
+          'description', aq."assetDescription",
+          'createdAt', aq."assetCreatedAt",
+          'updatedAt', aq."assetUpdatedAt",
+          'userId', aq."assetUserId", 
+          'mainImage', aq."assetMainImage",
+          'thumbnailImage', aq."assetThumbnailImage",
+          'mainImageExpiration', aq."assetMainImageExpiration",
+          'categoryId', aq."assetCategoryId",
+          'locationId', aq."assetLocationId",
+          'organizationId', aq."assetOrganizationId",
+          'status', aq."assetStatus",
+          'valuation', aq."assetValue",
+          'availableToBook', aq."assetAvailableToBook",
+          'kitId', aq."assetKitId",
+          'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
+          'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
+          'tags', aq.tags,
+          'location', jsonb_build_object('name', aq."locationName"),
+          'custody', aq.custody,
+          'customFields', COALESCE(aq."customFields", '[]'::jsonb),
+          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
+        )
+      ) FILTER (WHERE aq."assetId" IS NOT NULL),
+      '[]'
+    ) AS assets
+  `;
+};

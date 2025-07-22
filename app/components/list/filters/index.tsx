@@ -47,7 +47,7 @@ export const Filters = ({
           {slots?.["right-of-search"] || null}
         </div>
         {children ? (
-          <div className="flex flex-1 justify-end">{children}</div>
+          <div className="flex flex-1 justify-end gap-3">{children}</div>
         ) : null}
       </div>
     </div>

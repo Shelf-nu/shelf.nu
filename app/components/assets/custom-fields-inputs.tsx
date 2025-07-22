@@ -12,7 +12,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Search } from "lucide-react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
@@ -198,12 +198,14 @@ export default function AssetCustomFields({
     <div className="border-b pb-6">
       <div className=" border-t py-5">
         <h2 className="mb-1 text-[18px] font-semibold">Custom Fields</h2>
-        <Link
+        <Button
           to="/settings/custom-fields"
           className="font-medium text-primary-600"
+          target="_blank"
+          variant="link"
         >
           Manage custom fields
-        </Link>
+        </Button>
       </div>
       {customFields.length > 0 ? (
         <>

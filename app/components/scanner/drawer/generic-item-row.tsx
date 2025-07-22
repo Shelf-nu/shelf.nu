@@ -8,13 +8,17 @@ import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import useApiQuery from "~/hooks/use-api-query";
 import type {
+  AssetFromBarcode,
+  KitFromBarcode,
+} from "~/routes/api+/get-scanned-barcode.$value";
+import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 
-// Type for the API response
-type ApiResponse = {
+// Type for the QR API response
+type QrApiResponse = {
   error?: { message: string };
   qr?: {
     type: "asset" | "kit";
@@ -26,6 +30,23 @@ type ApiResponse = {
     };
   };
 };
+
+// Type for the Barcode API response
+type BarcodeApiResponse = {
+  error?: { message: string };
+  barcode?: {
+    type: "asset" | "kit";
+    asset?: AssetFromBarcode & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
+    kit?: KitFromBarcode & {
+      [key: string]: any; // Extend with any additional fields you need
+    };
+  };
+};
+
+// Union type for both responses
+type ApiResponse = QrApiResponse | BarcodeApiResponse;
 
 // Type for the row props
 type GenericItemRowProps<T> = {
@@ -75,9 +96,15 @@ export function GenericItemRow<T>({
     searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
   }
 
+  // Determine which API to call based on codeType
+  const isBarcode = item?.codeType === "barcode";
+  const apiEndpoint = isBarcode
+    ? `/api/get-scanned-barcode/${encodeURIComponent(qrId)}`
+    : `/api/get-scanned-item/${qrId}`;
+
   // Use the API hook to fetch item data
   const { data: response, error: fetchError } = useApiQuery<ApiResponse>({
-    api: `/api/get-scanned-item/${qrId}`,
+    api: apiEndpoint,
     searchParams,
     enabled: shouldFetch,
   });
@@ -94,12 +121,17 @@ export function GenericItemRow<T>({
         return;
       }
 
-      const qr = response.qr;
+      // Handle both QR and barcode responses
+      const dataSource = isBarcode
+        ? (response as BarcodeApiResponse).barcode
+        : (response as QrApiResponse).qr;
+
       // Determine item type (asset or kit) and update accordingly
-      if (qr && qr.type === "asset") {
+      if (dataSource && dataSource.type === "asset") {
         const itemWithType: ScanListItem = {
-          data: qr.asset,
+          data: dataSource.asset,
           type: "asset",
+          codeType: item?.codeType,
         };
         if (itemWithType.data) {
           setItem({
@@ -107,10 +139,11 @@ export function GenericItemRow<T>({
             item: itemWithType,
           });
         }
-      } else if (qr && qr.type === "kit") {
+      } else if (dataSource && dataSource.type === "kit") {
         const itemWithType: ScanListItem = {
-          data: qr.kit,
+          data: dataSource.kit,
           type: "kit",
+          codeType: item?.codeType,
         };
         if (itemWithType.data) {
           setItem({
@@ -120,6 +153,7 @@ export function GenericItemRow<T>({
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response, qrId, setItem]);
 
   // Handle fetch errors
@@ -202,7 +236,7 @@ export function DefaultLoadingState({
   return (
     <div className="max-w-full">
       <p>
-        QR id: <span className="font-semibold">{qrId}</span>
+        Code: <span className="font-semibold">{qrId}</span>
       </p>{" "}
       {error ? (
         <p className="whitespace-normal text-[12px] text-error-500">{error}</p>

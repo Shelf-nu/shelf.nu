@@ -51,11 +51,18 @@ export function AdvancedFilteringAndSorting() {
   );
 }
 
-const getTriggerClasses = (open: boolean, activeItems: number) =>
+const getTriggerClasses = (
+  open: boolean,
+  activeItems: number,
+  className?: string
+) =>
   tw(
     "font-normal text-gray-500",
     open ? "bg-gray-50" : "",
-    activeItems > 0 ? "border-primary bg-primary-25 text-primary" : ""
+    activeItems > 0
+      ? "whitespace-nowrap border-primary bg-primary-25 text-primary"
+      : "",
+    className
   );
 
 function AdvancedFilter() {
@@ -333,8 +340,8 @@ function AdvancedSorting() {
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
-    const [name, direction, fieldType] = s.split(":");
-    return { name, direction, fieldType } as Sort;
+    const [name, direction, cfType] = s.split(":");
+    return { name, direction, cfType } as Sort;
   });
   const disabled = useDisabled();
 

@@ -1,4 +1,4 @@
-import { Currency, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
   json,
   MaxPartSizeExceededError,
@@ -17,6 +17,7 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import TransferOwnershipCard from "~/components/settings/transfer-ownership-card";
 
 import {
   EditGeneralWorkspaceSettingsFormSchema,
@@ -26,6 +27,7 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import {
+  getOrganizationAdmins,
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
@@ -94,6 +96,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
+    const admins = await getOrganizationAdmins({
+      organizationId: organization.id,
+    });
+
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
     };
@@ -104,6 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         curriences: Object.keys(Currency),
         isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
+        admins,
       })
     );
   } catch (cause) {
@@ -135,7 +142,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    await requirePermission({
+    const { role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -259,6 +266,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return json({ success: true });
       }
       case "sso": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to edit SSO settings.",
+            label: "Settings",
+          });
+        }
+
         const { enabledSso } = organization;
         if (!enabledSso) {
           throw new ShelfError({
@@ -339,6 +355,8 @@ export default function WorkspaceEditPage() {
           className="mt-4"
         />
       </div>
+
+      <TransferOwnershipCard />
     </>
   );
 }

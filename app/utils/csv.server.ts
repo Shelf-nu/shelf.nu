@@ -3,6 +3,7 @@ import type {
   AssetIndexSettings,
   Organization,
   Prisma,
+  Tag,
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -547,6 +548,7 @@ export async function exportBookingsFromIndexToCsv({
         ...selfServiceData,
         orderBy,
         orderDirection,
+        extraInclude: { tags: { select: { name: true } } },
       });
       bookings = bookingsData.bookings;
     } else {
@@ -559,6 +561,7 @@ export async function exportBookingsFromIndexToCsv({
               title: true,
             },
           },
+          tags: { select: { name: true } },
         },
       });
     }
@@ -598,6 +601,7 @@ type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   displayTo?: string;
   displayOriginalFrom?: string;
   displayOriginalTo?: string;
+  tags: Pick<Tag, "name">[];
 };
 
 /**
@@ -615,13 +619,15 @@ export const buildCsvExportDataFromBookings = (
     url: "Booking URL", // custom string
     id: "Booking ID", // string
     name: "Name", // string
-    from: "Start date", // date
-    to: "End date", // date
+    status: "Status", // string
+    from: "Actual start date", // date
+    to: "Actual end date", // date
     custodian: "Custodian",
     description: "Description", // string
+    tags: "Tags",
     asset: "Assets", // New column for assets
-    originalFrom: "Original start date",
-    originalTo: "Original end date",
+    originalFrom: "Planned start date",
+    originalTo: "Planned end date",
   };
 
   // Create data rows with assets
@@ -649,6 +655,11 @@ export const buildCsvExportDataFromBookings = (
           break;
         case "name":
           value = booking.name;
+          break;
+        case "status":
+          value =
+            booking.status.charAt(0).toUpperCase() +
+            booking.status.slice(1).toLowerCase();
           break;
         case "from":
           value = booking.displayFrom;
@@ -687,6 +698,12 @@ export const buildCsvExportDataFromBookings = (
           value = booking.displayOriginalTo
             ? booking.displayOriginalTo
             : booking.displayTo;
+          break;
+
+        case "tags":
+          value = booking.tags.length
+            ? booking.tags.map((tag) => tag.name).join(", ")
+            : "No tags";
           break;
         default:
           value = "";

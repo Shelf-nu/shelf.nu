@@ -1,4 +1,6 @@
-import { BookingStatus, type Booking } from "@prisma/client";
+import type { Asset, Booking, Currency } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
+import { formatCurrency } from "./currency";
 
 export function canUserManageBookingAssets(
   booking: Pick<Booking, "status"> & {
@@ -12,7 +14,7 @@ export function canUserManageBookingAssets(
   const isCancelled = booking.status === BookingStatus.CANCELLED;
 
   const cantManageAssetsAsSelfService =
-    isSelfService && booking.status === BookingStatus.DRAFT;
+    isSelfService && booking.status !== BookingStatus.DRAFT;
 
   return (
     !!booking.from &&
@@ -33,3 +35,34 @@ export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
   ARCHIVED: "#667085",
   CANCELLED: "#667085",
 };
+
+/**
+ * Calculates the total value of assets in a booking.
+ * @param assets - Array of assets with their valuations.
+ * @param currency - The currency in which the total value should be formatted.
+ * @param locale - The locale for formatting the currency.
+ * @returns A formatted string representing the total value of assets.
+ * @example
+ * const totalValue = calculateTotalValueOfAssets({
+ *   assets: [{ valuation: 100 }, { valuation: 200 }],
+ *   currency: "USD",
+ *   locale: "en-US",
+ * });
+ * Returns "$300.00"
+ */
+export function calculateTotalValueOfAssets({
+  assets,
+  currency,
+  locale,
+}: {
+  assets: Pick<Asset, "valuation">[];
+  currency: Currency;
+  locale: string;
+}): string {
+  const value = assets.reduce((acc, asset) => acc + (asset.valuation || 0), 0);
+  return formatCurrency({
+    value: value,
+    locale,
+    currency,
+  });
+}

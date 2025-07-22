@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
@@ -49,14 +50,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */
-    const teamMembersData = await getTeamMemberForCustodianFilter({
-      organizationId,
-      getAll:
-        searchParams.has("getAll") &&
-        hasGetAllValue(searchParams, "teamMember"),
-      filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
-      userId,
-    });
+    const [teamMembersData, tagsData] = await Promise.all([
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
+        userId,
+      }),
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
+    ]);
 
     const selfServiceOrBaseUser = isSelfServiceOrBase
       ? teamMembersData.teamMembers.find(
@@ -82,6 +88,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         selfServiceOrBaseUser,
         ...teamMembersData,
         assetIds: [assetId],
+        ...tagsData,
       })
     );
   } catch (cause) {

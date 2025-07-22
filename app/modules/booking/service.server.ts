@@ -7,8 +7,9 @@ import type {
   Kit,
   User,
   UserOrganization,
+  Tag,
 } from "@prisma/client";
-import { isBefore } from "date-fns";
+import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -21,10 +22,14 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
   getDateTimeFormatFromHints,
+  getHints,
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  getFiltersFromRequest,
+  updateCookieWithPerPage,
+} from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -52,6 +57,7 @@ import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
+  ClashingBooking,
   SchedulerData,
 } from "./types";
 import {
@@ -173,7 +179,7 @@ export async function createBooking({
     | "organizationId"
     | "from"
     | "to"
-  > & { custodianTeamMemberId: string };
+  > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
    * Asset IDs that are connected to the booking
@@ -226,6 +232,12 @@ export async function createBooking({
       };
     }
 
+    if (booking.tags.length > 0) {
+      dataToCreate.tags = {
+        connect: booking.tags,
+      };
+    }
+
     return await db.booking.create({
       data: dataToCreate,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -256,6 +268,7 @@ export async function updateBasicBooking({
   custodianUserId,
   description,
   organizationId,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -269,7 +282,9 @@ export async function updateBasicBooking({
     | "organizationId"
   >
 > &
-  Pick<Booking, "id" | "organizationId">) {
+  Pick<Booking, "id" | "organizationId"> & {
+    tags: { id: string }[];
+  }) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -293,6 +308,10 @@ export async function updateBasicBooking({
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     /** Booking update is not allowed for these type of status */
@@ -364,6 +383,7 @@ export async function updateBasicBooking({
         });
       }
     }
+
     return await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
@@ -394,6 +414,7 @@ export async function reserveBooking({
   organizationId,
   hints,
   isSelfServiceOrBase,
+  tags,
 }: Partial<
   Pick<
     Booking,
@@ -410,6 +431,7 @@ export async function reserveBooking({
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
     isSelfServiceOrBase: boolean;
+    tags: { id: string }[];
   }) {
   try {
     const bookingFound = await db.booking
@@ -459,6 +481,10 @@ export async function reserveBooking({
       status: BookingStatus.RESERVED,
       name,
       description,
+      tags: {
+        set: [],
+        connect: tags,
+      },
     };
 
     dataToUpdate.from = from;
@@ -826,6 +852,23 @@ export async function checkinBooking({
       }).toJSDate();
     }
 
+    /**
+     * If booking was overdue then we have to adjust the endDate of booking
+     * */
+    if (bookingFound.status === BookingStatus.OVERDUE) {
+      // Update originalTo to booking's to date
+      dataToUpdate.originalTo = bookingFound.to;
+
+      const toDateStr = DateTime.fromJSDate(new Date(), {
+        zone: hints.timeZone,
+      }).toFormat(DATE_TIME_FORMAT);
+
+      // Update the `to` date to current date
+      dataToUpdate.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+        zone: hints.timeZone,
+      }).toJSDate();
+    }
+
     const updatedBooking = await db.$transaction(async (tx) => {
       /* Updating the status of all assets inside booking */
       await tx.asset.updateMany({
@@ -911,14 +954,37 @@ export async function updateBookingAssets({
   assetIds: Asset["id"][];
 }) {
   try {
-    return await db.booking.update({
-      where: { id, organizationId },
-      data: {
-        assets: {
-          connect: assetIds.map((id) => ({ id })),
+    const booking = await db.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id, organizationId },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
         },
-      },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      /**
+       *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
+       */
+      if (
+        b.status === BookingStatus.ONGOING ||
+        b.status === BookingStatus.OVERDUE
+      ) {
+        await db.asset.updateMany({
+          where: { id: { in: assetIds }, organizationId },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+      }
+      return b;
     });
+
+    return booking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1168,7 +1234,7 @@ export async function extendBooking({
       });
 
     /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
-    const clashingBookings = await db.booking.findMany({
+    const clashingBookings: ClashingBooking[] = await db.booking.findMany({
       where: {
         id: { not: booking.id },
         organizationId,
@@ -1336,9 +1402,19 @@ export async function getBookingsFilterData({
   canSeeAllBookings: boolean;
   organizationId: Organization["id"];
 }) {
+  const {
+    filters,
+    redirectNeeded,
+    serializedCookie: filtersCookie,
+  } = await getFiltersFromRequest(request, organizationId, {
+    name: "bookingFilter",
+    path: "/bookings",
+  });
+
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status, teamMemberIds } =
+  const { page, perPageParam, search, status, teamMemberIds, tags } =
     getParamsValues(searchParams);
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -1396,6 +1472,10 @@ export async function getBookingsFilterData({
     orderBy,
     orderDirection,
     selfServiceData,
+    filtersCookie,
+    filters,
+    redirectNeeded,
+    tags,
   };
 }
 
@@ -1420,6 +1500,8 @@ export async function getBookings(params: {
   takeAll?: boolean;
   orderBy?: string;
   orderDirection?: SortingDirection;
+  kitId?: string;
+  tags?: Tag["id"][];
 }) {
   const {
     organizationId,
@@ -1438,6 +1520,8 @@ export async function getBookings(params: {
     takeAll = false,
     orderBy = "from",
     orderDirection = "asc",
+    kitId,
+    tags,
   } = params;
 
   try {
@@ -1544,6 +1628,20 @@ export async function getBookings(params: {
           to: { lte: bookingTo },
         },
       ];
+    }
+
+    if (kitId) {
+      where.assets = {
+        some: { kitId },
+      };
+    }
+
+    if (tags?.length) {
+      if (tags.includes("untagged")) {
+        where.tags = { none: {} };
+      } else {
+        where.tags = { some: { id: { in: tags } } };
+      }
     }
 
     const [bookings, bookingCount] = await Promise.all([
@@ -1866,26 +1964,52 @@ export async function getBookingsForCalendar(params: {
     canSeeAllBookings,
     canSeeAllCustody,
   } = params;
-  const searchParams = getCurrentSearchParams(request);
+
+  const { searchParams, search, status, teamMemberIds, tags, selfServiceData } =
+    await getBookingsFilterData({
+      request,
+      canSeeAllBookings,
+      organizationId,
+      userId,
+    });
 
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
+
+  // If start and end are not provided, default to current month
+  let startDate: Date;
+  let endDate: Date;
+
+  if (start && end) {
+    startDate = new Date(start);
+    endDate = new Date(end);
+  } else {
+    // Default to current month
+    const now = new Date();
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1); // First day of current month
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+  }
 
   try {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
       perPage: 1000,
+      search,
       userId,
-      bookingFrom: new Date(start),
-      bookingTo: new Date(end),
-      ...(!canSeeAllBookings && {
-        // If the user is self service, we only show bookings that belong to that user)
-        custodianUserId: userId,
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
       }),
+      bookingFrom: startDate,
+      bookingTo: endDate,
+      custodianTeamMemberIds: teamMemberIds,
+      ...selfServiceData,
+      tags,
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,
+        tags: { select: { id: true, name: true } },
       },
       takeAll: true,
     });
@@ -1922,13 +2046,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
-              user: {
-                id: booking.custodianUserId,
-                firstName: booking.custodianUser?.firstName,
-                lastName: booking.custodianUser?.lastName,
-                profilePicture: booking.custodianUser?.profilePicture,
-              },
+              user: booking.custodianUser
+                ? {
+                    id: booking.custodianUserId,
+                    firstName: booking.custodianUser?.firstName,
+                    lastName: booking.custodianUser?.lastName,
+                    profilePicture: booking.custodianUser?.profilePicture,
+                  }
+                : undefined,
             },
+            tags: booking.tags,
           },
         };
       });
@@ -2190,6 +2317,11 @@ export async function bulkArchiveBookings({
         message:
           "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
         label,
+        additionalData: {
+          bookings,
+          organizationId,
+          bookingIds,
+        },
       });
     }
 
@@ -2204,15 +2336,19 @@ export async function bulkArchiveBookings({
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk archive booking.";
+    const isShelfError = isLikeShelfError(cause);
 
     throw new ShelfError({
       cause,
-      message,
-      additionalData: { bookingIds, organizationId },
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while archiving bookings.",
+      additionalData: isShelfError
+        ? cause.additionalData
+        : {
+            bookingIds,
+            organizationId,
+          },
       label,
     });
   }
@@ -2271,6 +2407,11 @@ export async function bulkCancelBookings({
         message:
           "There are some unavailable to cancel booking selected. Please make sure you are selecting the booking which are allowed to cancel.",
         label,
+        additionalData: {
+          bookings,
+          organizationId,
+          bookingIds,
+        },
       });
     }
 
@@ -2372,15 +2513,16 @@ export async function bulkCancelBookings({
       })
     );
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk cancelling bookings.";
+    const isShelfError = isLikeShelfError(cause);
 
     throw new ShelfError({
       cause,
-      message,
-      additionalData: { bookingIds, organizationId, userId },
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while bulk cancelling bookings.",
+      additionalData: isShelfError
+        ? cause.additionalData
+        : { bookingIds, organizationId, userId },
       label,
     });
   }
@@ -2468,15 +2610,17 @@ export async function getAvailableAssetsIdsForBooking(
   try {
     const selectedAssets = await db.asset.findMany({
       where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
+      select: { status: true, id: true, kitId: true },
     });
-    if (selectedAssets.some((asset) => asset.kit)) {
+
+    if (selectedAssets.some((asset) => asset.kitId)) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
         label: "Booking",
       });
     }
+
     return selectedAssets.map((asset) => asset.id);
   } catch (cause: ShelfError | any) {
     throw new ShelfError({
@@ -2592,4 +2736,69 @@ export async function loadBookingsData({
     ids,
     hints,
   };
+}
+
+/**
+ *
+ */
+export async function duplicateBooking({
+  bookingId,
+  organizationId,
+  userId,
+  request,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  request: Request;
+}) {
+  try {
+    const bookingToDuplicate = await getBooking({
+      id: bookingId,
+      organizationId,
+    });
+    const hints = getHints(request);
+
+    const newBooking = await db.booking.create({
+      data: {
+        name: bookingToDuplicate.name + " (Copy)",
+        description: bookingToDuplicate.description,
+        from: DateTime.fromFormat(
+          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
+            DATE_TIME_FORMAT
+          ),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
+        to: DateTime.fromFormat(
+          DateTime.fromJSDate(addDays(new Date(), 1), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT),
+          DATE_TIME_FORMAT,
+          { zone: hints.timeZone }
+        ).toJSDate(),
+        organizationId,
+        creatorId: userId,
+        status: BookingStatus.DRAFT,
+        custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
+        custodianUserId: bookingToDuplicate.custodianUserId,
+        assets: {
+          connect: bookingToDuplicate.assets.map((asset) => ({ id: asset.id })),
+        },
+        tags: {
+          connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
+        },
+      },
+    });
+
+    return newBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while duplicating booking.",
+      label,
+    });
+  }
 }

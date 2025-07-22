@@ -202,6 +202,11 @@ export function useSidebarNavItems() {
           to: "/settings/general",
         },
         {
+          title: "Bookings",
+          to: "/settings/bookings",
+          hidden: isPersonalOrganization,
+        },
+        {
           title: "Custom fields",
           to: "/settings/custom-fields",
         },

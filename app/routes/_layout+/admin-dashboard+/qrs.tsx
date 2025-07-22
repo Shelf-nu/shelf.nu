@@ -43,8 +43,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /** We do this to get all the batches ever created so we can have the filter */
     const batches = await db.printBatch.findMany();
 
-    if (page > totalPages) {
-      return redirect("/admin-dashboard");
+    if (totalPages > 0 && page > totalPages) {
+      return redirect("/admin-dashboard/qrs?page=1");
     }
 
     const header: HeaderData = {

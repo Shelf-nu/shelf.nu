@@ -1,3 +1,4 @@
+import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect, redirectDocument } from "@remix-run/node";
 import { useAtomValue } from "jotai";
@@ -15,6 +16,7 @@ import { createNote } from "~/modules/note/service.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
@@ -64,6 +66,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getAllEntriesForCreateAndEdit({
         organizationId,
         request,
+        tagUseFor: TagUseFor.ASSET,
       });
 
     const searchParams = getCurrentSearchParams(request);
@@ -107,7 +110,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -163,6 +166,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(payload.tags);
 
+    /** Extract barcode data from form only if barcodes are enabled */
+    const barcodes = canUseBarcodes
+      ? extractBarcodesFromFormData(formData)
+      : [];
+
     const asset = await createAsset({
       organizationId,
       title,
@@ -174,6 +182,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       tags,
       valuation,
       customFieldsValues,
+      barcodes,
     });
 
     // Not sure how to handle this failing as the asset is already created

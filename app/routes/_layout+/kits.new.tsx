@@ -5,8 +5,10 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import { useSearchParams } from "~/hooks/search-params";
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import { createKit, updateKitImage } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -25,15 +27,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.create,
     });
+
+    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
+      {
+        request,
+        organizationId,
+      }
+    );
+
     return json(
       data({
         header,
+        categories,
+        totalCategories,
       })
     );
   } catch (cause) {
@@ -57,7 +69,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -75,11 +87,18 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const payload = parseData(formData, NewKitFormSchema);
 
+    /** Extract barcode data from form */
+    const barcodes = canUseBarcodes
+      ? extractBarcodesFromFormData(formData)
+      : [];
+
     const kit = await createKit({
       ...payload,
       description: payload.description ?? "",
       createdById: userId,
       organizationId,
+      categoryId: payload.category ?? null,
+      barcodes,
     });
 
     await updateKitImage({

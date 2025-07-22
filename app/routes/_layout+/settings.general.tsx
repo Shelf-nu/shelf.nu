@@ -1,4 +1,4 @@
-import { Currency, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -18,6 +18,9 @@ import { ExportBackupButton } from "~/components/assets/export-backup-button";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
+import TransferOwnershipCard, {
+  TransferOwnershipSchema,
+} from "~/components/settings/transfer-ownership-card";
 
 import { Card } from "~/components/shared/card";
 import {
@@ -28,6 +31,8 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import {
+  getOrganizationAdmins,
+  transferOwnership,
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
@@ -50,74 +55,63 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.generalSettings,
-      action: PermissionAction.read,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.generalSettings,
+        action: PermissionAction.read,
+      });
 
-    const user = await db.user
-      .findUniqueOrThrow({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-
-          userOrganizations: {
-            include: {
-              organization: {
-                include: {
-                  ssoDetails: true,
-                  _count: {
-                    select: {
-                      assets: true,
-                      members: true,
-                      locations: true,
+    const [user, tierLimit, admins] = await Promise.all([
+      db.user
+        .findUniqueOrThrow({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+            userOrganizations: {
+              include: {
+                organization: {
+                  include: {
+                    ssoDetails: true,
+                    _count: {
+                      select: {
+                        assets: true,
+                        members: true,
+                        locations: true,
+                      },
                     },
-                  },
-                  owner: {
-                    select: {
-                      id: true,
-                      firstName: true,
-                      lastName: true,
-                      profilePicture: true,
+                    owner: {
+                      select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        profilePicture: true,
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "User not found",
-          additionalData: { userId, organizationId },
-          label: "Settings",
-        });
-      });
-
-    const currentOrganization = user.userOrganizations.find(
-      (userOrg) => userOrg.organizationId === organizationId
-    );
-
-    /* Check the tier limit */
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    });
-
-    if (!currentOrganization) {
-      throw new ShelfError({
-        cause: null,
-        message: "Organization not found",
-        additionalData: { userId, organizationId },
-        label: "Settings",
-      });
-    }
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "User not found",
+            additionalData: { userId, organizationId },
+            label: "Settings",
+          });
+        }),
+      /* Check the tier limit */
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getOrganizationAdmins({ organizationId }),
+    ]);
 
     const header: HeaderData = {
       title: "General",
@@ -126,12 +120,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         header,
-        organization: currentOrganization.organization,
+        organization: currentOrganization,
         canExportAssets: canExportAssets(tierLimit),
         user,
         curriences: Object.keys(Currency),
         isPersonalWorkspace:
-          currentOrganization.organization.type === OrganizationType.PERSONAL,
+          currentOrganization.type === OrganizationType.PERSONAL,
+        admins,
       })
     );
   } catch (cause) {
@@ -155,19 +150,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.generalSettings,
-      action: PermissionAction.update,
-    });
+    const { organizationId, currentOrganization, role } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.generalSettings,
+        action: PermissionAction.update,
+      });
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
     const { intent } = parseData(
       formData,
       z.object({
-        intent: z.enum(["general", "permissions", "sso"]),
+        intent: z.enum(["general", "permissions", "sso", "transfer-ownership"]),
       }),
       {
         additionalData: {
@@ -267,6 +263,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "sso": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to edit SSO settings.",
+            label: "Settings",
+          });
+        }
+
         if (!currentOrganization.enabledSso) {
           throw new ShelfError({
             cause: null,
@@ -313,6 +318,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/settings/general");
       }
+      case "transfer-ownership": {
+        const payload = parseData(formData, TransferOwnershipSchema, {
+          additionalData: { userId, organizationId },
+        });
+
+        const { newOwner } = await transferOwnership({
+          currentOrganization,
+          newOwnerId: payload.newOwner,
+          userId: authSession.userId,
+        });
+
+        sendNotification({
+          title: "Ownership transferred",
+          message: `You have successfully transferred ownership of ${currentOrganization.name} to ${newOwner.firstName} ${newOwner.lastName}`,
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect("/assets");
+      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -346,22 +371,23 @@ export default function GeneralPage() {
         name={organization.name}
         currency={organization.currency}
       />
-      <Card className={tw("")}>
-        <div className=" mb-6">
-          <h4 className="text-text-lg font-semibold">Asset backup</h4>
-          <p className=" text-sm text-gray-600">
-            Download a backup of your assets. If you want to restore a backup,
-            please get in touch with support.
-          </p>
-          <p className=" font-italic mb-2 text-sm text-gray-600">
-            IMPORTANT NOTE: QR codes will not be included in the export. Due to
-            the nature of how Shelf's QR codes work, they currently cannot be
-            exported with assets because they have unique ids. <br />
-            Importing a backup will just create a new QR code for each asset.
-          </p>
-          <ExportBackupButton canExportAssets={canExportAssets} />
-        </div>
+
+      <Card className={tw("mb-0")}>
+        <h4 className="text-text-lg font-semibold">Asset backup</h4>
+        <p className=" text-sm text-gray-600">
+          Download a backup of your assets. If you want to restore a backup,
+          please get in touch with support.
+        </p>
+        <p className=" font-italic mb-2 text-sm text-gray-600">
+          IMPORTANT NOTE: QR codes will not be included in the export. Due to
+          the nature of how Shelf's QR codes work, they currently cannot be
+          exported with assets because they have unique ids. <br />
+          Importing a backup will just create a new QR code for each asset.
+        </p>
+        <ExportBackupButton canExportAssets={canExportAssets} />
       </Card>
+
+      <TransferOwnershipCard />
     </div>
   );
 }

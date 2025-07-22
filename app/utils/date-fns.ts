@@ -1,4 +1,4 @@
-import { format, parseISO } from "date-fns";
+import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "./client-hints";
@@ -42,11 +42,7 @@ export function calcTimeDifference(
 }
 
 export function getTimeRemainingMessage(date1: Date, date2: Date): string {
-  // console.log("date1", date1);
-  // console.log("date2", date2);
   const { hours, minutes } = calcTimeDifference(date1, date2);
-  // console.log("hours", hours);
-  // console.log("minutes", minutes);
 
   if (hours > 0) {
     return `${hours} hour${hours > 1 ? "s" : ""}`;
@@ -79,30 +75,6 @@ export function formatDatesForICal(date: Date, hints: ClientHint) {
   };
 
   return formatLocalDate(date, dateTimeFormat);
-}
-
-export function getBookingDefaultStartEndTimes() {
-  const now = new Date();
-
-  /** Add 10 minutes to current time */
-  const startDate = dateForDateTimeInputValue(
-    new Date(now.setMinutes(now.getMinutes() + 10, 0))
-  );
-
-  let endDate;
-  /** If its already after 6pm, set it to 6pm tomorrow */
-  if (
-    now.getHours() >= 18 ||
-    (now.getHours() === 17 && now.getMinutes() > 49)
-  ) {
-    now.setDate(now.getDate() + 1);
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  } else {
-    /** Set to 6pm today */
-    endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
-  }
-
-  return { startDate, endDate };
 }
 
 export function getWeekNumber(currentDate: Date) {
@@ -191,4 +163,118 @@ export function adjustDateToUTC(dateString: string, timeZone: string): string {
   const zonedDate = toZonedTime(parseISO(dateString), timeZone);
   const utcDate = fromZonedTime(zonedDate, timeZone);
   return format(utcDate, "yyyy-MM-dd");
+}
+
+/**
+ * Converts a UTC date string to the user's local timezone for display.
+ * This ensures dates are shown correctly in the user's local context.
+ *
+ * @param dateString - The UTC date string from the database
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} A date string in 'yyyy-MM-dd' format, adjusted to user timezone
+ *
+ * @example
+ * adjustDateToUserTimezone("2024-01-01", "America/New_York") // returns local equivalent
+ */
+export function adjustDateToUserTimezone(
+  dateString: string,
+  timeZone: string
+): string {
+  // If the date string is empty or not a valid date format, return empty string
+  if (!dateString || !isDateString(dateString)) {
+    return "";
+  }
+
+  try {
+    const date = toZonedTime(parseISO(dateString), timeZone);
+    return format(date, "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Converts a UTC date (string or Date) to the user's local timezone as an ISO 8601 string.
+ *
+ * @param dateInput - The UTC date string or Date object
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} ISO 8601 string adjusted to the user's timezone (e.g. "2025-06-16T03:41:00-04:00")
+ */
+export function toIsoDateTimeToUserTimezone(
+  dateInput: string | Date,
+  timeZone: string
+): string {
+  if (!dateInput) return "";
+
+  try {
+    const date =
+      typeof dateInput === "string" ? parseISO(dateInput) : dateInput;
+
+    const zonedDate = toZonedTime(date, timeZone);
+
+    // Return ISO 8601 string with timezone offset
+    return formatISO(zonedDate, { representation: "complete" });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Gets today's date in the user's timezone, formatted as YYYY-MM-DD.
+ * Useful for setting minimum dates and default values.
+ *
+ * @param timeZone - The user's timezone
+ * @returns {string} Today's date in YYYY-MM-DD format
+ */
+export function getTodayInUserTimezone(timeZone: string): string {
+  try {
+    const now = new Date();
+    const zonedDate = toZonedTime(now, timeZone);
+    return format(zonedDate, "yyyy-MM-dd");
+  } catch {
+    // Fallback to local date if timezone conversion fails
+    return format(new Date(), "yyyy-MM-dd");
+  }
+}
+
+/**
+ * Converts a UTC time string to the user's local timezone for display.
+ * This ensures time strings are shown correctly in the user's local context.
+ *
+ * @param utcTimeString - The UTC time string from the database (e.g., "07:15")
+ * @param timeZone - The user's timezone (e.g., "America/New_York")
+ * @returns {string} A time string in 'HH:mm' format, adjusted to user timezone
+ *
+ * @example
+ * adjustTimeToUserTimezone("07:15", "America/New_York") // returns local equivalent like "03:15"
+ */
+export function adjustTimeToUserTimezone(
+  utcTimeString: string,
+  timeZone: string
+): string {
+  if (!utcTimeString || !utcTimeString.includes(":")) {
+    return "";
+  }
+
+  try {
+    const [hours, minutes] = utcTimeString.split(":").map(Number);
+
+    // Create a UTC date for today with the specified time
+    const today = new Date();
+    const utcDate = new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+        hours,
+        minutes
+      )
+    );
+
+    // Convert to user's timezone
+    const localDate = toZonedTime(utcDate, timeZone);
+    return format(localDate, "HH:mm");
+  } catch {
+    return "";
+  }
 }

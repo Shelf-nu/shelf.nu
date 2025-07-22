@@ -11,7 +11,6 @@ import {
 } from "./client-hints";
 import { ShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
-
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -202,6 +201,9 @@ export const buildCustomFieldValue = (
         return { raw, valueOption: String(raw) };
       case "MULTILINE_TEXT":
         return { raw, valueMultiLineText: String(raw) };
+      case "AMOUNT": {
+        return { raw: Number(raw), valueText: String(raw) };
+      }
     }
 
     return { raw, valueText: String(raw) };

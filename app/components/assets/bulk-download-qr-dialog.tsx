@@ -9,9 +9,9 @@ import { useSearchParams } from "~/hooks/search-params";
 import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
 import { sanitizeFilename } from "~/utils/misc";
+import { QrLabel } from "../code-preview/code-preview";
+import type { QrDef } from "../code-preview/code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import type { QrDef } from "../qr/qr-preview";
-import { QrLabel } from "../qr/qr-preview";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
@@ -132,7 +132,7 @@ export default function BulkDownloadQrDialog({
       const downloadLink = document.createElement("a");
 
       downloadLink.href = URL.createObjectURL(zipBlob);
-      downloadLink.download = "qr-codes.zip";
+      downloadLink.download = `qr-codes-${new Date().getTime()}.zip`;
 
       downloadLink.click();
 

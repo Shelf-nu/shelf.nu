@@ -74,7 +74,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
     throw new ShelfError({
       cause,
       message:
-        "This QR code doesn't exist or it doesn't belong to your current organization.",
+        "This code doesn't exist or it doesn't belong to your current organization.",
       title: "QR code not found",
       status: 404,
       additionalData: { id },
@@ -241,7 +241,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
     throw new ShelfError({
       cause,
       message:
-        "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
+        "This code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
       title: "QR code not found",
       status: 404,
       additionalData: { qrId, organizationId },
@@ -449,7 +449,11 @@ export async function claimQrCode({
 }
 
 interface QRCodeMapParams {
-  assets: Asset[];
+  assets: Prisma.AssetGetPayload<{
+    include: {
+      qrCodes: true;
+    };
+  }>[];
   organizationId: string;
   userId: string;
   size: "small" | "medium" | "large" | "cable";
@@ -464,7 +468,7 @@ export async function getQrCodeMaps({
   try {
     const qrCodePromises = assets.map(async (asset) => {
       try {
-        let qr = await getQrByAssetId({ assetId: asset.id });
+        let qr = asset.qrCodes[0];
         const qrCode = qr
           ? await generateCode({
               version: qr.version as TypeNumber,
@@ -520,6 +524,7 @@ export async function parseQrCodesFromImportData({
       .map((asset) => {
         if (asset.qrId) {
           return {
+            key: asset.key,
             title: asset.title,
             qrId: asset.qrId,
           };

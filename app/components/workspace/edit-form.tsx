@@ -10,6 +10,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -189,9 +190,9 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
   return organization.type === OrganizationType.TEAM ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
       <Card className={tw("my-0 w-full", className)}>
-        <div className=" border-b pb-5">
-          <h2 className=" text-[18px] font-semibold">Permissions</h2>
-          <p>
+        <div className="border-b pb-5">
+          <h3 className="text-text-lg font-semibold">Permissions</h3>
+          <p className="text-sm text-gray-600">
             Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
             users.
           </p>
@@ -343,12 +344,13 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
+  const { isOwner } = useUserRoleHelper();
   const fetcher = useFetcher({ key: "sso" });
   let schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
 
-  return organization.enabledSso && organization.ssoDetails ? (
+  return isOwner && organization.enabledSso && organization.ssoDetails ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
       <Card className={tw("my-0 ", className)}>
         <div className=" border-b pb-5">

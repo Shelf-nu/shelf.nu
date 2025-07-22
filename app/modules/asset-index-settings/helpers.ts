@@ -25,13 +25,26 @@ export const fixedFields = [
   "actions",
 ] as const;
 
+// Define barcode field names
+export const barcodeFields = [
+  "barcode_Code128",
+  "barcode_Code39",
+  "barcode_DataMatrix",
+] as const;
+
+export type BarcodeField = (typeof barcodeFields)[number];
+
 export type FixedField = (typeof fixedFields)[number];
 
 // Define a type for custom fields column names that start with "cf_"
 type CustomFieldColumnKey = `cf_${string}`;
 
-// Define a new type that includes both FixedField and the additional key "name"
-export type ColumnLabelKey = FixedField | "name" | CustomFieldColumnKey;
+// Define a new type that includes both FixedField, BarcodeField and the additional key "name"
+export type ColumnLabelKey =
+  | FixedField
+  | BarcodeField
+  | "name"
+  | CustomFieldColumnKey;
 
 export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
@@ -49,6 +62,9 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   custody: "Custody",
   upcomingReminder: "Upcoming Reminder",
   actions: "Actions",
+  barcode_Code128: "Code128",
+  barcode_Code39: "Code39",
+  barcode_DataMatrix: "DataMatrix",
 };
 
 export const defaultFields: Column[] = [
@@ -65,13 +81,22 @@ export const defaultFields: Column[] = [
   { name: "kit", visible: true, position: 10 },
   { name: "custody", visible: true, position: 11 },
   { name: "upcomingReminder", visible: true, position: 12 },
-  { name: "actions", visible: true, position: 12 },
+  { name: "actions", visible: true, position: 13 },
 ];
 
+// Generate barcode columns when barcodes are enabled
+export const generateBarcodeColumns = (): Column[] =>
+  barcodeFields.map((field, index) => ({
+    name: field,
+    visible: true,
+    position: defaultFields.length + index, // Position after fixed fields
+  }));
+
 export const generateColumnsSchema = (customFields: string[]) => {
-  // Combine fixed and custom fields to form ColumnLabelKey
+  // Combine fixed, barcode and custom fields to form ColumnLabelKey
   const allFields = [
     ...fixedFields,
+    ...barcodeFields,
     "name", // Explicitly include "name"
     ...customFields,
   ] as const;

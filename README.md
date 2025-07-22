@@ -12,14 +12,15 @@
 Shelf 🏷️ is a cutting-edge, open-source asset management platform designed to streamline tracking, organizing, and managing assets for individuals, businesses, and educational institutions.
 </p>
 
-<div align="center">
+<div align="center" justify="center">
 <a href="https://www.shelf.nu/?ref=github" target="_blank"><b>Website</b></a> •
 <a href="https://github.com/Shelf-nu/shelf.nu/tree/main/docs" target="_blank"><b>Documentation</b></a> •
-<a href="https://discord.gg/gdPMsSzqCS" target="_blank"><b>Community</b></a> •
-<a href="https://twitter.com/ShelfQR/?ref=github" target="_blank"><b>Twitter</b></a>
-</div>
+<a href="https://discord.gg/8he9W7aTJu" target="_blank"><b>Community</b></a> •
+<a href="https://twitter.com/ShelfQR/?ref=github" target="_blank"><b>Twitter</b></a> •
 
----
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+
+</div>
 
 ## Core Features 🚀
 
@@ -37,7 +38,7 @@ Shelf 🏷️ is a cutting-edge, open-source asset management platform designed 
 
 ## Real Impact: Eastern Michigan University Case Study 🌟
 
-Shelf revolutionized asset management for Eastern Michigan University’s Theatre Program:
+Shelf revolutionized asset management for Eastern Michigan University's Theatre Program:
 
 - **Centralized Inventory**: Moving from chaotic spreadsheets to an organized digital catalog.
 - **Remote Access**: Students coordinate props from different locations, streamlining pre-production.
@@ -58,34 +59,78 @@ Shelf is ideal for managing:
 
 ---
 
-## How to Get Started 💻
+## Quick Start 🚀
 
-To set up Shelf:
+Get Shelf running locally in just a few steps:
 
-1. **Clone the Repo**:
-   ```bash
-   git clone https://github.com/Shelf-nu/shelf.nu.git
-   cd shelf.nu
-   ```
-2. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-3. **Setup your database:**
+### Prerequisites
 
-   - Create your supabase database: [Guide](./docs/get-started.md#development)
-   - Run intial migrations
+- **Node.js** (v18 or higher)
+- **npm** or **yarn**
+- **Git**
 
-   ```
-   npm run setup
-   ```
+### 1. Clone & Install 📦
 
-4. **Start local server**:
-   ```bash
-   npm run dev
-   ```
+```bash
+git clone https://github.com/Shelf-nu/shelf.nu.git
+cd shelf.nu
+npm install
+```
 
-For detailed setup instructions, check out our [documentation](https://github.com/Shelf-nu/shelf.nu/tree/main/docs).
+### 2. Setup Environment Variables 🔧
+
+```bash
+cp .env.example .env
+```
+
+### 3. Setup Supabase Database 🗄️
+
+You'll need a Supabase account and database. Follow our detailed [Supabase Setup Guide](./docs/supabase-setup.md) to:
+
+- Create your Supabase project
+- Configure authentication
+- Setup storage buckets
+- Get your connection strings and API keys
+
+### 4. Configure Your .env File ⚙️
+
+After completing the Supabase setup, update your `.env` file with the values from your Supabase dashboard.
+
+### 5. Initialize Database 🏗️
+
+```bash
+npm run setup
+```
+
+### 6. Start Development Server 🎉
+
+```bash
+npm run dev
+```
+
+Your app will be available at `http://localhost:3000` 🎊
+
+---
+
+## Documentation 📚
+
+- 📖 **[Local Development Guide](./docs/local-development.md)** - Detailed setup for local development
+- 🗄️ **[Supabase Setup Guide](./docs/supabase-setup.md)** - Complete Supabase configuration
+- 🚀 **[Deployment Guide](./docs/deployment.md)** - Deploy to production (Fly.io, GitHub Actions)
+- 🐳 **[Docker Guide](./docs/docker.md)** - Run with Docker
+- 🔧 **[All Documentation](./docs/)** - Browse all guides and references
+
+---
+
+## Alternative Setup Options 🛠️
+
+### Docker 🐳
+
+Prefer containers? Check out our [Docker setup guide](./docs/docker.md).
+
+### One-Click Deploy 🚀
+
+Ready for production? See our [deployment guide](./docs/deployment.md) for Fly.io and GitHub Actions setup.
 
 ---
 
