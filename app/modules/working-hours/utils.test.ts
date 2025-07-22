@@ -1,7 +1,7 @@
 import type { WorkingHoursData, WeeklyScheduleJson } from "./types";
 import {
-  calculateEffectiveEndDate,
   calculateBusinessHoursDuration,
+  calculateEffectiveEndDate,
   getBookingDefaultStartEndTimes,
   normalizeWorkingHoursForValidation,
 } from "./utils";
@@ -408,14 +408,30 @@ describe("calculateBusinessHoursDuration", () => {
 });
 
 describe("getBookingDefaultStartEndTimes", () => {
+  const originalTZ = process.env.TZ;
+
+  beforeAll(() => {
+    // Force tests to run in UTC for consistent behavior across environments
+    process.env.TZ = "UTC";
+  });
+
   beforeEach(() => {
-    // Mock current time to Friday, July 25, 2025 at 2 PM
+    // Mock current time to Friday, July 25, 2025 at 2 PM UTC
     vitest.useFakeTimers();
     vitest.setSystemTime(new Date("2025-07-25T14:00:00Z"));
   });
 
   afterEach(() => {
     vitest.useRealTimers();
+  });
+
+  afterAll(() => {
+    // Restore original timezone
+    if (originalTZ !== undefined) {
+      process.env.TZ = originalTZ;
+    } else {
+      delete process.env.TZ;
+    }
   });
 
   const mockWorkingHours: WorkingHoursData = {
@@ -457,9 +473,9 @@ describe("getBookingDefaultStartEndTimes", () => {
 
     const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0);
 
-    // Function finds next available working time (6 AM UTC = 9 AM local)
-    expect(result.startDate).toBe("2025-07-28T06:00"); // Next working day 9 AM local (6 AM UTC)
-    expect(result.endDate).toBe("2025-07-28T14:00"); // End of working day 5 PM local (2 PM UTC)
+    // Since we're within working hours (2 PM on Friday), use 10-minute buffer
+    expect(result.startDate).toBe("2025-07-25T14:10"); // Current time + 10 minutes
+    expect(result.endDate).toBe("2025-07-25T17:00"); // End of current working day
   });
 
   it("should handle buffer time within working hours", () => {
@@ -467,8 +483,9 @@ describe("getBookingDefaultStartEndTimes", () => {
 
     const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2);
 
-    expect(result.startDate).toBe("2025-07-28T06:00"); // Next working day 9 AM local (6 AM UTC)
-    expect(result.endDate).toBe("2025-07-28T14:00"); // End of working day 5 PM local (2 PM UTC)
+    // Since we're within working hours and buffer doesn't exceed closing time
+    expect(result.startDate).toBe("2025-07-25T16:00"); // Current time + 2 hours buffer
+    expect(result.endDate).toBe("2025-07-25T17:00"); // End of current working day
   });
 
   it("should find next working day when outside hours", () => {
@@ -479,8 +496,8 @@ describe("getBookingDefaultStartEndTimes", () => {
 
     const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0);
 
-    expect(result.startDate).toBe("2025-07-28T06:00"); // Next Monday 9 AM local (6 AM UTC)
-    expect(result.endDate).toBe("2025-07-28T14:00"); // Next Monday 5 PM local (2 PM UTC)
+    expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
+    expect(result.endDate).toBe("2025-07-28T17:00"); // Next Monday 5 PM UTC
   });
 
   it("should handle buffer time that extends past working hours", () => {
@@ -492,8 +509,8 @@ describe("getBookingDefaultStartEndTimes", () => {
     const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2);
 
     // Buffer would put us at 6:30 PM, past closing, so use next working day
-    expect(result.startDate).toBe("2025-07-28T06:00"); // Next Monday 9 AM local (6 AM UTC)
-    expect(result.endDate).toBe("2025-07-28T14:00"); // Next Monday 5 PM local (2 PM UTC)
+    expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
+    expect(result.endDate).toBe("2025-07-28T17:00"); // Next Monday 5 PM UTC
   });
 
   it("should handle date-specific overrides", () => {
@@ -518,7 +535,7 @@ describe("getBookingDefaultStartEndTimes", () => {
 
     const result = getBookingDefaultStartEndTimes(workingHoursWithOverride, 0);
 
-    expect(result.startDate).toBe("2025-07-28T06:00"); // Next Monday 9 AM local (6 AM UTC)
-    expect(result.endDate).toBe("2025-07-28T14:00"); // Next Monday 5 PM local (2 PM UTC)
+    expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
+    expect(result.endDate).toBe("2025-07-28T17:00"); // Next Monday 5 PM UTC
   });
 });
