@@ -132,7 +132,7 @@ export default function BulkDownloadQrDialog({
       const downloadLink = document.createElement("a");
 
       downloadLink.href = URL.createObjectURL(zipBlob);
-      downloadLink.download = "qr-codes.zip";
+      downloadLink.download = `qr-codes-${new Date().getTime()}.zip`;
 
       downloadLink.click();
 
