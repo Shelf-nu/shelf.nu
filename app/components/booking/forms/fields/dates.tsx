@@ -1,9 +1,11 @@
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { InfoBox } from "~/components/shared/info-box";
+import { Separator } from "~/components/shared/separator";
 import { Spinner } from "~/components/shared/spinner";
 import { TimeDisplay } from "~/components/shared/time-display";
 import { WorkingHoursPreviewDialog } from "~/components/working-hours/working-hours-preview-dialog";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type {
   useWorkingHours,
   UseWorkingHoursResult,
@@ -38,6 +40,7 @@ export function DatesFields({
 }) {
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
+  const { maxBookingLength, bufferStartTime } = useBookingSettings();
 
   return (
     <>
@@ -126,6 +129,20 @@ export function DatesFields({
           Within this period the assets in this booking will be checked out and
           unavailable for other bookings.
         </p>
+        {(maxBookingLength || bufferStartTime > 0) && (
+          <Separator className="my-2" />
+        )}
+        {maxBookingLength && (
+          <p className="text-[14px] text-gray-600">
+            Maximum booking length is <strong>{maxBookingLength} hours</strong>.
+          </p>
+        )}
+        {bufferStartTime > 0 && (
+          <p className="text-[14px] text-gray-600">
+            Minimum advance notice: <strong>{bufferStartTime} hours</strong>{" "}
+            before booking start time.
+          </p>
+        )}
       </FormRow>
       <WorkingHoursInfo
         workingHoursData={workingHoursData}
