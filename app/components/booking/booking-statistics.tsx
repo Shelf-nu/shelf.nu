@@ -93,7 +93,7 @@ export function BookingStatistics({
         <Separator />
 
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Created by</span>
+          <span className="text-sm text-color-500">Created by</span>
 
           <UserBadge
             name={`${creator.firstName} ${creator.lastName}`}
