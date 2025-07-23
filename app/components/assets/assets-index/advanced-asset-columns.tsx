@@ -8,6 +8,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "@remix-run/react";
+import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -275,6 +276,9 @@ export function AdvancedIndexColumn({
     case "barcode_DataMatrix":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "upcomingBookings":
+      return <UploadingBookingsColumn bookings={item.bookings} />;
+
     default:
       return <Td> </Td>;
   }
@@ -497,6 +501,66 @@ function BarcodeColumn({
           )}
         </span>
       ))}
+    </Td>
+  );
+}
+
+function UploadingBookingsColumn({
+  bookings,
+}: {
+  bookings: AdvancedIndexAsset["bookings"];
+}) {
+  if (!bookings || bookings.length === 0) {
+    return <Td>No upcoming bookings</Td>;
+  }
+
+  return (
+    <Td>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="link-gray">
+            {bookings.length} upcoming bookings
+          </Button>
+        </PopoverTrigger>
+
+        <PopoverPortal>
+          <PopoverContent className="max-h-64 divide-y overflow-auto rounded-md border bg-white p-4">
+            {bookings.map((booking) => {
+              const custodianName = booking?.custodianUser
+                ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+                : booking.custodianTeamMember?.name;
+
+              return (
+                <div key={booking.id}>
+                  <EventCardContent
+                    booking={{
+                      id: booking.id,
+                      name: booking.name,
+                      description: booking.description,
+                      status: booking.status,
+                      tags: booking.tags,
+                      start: booking.from,
+                      end: booking.to,
+                      custodian: {
+                        name: custodianName!,
+                        user: booking.custodianUser
+                          ? {
+                              id: booking.custodianUser.id,
+                              firstName: booking.custodianUser.firstName,
+                              lastName: booking.custodianUser.lastName,
+                              profilePicture:
+                                booking.custodianUser.profilePicture,
+                            }
+                          : null,
+                      },
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
     </Td>
   );
 }

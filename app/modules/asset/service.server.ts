@@ -541,10 +541,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  const settingColumns = settings?.columns as Column[];
+
+  const isUpcomingBookingsColumnVisible =
+    settings.mode === "ADVANCED" &&
+    settingColumns?.some(
+      (col) => col.name === "upcomingBookings" && col.visible
+    );
+
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = parseFilters(filters, settings.columns as Column[]);
+    const parsedFilters = parseFilters(filters, settingColumns);
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -563,7 +571,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const query = Prisma.sql`
       WITH asset_query AS (
         ${assetQueryFragment({
-          withBookings: getBookings,
+          withBookings: getBookings || isUpcomingBookingsColumnVisible,
           withBarcodes: canUseBarcodes,
         })}
         ${customFieldSelect}
@@ -583,7 +591,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       SELECT 
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment({
-          withBookings: getBookings,
+          withBookings: getBookings || isUpcomingBookingsColumnVisible,
           withBarcodes: canUseBarcodes,
         })}
       FROM sorted_asset_query aq;
