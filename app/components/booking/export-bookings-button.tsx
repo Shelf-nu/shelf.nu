@@ -65,7 +65,7 @@ export function ExportBookingsButton() {
     <Button
       onClick={handleExport}
       variant="secondary"
-      className="font-medium"
+      className="flex-1 whitespace-nowrap font-medium"
       title={title}
       disabled={
         disabled

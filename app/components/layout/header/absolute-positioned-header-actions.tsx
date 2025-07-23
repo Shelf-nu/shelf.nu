@@ -14,6 +14,6 @@ export const AbsolutePositionedHeaderActions = ({
       className
     )}
   >
-    <div className=" flex flex-1 gap-2">{children}</div>
+    <div className="flex flex-1 flex-col gap-2 md:flex-row">{children}</div>
   </div>
 );

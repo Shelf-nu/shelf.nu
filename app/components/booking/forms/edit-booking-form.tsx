@@ -183,104 +183,107 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       {/* Render the actions on top only when the form is in edit mode */}
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
-          <When truthy={isBase}>
-            <BookingProcessSidebar />
-          </When>
+          <div className="flex flex-1 items-center justify-between gap-2">
+            <When truthy={isBase}>
+              <BookingProcessSidebar />
+            </When>
 
-          {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
-          <ActionsDropdown />
+            {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
+            <ActionsDropdown />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            {/*  We show the button in all cases, unless the booking is in a final state */}
+            {!(
+              bookingStatus?.isCompleted ||
+              bookingStatus?.isCancelled ||
+              bookingStatus?.isArchived
+            ) ? (
+              <>
+                <input
+                  type="hidden"
+                  name="nameChangeOnly"
+                  value={bookingStatus?.isDraft ? "no" : "yes"}
+                />
+                <Button
+                  type="submit"
+                  disabled={disabled || isLoadingWorkingHours}
+                  variant="secondary"
+                  name="intent"
+                  value="save"
+                  className="grow"
+                  size="sm"
+                >
+                  Save
+                </Button>
+              </>
+            ) : null}
 
-          {/*  We show the button in all cases, unless the booking is in a final state */}
-          {!(
-            bookingStatus?.isCompleted ||
-            bookingStatus?.isCancelled ||
-            bookingStatus?.isArchived
-          ) ? (
-            <>
-              <input
-                type="hidden"
-                name="nameChangeOnly"
-                value={bookingStatus?.isDraft ? "no" : "yes"}
-              />
+            {/* When booking is draft, we show the reserve button */}
+            {bookingStatus?.isDraft ? (
               <Button
+                disabled={
+                  disabled ||
+                  isLoadingWorkingHours ||
+                  !bookingFlags?.hasAssets ||
+                  bookingFlags?.hasAlreadyBookedAssets ||
+                  bookingFlags?.hasUnavailableAssets
+                    ? {
+                        reason: bookingFlags?.hasUnavailableAssets
+                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                          : bookingFlags?.hasAlreadyBookedAssets
+                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                          : isProcessing || isLoadingWorkingHours
+                          ? undefined
+                          : "You need to add assets to your booking before you can reserve it",
+                      }
+                    : false
+                }
                 type="submit"
-                disabled={disabled || isLoadingWorkingHours}
-                variant="secondary"
                 name="intent"
-                value="save"
-                className="grow"
+                value="reserve"
+                className="grow whitespace-nowrap"
                 size="sm"
               >
-                Save
+                {isBase ? "Request reservation" : "Reserve"}
               </Button>
-            </>
-          ) : null}
+            ) : null}
 
-          {/* When booking is draft, we show the reserve button */}
-          {bookingStatus?.isDraft ? (
-            <Button
-              disabled={
-                disabled ||
-                isLoadingWorkingHours ||
-                !bookingFlags?.hasAssets ||
-                bookingFlags?.hasAlreadyBookedAssets ||
-                bookingFlags?.hasUnavailableAssets
-                  ? {
-                      reason: bookingFlags?.hasUnavailableAssets
-                        ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                        : bookingFlags?.hasAlreadyBookedAssets
-                        ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                        : isProcessing || isLoadingWorkingHours
-                        ? undefined
-                        : "You need to add assets to your booking before you can reserve it",
-                    }
-                  : false
+            {/* When booking is reserved, we show the check-out button */}
+            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
+              <CheckoutDialog
+                portalContainer={zo.form}
+                booking={{ id, name: name!, from: startDate! }}
+                disabled={
+                  disabled ||
+                  isLoadingWorkingHours ||
+                  bookingFlags?.hasUnavailableAssets ||
+                  bookingFlags?.hasCheckedOutAssets ||
+                  bookingFlags?.hasAssetsInCustody
+                    ? {
+                        reason: bookingFlags?.hasAssetsInCustody
+                          ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                          : isProcessing || isLoadingWorkingHours
+                          ? undefined
+                          : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
+                      }
+                    : false
+                }
+              />
+            </When>
+
+            <When
+              truthy={
+                (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                canCheckInBooking
               }
-              type="submit"
-              name="intent"
-              value="reserve"
-              className="grow"
-              size="sm"
             >
-              {isBase ? "Request reservation" : "Reserve"}
-            </Button>
-          ) : null}
-
-          {/* When booking is reserved, we show the check-out button */}
-          <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-            <CheckoutDialog
-              portalContainer={zo.form}
-              booking={{ id, name: name!, from: startDate! }}
-              disabled={
-                disabled ||
-                isLoadingWorkingHours ||
-                bookingFlags?.hasUnavailableAssets ||
-                bookingFlags?.hasCheckedOutAssets ||
-                bookingFlags?.hasAssetsInCustody
-                  ? {
-                      reason: bookingFlags?.hasAssetsInCustody
-                        ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
-                        : isProcessing || isLoadingWorkingHours
-                        ? undefined
-                        : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
-                    }
-                  : false
-              }
-            />
-          </When>
-
-          <When
-            truthy={
-              (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
-              canCheckInBooking
-            }
-          >
-            <CheckinDialog
-              portalContainer={zo.form}
-              booking={{ id, name: name!, to: endDate!, from: startDate! }}
-              disabled={disabled || isLoadingWorkingHours}
-            />
-          </When>
+              <CheckinDialog
+                portalContainer={zo.form}
+                booking={{ id, name: name!, to: endDate!, from: startDate! }}
+                disabled={disabled || isLoadingWorkingHours}
+              />
+            </When>
+          </div>
         </AbsolutePositionedHeaderActions>
       ) : null}
       <div className="mb-4">
