@@ -212,7 +212,10 @@ export function BookingAssetsSidebar({
                               </td>
                               <td className="px-6 py-4"> </td>
                               <td className="px-6 py-4">
-                                <CategoryBadge category={kit.category} />
+                                <CategoryBadge
+                                  category={kit.category}
+                                  className="whitespace-nowrap"
+                                />
                               </td>
                               <td className="px-6 py-4 pr-4 text-right align-middle">
                                 <div className="flex items-center justify-end gap-5">
