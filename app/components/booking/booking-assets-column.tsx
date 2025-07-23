@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
@@ -122,33 +123,12 @@ export function BookingAssetsColumn() {
         <div className="flex flex-col">
           {/* This is a fake table header */}
           <div className="-mx-4 flex justify-between border border-b-0 bg-surface px-4 pb-3 pt-4 text-left font-normal text-color-600 md:mx-0 md:rounded-t md:px-6">
-            <ListTitle
-              title="Assets & Kits"
-              hasBulkActions
+            <BookingAssetsHeader
+              canSeeActions={canSeeActions}
               itemsGetter={itemsGetter}
-              disableSelectAllItems
+              manageAssetsUrl={manageAssetsUrl}
+              manageAssetsButtonDisabled={manageAssetsButtonDisabled}
             />
-
-            <When truthy={canSeeActions}>
-              <div className="flex items-center gap-2">
-                <ListBulkActionsDropdown />
-                <Button
-                  icon="scan"
-                  variant="secondary"
-                  to="scan-assets"
-                  disabled={manageAssetsButtonDisabled}
-                >
-                  Scan
-                </Button>
-                <Button
-                  to={manageAssetsUrl}
-                  className="whitespace-nowrap"
-                  disabled={manageAssetsButtonDisabled}
-                >
-                  Manage assets
-                </Button>
-              </div>
-            </When>
           </div>
 
           <div className="-mx-4 overflow-x-auto border border-b-0 border-color-200 bg-surface md:mx-0 md:rounded-b">
@@ -215,6 +195,97 @@ export function BookingAssetsColumn() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface BookingAssetsHeaderProps {
+  canSeeActions: boolean;
+  itemsGetter: (data: any) => any[];
+  manageAssetsUrl: string;
+  manageAssetsButtonDisabled: any;
+}
+
+function BookingAssetsHeader({
+  canSeeActions,
+  itemsGetter,
+  manageAssetsUrl,
+  manageAssetsButtonDisabled,
+}: BookingAssetsHeaderProps) {
+  const { isMd } = useViewportHeight();
+
+  if (isMd) {
+    // Desktop layout: everything in one row
+    return (
+      <div className="flex justify-between">
+        <ListTitle
+          title="Assets & Kits"
+          hasBulkActions
+          itemsGetter={itemsGetter}
+          disableSelectAllItems
+        />
+
+        <When truthy={canSeeActions}>
+          <div className="flex items-center gap-2">
+            <ListBulkActionsDropdown />
+            <Button
+              icon="scan"
+              variant="secondary"
+              to="scan-assets"
+              disabled={manageAssetsButtonDisabled}
+            >
+              Scan
+            </Button>
+            <Button
+              to={manageAssetsUrl}
+              className="whitespace-nowrap"
+              disabled={manageAssetsButtonDisabled}
+            >
+              Manage assets
+            </Button>
+          </div>
+        </When>
+      </div>
+    );
+  }
+
+  // Mobile layout: two rows
+  return (
+    <div>
+      {/* First row: ListTitle and ListBulkActionsDropdown */}
+      <div className="flex items-start justify-between">
+        <ListTitle
+          title="Assets & Kits"
+          hasBulkActions
+          itemsGetter={itemsGetter}
+          disableSelectAllItems
+        />
+        <When truthy={canSeeActions}>
+          <ListBulkActionsDropdown />
+        </When>
+      </div>
+
+      {/* Second row: Scan and Manage assets buttons */}
+      <When truthy={canSeeActions}>
+        <div className="flex gap-2">
+          <Button
+            icon="scan"
+            variant="secondary"
+            to="scan-assets"
+            disabled={manageAssetsButtonDisabled}
+            className="flex-1"
+          >
+            Scan
+          </Button>
+          <Button
+            to={manageAssetsUrl}
+            className="flex-1 whitespace-nowrap"
+            disabled={manageAssetsButtonDisabled}
+          >
+            Manage assets
+          </Button>
+        </div>
+      </When>
     </div>
   );
 }

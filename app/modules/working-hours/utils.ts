@@ -1,4 +1,10 @@
-import { addHours } from "date-fns";
+import {
+  addHours,
+  addDays,
+  format,
+  parseISO,
+  differenceInHours,
+} from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
@@ -389,4 +395,128 @@ function getOriginalDefaultTimes(
   }
 
   return { startDate, endDate };
+}
+
+/**
+ * Calculates the effective end date for a booking by extending the duration
+ * to skip closed days when maxBookingLengthSkipClosedDays is enabled.
+ *
+ * @param startDate - The start date of the booking
+ * @param endDate - The end date of the booking
+ * @param workingHoursData - Working hours configuration with schedules and overrides
+ * @param skipClosedDays - Whether to skip closed days in the calculation
+ * @returns Effective end date for validation (or original endDate if not skipping)
+ */
+export function calculateEffectiveEndDate(
+  startDate: Date,
+  endDate: Date,
+  workingHoursData: WorkingHoursData | null | undefined,
+  skipClosedDays: boolean
+): Date {
+  // If not skipping closed days or no working hours data, use original endDate
+  if (!skipClosedDays || !workingHoursData?.enabled) {
+    return endDate;
+  }
+
+  let closedDaysCount = 0;
+  const currentDate = new Date(startDate);
+  const originalEndDate = new Date(endDate);
+
+  // Count closed days between start and original end date
+  while (currentDate < originalEndDate) {
+    const dateString = format(currentDate, "yyyy-MM-dd");
+    const dayOfWeek = currentDate.getDay().toString();
+
+    // Check for date-specific override first
+    const override = workingHoursData.overrides.find((override) => {
+      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      return overrideDate === dateString;
+    });
+
+    let isOpen: boolean;
+
+    if (override) {
+      isOpen = override.isOpen;
+    } else {
+      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
+      isOpen = daySchedule?.isOpen || false;
+    }
+
+    // If this day is closed, count it
+    if (!isOpen) {
+      closedDaysCount++;
+    }
+
+    // Move to next day
+    currentDate.setTime(addDays(currentDate, 1).getTime());
+  }
+
+  // Extend the end date by the number of closed days
+  const finalEndDate = addDays(originalEndDate, closedDaysCount);
+
+  return finalEndDate;
+}
+
+/**
+ * Calculates the effective booking duration by subtracting closed days from calendar hours.
+ *
+ * Example: Fri 3PM → Mon 3PM = 72 calendar hours
+ * If Sat/Sun closed: 72 hours - 48 hours (2 closed days) = 24 hours
+ *
+ * @param startDate - The start date of the booking
+ * @param endDate - The end date of the booking
+ * @param workingHoursData - Working hours configuration with schedules and overrides
+ * @returns Calendar hours minus closed days hours
+ */
+export function calculateBusinessHoursDuration(
+  startDate: Date,
+  endDate: Date,
+  workingHoursData: WorkingHoursData
+): number {
+  // Start with total calendar hours
+  const totalCalendarHours = differenceInHours(endDate, startDate);
+  let closedDaysHours = 0;
+
+  const currentDate = new Date(startDate);
+
+  // Process each day from start to end to count closed days
+  while (currentDate < endDate) {
+    const nextDay = addDays(currentDate, 1);
+    nextDay.setHours(0, 0, 0, 0); // Start of next day
+
+    // Get the actual time window for this day (intersection of booking with day)
+    const windowStart = currentDate;
+    const windowEnd = nextDay > endDate ? endDate : nextDay;
+
+    // Check if this day is closed
+    const dateString = format(windowStart, "yyyy-MM-dd");
+    const dayOfWeek = windowStart.getDay().toString();
+
+    // Check for date-specific override first
+    const override = workingHoursData.overrides.find((override) => {
+      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      return overrideDate === dateString;
+    });
+
+    let isOpen: boolean;
+    if (override) {
+      isOpen = override.isOpen;
+    } else {
+      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
+      isOpen = daySchedule?.isOpen || false;
+    }
+
+    if (!isOpen) {
+      // This day is closed, subtract its hours from the total
+      const hoursInThisDay = differenceInHours(windowEnd, windowStart);
+      closedDaysHours += hoursInThisDay;
+    }
+
+    // Move to next day
+    currentDate.setTime(nextDay.getTime());
+  }
+
+  const effectiveHours = totalCalendarHours - closedDaysHours;
+
+  return effectiveHours;
 }

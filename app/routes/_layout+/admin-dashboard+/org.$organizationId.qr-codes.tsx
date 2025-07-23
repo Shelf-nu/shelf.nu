@@ -175,7 +175,7 @@ export default function AdminOrgQrCodes() {
             <Button
               to={`/api/${organization.id}/qr-codes.zip?${new URLSearchParams({
                 orphaned: "true",
-              })}`}
+              })}-${new Date().getTime()}`}
               reloadDocument
               className="whitespace-nowrap"
               variant="secondary"
@@ -183,7 +183,9 @@ export default function AdminOrgQrCodes() {
               Print unlinked codes
             </Button>
             <Button
-              to={`/api/${organization.id}/qr-codes.zip`}
+              to={`/api/${
+                organization.id
+              }/qr-codes-${new Date().getTime()}.zip`}
               reloadDocument
               className="whitespace-nowrap"
               variant="secondary"

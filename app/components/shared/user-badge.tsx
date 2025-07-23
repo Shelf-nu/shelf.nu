@@ -12,7 +12,7 @@ export function UserBadge({
       <img
         src={img || "/static/images/default_pfp.jpg"}
         className="mr-1 size-4 rounded-full"
-        alt=""
+        alt={name}
       />
       <span className="mt-px">{name}</span>
     </GrayBadge>

@@ -342,6 +342,7 @@ export function ThemeAwareComponent() {
 **Implementation Details:**
 
 The hook handles multiple theme change scenarios:
+
 - **Initial Load**: Checks localStorage first, falls back to system preference
 - **Storage Changes**: Responds to theme changes from other tabs/windows
 - **System Changes**: Updates when system preference changes (only if no manual theme is set)
@@ -387,6 +388,7 @@ export function AssetImage({ src, alt }: { src?: string; alt: string }) {
 - `useTheme`: Used internally to determine the current theme and select the appropriate placeholder image.
 
 This hook is particularly useful for:
+
 - Asset images that may fail to load
 - Default images for new assets
 - Consistent placeholder appearance across theme changes

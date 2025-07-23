@@ -59,6 +59,7 @@ export function AssetIndexFilters({
               <SortBy
                 sortingOptions={ASSET_SORTING_OPTIONS}
                 defaultSortingBy="createdAt"
+                className="flex-1"
               />
 
               <AvailabilityViewToggle />
