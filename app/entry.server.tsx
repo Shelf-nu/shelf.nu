@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { PassThrough } from "stream";
 
 import type { AppLoadContext, EntryContext } from "@remix-run/node";

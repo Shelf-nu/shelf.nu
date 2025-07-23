@@ -1,6 +1,7 @@
 {
   "login": {
-    "login": "Se connecter",
-    "subHeading": "Welcome back! Enter your details below to log in."
+    "title": "Se connecter",
+    "subHeading": "Bon retour ! Saisissez vos informations ci-dessous pour vous connecter.",
+    "test": "Testicle s"
   }
 }

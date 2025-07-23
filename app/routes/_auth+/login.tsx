@@ -42,7 +42,7 @@ import { validEmail } from "~/utils/misc";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const t = await initTranslationLoader(request);
-  const title = "Log in";
+  const title = t("login.title");
   const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
 
@@ -181,7 +181,7 @@ export default function IndexLoginForm() {
           data-test-id="login"
           disabled={disabled}
         >
-          {t("login.login")}
+          {t("login.title")}
         </Button>
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">
