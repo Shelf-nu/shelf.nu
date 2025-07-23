@@ -107,13 +107,13 @@ export default function KitOverview() {
   return (
     <Card className="mt-0 px-[-4] py-[-5] md:border">
       <ul className="item-information">
-        <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
+        <li className="w-full border-b-[1.1px] border-b-color-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-color-900">
             ID
           </span>
           <div className="mt-1 w-3/5 text-color-600 md:mt-0">{kit?.id}</div>
         </li>
-        <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
+        <li className="w-full border-b-[1.1px] border-b-color-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-color-900">
             Created
           </span>
@@ -123,7 +123,7 @@ export default function KitOverview() {
         </li>
 
         {kit?.description ? (
-          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
+          <li className="w-full border-b-[1.1px] border-b-color-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
             <span className="w-1/4 text-[14px] font-medium text-color-900">
               Description
             </span>
@@ -134,7 +134,7 @@ export default function KitOverview() {
         ) : null}
 
         <When truthy={!!kit.category}>
-          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
+          <li className="w-full border-b-[1.1px] border-b-color-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
             <span className="w-1/4 text-[14px] font-medium text-color-900">
               Category
             </span>
@@ -144,7 +144,7 @@ export default function KitOverview() {
           </li>
         </When>
 
-        <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
+        <li className="w-full border-b-[1.1px] border-b-color-100 p-4 last:border-b-0 dark:border-b-color-200 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-color-900">
             Total value{" "}
             <InfoTooltip

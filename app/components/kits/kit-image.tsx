@@ -93,7 +93,7 @@ export default function KitImage({
               "transition-opacity" // Fallback animation
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner className="[&_.spinner]:before:border-t-color-400" />
           </div>
         )}
 

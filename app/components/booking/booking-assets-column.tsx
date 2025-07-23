@@ -217,7 +217,7 @@ function BookingAssetsHeader({
   if (isMd) {
     // Desktop layout: everything in one row
     return (
-      <div className="flex justify-between">
+      <div className="flex w-full items-center justify-between">
         <ListTitle
           title="Assets & Kits"
           hasBulkActions

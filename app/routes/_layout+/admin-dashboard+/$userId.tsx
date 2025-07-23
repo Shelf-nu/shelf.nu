@@ -602,7 +602,7 @@ const SsoUsersByDomainTable = ({
               <Th className="whitespace-nowrap">SSO Users</Th>
             </Tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-color-200">
             {sortedDomains.map(([domain, userCount]) => (
               <Tr key={domain} className="transition-colors hover:bg-color-50">
                 <Td className="max-w-none">{domain}</Td>

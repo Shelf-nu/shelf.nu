@@ -237,7 +237,7 @@ export default function DynamicSelect({
               </div>
 
               <When truthy={showSearch}>
-                <div className="filters-form relative border-y border-y-gray-200 p-3">
+                <div className="filters-form relative border-y border-y-color-200 p-3">
                   <Input
                     type="text"
                     label={`Search ${contentLabel}`}

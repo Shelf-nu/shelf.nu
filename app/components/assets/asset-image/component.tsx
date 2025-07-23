@@ -217,7 +217,7 @@ export const AssetImage = ({
               "transition-opacity"
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner className="[&_.spinner]:before:border-t-color-400" />
           </div>
         )}
 

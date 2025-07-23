@@ -133,12 +133,12 @@ export function DatesFields({
           <Separator className="my-2" />
         )}
         {maxBookingLength && (
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Maximum booking length is <strong>{maxBookingLength} hours</strong>.
           </p>
         )}
         {bufferStartTime > 0 && (
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Minimum advance notice: <strong>{bufferStartTime} hours</strong>{" "}
             before booking start time.
           </p>

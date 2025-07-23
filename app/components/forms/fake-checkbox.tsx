@@ -25,7 +25,7 @@ export const FakeCheckbox = ({
         width="19"
         height="19"
         rx="5.5"
-        fill="var(--bg-color-50)"
+        fill="var(--bg-muted)"
       />
       <path
         d="M14.6668 6.5L8.25016 12.9167L5.3335 10"
@@ -58,7 +58,7 @@ export const FakeCheckbox = ({
         width="19"
         height="19"
         rx="5.5"
-        fill="var(--bg-color-50)"
+        fill="var(--bg-muted)"
       />
       <rect
         x="0.5"

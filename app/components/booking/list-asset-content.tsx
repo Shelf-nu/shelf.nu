@@ -82,7 +82,7 @@ export default function ListAssetContent({
 
       <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
         {isKitAsset && (
-          <div className="absolute inset-y-0 left-0 h-full w-2 bg-color-100" />
+          <div className="absolute inset-y-0 left-0 h-full w-2 bg-color-100 dark:bg-color-25" />
         )}
         <div
           className={tw(

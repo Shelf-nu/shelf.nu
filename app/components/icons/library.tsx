@@ -1547,7 +1547,7 @@ export function PartialCheckboxIcon(props: SVGProps<SVGSVGElement>) {
         height={19}
         x={0.5}
         y={0.5}
-        fill="var(--bg-color-50)"
+        fill="var(--bg-muted)"
         rx={3.5}
       />
       <rect
