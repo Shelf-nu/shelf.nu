@@ -1558,10 +1558,43 @@ export async function getBookings(params: {
 
     /** If the search string exists, add it to the where object */
     if (search?.trim()?.length) {
-      where.name = {
-        contains: search.trim(),
-        mode: "insensitive",
-      };
+      const searchTerms = search
+        .toLowerCase()
+        .trim()
+        .split(",")
+        .map((term) => term.trim())
+        .filter(Boolean);
+
+      where.OR = searchTerms.map((term) => ({
+        OR: [
+          // Search in booking fields
+          { name: { contains: term, mode: "insensitive" } },
+          { description: { contains: term, mode: "insensitive" } },
+          // Search in tags
+          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
+          // Search in custodian team member name
+          {
+            custodianTeamMember: {
+              name: { contains: term, mode: "insensitive" },
+            },
+          },
+          // Search in custodian user names
+          {
+            custodianUser: {
+              OR: [
+                { firstName: { contains: term, mode: "insensitive" } },
+                { lastName: { contains: term, mode: "insensitive" } },
+              ],
+            },
+          },
+          // Search in asset titles
+          {
+            assets: {
+              some: { title: { contains: term, mode: "insensitive" } },
+            },
+          },
+        ],
+      }));
     }
 
     /** Handle combination of custodianTeamMemberIds and custodianUserId */
@@ -1659,6 +1692,38 @@ export async function getBookings(params: {
               id: true,
               custody: true,
               availableToBook: true,
+              kitId: true,
+              status: true,
+              mainImage: true,
+              thumbnailImage: true,
+              mainImageExpiration: true,
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                },
+              },
+              bookings: {
+                select: {
+                  id: true,
+                },
+              },
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                  imageExpiration: true,
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                },
+              },
             },
           },
           creator: {
