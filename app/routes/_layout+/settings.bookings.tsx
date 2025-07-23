@@ -7,13 +7,13 @@ import type {
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
-  BufferSettings,
-  BufferSettingsSchema,
-} from "~/components/booking/buffer/buffer-settings";
-import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
 } from "~/components/booking/tags-required/tags-required-settings";
+import {
+  TimeSettings,
+  TimeSettingsSchema,
+} from "~/components/booking/time-settings";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
@@ -124,7 +124,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (
       !intent ||
       ![
-        "updateBuffer",
+        "updateTimeSettings",
         "updateTagsRequired",
         "toggle",
         "updateSchedule",
@@ -141,8 +141,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     switch (intent) {
-      case "updateBuffer": {
-        const { bufferStartTime } = parseData(formData, BufferSettingsSchema, {
+      case "updateTimeSettings": {
+        const {
+          bufferStartTime,
+          maxBookingLength,
+          maxBookingLengthSkipClosedDays,
+        } = parseData(formData, TimeSettingsSchema, {
           additionalData: {
             intent,
             organizationId,
@@ -153,6 +157,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await updateBookingSettings({
           organizationId,
           bufferStartTime,
+          maxBookingLength: maxBookingLength || null,
+          maxBookingLengthSkipClosedDays,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Booking time restrictions have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
 
         return json(data({ success: true }), { status: 200 });
@@ -338,14 +351,18 @@ export default function GeneralPage() {
         defaultValue={bookingSettings.tagsRequired}
       />
 
-      {/* Buffer settings form */}
-      <BufferSettings
+      {/* Time settings form */}
+      <TimeSettings
         header={{
-          title: "Minimum notice period",
+          title: "Booking time restrictions",
           subHeading:
-            "Set how far in advance users must reserve assets before their checkout time. This prevents last-minute bookings and ensures proper asset availability.",
+            "Control booking timing constraints including minimum advance notice and maximum booking duration.",
         }}
-        defaultValue={bookingSettings.bufferStartTime}
+        defaultBufferValue={bookingSettings.bufferStartTime}
+        defaultMaxLengthValue={bookingSettings.maxBookingLength}
+        defaultMaxBookingLengthSkipClosedDays={
+          bookingSettings.maxBookingLengthSkipClosedDays
+        }
       />
 
       {/* Enable working hours form */}

@@ -1,9 +1,11 @@
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { InfoBox } from "~/components/shared/info-box";
+import { Separator } from "~/components/shared/separator";
 import { Spinner } from "~/components/shared/spinner";
 import { TimeDisplay } from "~/components/shared/time-display";
 import { WorkingHoursPreviewDialog } from "~/components/working-hours/working-hours-preview-dialog";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type {
   useWorkingHours,
   UseWorkingHoursResult,
@@ -16,6 +18,7 @@ export function DatesFields({
   startDateName,
   disabled,
   startDateError,
+  setStartDate,
   endDate,
   endDateName,
   endDateError,
@@ -27,6 +30,7 @@ export function DatesFields({
   startDateName: string;
   disabled: boolean;
   startDateError?: string;
+  setStartDate?: React.Dispatch<React.SetStateAction<string>>;
   endDate: string | undefined;
   endDateName: string;
   endDateError?: string;
@@ -36,6 +40,7 @@ export function DatesFields({
 }) {
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
+  const { maxBookingLength, bufferStartTime } = useBookingSettings();
 
   return (
     <>
@@ -45,7 +50,7 @@ export function DatesFields({
         required
       >
         <Input
-          key={startDate}
+          key="start-date-input"
           label="Start Date"
           type="datetime-local"
           hideLabel
@@ -57,16 +62,43 @@ export function DatesFields({
           placeholder="Booking"
           required
           onChange={(event) => {
+            // Update start date state to persist user's selection
+            if (setStartDate) {
+              setStartDate(event.target.value);
+            }
+
             /**
              * When user changes the startDate and the new startDate is greater than the endDate
              * in that case, we have to update endDate to be the endDay date of startDate.
              */
-            const newStartDate = new Date(event.target.value);
-            if (isNewBooking && endDate && newStartDate > new Date(endDate)) {
-              const newEndDate = dateForDateTimeInputValue(
-                new Date(newStartDate.setHours(18, 0, 0))
-              );
-              setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+            const inputValue = event.target.value;
+            if (isNewBooking && endDate && inputValue) {
+              try {
+                // Safari-friendly date parsing: datetime-local format is YYYY-MM-DDTHH:mm
+                const newStartDate = new Date(inputValue);
+                const currentEndDate = new Date(endDate);
+
+                // Check if dates are valid before comparing
+                if (
+                  !isNaN(newStartDate.getTime()) &&
+                  !isNaN(currentEndDate.getTime()) &&
+                  newStartDate > currentEndDate
+                ) {
+                  // Create new end date at 6 PM on the same day as start date
+                  const endDateTime = new Date(newStartDate);
+                  endDateTime.setHours(18, 0, 0, 0);
+
+                  const newEndDate = dateForDateTimeInputValue(endDateTime);
+                  setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+                }
+              } catch (error) {
+                // If date parsing fails, just update the start date without affecting end date
+                // eslint-disable-next-line no-console
+                console.warn(
+                  "Date parsing failed in start date onChange:",
+                  error
+                );
+              }
             }
           }}
         />
@@ -97,6 +129,20 @@ export function DatesFields({
           Within this period the assets in this booking will be checked out and
           unavailable for other bookings.
         </p>
+        {(maxBookingLength || bufferStartTime > 0) && (
+          <Separator className="my-2" />
+        )}
+        {maxBookingLength && (
+          <p className="text-[14px] text-gray-600">
+            Maximum booking length is <strong>{maxBookingLength} hours</strong>.
+          </p>
+        )}
+        {bufferStartTime > 0 && (
+          <p className="text-[14px] text-gray-600">
+            Minimum advance notice: <strong>{bufferStartTime} hours</strong>{" "}
+            before booking start time.
+          </p>
+        )}
       </FormRow>
       <WorkingHoursInfo
         workingHoursData={workingHoursData}
@@ -176,14 +222,14 @@ export function WorkingHoursInfo({
     );
 
   const shouldShowWorkingHoursInfo = workingHours?.enabled && !error;
-  return (
+  return shouldShowWorkingHoursInfo ? (
     <InfoBox className={tw("py-2", className)}>
       {loading ? (
         <div className="flex items-center gap-2">
           <div>Loading working hours</div>
           <Spinner className="mt-1 size-4" />
         </div>
-      ) : shouldShowWorkingHoursInfo ? (
+      ) : (
         <div className="mt-1 text-sm text-gray-600">
           <p>
             <strong>Working days:</strong>{" "}
@@ -209,12 +255,7 @@ export function WorkingHoursInfo({
             <WorkingHoursPreviewDialog workingHoursData={workingHoursData} />
           </div>
         </div>
-      ) : (
-        <div className="mt-1 text-sm text-gray-600">
-          No specific working hours set. You can schedule your booking for any
-          day and time.
-        </div>
       )}
     </InfoBox>
-  );
+  ) : null;
 }

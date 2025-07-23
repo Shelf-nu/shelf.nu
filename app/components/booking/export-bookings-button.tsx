@@ -43,9 +43,10 @@ export function ExportBookingsButton() {
   const handleExport = async () => {
     setIsDownloading(true);
     try {
-      const url = `/bookings/export/bookings-${new Date()
+      const now = new Date();
+      const url = `/bookings/export/bookings-${now
         .toISOString()
-        .slice(0, 10)}.csv`;
+        .slice(0, 10)}-${now.getTime()}.csv`;
       const response = await fetch(`${url}${fetchSearchParams}`);
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -64,7 +65,7 @@ export function ExportBookingsButton() {
     <Button
       onClick={handleExport}
       variant="secondary"
-      className="font-medium"
+      className="flex-1 whitespace-nowrap font-medium"
       title={title}
       disabled={
         disabled

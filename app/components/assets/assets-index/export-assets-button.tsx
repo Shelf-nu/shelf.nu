@@ -23,7 +23,7 @@ export function ExportAssetsButton() {
   const assetIds = selectedAssets.map((asset) => asset.id);
   const url = `/assets/export/assets-${new Date()
     .toISOString()
-    .slice(0, 10)}.csv`;
+    .slice(0, 10)}-${new Date().getTime()}.csv`;
   const searchParams =
     assetIds.length > 0 ? `?assetIds=${assetIds.join(",")}` : "";
 

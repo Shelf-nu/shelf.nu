@@ -34,9 +34,10 @@ export default function ExtendBookingDialog({
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
   const hints = useHints();
-  const { currentOrganization } = useLoaderData<BookingPageLoaderData>();
+  const { currentOrganization, booking } =
+    useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours(currentOrganization.id);
-  const { bufferStartTime } = useBookingSettings();
+  const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
 
@@ -45,7 +46,7 @@ export default function ExtendBookingDialog({
     ExtendBookingSchema({
       timeZone: hints.timeZone,
       workingHours: workingHoursData.workingHours,
-      bufferStartTime,
+      bookingSettings,
     })
   );
 
@@ -76,7 +77,6 @@ export default function ExtendBookingDialog({
   const validationErrors = getValidationErrors<ExtendBookingSchemaType>(
     fetcher?.data?.error
   );
-
   return (
     <>
       <Button
@@ -163,6 +163,11 @@ export default function ExtendBookingDialog({
                 </p>
               )}
               <input type="hidden" name="intent" value="extend-booking" />
+              <input
+                type="hidden"
+                name={zo.fields.startDate()}
+                value={booking?.from || ""}
+              />
 
               <div className="flex items-center gap-2">
                 <Button
