@@ -1587,10 +1587,24 @@ export async function getBookings(params: {
               ],
             },
           },
-          // Search in asset titles
+          // Search in asset titles, QR codes, and barcodes
           {
             assets: {
-              some: { title: { contains: term, mode: "insensitive" } },
+              some: {
+                OR: [
+                  { title: { contains: term, mode: "insensitive" } },
+                  {
+                    qrCodes: {
+                      some: { id: { contains: term, mode: "insensitive" } },
+                    },
+                  },
+                  {
+                    barcodes: {
+                      some: { value: { contains: term, mode: "insensitive" } },
+                    },
+                  },
+                ],
+              },
             },
           },
         ],
@@ -1651,16 +1665,23 @@ export async function getBookings(params: {
     }
 
     if (bookingFrom && bookingTo) {
-      where.OR = [
-        {
-          from: { lte: bookingTo },
-          to: { gte: bookingFrom },
-        },
-        {
-          from: { gte: bookingFrom },
-          to: { lte: bookingTo },
-        },
-      ];
+      // Add date filtering to AND clause instead of overriding OR clause
+      // to preserve search conditions
+      if (!where.AND) {
+        where.AND = [];
+      }
+      where.AND.push({
+        OR: [
+          {
+            from: { lte: bookingTo },
+            to: { gte: bookingFrom },
+          },
+          {
+            from: { gte: bookingFrom },
+            to: { lte: bookingTo },
+          },
+        ],
+      });
     }
 
     if (kitId) {

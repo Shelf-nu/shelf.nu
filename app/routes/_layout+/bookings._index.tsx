@@ -47,13 +47,14 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-const searchFieldTooltipText = `
+export const bookingsSearchFieldTooltipText = `
 Search bookings based on different fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
 - Name
 - Description
 - Tags
 - Custodian names (first or last name)
 - Asset names
+- Asset barcodes or qr code
 `;
 
 export type BookingsIndexLoaderData = typeof loader;
@@ -188,7 +189,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalTags: tags.length,
         searchFieldTooltip: {
           title: "Search your bookings",
-          text: parseMarkdownToReact(searchFieldTooltipText),
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
         },
       }),
       {

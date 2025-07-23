@@ -131,7 +131,7 @@ export function BookingAssetsSidebar({
 
       <SheetContent className="w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]">
         <div className="flex h-screen w-full flex-col">
-          <SheetHeader className="border-color-200 border-b p-6">
+          <SheetHeader className="border-color-200 border-b px-6 py-3">
             <SheetTitle className="text-left">
               Assets in "{booking.name}"
             </SheetTitle>
@@ -141,18 +141,17 @@ export function BookingAssetsSidebar({
             </SheetDescription>
           </SheetHeader>
 
-          <div className="flex-1 overflow-auto scrollbar-thin">
-            <div className="flex flex-col">
-              {/* Header matching BookingAssetsColumn */}
-              <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
-                <h5 className="text-left capitalize">Assets & kits</h5>
-                <p>
-                  <span>{paginatedItems.length} items</span>
-                </p>
-              </div>
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Header matching BookingAssetsColumn */}
+            <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
+              <h5 className="text-left capitalize">Assets & kits</h5>
+              <p>
+                <span>{paginatedItems.length} items</span>
+              </p>
+            </div>
 
-              {/* Table structure matching BookingAssetsColumn */}
-              <div className="-mx-4 overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0">
+            {/* Table structure matching BookingAssetsColumn */}
+            <div className="flex-1 overflow-auto border border-b-0 border-gray-200 bg-white md:mx-0">
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b border-gray-200 text-left ">
@@ -166,7 +165,7 @@ export function BookingAssetsSidebar({
                       <th className="px-6 py-3"> </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="">
                     {paginatedItems.map((item) => {
                       if (item.type === "kit") {
                         const kit = item.kit;
@@ -370,8 +369,7 @@ export function BookingAssetsSidebar({
               </div>
             </div>
           </div>
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
+        </SheetContent>
+      </Sheet>
+    );
 }
