@@ -50,7 +50,7 @@ export default function BulkActionsDropdown() {
   }
 
   return (
-    <div className="actions-dropdown flex items-center gap-2">
+    <div className="actions-dropdown flex w-full items-center gap-2">
       <ConditionalDropdown />
       <BookSelectedAssetsDropdown />
     </div>
@@ -184,7 +184,7 @@ function ConditionalDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="asset-actions sm:hidden"
+          className="asset-actions flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           type="button"

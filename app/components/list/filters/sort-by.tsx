@@ -9,6 +9,7 @@ import { useNavigation } from "@remix-run/react";
 import { useSearchParams } from "~/hooks/search-params";
 
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 
 type TSort = Record<string, string>;
 export type SortingOptions = keyof TSort;
@@ -18,9 +19,11 @@ type SortByProps<T extends TSort> = {
   sortingOptions: T;
   defaultSortingBy: keyof T;
   defaultSortingDirection?: SortingDirection;
+  className?: string;
 };
 
 export function SortBy<T extends Record<string, string>>({
+  className,
   sortingOptions,
   defaultSortingBy,
   defaultSortingDirection = "desc",
@@ -43,7 +46,10 @@ export function SortBy<T extends Record<string, string>>({
   return (
     <Popover>
       <PopoverTrigger
-        className="inline-flex items-center gap-2 text-gray-500"
+        className={tw(
+          "inline-flex items-center gap-2 text-gray-500",
+          className
+        )}
         asChild
       >
         <button className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">

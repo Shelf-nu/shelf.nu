@@ -131,8 +131,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           {/* The title and the total number of items. This basically acts like a fake table row */}
           <div
             className={tw(
-              modeIsAdvanced ? "p-3 pb-[5px]" : "p-4 pb-2",
-              "flex items-center justify-between border-b "
+              modeIsAdvanced ? "p-3 pb-[5px]" : "flex-col p-4 pb-2 md:flex-row",
+              "flex justify-between border-b md:items-center "
             )}
           >
             <div>
