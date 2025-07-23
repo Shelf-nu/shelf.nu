@@ -52,6 +52,6 @@ export interface Config {
    */
   showHowDidYouFindUs: boolean;
 
-  SUPPORTED_LANGUAGES: Array<string>;
-  FALLBACK_LANGUAGE: string;
+  supportedLanguages: Array<string>;
+  fallbackLanguage: string;
 }

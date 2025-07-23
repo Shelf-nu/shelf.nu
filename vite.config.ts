@@ -37,7 +37,7 @@ export default defineConfig({
     include: ["./app/routes/**/*"],
   },
   build: {
-    target: "esnext",
+    target: "ES2022",
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {
