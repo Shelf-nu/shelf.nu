@@ -131,7 +131,7 @@ export default function ContactOwner() {
       <div className="flex-1 py-8">
         <div className="mb-8">
           <h1 className="mb-2 text-[24px] font-semibold">Contact Owner</h1>
-          <p className="text-gray-600">
+          <p className="text-color-600">
             Assist the owner by sharing your contact information.
           </p>
         </div>
@@ -158,7 +158,7 @@ export default function ContactOwner() {
               error={zo.errors.content()?.message}
               disabled={disabled}
             />
-            <p className="mt-2.5 text-center text-gray-600">
+            <p className="mt-2.5 text-center text-color-600">
               By leaving your contact information you agree that the owner of
               the asset can contact you.
             </p>

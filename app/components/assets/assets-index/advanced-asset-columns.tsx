@@ -97,7 +97,7 @@ export function AdvancedIndexColumn({
               <PopoverContent
                 align="end"
                 className={tw(
-                  "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
+                  "z-[999999] mt-1 min-w-[300px] rounded-md border border-color-300 bg-surface p-4"
                 )}
               >
                 <MarkdownViewer
@@ -110,7 +110,7 @@ export function AdvancedIndexColumn({
           <Button
             role="link"
             variant="link"
-            className="text-gray text-end font-normal underline hover:text-gray-600"
+            className="text-gray text-end font-normal underline hover:text-color-600"
             target="_blank"
             to={`${customFieldDisplayValue}?ref=shelf-webapp`}
           >
@@ -155,7 +155,7 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <Link
                   to={item.id}
-                  className="truncate font-medium underline hover:text-gray-600"
+                  className="truncate font-medium underline hover:text-color-600"
                   title={item.title}
                 >
                   {item.title}
@@ -237,7 +237,7 @@ export function AdvancedIndexColumn({
             item?.kit?.name ? (
               <Link
                 to={`/kits/${item.kitId}`}
-                className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
+                className="block max-w-[220px] truncate font-medium underline hover:text-color-600"
                 title={item.kit.name}
               >
                 {item.kit.name}
@@ -493,7 +493,7 @@ function BarcodeColumn({
             trigger={<Button variant="link-gray">{barcode.value}</Button>}
           />
           {index < barcodes.length - 1 && (
-            <span className="text-gray-400">, </span>
+            <span className="text-color-400">, </span>
           )}
         </span>
       ))}

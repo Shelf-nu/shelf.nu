@@ -6,6 +6,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -39,6 +40,8 @@ export function meta({ data }: MetaArgs<typeof loader>) {
 
 export default function Me() {
   const { user } = useLoaderData<typeof loader>();
+  const placeholderImage = usePlaceholderImage();
+
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -50,9 +53,7 @@ export default function Me() {
         slots={{
           "left-of-title": (
             <img
-              src={
-                user.profilePicture ?? "/static/images/asset-placeholder.jpg"
-              }
+              src={user.profilePicture ?? placeholderImage}
               alt="team-member"
               className="mr-4 size-14 rounded"
             />

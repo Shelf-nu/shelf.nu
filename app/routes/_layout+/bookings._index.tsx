@@ -403,7 +403,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               {item.displayFrom[0]}
             </span>
-            <span className="block text-gray-600">{item.displayFrom[1]}</span>
+            <span className="block text-color-600">{item.displayFrom[1]}</span>
           </div>
         ) : null}
       </Td>
@@ -415,7 +415,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               {item.displayTo[0]}
             </span>
-            <span className="block text-gray-600">{item.displayTo[1]}</span>
+            <span className="block text-color-600">{item.displayTo[1]}</span>
           </div>
         ) : null}
       </Td>
@@ -425,7 +425,7 @@ const ListBookingsContent = ({
           items={item.tags}
           idKey="id"
           labelKey="name"
-          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
+          emptyMessage={<div className="text-sm text-color-500">No tags</div>}
         />
       </Td>
 

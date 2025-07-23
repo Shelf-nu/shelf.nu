@@ -100,7 +100,7 @@ export default function AddAssetsToExistingBookingDialog() {
                         <div className="semi-bold max-w-[250px] truncate">
                           {booking.name}
                         </div>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-color-500">
                           {booking.displayFrom} - {booking.displayTo}
                         </div>
                       </div>
@@ -115,7 +115,7 @@ export default function AddAssetsToExistingBookingDialog() {
               </When>
 
               <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
-                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
+                <div className="mb-4 rounded-md border border-color-300 bg-color-25 p-2">
                   <When truthy={!!fetcherError}>
                     <p>{fetcherError}</p>
                   </When>

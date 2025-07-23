@@ -290,7 +290,7 @@ export default function KitsIndexPage() {
                       <Button
                         to={`/kit/${resource.id}`}
                         variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
+                        className="text-left font-medium text-color-900 hover:text-color-700"
                         target={"_blank"}
                         onlyNewTabIconOnHover={true}
                       >

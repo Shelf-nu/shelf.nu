@@ -32,10 +32,10 @@ export function OverridePreview({ override }: OverridePreviewProps) {
     deleteFetcher?.formData.get("overrideId") === override.id;
 
   return !optimisticDeleted ? (
-    <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
+    <div className="mt-2 flex items-center justify-between rounded-lg border border-color-200 p-4 transition-colors hover:border-color-300">
       <div className="flex-1">
         <div className="flex items-center gap-3">
-          <span className="font-semibold text-gray-900">
+          <span className="font-semibold text-color-900">
             <DateS
               date={override.date}
               options={{
@@ -57,7 +57,7 @@ export function OverridePreview({ override }: OverridePreviewProps) {
             {override.isOpen ? "Open" : "Closed"}
           </span>
         </div>
-        <div className="mt-1 flex items-center gap-4 text-sm text-gray-600">
+        <div className="mt-1 flex items-center gap-4 text-sm text-color-600">
           {override.isOpen ? (
             <TimeRangeDisplay
               openTime={override.openTime || undefined}

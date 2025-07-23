@@ -43,23 +43,23 @@ export function TeamMembersActionsDropdown({
           className="outline-none focus-visible:border-0"
           aria-label="Actions Trigger"
         >
-          <i className="inline-block px-3 py-0 text-gray-400 ">
+          <i className="inline-block px-3 py-0 text-color-400 ">
             <VerticalDotsIcon />
           </i>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="order w-[180px] rounded-md bg-white p-[6px] text-right "
+          className="order w-[180px] rounded-md bg-surface p-[6px] text-right "
           ref={ref}
         >
           <DropdownMenuItem
-            className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+            className="p-0 text-color-700 hover:bg-color-50 hover:text-color-700"
             onSelect={(e) => e.preventDefault()}
           >
             <Button
               icon="send"
               variant="link"
-              className="!hover:text-gray-700 justify-start p-4 !text-gray-700"
+              className="!hover:text-color-700 justify-start p-4 !text-color-700"
               onClick={() => {
                 setIsInviteOpen(true);
                 setOpen(false);
@@ -77,12 +77,12 @@ export function TeamMembersActionsDropdown({
             </Button>
           </DropdownMenuItem>
 
-          <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
+          <DropdownMenuItem className="p-0 text-color-700 hover:bg-color-50 hover:text-color-700">
             <Button
               to={`${teamMember.id}/edit`}
               role="link"
               variant="link"
-              className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+              className="justify-start whitespace-nowrap px-4 py-3  text-color-700 hover:text-color-700"
               width="full"
               icon="pen"
               onClick={() => setOpen(false)}

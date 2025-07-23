@@ -175,7 +175,7 @@ export default function NrmSettings() {
 
   return (
     <div>
-      <p className="mb-6 text-xs text-gray-600">
+      <p className="mb-6 text-xs text-color-600">
         Non-registered members can be given custody of an asset. If you want
         them to get reminders, invite them via email.
       </p>

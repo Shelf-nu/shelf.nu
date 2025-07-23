@@ -78,7 +78,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
             variant="tertiary"
             disabled={disabled}
             title="Clear search"
-            className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
+            className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-color-400 hover:text-color-700"
             onClick={clearSearch}
           />
         ) : (

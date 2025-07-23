@@ -21,7 +21,7 @@ export const ViewButtonGroup = ({
   className = "", // Additional styling
 }: ViewButtonGroupProps) => {
   const disabledButtonStyles =
-    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
+    "cursor-not-allowed pointer-events-none bg-color-50 text-color-800";
 
   return (
     <ButtonGroup className={className}>

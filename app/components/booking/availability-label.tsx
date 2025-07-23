@@ -194,10 +194,10 @@ export function AvailabilityBadge({
         </TooltipTrigger>
         <TooltipContent side="bottom" align="end">
           <div className="max-w-[260px] text-left sm:max-w-[320px]">
-            <h6 className="mb-1 text-xs font-semibold text-gray-700">
+            <h6 className="mb-1 text-xs font-semibold text-color-700">
               {tooltipTitle}
             </h6>
-            <div className="whitespace-normal text-xs font-medium text-gray-500">
+            <div className="whitespace-normal text-xs font-medium text-color-500">
               {tooltipContent}
             </div>
           </div>

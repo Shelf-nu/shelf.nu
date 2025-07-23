@@ -14,12 +14,12 @@ export default function InventoryValueChart() {
   ).length;
 
   return (
-    <div className="w-full border border-gray-200 ">
+    <div className="w-full border border-color-200 ">
       <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
           Inventory value
         </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+        <div className="border-b p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
           <InfoTooltip
             content={
               <>
@@ -48,9 +48,9 @@ export default function InventoryValueChart() {
                     color="orange"
                     className="relative"
                   >
-                    <span className="block text-center text-xs font-medium text-gray-600">
+                    <span className="block text-center text-xs font-medium text-color-600">
                       Value Known <br />
-                      <span className="block text-[14px] font-semibold leading-6 text-gray-900">
+                      <span className="block text-[14px] font-semibold leading-6 text-color-900">
                         {valueKnownAssets}/{totalAssets} assets
                       </span>
                       {`(${((valueKnownAssets / totalAssets) * 100).toFixed(
@@ -61,10 +61,10 @@ export default function InventoryValueChart() {
                 )}
               </ClientOnly>
               <div>
-                <Text className="mb-2 !text-[14px] font-medium text-gray-600">
+                <Text className="mb-2 !text-[14px] font-medium text-color-600">
                   Inventory value
                 </Text>
-                <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
+                <Text className="mb-3 !text-[30px] font-semibold text-color-900">
                   {(totalValuation || 0).toLocaleString(locale, {
                     style: "currency",
                     currency: currency,

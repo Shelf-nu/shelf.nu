@@ -75,7 +75,7 @@ export function TeamUsersActionsDropdown({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="order w-[180px] rounded-md bg-white p-[6px] text-right"
+          className="order w-[180px] rounded-md bg-surface p-[6px] text-right"
           asChild
           ref={ref}
         >
@@ -95,7 +95,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  className="justify-start px-4 py-3  text-color-700 hover:bg-color-50 hover:text-color-700 focus:bg-color-50"
                   width="full"
                   name="intent"
                   value="resend"
@@ -108,7 +108,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  className="justify-start px-4 py-3  text-color-700 hover:bg-color-50 hover:text-color-700 focus:bg-color-50"
                   width="full"
                   name="intent"
                   value="cancelInvite"
@@ -129,7 +129,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  className="justify-start px-4 py-3  text-color-700 hover:bg-color-50 hover:text-color-700 focus:bg-color-50"
                   width="full"
                   name="intent"
                   value="revokeAccess"

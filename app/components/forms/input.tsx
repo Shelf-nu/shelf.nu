@@ -78,16 +78,16 @@ const Input = forwardRef(function Input(
    */
 
   const iconClasses = tw(
-    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]",
+    "pointer-events-none absolute flex h-full items-center border-color-300 px-[14px]",
     iconClassName
   );
 
   const addonClasses = tw(
-    "pointer-events-none flex items-center rounded-l-[4px] border-y border-l border-gray-300 bg-white px-[14px] text-gray-600"
+    "pointer-events-none flex items-center rounded-l-[4px] border-y border-l border-color-300 bg-surface px-[14px] text-color-600"
   );
 
   const inputClasses = tw(
-    "w-full max-w-full border border-gray-300 px-[14px] py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500 disabled:placeholder:text-gray-300",
+    "w-full max-w-full border border-color-300 px-[14px] py-2 text-[16px] text-color-900 shadow outline-none placeholder:text-color-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-color-300 disabled:bg-color-50 disabled:text-color-500 disabled:placeholder:text-color-300",
     /** Add some border for error */
     error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : "",
 

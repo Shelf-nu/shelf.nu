@@ -43,7 +43,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
             <Button
               role="button"
               variant="link"
-              className="cursor-pointer justify-start text-gray-700 hover:text-gray-700"
+              className="cursor-pointer justify-start text-color-700 hover:text-color-700"
               width="full"
               onClick={() => {
                 setIsDropdownOpen(false);

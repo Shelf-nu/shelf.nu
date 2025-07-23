@@ -10,6 +10,7 @@ import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
 import { CrispButton } from "../marketing/crisp";
+import { Card } from "../shared/card";
 import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
@@ -58,7 +59,6 @@ interface CodePreviewProps {
 
 export const CodePreview = ({
   className,
-  style,
   qrObj,
   barcodes = [],
   item,
@@ -187,12 +187,11 @@ export const CodePreview = ({
   }
 
   return (
-    <div
-      className={tw("mb-4 w-auto rounded border bg-white", className)}
-      style={style}
+    <Card
+      className={tw("mb-4 w-auto rounded border bg-surface p-0", className)}
     >
       {/* Code Selector */}
-      <div className="w-full border-b-[1.1px] border-[#E3E4E8] px-4 py-3">
+      <div className="w-full border-b-[1.1px] px-4 py-3">
         <div className="flex items-center gap-2">
           <select
             id="code-selector"
@@ -204,7 +203,7 @@ export const CodePreview = ({
               );
               onCodeChange?.(newSelectedCode || null);
             }}
-            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-color-300 bg-surface px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {availableCodes.map((code) => (
               <option key={code.id} value={code.id}>
@@ -256,7 +255,7 @@ export const CodePreview = ({
 
       {/* Actions */}
       <When truthy={!hideButton && !!selectedCode}>
-        <div className="mt-8 flex w-full items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
+        <div className="mt-8 flex w-full items-center gap-3 border-t-[1.1px] px-4 py-3">
           <Button
             icon="download"
             onClick={downloadCode}
@@ -285,7 +284,7 @@ export const CodePreview = ({
         item={item}
         onRefetchData={onRefetchData}
       />
-    </div>
+    </Card>
   );
 };
 

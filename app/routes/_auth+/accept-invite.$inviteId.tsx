@@ -207,7 +207,7 @@ export default function AcceptInvite() {
           </Button>
         </Form>
       </div>
-      <div className=" mx-[-200px] mt-20 flex flex-col items-center text-center text-gray-600">
+      <div className=" mx-[-200px] mt-20 flex flex-col items-center text-center text-color-600">
         <p>
           If you have any questions or need assistance, please don't hesitate to
           contact our support team at {SUPPORT_EMAIL}.

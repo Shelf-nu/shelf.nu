@@ -22,12 +22,12 @@ export default function CustodiansList() {
   });
   return (
     <>
-      <div className="rounded-t border border-b-0 border-gray-200">
+      <div className="rounded-t border border-b-0 border-color-200">
         <div className="flex items-center justify-between">
-          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-color-900 md:px-6">
             Top custodians
           </div>
-          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+          <div className=" p-4 text-right text-[14px] font-semibold  text-color-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -41,7 +41,7 @@ export default function CustodiansList() {
       </div>
 
       {custodiansData.length > 0 ? (
-        <Table className="h-full rounded border  border-gray-200 p-8">
+        <Table className="h-full rounded border  border-color-200 p-8">
           <tbody>
             {custodiansData.map((cd) => (
               <Tr key={cd.id} className="h-[72px]">
@@ -63,7 +63,7 @@ export default function CustodiansList() {
           </tbody>
         </Table>
       ) : (
-        <div className="h-full flex-1 rounded-b border border-gray-200 p-8">
+        <div className="h-full flex-1 rounded-b border border-color-200 p-8">
           <EmptyState text="No assets in custody" />
         </div>
       )}
@@ -94,7 +94,7 @@ function Row({
     <>
       <Td className="w-full">
         <div className="flex items-center justify-between">
-          <span className="text-text-sm font-medium text-gray-900">
+          <span className="text-text-sm font-medium text-color-900">
             <div className="flex items-center gap-3">
               <img
                 src={
@@ -111,7 +111,7 @@ function Row({
                     <Button
                       to={`/settings/team/users/${custodian.userId}/assets`}
                       variant="link"
-                      className="text-left font-medium text-gray-900 hover:text-gray-700"
+                      className="text-left font-medium text-color-900 hover:text-color-700"
                       target={"_blank"}
                       onlyNewTabIconOnHover={true}
                     >
@@ -121,7 +121,7 @@ function Row({
                     <span className="mt-px">{teamMemberName}</span>
                   )}
                 </span>
-                <span className="block text-gray-600">{count} Assets</span>
+                <span className="block text-color-600">{count} Assets</span>
               </div>
             </div>
           </span>

@@ -43,7 +43,7 @@ export default function PerPageItemsSelect() {
           <div className=" max-h-[320px] overflow-auto">
             {perPageValues.map((value) => (
               <SelectItem value={value} key={value}>
-                <span className="mr-4 text-[14px] font-semibold text-gray-700">
+                <span className="mr-4 text-[14px] font-semibold text-color-700">
                   {value}
                 </span>
               </SelectItem>

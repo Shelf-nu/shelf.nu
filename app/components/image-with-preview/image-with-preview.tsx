@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -26,6 +27,7 @@ export default function ImageWithPreview({
   const [isImageError, setIsImageError] = useState(false);
 
   const [open, setOpen] = useState(false);
+  const placeholderImage = usePlaceholderImage();
 
   function handleOpenDialog() {
     if (!imageUrl) {
@@ -65,17 +67,17 @@ export default function ImageWithPreview({
         {isLoading ? (
           <div
             className={tw(
-              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "absolute inset-0 flex items-center justify-center bg-color-100",
               "z-10 transition-opacity"
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner className="[&_.spinner]:before:border-t-color-400" />
           </div>
         ) : null}
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
-          src={thumbnailUrl ?? "/static/images/asset-placeholder.jpg"}
+          src={thumbnailUrl ?? placeholderImage}
           className={tw(
             "size-full object-cover",
             withPreview && "cursor-pointer"
@@ -96,8 +98,10 @@ export default function ImageWithPreview({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className="text-lg font-semibold text-gray-900">{alt}</div>
-                <div className="text-sm font-normal text-gray-600">
+                <div className="text-lg font-semibold text-color-900">
+                  {alt}
+                </div>
+                <div className="text-sm font-normal text-color-600">
                   1 image(s)
                 </div>
               </div>
@@ -105,10 +109,10 @@ export default function ImageWithPreview({
           >
             <div
               className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                "relative z-10 flex h-full flex-col bg-surface shadow-lg md:rounded"
               }
             >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-color-200 bg-color-50">
                 <img src={imageUrl} className="max-h-full" alt={alt} />
               </div>
               <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">

@@ -62,8 +62,8 @@ export function ScanBarcodeTab({
     scannedValue && detectedType ? (
       <div className="w-full max-w-none space-y-3 text-left">
         {/* Detected Barcode Preview */}
-        <div className="rounded-lg border bg-gray-50 p-3">
-          <h4 className="mb-2 text-sm font-medium text-gray-900">
+        <div className="rounded-lg border bg-color-50 p-3">
+          <h4 className="mb-2 text-sm font-medium text-color-900">
             Detected Barcode
           </h4>
           <div className="space-y-2">
@@ -71,11 +71,11 @@ export function ScanBarcodeTab({
               <span className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
                 {detectedType}
               </span>
-              <span className="truncate font-mono text-sm text-gray-700">
+              <span className="truncate font-mono text-sm text-color-700">
                 {scannedValue}
               </span>
             </div>
-            {helpText && <p className="text-xs text-gray-600">{helpText}</p>}
+            {helpText && <p className="text-xs text-color-600">{helpText}</p>}
           </div>
           <div className="mt-2 flex justify-center">
             <BarcodeDisplay

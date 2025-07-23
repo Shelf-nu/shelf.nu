@@ -66,11 +66,11 @@ export default function TeamSettings() {
   return (
     <>
       <When truthy={!params.userId}>
-        <div className="rounded border bg-white p-4 md:px-10 md:py-8">
+        <div className="rounded border bg-surface p-4 md:px-10 md:py-8">
           <h1 className="text-[18px] font-semibold">
             {isPersonalOrg ? "Team" : `${orgName}’s team`}
           </h1>
-          <p className="mb-6 text-sm text-gray-600">
+          <p className="mb-6 text-sm text-color-600">
             Manage your existing team and give team members custody to certain
             assets.
           </p>

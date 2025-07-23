@@ -74,7 +74,7 @@ export default function SetOrEditReminderDialog({
         title={
           <div className="-mb-3 w-full pb-6">
             <h3>Set Reminder</h3>
-            <p className="text-gray-600">
+            <p className="text-color-600">
               Notify you and / or others via email about this asset.
             </p>
           </div>
@@ -125,7 +125,7 @@ export default function SetOrEditReminderDialog({
                 inputType="textarea"
                 className="mb-2"
               />
-              <p className="text-gray-500">
+              <p className="text-color-500">
                 This will show in the reminder mail that gets sent to selected
                 team member(s). Curious about the reminder mail?{" "}
                 <Button
@@ -158,7 +158,7 @@ export default function SetOrEditReminderDialog({
                 placeholder="Enter description..."
                 className="mb-2"
               />
-              <p className="text-gray-500">
+              <p className="text-color-500">
                 We will send the reminder at this date/time.
               </p>
             </div>

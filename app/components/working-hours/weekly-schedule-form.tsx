@@ -164,7 +164,7 @@ export const WeeklyScheduleForm = ({
         <input type="hidden" name="intent" value="updateSchedule" />
         <div className="mb-4 border-b pb-4">
           <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-color-600">
             Set your working hours for each day of the week. Times will be
             displayed in your local format.
           </p>

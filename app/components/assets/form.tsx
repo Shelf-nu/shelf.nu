@@ -329,7 +329,7 @@ export const AssetForm = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Link to="/tags/new" className="text-gray-600 underline">
+              <Link to="/tags/new" className="text-color-600 underline">
                 Create tags
               </Link>
             </p>
@@ -350,7 +350,7 @@ export const AssetForm = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link to="/locations/new" className="text-gray-600 underline">
+              <Link to="/locations/new" className="text-color-600 underline">
                 Create locations
               </Link>
             </p>
@@ -429,7 +429,7 @@ export const AssetForm = ({
               defaultValue={valuation || ""}
               required={zodFieldIsRequired(FormSchema.shape.valuation)}
             />
-            <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
+            <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-color-600 lg:bottom-[11px]">
               {currency}
             </span>
           </div>

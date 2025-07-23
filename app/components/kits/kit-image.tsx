@@ -2,6 +2,7 @@ import type { ImgHTMLAttributes } from "react";
 import { useEffect, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import type { action } from "~/routes/api+/kit.refresh-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -29,14 +30,14 @@ export default function KitImage({
   const fetcher = useFetcher<typeof action>();
 
   const { kitId, image, imageExpiration, alt } = kit;
+  const placeholderImage = usePlaceholderImage();
 
   const updatedKitImage = fetcher.data?.error ? null : fetcher.data?.kit.image;
   const [isLoading, setIsLoading] = useState(true);
   const handleImageLoad = () => {
     setIsLoading(false);
   };
-  const url =
-    image ?? updatedKitImage ?? "/static/images/asset-placeholder.jpg";
+  const url = image ?? updatedKitImage ?? placeholderImage;
 
   useEffect(function refreshImageIfExpired() {
     if (image && imageExpiration) {
@@ -88,11 +89,11 @@ export default function KitImage({
         {isLoading && (
           <div
             className={tw(
-              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "absolute inset-0 flex items-center justify-center bg-color-100",
               "transition-opacity" // Fallback animation
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner className="[&_.spinner]:before:border-t-color-400" />
           </div>
         )}
 
@@ -118,10 +119,10 @@ export default function KitImage({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className=" text-lg font-semibold text-gray-900">
+                <div className=" text-lg font-semibold text-color-900">
                   {kit.alt}
                 </div>
-                <div className="text-sm font-normal text-gray-600">
+                <div className="text-sm font-normal text-color-600">
                   1 image(s)
                 </div>
               </div>
@@ -129,10 +130,10 @@ export default function KitImage({
           >
             <div
               className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                "relative z-10 flex h-full flex-col bg-surface shadow-lg md:rounded"
               }
             >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-color-200 bg-color-50">
                 <img src={url} className={"max-h-full"} alt={alt} />
               </div>
               <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">

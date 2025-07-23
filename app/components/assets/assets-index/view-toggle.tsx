@@ -12,7 +12,7 @@ export function AvailabilityViewToggle({
 }) {
   const [, setSearchParams] = useSearchParams();
   const disabledButtonStyles =
-    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
+    "cursor-not-allowed pointer-events-none bg-color-50 text-color-800";
   const { isAvailabilityView, shouldShowAvailabilityView } =
     useIsAvailabilityView();
 
@@ -23,7 +23,7 @@ export function AvailabilityViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px]  hover:cursor-pointer",
-            "font-normal text-gray-500",
+            "font-normal text-color-500",
             !isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -44,7 +44,7 @@ export function AvailabilityViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px] hover:cursor-pointer",
-            "font-normal text-gray-500",
+            "font-normal text-color-500",
             isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}

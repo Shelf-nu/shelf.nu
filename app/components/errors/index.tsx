@@ -49,7 +49,7 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
         </span>
         <h2 className="mb-2">{title}</h2>
         <p className="max-w-[550px]" dangerouslySetInnerHTML={messageHtml} />
-        {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
+        {traceId && <p className="text-color-400">(Trace id: {traceId})</p>}
         <div className=" mt-8 flex gap-3">
           <Button to="/" variant="secondary" icon="home">
             Back to home

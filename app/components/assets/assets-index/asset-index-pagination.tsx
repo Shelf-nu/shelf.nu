@@ -25,7 +25,7 @@ export function AssetIndexPagination() {
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
   const disabledButtonStyles =
-    "cursor-not-allowed pointer-events-none bg-gray-50 text-gray-800";
+    "cursor-not-allowed pointer-events-none bg-color-50 text-color-800";
 
   function handleScrollToTop() {
     let target: Element | Window | null = document.querySelector(
@@ -45,7 +45,7 @@ export function AssetIndexPagination() {
   return (
     <div
       className={tw(
-        "asset-index-pagination flex flex-col items-center justify-between border-t border-gray-200 bg-white transition-all delay-75 ease-in-out md:flex-row",
+        "asset-index-pagination flex flex-col items-center justify-between border-t border-color-200 bg-surface transition-all delay-75 ease-in-out dark:border-color-300 md:flex-row",
         isMd ? "fixed bottom-0 right-0 z-[12]" : "",
         state === "collapsed" ? "lg:left-[48px]" : "lg:left-[256px]"
       )}
