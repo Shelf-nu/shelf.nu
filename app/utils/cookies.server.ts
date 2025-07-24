@@ -12,6 +12,7 @@ import i18n from "~/i18n/i18n.server";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getCurrentSearchParams } from "./http.server";
+
 // find cookie by name from request headers
 export function getCookie(name: string, headers: Headers) {
   const cookie = headers.get("cookie");
@@ -20,6 +21,13 @@ export function getCookie(name: string, headers: Headers) {
   const match = cookie.match(new RegExp(`(^| )${name}=([^;]+)`));
   if (match) return match[2];
 }
+/*
+ i18next cookie 
+*/
+export const i18nCookie = createCookie("i18next", {
+  maxAge: 60 * 60 * 24 * 365 * 10, // 10 year
+  path: "/",
+});
 /**
  *  Get the language from the cookie , return the fallback language if not found
  *  This function is used to determine the language for i18n based on the cookie

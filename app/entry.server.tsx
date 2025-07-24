@@ -158,8 +158,6 @@ async function handleBrowserRequest(
 ) {
   const instance = await createI18nInstance(request, remixContext);
   return new Promise((resolve, reject) => {
-    // Initialize i18n instance
-
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
       <I18nextProvider i18n={instance}>

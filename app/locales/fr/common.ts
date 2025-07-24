@@ -5,7 +5,10 @@ const fr: CommonTranslations = {
     title: "Se connecter",
     subHeading:
       "Bon retour ! Saisissez vos informations ci-dessous pour vous connecter.",
-    test: "Testicle s",
+  },
+  languageSwitch: {
+    title: "Paramètres de langue",
+    description: "Sélectionnez votre langue préférée pour l'application.",
   },
 };
 export default fr;

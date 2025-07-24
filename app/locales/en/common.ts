@@ -2,7 +2,10 @@ const en = {
   login: {
     title: "Log in",
     subHeading: "Welcome back! Enter your details below to log in.",
-    test: "Testicleszxx",
+  },
+  languageSwitch: {
+    title: "Language Settings",
+    description: "Select your preferred language for the application.",
   },
 };
 export default en;

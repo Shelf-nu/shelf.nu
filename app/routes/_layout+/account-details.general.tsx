@@ -7,6 +7,7 @@ import { json, redirect } from "@remix-run/node";
 
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import LanguageSwitch from "~/components/i18n/languageSwitch";
 import { Card } from "~/components/shared/card";
 import { createChangeEmailSchema } from "~/components/user/change-email";
 import {
@@ -39,6 +40,7 @@ import type { UpdateUserContactPayload } from "~/modules/user-contact/service.se
 import { updateUserContact } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getLng } from "~/utils/cookies.server";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
@@ -60,6 +62,7 @@ const IntentSchema = z.object({
     "initiateEmailChange",
     "verifyEmailChange",
     "updateUserContact",
+    "updateLanguage", // this is for i18n
   ]),
 });
 
@@ -92,6 +95,11 @@ const ActionSchemas = {
     email: z.string().email(),
     type: z.literal("verifyEmailChange"),
     otp: z.string().min(6).max(6),
+  }),
+  updateLanguage: z.object({
+    type: z.literal("updateLanguage"),
+    lng: z.string().min(2).max(5),
+    intent: z.literal("updateLanguage"),
   }),
 } as const;
 
@@ -130,6 +138,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     switch (intent) {
+      case "updateLanguage": {
+        sendNotification({
+          title: "Language updated",
+          message: "Your settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+        return json(
+          { success: true },
+          {
+            headers: {
+              "Set-Cookie":
+                "i18next=" + payload.lng + "; Path=/; Max-Age=315360000", // 10 years
+            },
+          }
+        );
+      }
       case "resetPassword": {
         if (payload.type !== "resetPassword")
           throw new Error("Invalid payload type");
@@ -374,7 +399,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const title = "Account Details";
     const user = await getUserWithContact(userId);
 
-    return json(data({ title, user }));
+    return json(data({ title, user, lng: getLng(request) }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -390,12 +415,13 @@ export const handle = {
 };
 
 export default function UserPage() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, lng } = useLoaderData<typeof loader>();
 
   return (
     <div className="mb-2.5 flex flex-col justify-between gap-3">
       <UserDetailsForm user={user} />
       <UserContactDetailsForm user={user} />
+      <LanguageSwitch selectedLanguage={lng} />
       {!user.sso && (
         <>
           <Card className="my-0">
