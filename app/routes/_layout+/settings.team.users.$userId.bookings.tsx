@@ -17,12 +17,15 @@ import {
   getParams,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings._index";
+import BookingsIndexPage, {
+  bookingsSearchFieldTooltipText,
+} from "./bookings._index";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -101,6 +104,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...tagsData,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],

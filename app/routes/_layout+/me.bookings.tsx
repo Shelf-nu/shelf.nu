@@ -7,12 +7,15 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings._index";
+import BookingsIndexPage, {
+  bookingsSearchFieldTooltipText,
+} from "./bookings._index";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -83,6 +86,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...tagsData,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
       })
     );
   } catch (cause) {
