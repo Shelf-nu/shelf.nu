@@ -5,16 +5,16 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-
+import { useTranslation } from "react-i18next";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
-
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
+import { initTranslationLoader } from "~/i18n/i18next.server";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -40,9 +40,10 @@ import {
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 
-export function loader({ context }: LoaderFunctionArgs) {
-  const title = "Log in";
-  const subHeading = "Welcome back! Enter your details below to log in.";
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const t = await initTranslationLoader(request);
+  const title = t("login.title");
+  const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
@@ -120,6 +121,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
+  const { t } = useTranslation();
   const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
@@ -179,7 +181,7 @@ export default function IndexLoginForm() {
           data-test-id="login"
           disabled={disabled}
         >
-          Log In
+          {t("login.title")}
         </Button>
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">
