@@ -54,3 +54,5 @@ docs/.vitepress/dist
 .vercel
 
 i18n.cache
+
+public/locales/*
