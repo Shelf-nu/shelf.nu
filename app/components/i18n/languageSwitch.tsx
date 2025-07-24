@@ -59,7 +59,7 @@ export default function LanguageSwitch({
             <SelectContent>
               {availableLanguages.map((lang) => (
                 <SelectItem key={lang} value={lang}>
-                  {getCountryDisplayName('es',selectedLanguage)}
+                  {getCountryDisplayName(lang, selectedLanguage)}
                 </SelectItem>
               ))}
             </SelectContent>
