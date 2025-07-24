@@ -242,7 +242,7 @@ export const CodePreview = ({
         {selectedCode?.type === "qr" ? (
           <QrLabel
             ref={captureDivRef}
-            data={{ qr: selectedCode.qrData }}
+            data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
             title={item.name}
           />
         ) : selectedCode?.type === "barcode" ? (
@@ -304,7 +304,6 @@ interface QrLabelProps {
 export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
     const { data, title } = props ?? {};
-
     return (
       <div
         style={{

@@ -42,12 +42,14 @@ import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { bookingsSearchFieldTooltipText } from "./bookings._index";
 
 export function links() {
   return [{ rel: "stylesheet", href: calendarStyles }];
@@ -139,6 +141,10 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         currentOrganization,
         ...tagsData,
         modelName,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
       })
     );
   } catch (cause) {

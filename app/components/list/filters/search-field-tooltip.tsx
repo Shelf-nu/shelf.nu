@@ -24,9 +24,9 @@ export const SearchFieldTooltip = () => {
             <h6 className="mb-1 text-xs font-semibold text-gray-700">
               {searchFieldTooltip.title}
             </h6>
-            <p className="text-xs font-medium text-gray-500">
+            <div className="text-xs font-medium text-gray-500">
               <MarkdownViewer content={searchFieldTooltip.text} />
-            </p>
+            </div>
           </div>
         </TooltipContent>
       </Tooltip>
