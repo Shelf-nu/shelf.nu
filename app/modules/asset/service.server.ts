@@ -3235,3 +3235,152 @@ export async function getLocationsForCreateAndEdit({
     });
   }
 }
+
+export async function markAssetAsMissing({
+  assetId,
+  userId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const [asset, user] = await Promise.all([
+      db.asset.findFirst({
+        where: { id: assetId, organizationId },
+        select: { id: true, title: true, status: true },
+      }),
+      db.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      }),
+    ]);
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!user) {
+      throw new ShelfError({
+        cause: null,
+        message: "User not found",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Update asset status to MISSING
+    await db.asset.update({
+      where: { id: assetId },
+      data: { status: AssetStatus.MISSING },
+    });
+
+    // Create a note for the status change using the createNote function
+    const fullName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+    await createNote({
+      content: `**[${fullName}](/settings/team/users/${userId})** marked **${asset.title}** as missing.`,
+      type: "UPDATE",
+      userId,
+      assetId: asset.id,
+    });
+
+    return asset;
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while marking asset as missing";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetId, userId, organizationId },
+      label: "Assets",
+    });
+  }
+}
+
+export async function markAssetAsFound({
+  assetId,
+  userId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const [asset, user] = await Promise.all([
+      db.asset.findFirst({
+        where: { id: assetId, organizationId },
+        select: { id: true, title: true, status: true },
+      }),
+      db.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      }),
+    ]);
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!user) {
+      throw new ShelfError({
+        cause: null,
+        message: "User not found",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.status !== AssetStatus.MISSING) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset is not marked as missing",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Update asset status to AVAILABLE
+    await db.asset.update({
+      where: { id: assetId },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+
+    // Create a note for the status change using the createNote function
+    const fullName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+    await createNote({
+      content: `**[${fullName}](/settings/team/users/${userId})** found **${asset.title}** and marked it as available.`,
+      type: "UPDATE",
+      userId,
+      assetId: asset.id,
+    });
+
+    return asset;
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while marking asset as found";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetId, userId, organizationId },
+      label: "Assets",
+    });
+  }
+}

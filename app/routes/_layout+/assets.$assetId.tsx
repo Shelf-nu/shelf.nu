@@ -26,6 +26,8 @@ import {
   deleteOtherImages,
   getAsset,
   relinkQrCode,
+  markAssetAsMissing,
+  markAssetAsFound,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -109,6 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+export type AssetPageActionData = typeof action;
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -127,6 +130,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "relink-qr-code",
           "set-reminder",
           "add-barcode",
+          "mark-as-missing",
+          "mark-as-found",
         ]),
       })
     );
@@ -136,6 +141,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "relink-qr-code": PermissionAction.update,
       "set-reminder": PermissionAction.update,
       "add-barcode": PermissionAction.update,
+      "mark-as-missing": PermissionAction.update,
+      "mark-as-found": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -286,6 +293,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: reason.status,
           });
         }
+      }
+
+      case "mark-as-missing": {
+        await markAssetAsMissing({
+          assetId: id,
+          organizationId,
+          userId,
+        });
+
+        sendNotification({
+          title: "Asset marked as missing",
+          message: "The asset has been marked as missing successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "mark-as-found": {
+        await markAssetAsFound({
+          assetId: id,
+          organizationId,
+          userId,
+        });
+
+        sendNotification({
+          title: "Asset marked as found",
+          message: "The asset has been marked as found and is now available",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
       }
 
       default: {

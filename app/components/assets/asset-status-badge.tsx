@@ -8,6 +8,8 @@ export const userFriendlyAssetStatus = (status: AssetStatus) => {
       return "In custody";
     case AssetStatus.CHECKED_OUT:
       return "Checked out";
+    case AssetStatus.MISSING:
+      return "Missing";
     default:
       return "Available";
   }
@@ -19,6 +21,8 @@ export const assetStatusColorMap = (status: AssetStatus) => {
       return "#2E90FA";
     case AssetStatus.CHECKED_OUT:
       return "#5925DC";
+    case AssetStatus.MISSING:
+      return "#DC2626";
     default:
       return "#12B76A";
   }
