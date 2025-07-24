@@ -142,7 +142,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 hasBulkActions={!!bulkActions}
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
               <When truthy={modeIsAdvanced}>
                 <ExportAssetsButton />
