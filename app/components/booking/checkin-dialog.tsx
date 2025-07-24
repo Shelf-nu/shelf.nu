@@ -1,4 +1,5 @@
 import type { Booking } from "@prisma/client";
+import { Zap } from "lucide-react";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import { Button, type ButtonProps } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -26,15 +27,23 @@ type CheckinDialogProps = {
   };
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
+  /** Callback to close parent dropdown/menu */
+  onClose?: () => void;
+  /** Custom label for the button */
+  label?: string;
+  /** Variant for different contexts */
+  variant?: "default" | "dropdown";
 };
 
 export default function CheckinDialog({
   disabled,
   booking,
   portalContainer,
+  onClose,
+  label = "Check-in",
+  variant = "default",
 }: CheckinDialogProps) {
   const isEarlyCheckin = isBookingEarlyCheckin(booking.to);
-
   if (!isEarlyCheckin) {
     return (
       <Button
@@ -42,10 +51,21 @@ export default function CheckinDialog({
         type="submit"
         name="intent"
         value="checkIn"
-        className="grow"
-        size="sm"
+        className={
+          variant === "dropdown"
+            ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+            : "grow"
+        }
+        variant={variant === "dropdown" ? "link" : "primary"}
+        width={variant === "dropdown" ? "full" : undefined}
       >
-        Check-in
+        {variant === "dropdown" ? (
+          <span className="flex items-center gap-2">
+            <Zap className="size-4" /> {label}
+          </span>
+        ) : (
+          label
+        )}
       </Button>
     );
   }
@@ -58,8 +78,22 @@ export default function CheckinDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button disabled={disabled} className="grow" size="sm" type="button">
-          Check-in
+        <Button
+          disabled={disabled}
+          className={
+            variant === "dropdown"
+              ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+              : "grow"
+          }
+          variant={variant === "dropdown" ? "link" : "primary"}
+        >
+          {variant === "dropdown" ? (
+            <span className="flex items-center gap-2">
+              <Zap className="size-4" /> {label}
+            </span>
+          ) : (
+            label
+          )}
         </Button>
       </AlertDialogTrigger>
 

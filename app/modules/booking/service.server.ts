@@ -946,6 +946,143 @@ export async function checkinBooking({
   }
 }
 
+export async function partialCheckinBooking({
+  id,
+  organizationId,
+  assetIds,
+  userId,
+  hints,
+}: Pick<Booking, "id" | "organizationId"> & {
+  assetIds: Asset["id"][];
+  userId: User["id"];
+  hints: ClientHint;
+}) {
+  try {
+    // First, validate the booking exists and get its current assets
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: { assets: { select: { id: true, kitId: true } } },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          status: 404,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace.",
+        });
+      });
+
+    // Early exit: If we're checking in all assets, do a complete check-in instead
+    if (assetIds.length === bookingFound.assets.length) {
+      const allAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+      const providedAssetIds = new Set(assetIds);
+      
+      // Check if the provided asset IDs match exactly with booking assets
+      if (allAssetIds.size === providedAssetIds.size && 
+          [...allAssetIds].every(id => providedAssetIds.has(id))) {
+        // Do complete check-in
+        return await checkinBooking({
+          id,
+          organizationId,
+          hints,
+        });
+      }
+    }
+
+    // Validate that all provided assetIds are actually in the booking
+    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+    const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
+    
+    if (invalidAssetIds.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Some assets are not part of this booking: ${invalidAssetIds.join(", ")}`,
+      });
+    }
+
+    // For kits: only update kit status if ALL assets of a kit are being checked in
+    const assetsBeingCheckedIn = bookingFound.assets.filter((a) => assetIds.includes(a.id));
+    const kitIdsInBooking = getKitIdsByAssets(bookingFound.assets);
+    const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
+    
+    // Only process kits where ALL their assets in this booking are being checked in
+    const completeKitIds: string[] = [];
+    for (const kitId of kitIdsBeingCheckedIn) {
+      const kitAssetsInBooking = bookingFound.assets.filter(a => a.kitId === kitId);
+      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(a => a.kitId === kitId);
+      
+      if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
+        completeKitIds.push(kitId);
+      }
+    }
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      // Remove the scanned assets from the booking
+      await tx.booking.update({
+        where: { id },
+        data: {
+          assets: {
+            disconnect: assetIds.map((assetId) => ({ id: assetId })),
+          },
+        },
+      });
+
+      // Update the status of checked-in assets to AVAILABLE
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      // Only update kit status for kits that are completely checked in
+      if (completeKitIds.length > 0) {
+        await tx.kit.updateMany({
+          where: { id: { in: completeKitIds } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
+
+      // Create audit notes for each checked-in asset using createNotes
+      const noteContent = `Checked in via partial check-in for booking "${bookingFound.name}".`;
+      await createNotes({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetIds,
+      });
+
+      // Get the updated booking with remaining assets
+      return tx.booking.findUniqueOrThrow({
+        where: { id },
+        include: {
+          assets: true,
+          custodianUser: true,
+          custodianTeamMember: true,
+          _count: { select: { assets: true } },
+        },
+      });
+    });
+
+    return {
+      booking: updatedBooking,
+      checkedInAssetCount: assetIds.length,
+      remainingAssetCount: updatedBooking.assets.length,
+      isComplete: false,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while partially checking in booking.",
+    });
+  }
+}
+
 export async function updateBookingAssets({
   id,
   organizationId,
