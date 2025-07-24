@@ -63,7 +63,10 @@ const DropdownMenuContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
     portalContainer?: HTMLElement;
   }
->(function DropdownMenuContent({ className, sideOffset = 4, portalContainer, ...props }, ref) {
+>(function DropdownMenuContent(
+  { className, sideOffset = 4, portalContainer, ...props },
+  ref
+) {
   return (
     <DropdownMenuPrimitive.Portal container={portalContainer}>
       <DropdownMenuPrimitive.Content

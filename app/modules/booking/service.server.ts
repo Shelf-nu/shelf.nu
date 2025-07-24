@@ -978,10 +978,12 @@ export async function partialCheckinBooking({
     if (assetIds.length === bookingFound.assets.length) {
       const allAssetIds = new Set(bookingFound.assets.map((a) => a.id));
       const providedAssetIds = new Set(assetIds);
-      
+
       // Check if the provided asset IDs match exactly with booking assets
-      if (allAssetIds.size === providedAssetIds.size && 
-          [...allAssetIds].every(id => providedAssetIds.has(id))) {
+      if (
+        allAssetIds.size === providedAssetIds.size &&
+        [...allAssetIds].every((id) => providedAssetIds.has(id))
+      ) {
         // Do complete check-in
         return await checkinBooking({
           id,
@@ -994,27 +996,35 @@ export async function partialCheckinBooking({
     // Validate that all provided assetIds are actually in the booking
     const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
     const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
-    
+
     if (invalidAssetIds.length > 0) {
       throw new ShelfError({
         cause: null,
         status: 400,
         label,
-        message: `Some assets are not part of this booking: ${invalidAssetIds.join(", ")}`,
+        message: `Some assets are not part of this booking: ${invalidAssetIds.join(
+          ", "
+        )}`,
       });
     }
 
     // For kits: only update kit status if ALL assets of a kit are being checked in
-    const assetsBeingCheckedIn = bookingFound.assets.filter((a) => assetIds.includes(a.id));
+    const assetsBeingCheckedIn = bookingFound.assets.filter((a) =>
+      assetIds.includes(a.id)
+    );
     const kitIdsInBooking = getKitIdsByAssets(bookingFound.assets);
     const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
-    
+
     // Only process kits where ALL their assets in this booking are being checked in
     const completeKitIds: string[] = [];
     for (const kitId of kitIdsBeingCheckedIn) {
-      const kitAssetsInBooking = bookingFound.assets.filter(a => a.kitId === kitId);
-      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(a => a.kitId === kitId);
-      
+      const kitAssetsInBooking = bookingFound.assets.filter(
+        (a) => a.kitId === kitId
+      );
+      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
+        (a) => a.kitId === kitId
+      );
+
       if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
         completeKitIds.push(kitId);
       }
