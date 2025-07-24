@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { Card } from "~/components/shared/card";
-import { getFlagEmoji, getCountryDisplayName } from "../../utils/country";
+import { config } from "~/config/shelf.config";
+import { getCountryDisplayName } from "../../utils/country";
 import {
   Select,
   SelectContent,
@@ -25,7 +26,7 @@ export default function LanguageSwitch({
   const { t } = useTranslation();
   const zo = useZorm("LanguageSwitchForm", LanguageSwitchSchema);
   const fetcher = useFetcher();
-  const availableLanguages = ["en", "fr"];
+  const availableLanguages = config.supportedLanguages
 
   useEffect(() => {
     if (fetcher.data?.success) {
