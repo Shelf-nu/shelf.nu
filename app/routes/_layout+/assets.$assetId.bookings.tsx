@@ -24,12 +24,15 @@ import {
   getParams,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import BookingsIndexPage from "./bookings._index";
+import BookingsIndexPage, {
+  bookingsSearchFieldTooltipText,
+} from "./bookings._index";
 
 const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.DRAFT,
@@ -138,6 +141,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         ...teamMembersData,
         ...tagsData,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
       }),
       {
         headers: [
