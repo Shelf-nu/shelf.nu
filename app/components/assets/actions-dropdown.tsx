@@ -20,6 +20,8 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import { MarkAsFoundDialog } from "./mark-as-found-dialog";
+import { MarkAsMissingDialog } from "./mark-as-missing-dialog";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
@@ -244,6 +246,16 @@ const ConditionalActionsDropdown = () => {
                   </span>
                 </Button>
               </DropdownMenuItem>
+
+              {/* Mark as Missing/Found Actions */}
+              <DropdownMenuItem className="px-0 py-1 md:p-0">
+                {asset.status === "MISSING" ? (
+                  <MarkAsFoundDialog assetTitle={asset.title} />
+                ) : (
+                  <MarkAsMissingDialog assetTitle={asset.title} />
+                )}
+              </DropdownMenuItem>
+
               <DropdownMenuItem className="px-0 py-1 md:p-0">
                 <Button
                   to="overview/duplicate"
