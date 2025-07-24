@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
@@ -70,6 +71,7 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
+  const { isBaseOrSelfService } = useUserRoleHelper();
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
@@ -193,7 +195,7 @@ export const CodePreview = ({
     >
       {/* Code Selector */}
       <div className="w-full border-b-[1.1px] border-[#E3E4E8] px-4 py-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <select
             id="code-selector"
             value={selectedCodeId}
@@ -204,7 +206,10 @@ export const CodePreview = ({
               );
               onCodeChange?.(newSelectedCode || null);
             }}
-            className="min-w-0 max-w-[280px] flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={tw(
+              "min-w-0  flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 pr-7 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500",
+              isBaseOrSelfService ? "max-w-[320px]" : "max-w-[280px]"
+            )}
           >
             {availableCodes.map((code) => (
               <option key={code.id} value={code.id}>
@@ -212,28 +217,30 @@ export const CodePreview = ({
               </option>
             ))}
           </select>
-          <Button
-            icon="plus"
-            variant="secondary"
-            size="sm"
-            onClick={() => setIsAddBarcodeDialogOpen(true)}
-            disabled={
-              !canUseBarcodes
-                ? {
-                    reason: (
-                      <>
-                        Your workspace doesn't currently support barcodes. If
-                        you want to enable barcodes for your workspace, please
-                        get in touch with{" "}
-                        <CrispButton variant="link">sales</CrispButton>.
-                      </>
-                    ),
-                  }
-                : false
-            }
-            tooltip={canUseBarcodes ? "Add code to asset" : undefined}
-            className="shrink-0"
-          />
+          <When truthy={!isBaseOrSelfService}>
+            <Button
+              icon="plus"
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsAddBarcodeDialogOpen(true)}
+              disabled={
+                !canUseBarcodes
+                  ? {
+                      reason: (
+                        <>
+                          Your workspace doesn't currently support barcodes. If
+                          you want to enable barcodes for your workspace, please
+                          get in touch with{" "}
+                          <CrispButton variant="link">sales</CrispButton>.
+                        </>
+                      ),
+                    }
+                  : false
+              }
+              tooltip={canUseBarcodes ? "Add code to asset" : undefined}
+              className="shrink-0"
+            />
+          </When>
         </div>
       </div>
 

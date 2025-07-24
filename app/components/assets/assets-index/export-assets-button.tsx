@@ -49,7 +49,7 @@ export function ExportAssetsButton() {
     <Button
       onClick={handleExport}
       variant="secondary"
-      className="font-medium"
+      className="whitespace-nowrap font-medium"
       title={title}
       disabled={
         !canImportAssets
