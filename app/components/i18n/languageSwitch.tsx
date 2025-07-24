@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { Card } from "~/components/shared/card";
+import { getFlagEmoji, getCountryDisplayName } from "../../utils/country";
 import {
   Select,
   SelectContent,
@@ -58,7 +59,7 @@ export default function LanguageSwitch({
             <SelectContent>
               {availableLanguages.map((lang) => (
                 <SelectItem key={lang} value={lang}>
-                  {lang}
+                  {getCountryDisplayName('es',selectedLanguage)}
                 </SelectItem>
               ))}
             </SelectContent>
