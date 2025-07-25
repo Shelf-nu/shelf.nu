@@ -16,12 +16,13 @@ type BaseDrawerProps = {
   className?: string;
   style?: React.CSSProperties;
   defaultExpanded?: boolean;
-  title: string;
+  title?: string | React.ReactNode;
   onClear?: () => void;
   hasItems: boolean;
   emptyStateContent?:
     | React.ReactNode
     | ((expanded: boolean) => React.ReactNode);
+  headerContent?: React.ReactNode;
 };
 
 /** Used for calculating expanded size */
@@ -42,6 +43,7 @@ export default function BaseDrawer({
   onClear,
   hasItems,
   emptyStateContent,
+  headerContent,
 }: BaseDrawerProps) {
   const [expanded, setExpanded] = useState(
     defaultExpanded !== undefined ? defaultExpanded : false
@@ -53,12 +55,55 @@ export default function BaseDrawer({
   )?.minimizedSidebar;
 
   const itemsListRef = useRef<HTMLDivElement>(null);
+  const headerContentRef = useRef<HTMLDivElement>(null);
+  const baseHeaderRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(148); // Default fallback
 
   // Handle scanning mode changes
   const mode = useGlobalModeViaObserver();
   useEffect(() => {
     setExpanded(mode === "scanner");
   }, [mode]);
+
+  // Calculate dynamic header height only when needed
+  useEffect(() => {
+    // Only calculate dynamic height if we have custom header content
+    if (!headerContent) {
+      return;
+    }
+
+    const calculateHeaderHeight = () => {
+      const dragHandleHeight = 36; // Approximate height of drag handle
+      const headerContentHeight = headerContentRef.current?.offsetHeight || 0;
+      const baseHeaderHeight = baseHeaderRef.current?.offsetHeight || 60; // Default base header height
+      const padding = 16; // Some padding for safety
+      
+      const totalHeight = dragHandleHeight + headerContentHeight + baseHeaderHeight + padding;
+      setHeaderHeight(totalHeight);
+    };
+
+    // Calculate immediately
+    calculateHeaderHeight();
+
+    // Recalculate on window resize
+    const handleResize = () => calculateHeaderHeight();
+    window.addEventListener('resize', handleResize);
+
+    // Use ResizeObserver to detect changes in header content
+    const resizeObserver = new ResizeObserver(() => calculateHeaderHeight());
+    
+    if (headerContentRef.current) {
+      resizeObserver.observe(headerContentRef.current);
+    }
+    if (baseHeaderRef.current) {
+      resizeObserver.observe(baseHeaderRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+    };
+  }, [headerContent, title, hasItems, onClear]);
 
   return (
     <Portal>
@@ -73,9 +118,11 @@ export default function BaseDrawer({
             ? mode === "scanner"
               ? vh - 400
               : vh - TOP_GAP
+            : headerContent
+            ? headerHeight  // Use dynamic height when custom header content exists
             : hasItems
-            ? 170
-            : 148,
+            ? 170           // Original logic: show first item when there are items
+            : 148,          // Original logic: minimal height when no items
         }}
       >
         <div className={tw("h-full")} style={style}>
@@ -102,8 +149,16 @@ export default function BaseDrawer({
               />
             </motion.div>
 
-            {/* Header */}
-            <div className="flex items-center justify-between border-b text-left">
+            {/* Extra Header Content - Always visible */}
+            <div ref={headerContentRef}>
+              {headerContent}
+            </div>
+
+            {/* Base Header */}
+            <div 
+              ref={baseHeaderRef}
+              className="default-base-drawer-header flex items-center justify-between border-b text-left"
+            >
               <div className="py-4">{title}</div>
 
               {hasItems && onClear && (

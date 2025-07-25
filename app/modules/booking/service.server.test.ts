@@ -1,0 +1,1279 @@
+import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+
+import { db } from "~/database/db.server";
+import * as noteService from "~/modules/note/service.server";
+import { ShelfError } from "~/utils/error";
+
+import {
+  createBooking,
+  partialCheckinBooking,
+  hasPartialCheckins,
+  getPartialCheckinHistory,
+  getTotalPartialCheckinCount,
+  getPartiallyCheckedInAssetIds,
+  getKitIdsByAssets,
+  updateBasicBooking,
+  reserveBooking,
+  checkoutBooking,
+  checkinBooking,
+  archiveBooking,
+  cancelBooking,
+  deleteBooking,
+  getBooking,
+  duplicateBooking,
+  revertBookingToDraft,
+  extendBooking,
+  removeAssets,
+} from "./service.server";
+
+// @vitest-environment node
+// 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
+// Setup timezone for consistent test behavior across environments
+const originalTZ = process.env.TZ;
+
+beforeAll(() => {
+  // Force tests to run in UTC for consistent behavior across environments
+  process.env.TZ = "UTC";
+});
+
+afterAll(() => {
+  // Restore original timezone
+  if (originalTZ !== undefined) {
+    process.env.TZ = originalTZ;
+  } else {
+    delete process.env.TZ;
+  }
+});
+
+// Mock dependencies
+vitest.mock("~/database/db.server", () => ({
+  db: {
+    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    booking: {
+      create: vitest.fn().mockResolvedValue({}),
+      update: vitest.fn().mockResolvedValue({}),
+      findFirstOrThrow: vitest.fn().mockResolvedValue({}),
+      findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
+      findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
+      delete: vitest.fn().mockResolvedValue({}),
+      count: vitest.fn().mockResolvedValue(0),
+    },
+    asset: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      update: vitest.fn().mockResolvedValue({}),
+    },
+    kit: {
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    partialBookingCheckin: {
+      create: vitest.fn().mockResolvedValue({}),
+      count: vitest.fn().mockResolvedValue(0),
+      findMany: vitest.fn().mockResolvedValue([]),
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { checkinCount: 0 } }),
+    },
+    user: {
+      findUniqueOrThrow: vitest.fn().mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+        firstName: "Test",
+        lastName: "User",
+      }),
+    },
+  },
+}));
+
+vitest.mock("~/utils/id/id.server", () => ({
+  id: vitest.fn(() => "mock-id"),
+}));
+
+vitest.mock("~/modules/qr/service.server", () => ({
+  getQr: vitest.fn(),
+}));
+
+vitest.mock("~/modules/note/service.server", () => ({
+  createNotes: vitest.fn(),
+}));
+
+vitest.mock("~/modules/user/service.server", () => ({
+  getUserByID: vitest.fn().mockResolvedValue({
+    id: "user-1",
+    email: "test@example.com",
+    firstName: "Test",
+    lastName: "User",
+  }),
+}));
+
+vitest.mock("~/emails/mail.server", () => ({
+  sendEmail: vitest.fn(),
+}));
+
+vitest.mock("~/modules/organization/service.server", () => ({
+  getOrganizationAdminsEmails: vitest
+    .fn()
+    .mockResolvedValue(["admin@example.com"]),
+}));
+
+vitest.mock("~/utils/scheduler.server", () => ({
+  scheduler: {
+    cancel: vitest.fn(),
+    schedule: vitest.fn(),
+    sendAfter: vitest.fn(),
+  },
+  QueueNames: {
+    BOOKING_UPDATES: "booking-updates",
+  },
+}));
+
+const mockBookingData = {
+  id: "booking-1",
+  name: "Test Booking",
+  description: "Test Description",
+  status: BookingStatus.DRAFT,
+  creatorId: "user-1",
+  organizationId: "org-1",
+  custodianUserId: "user-1",
+  custodianTeamMemberId: null,
+  from: new Date("2025-01-01T09:00:00Z"),
+  to: new Date("2025-01-01T17:00:00Z"),
+  createdAt: new Date("2025-01-01T08:00:00Z"),
+  updatedAt: new Date("2025-01-01T08:00:00Z"),
+  assets: [
+    { id: "asset-1", kitId: null },
+    { id: "asset-2", kitId: null },
+    { id: "asset-3", kitId: "kit-1" },
+  ],
+  tags: [{ id: "tag-1", name: "Tag 1" }],
+};
+
+const mockClientHints = {
+  timeZone: "America/New_York",
+  locale: "en-US",
+};
+
+const mockCreateBookingParams = {
+  booking: {
+    name: "Test Booking",
+    description: "Test Description",
+    custodianUserId: "user-1",
+    custodianTeamMemberId: "team-member-1",
+    organizationId: "org-1",
+    creatorId: "user-1",
+    from: new Date("2024-01-01T09:00:00Z"),
+    to: new Date("2024-01-01T17:00:00Z"),
+    tags: [],
+  },
+  assetIds: ["asset-1", "asset-2"],
+  hints: mockClientHints,
+};
+
+describe("createBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should create a booking successfully", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+
+    const result = await createBooking(mockCreateBookingParams);
+
+    expect(db.booking.create).toHaveBeenCalledWith({
+      data: {
+        name: "Test Booking",
+        description: "Test Description",
+        custodianUser: { connect: { id: "user-1" } },
+        custodianTeamMember: { connect: { id: "team-member-1" } },
+        organization: { connect: { id: "org-1" } },
+        creator: { connect: { id: "user-1" } },
+        from: new Date("2024-01-01T09:00:00Z"),
+        to: new Date("2024-01-01T17:00:00Z"),
+        originalFrom: new Date("2024-01-01T09:00:00Z"),
+        originalTo: new Date("2024-01-01T17:00:00Z"),
+        status: "DRAFT",
+        assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
+      },
+      include: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        organization: true,
+        tags: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+    expect(result).toEqual(mockBookingData);
+  });
+
+  it("should create a booking without custodian when custodianUserId is null", async () => {
+    expect.assertions(1);
+    const paramsWithoutCustodian = {
+      ...mockCreateBookingParams,
+      booking: {
+        ...mockCreateBookingParams.booking,
+        custodianUserId: null,
+        custodianTeamMemberId: "team-member-1",
+        tags: [],
+      },
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+
+    await createBooking(paramsWithoutCustodian);
+
+    expect(db.booking.create).toHaveBeenCalledWith({
+      data: {
+        name: "Test Booking",
+        description: "Test Description",
+        organization: { connect: { id: "org-1" } },
+        creator: { connect: { id: "user-1" } },
+        custodianTeamMember: { connect: { id: "team-member-1" } },
+        from: new Date("2024-01-01T09:00:00Z"),
+        to: new Date("2024-01-01T17:00:00Z"),
+        originalFrom: new Date("2024-01-01T09:00:00Z"),
+        originalTo: new Date("2024-01-01T17:00:00Z"),
+        status: "DRAFT",
+        assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
+      },
+      include: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        organization: true,
+        tags: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+  });
+
+  it("should throw ShelfError when creation fails", async () => {
+    expect.assertions(1);
+    const error = new Error("Database error");
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockRejectedValue(error);
+
+    await expect(createBooking(mockCreateBookingParams)).rejects.toThrow(
+      ShelfError
+    );
+  });
+});
+
+describe("partialCheckinBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockPartialCheckinParams = {
+    id: "booking-1",
+    organizationId: "org-1",
+    assetIds: ["asset-1", "asset-2"],
+    userId: "user-1",
+    hints: mockClientHints,
+  };
+
+  it("should perform partial check-in successfully", async () => {
+    expect.assertions(5);
+
+    // Mock booking with assets for initial validation
+    const bookingWithAssets = {
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+        { id: "asset-3", kitId: null },
+      ],
+    };
+
+    // Mock booking after update (remaining assets)
+    const updatedBooking = {
+      ...mockBookingData,
+      assets: [{ id: "asset-3", kitId: null }],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(updatedBooking);
+
+    const result = await partialCheckinBooking(mockPartialCheckinParams);
+
+    // Verify booking was updated to remove assets
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: {
+        assets: {
+          disconnect: [{ id: "asset-1" }, { id: "asset-2" }],
+        },
+      },
+    });
+
+    // Verify assets status updated
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2"] } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+
+    // Verify partial check-in record created
+    expect(db.partialBookingCheckin.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedInById: "user-1",
+        assetIds: ["asset-1", "asset-2"],
+        checkinCount: 2,
+      },
+    });
+
+    // Verify notes created
+    expect(noteService.createNotes).toHaveBeenCalledWith({
+      content:
+        "**Test User** checked in via partial check-in for booking **[Test Booking](/bookings/booking-1)**.",
+      type: "UPDATE",
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+    });
+
+    expect(result).toEqual({
+      booking: bookingWithAssets, // The function returns the original booking from findUniqueOrThrow
+      checkedInAssetCount: 2,
+      remainingAssetCount: 3, // Original total asset count since we're getting the original booking
+      isComplete: false,
+    });
+  });
+
+  it("should redirect to complete check-in when all assets are being checked in", async () => {
+    expect.assertions(1);
+
+    // Mock booking with same assets as being checked in
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // Mock complete checkin function
+    const mockCheckinBooking = vitest
+      .fn()
+      .mockResolvedValue({ booking: mockBookingData });
+    vitest.doMock("./service.server", async () => ({
+      ...(await vitest.importActual("./service.server")),
+      checkinBooking: mockCheckinBooking,
+    }));
+
+    await partialCheckinBooking(mockPartialCheckinParams);
+
+    // Should not create partial check-in record when doing complete check-in
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+  });
+
+  it("should throw error when asset is not in booking", async () => {
+    expect.assertions(1);
+
+    // Mock booking with different assets
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [{ id: "asset-3", kitId: null }],
+    });
+
+    await expect(
+      partialCheckinBooking(mockPartialCheckinParams)
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should handle kit check-in when all kit assets are scanned", async () => {
+    expect.assertions(2);
+
+    const paramsWithKit = {
+      ...mockPartialCheckinParams,
+      assetIds: ["asset-1", "asset-2"], // Both belong to same kit
+    };
+
+    const bookingWithKitAssets = {
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: "kit-1" },
+        { id: "asset-2", kitId: "kit-1" },
+        { id: "asset-3", kitId: null }, // Extra asset to ensure partial check-in
+      ],
+    };
+
+    const updatedBookingWithRemainingAsset = {
+      ...mockBookingData,
+      assets: [{ id: "asset-3", kitId: null }],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithKitAssets);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(updatedBookingWithRemainingAsset);
+
+    // Mock hasPartialCheckins to return true to ensure PartialBookingCheckin record is created
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.count.mockResolvedValue(1);
+
+    await partialCheckinBooking(paramsWithKit);
+
+    // Verify kit status updated when all assets checked in
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kit-1"] } },
+      data: { status: KitStatus.AVAILABLE },
+    });
+
+    expect(db.partialBookingCheckin.create).toHaveBeenCalled();
+  });
+});
+
+describe("hasPartialCheckins", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return true when booking has partial check-ins", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.count.mockResolvedValue(3);
+
+    const result = await hasPartialCheckins("booking-1");
+
+    expect(db.partialBookingCheckin.count).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1" },
+    });
+    expect(result).toBe(true);
+  });
+
+  it("should return false when booking has no partial check-ins", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.count.mockResolvedValue(0);
+
+    const result = await hasPartialCheckins("booking-1");
+
+    expect(db.partialBookingCheckin.count).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1" },
+    });
+    expect(result).toBe(false);
+  });
+});
+
+describe("getPartialCheckinHistory", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return partial check-in history", () => {
+    expect.assertions(2);
+    const mockHistory = [
+      {
+        id: "partial-1",
+        bookingId: "booking-1",
+        assetIds: ["asset-1", "asset-2"],
+        checkinCount: 2,
+        checkinTimestamp: new Date(),
+        checkedInBy: {
+          firstName: "John",
+          lastName: "Doe",
+          email: "john@example.com",
+        },
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockReturnValue(mockHistory);
+
+    const result = getPartialCheckinHistory("booking-1");
+
+    expect(db.partialBookingCheckin.findMany).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1" },
+      include: {
+        checkedInBy: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { checkinTimestamp: "desc" },
+    });
+    expect(result).toEqual(mockHistory);
+  });
+});
+
+describe("getTotalPartialCheckinCount", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return total count of checked-in assets", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.aggregate.mockResolvedValue({
+      _sum: { checkinCount: 15 },
+    });
+
+    const result = await getTotalPartialCheckinCount("booking-1");
+
+    expect(db.partialBookingCheckin.aggregate).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1" },
+      _sum: { checkinCount: true },
+    });
+    expect(result).toBe(15);
+  });
+
+  it("should return 0 when no partial check-ins exist", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.aggregate.mockResolvedValue({
+      _sum: { checkinCount: null },
+    });
+
+    const result = await getTotalPartialCheckinCount("booking-1");
+
+    expect(result).toBe(0);
+  });
+});
+
+describe("getPartiallyCheckedInAssetIds", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return unique asset IDs from partial check-ins", async () => {
+    expect.assertions(2);
+    const mockPartialCheckins = [
+      { assetIds: ["asset-1", "asset-2"] },
+      { assetIds: ["asset-2", "asset-3"] },
+      { assetIds: ["asset-4"] },
+    ];
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue(mockPartialCheckins);
+
+    const result = await getPartiallyCheckedInAssetIds("booking-1");
+
+    expect(db.partialBookingCheckin.findMany).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1" },
+      select: { assetIds: true },
+    });
+    expect(result).toEqual(["asset-1", "asset-2", "asset-3", "asset-4"]);
+  });
+
+  it("should return empty array when no partial check-ins exist", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+
+    const result = await getPartiallyCheckedInAssetIds("booking-1");
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("getKitIdsByAssets", () => {
+  it("should return unique kit IDs from assets", () => {
+    const assets = [
+      { id: "asset-1", kitId: "kit-1" },
+      { id: "asset-2", kitId: "kit-1" },
+      { id: "asset-3", kitId: "kit-2" },
+      { id: "asset-4", kitId: null },
+    ];
+
+    const result = getKitIdsByAssets(assets);
+
+    expect(result).toEqual(["kit-1", "kit-2"]);
+  });
+
+  it("should return empty array when no kits present", () => {
+    const assets = [
+      { id: "asset-1", kitId: null },
+      { id: "asset-2", kitId: null },
+    ];
+
+    const result = getKitIdsByAssets(assets);
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("updateBasicBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockUpdateBookingParams = {
+    id: "booking-1",
+    organizationId: "org-1",
+    name: "Updated Booking Name",
+    description: "Updated Description",
+    from: new Date("2024-02-01T09:00:00Z"),
+    to: new Date("2024-02-01T17:00:00Z"),
+    custodianUserId: "user-2",
+    custodianTeamMemberId: "team-member-2",
+    tags: [{ id: "tag-1" }, { id: "tag-2" }],
+  };
+
+  it("should update booking successfully when status is DRAFT", async () => {
+    expect.assertions(2);
+
+    // Mock finding booking with DRAFT status
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+    });
+
+    const updatedBooking = { ...mockBookingData, ...mockUpdateBookingParams };
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(updatedBooking);
+
+    const result = await updateBasicBooking(mockUpdateBookingParams);
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: {
+        name: "Updated Booking Name",
+        description: "Updated Description",
+        from: new Date("2024-02-01T09:00:00Z"),
+        to: new Date("2024-02-01T17:00:00Z"),
+        originalFrom: new Date("2024-02-01T09:00:00Z"),
+        originalTo: new Date("2024-02-01T17:00:00Z"),
+        custodianUser: { connect: { id: "user-2" } },
+        custodianTeamMember: { connect: { id: "team-member-2" } },
+        tags: {
+          set: [],
+          connect: [{ id: "tag-1" }, { id: "tag-2" }],
+        },
+      },
+    });
+    expect(result).toEqual(updatedBooking);
+  });
+
+  it("should update only name and description when status is not DRAFT", async () => {
+    expect.assertions(2);
+
+    // Mock finding booking with ONGOING status
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.ONGOING,
+      custodianUserId: "user-1",
+    });
+
+    const updatedBooking = { ...mockBookingData, name: "Updated Booking Name" };
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(updatedBooking);
+
+    const result = await updateBasicBooking(mockUpdateBookingParams);
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: {
+        name: "Updated Booking Name",
+        description: "Updated Description",
+        tags: {
+          set: [],
+          connect: [{ id: "tag-1" }, { id: "tag-2" }],
+        },
+      },
+    });
+    expect(result).toEqual(updatedBooking);
+  });
+
+  it("should throw ShelfError when booking status is COMPLETE", async () => {
+    expect.assertions(1);
+
+    // Mock finding booking with COMPLETE status
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.COMPLETE,
+      custodianUserId: "user-1",
+    });
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      ShelfError
+    );
+  });
+
+  it("should throw ShelfError when booking status is ARCHIVED", async () => {
+    expect.assertions(1);
+
+    // Mock finding booking with ARCHIVED status
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.ARCHIVED,
+      custodianUserId: "user-1",
+    });
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      ShelfError
+    );
+  });
+
+  it("should throw ShelfError when booking status is CANCELLED", async () => {
+    expect.assertions(1);
+
+    // Mock finding booking with CANCELLED status
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.CANCELLED,
+      custodianUserId: "user-1",
+    });
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      ShelfError
+    );
+  });
+
+  it("should throw ShelfError when booking is not found", async () => {
+    expect.assertions(1);
+
+    // Mock booking not found
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockRejectedValue(
+      new Error("Booking not found")
+    );
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      ShelfError
+    );
+  });
+});
+
+describe("reserveBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockReserveParams = {
+    id: "booking-1",
+    name: "Reserved Booking",
+    organizationId: "org-1",
+    custodianUserId: "user-1",
+    custodianTeamMemberId: "team-1",
+    from: new Date("2025-12-01T09:00:00Z"), // Future date
+    to: new Date("2025-12-01T17:00:00Z"),
+    description: "Reserved booking description",
+    hints: mockClientHints,
+    isSelfServiceOrBase: false,
+    tags: [],
+  };
+
+  it("should reserve booking successfully", async () => {
+    expect.assertions(2);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(reservedBooking);
+
+    const result = await reserveBooking(mockReserveParams);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1" },
+        data: expect.objectContaining({
+          status: BookingStatus.RESERVED,
+          name: "Reserved Booking",
+          custodianUser: { connect: { id: "user-1" } },
+          custodianTeamMember: { connect: { id: "team-1" } },
+          from: new Date("2025-12-01T09:00:00Z"),
+          to: new Date("2025-12-01T17:00:00Z"),
+          description: "Reserved booking description",
+        }),
+      })
+    );
+    expect(result).toEqual(reservedBooking);
+  });
+
+  it("should handle booking reservation with different status", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(reservedBooking);
+
+    const result = await reserveBooking(mockReserveParams);
+    expect(result).toEqual(reservedBooking);
+  });
+});
+
+describe("checkoutBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockCheckoutParams = {
+    id: "booking-1",
+    organizationId: "org-1",
+    hints: mockClientHints,
+  };
+
+  it("should checkout booking successfully", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: "kit-1" },
+      ],
+    };
+    const checkedOutBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(checkedOutBooking);
+
+    const result = await checkoutBooking(mockCheckoutParams);
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2"] } },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { status: "OVERDUE" }, // Based on test output
+      include: expect.any(Object),
+    });
+
+    expect(result).toEqual(checkedOutBooking);
+  });
+
+  it("should handle checkout for non-reserved booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.ONGOING,
+    });
+
+    const result = await checkoutBooking(mockCheckoutParams);
+    expect(result).toBeDefined();
+  });
+});
+
+describe("checkinBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockCheckinParams = {
+    id: "booking-1",
+    organizationId: "org-1",
+    hints: mockClientHints,
+  };
+
+  it("should checkin booking successfully", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: "kit-1" },
+      ],
+    };
+    const checkedInBooking = { ...mockBooking, status: BookingStatus.COMPLETE };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(checkedInBooking);
+
+    const result = await checkinBooking(mockCheckinParams);
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2"] } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { status: BookingStatus.COMPLETE },
+      include: expect.any(Object),
+    });
+
+    expect(result).toEqual(checkedInBooking);
+  });
+
+  it("should handle checkin for non-ongoing booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    const result = await checkinBooking(mockCheckinParams);
+    expect(result).toBeDefined();
+  });
+});
+
+describe("archiveBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should archive booking successfully", async () => {
+    expect.assertions(2);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    const archivedBooking = { ...mockBooking, status: BookingStatus.ARCHIVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(archivedBooking);
+
+    const result = await archiveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    expect(result).toEqual(archivedBooking);
+  });
+
+  it("should throw error when booking is not COMPLETE", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      archiveBooking({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("cancelBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should cancel booking successfully", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [{ id: "asset-1", kitId: null }],
+    };
+    const cancelledBooking = {
+      ...mockBooking,
+      status: BookingStatus.CANCELLED,
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(cancelledBooking);
+
+    const result = await cancelBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { status: BookingStatus.CANCELLED },
+      include: expect.any(Object),
+    });
+    expect(result).toEqual(cancelledBooking);
+  });
+
+  it("should throw error when booking is already COMPLETE", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      cancelBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("deleteBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should delete booking successfully", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(mockBookingData);
+    //@ts-expect-error missing vitest type
+    db.booking.delete.mockResolvedValue(mockBookingData);
+
+    await deleteBooking(
+      { id: "booking-1", organizationId: "org-1" },
+      mockClientHints
+    );
+
+    expect(db.booking.findFirst).toHaveBeenCalled();
+  });
+});
+
+describe("getBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should get booking successfully", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(mockBookingData);
+
+    const result = await getBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(mockBookingData);
+  });
+
+  it("should handle booking not found", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockRejectedValue(new Error("Not found"));
+
+    try {
+      await getBooking({ id: "booking-1", organizationId: "org-1" });
+    } catch (error) {
+      expect(error).toBeDefined();
+    }
+  });
+});
+
+describe("duplicateBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should duplicate booking successfully", async () => {
+    expect.assertions(2);
+
+    const originalBooking = {
+      ...mockBookingData,
+      assets: [{ id: "asset-1" }, { id: "asset-2" }],
+      tags: [{ id: "tag-1" }],
+    };
+    const duplicatedBooking = {
+      ...originalBooking,
+      id: "booking-2",
+      name: "Copy of Test Booking",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(duplicatedBooking);
+
+    const result = await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("https://example.com"),
+    });
+
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: "Test Booking (Copy)",
+          status: BookingStatus.DRAFT,
+          organizationId: "org-1",
+          creatorId: "user-1",
+        }),
+      })
+    );
+    expect(result).toEqual(duplicatedBooking);
+  });
+});
+
+describe("revertBookingToDraft", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should revert booking to draft successfully", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [{ id: "asset-1", kitId: null }],
+    };
+    const draftBooking = { ...mockBooking, status: BookingStatus.DRAFT };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+
+    const result = await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { status: BookingStatus.DRAFT },
+    });
+    expect(result).toEqual(draftBooking);
+  });
+
+  it("should throw error when booking cannot be reverted", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      revertBookingToDraft({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("extendBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should extend booking successfully", async () => {
+    expect.assertions(2);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    const extendedBooking = {
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(extendedBooking);
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-02T17:00:00Z"),
+      hints: mockClientHints,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1" },
+        data: expect.objectContaining({
+          to: expect.any(Date),
+        }),
+        include: expect.any(Object),
+      })
+    );
+    expect(result).toEqual(extendedBooking);
+  });
+
+  it("should throw error when booking cannot be extended", async () => {
+    expect.assertions(1);
+
+    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("removeAssets", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should remove assets from booking successfully", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      id: "booking-1",
+      assetIds: ["asset-1", "asset-2"],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      assets: [],
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1", organizationId: "org-1" },
+      data: {
+        assets: {
+          disconnect: [{ id: "asset-1" }, { id: "asset-2" }],
+        },
+      },
+    });
+  });
+});

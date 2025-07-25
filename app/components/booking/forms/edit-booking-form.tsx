@@ -33,7 +33,7 @@ import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
-import CheckinDialog from "../checkin-dialog";
+import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDialog from "../checkout-dialog";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
@@ -277,7 +277,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 canCheckInBooking
               }
             >
-              <CheckinDialog
+              <CheckinDropdown
                 portalContainer={zo.form}
                 booking={{ id, name: name!, to: endDate!, from: startDate! }}
                 disabled={disabled || isLoadingWorkingHours}
