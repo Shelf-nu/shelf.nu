@@ -39,7 +39,6 @@ export default function CheckinDialog({
   disabled,
   booking,
   portalContainer,
-  onClose,
   label = "Check-in",
   variant = "default",
 }: CheckinDialogProps) {

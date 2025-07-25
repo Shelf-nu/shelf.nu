@@ -119,6 +119,7 @@ export default function CheckinDropdown({
                 width="full"
                 onClick={closeMenu}
                 disabled={disabled}
+                to={`/bookings/${booking.id}/checkin-assets`}
               >
                 <span className="flex items-center gap-2">
                   <ListChecks className="size-4" /> Explicit check-in

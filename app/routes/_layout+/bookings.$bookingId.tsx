@@ -890,8 +890,10 @@ export default function BookingPage() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**When we are on the booking.scan-assets route, we render an outlet */
-  const shouldRenderOutlet =
-    currentRoute?.handle?.name === "booking.scan-assets";
+  const shouldRenderOutlet = [
+    "booking.scan-assets",
+    "booking.checkin-assets",
+  ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (
     <Outlet />

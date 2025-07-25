@@ -958,6 +958,7 @@ export async function partialCheckinBooking({
   hints: ClientHint;
 }) {
   try {
+    const user = await getUserByID(userId);
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
       .findUniqueOrThrow({
@@ -984,6 +985,34 @@ export async function partialCheckinBooking({
         allAssetIds.size === providedAssetIds.size &&
         [...allAssetIds].every((id) => providedAssetIds.has(id))
       ) {
+        // Check if there are existing partial check-ins for this booking
+        const existingPartialCheckinsCount =
+          await db.partialBookingCheckin.count({
+            where: { bookingId: id },
+          });
+
+        // Only create PartialBookingCheckin record if there were previous partial check-ins
+        // This maintains the audit trail for a multi-session partial check-in process
+        if (existingPartialCheckinsCount > 0) {
+          await db.partialBookingCheckin.create({
+            data: {
+              bookingId: id,
+              checkedInById: userId,
+              assetIds,
+              checkinCount: assetIds.length,
+            },
+          });
+        }
+
+        // Create notes before complete check-in since this was initiated as explicit check-in
+        const noteContent = `**${user.firstName} ${user.lastName}** checked in via explicit check-in scanner for booking **[${bookingFound.name}](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+        await createNotes({
+          content: noteContent,
+          type: "UPDATE",
+          userId,
+          assetIds,
+        });
+
         // Do complete check-in
         return await checkinBooking({
           id,
@@ -1012,7 +1041,6 @@ export async function partialCheckinBooking({
     const assetsBeingCheckedIn = bookingFound.assets.filter((a) =>
       assetIds.includes(a.id)
     );
-    const kitIdsInBooking = getKitIdsByAssets(bookingFound.assets);
     const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
 
     // Only process kits where ALL their assets in this booking are being checked in
@@ -1055,8 +1083,20 @@ export async function partialCheckinBooking({
         });
       }
 
+      // Create partial check-in record for tracking
+      await tx.partialBookingCheckin.create({
+        data: {
+          bookingId: id,
+          checkedInById: userId,
+          assetIds,
+          checkinCount: assetIds.length,
+        },
+      });
+
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `Checked in via partial check-in for booking "${bookingFound.name}".`;
+      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via partial check-in for booking **[${
+        bookingFound.name
+      }](/bookings/${bookingFound.id})**.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -3034,4 +3074,66 @@ export async function duplicateBooking({
       label,
     });
   }
+}
+
+/**
+ * Helper functions for partial check-in tracking
+ */
+
+/**
+ * Check if a booking has any partial check-ins
+ */
+export async function hasPartialCheckins(bookingId: string): Promise<boolean> {
+  const count = await db.partialBookingCheckin.count({
+    where: { bookingId },
+  });
+  return count > 0;
+}
+
+/**
+ * Get partial check-in history for a booking
+ */
+export function getPartialCheckinHistory(bookingId: string) {
+  return db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    include: {
+      checkedInBy: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: { checkinTimestamp: "desc" },
+  });
+}
+
+/**
+ * Get total assets checked in via partial check-ins for a booking
+ */
+export async function getTotalPartialCheckinCount(
+  bookingId: string
+): Promise<number> {
+  const result = await db.partialBookingCheckin.aggregate({
+    where: { bookingId },
+    _sum: { checkinCount: true },
+  });
+  return result._sum.checkinCount || 0;
+}
+
+/**
+ * Get all unique asset IDs that have been checked in via partial check-ins
+ */
+export async function getPartiallyCheckedInAssetIds(
+  bookingId: string
+): Promise<string[]> {
+  const partialCheckins = await db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    select: { assetIds: true },
+  });
+
+  // Flatten all asset ID arrays and get unique values
+  const allAssetIds = partialCheckins.flatMap((pc) => pc.assetIds);
+  return [...new Set(allAssetIds)];
 }
