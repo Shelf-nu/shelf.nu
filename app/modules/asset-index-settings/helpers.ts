@@ -84,7 +84,7 @@ export const defaultFields: Column[] = [
   { name: "custody", visible: true, position: 11 },
   { name: "upcomingReminder", visible: true, position: 12 },
   { name: "actions", visible: true, position: 13 },
-  { name: "upcomingBookings", visible: false, position: 14 },
+  { name: "upcomingBookings", visible: true, position: 14 },
 ];
 
 // Generate barcode columns when barcodes are enabled
