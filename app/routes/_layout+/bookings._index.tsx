@@ -3,8 +3,9 @@ import { TagUseFor } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { Link, Outlet, useMatches } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
+import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
@@ -38,12 +39,23 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const bookingsSearchFieldTooltipText = `
+Search bookings based on different fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
+- Name
+- Description
+- Tags
+- Custodian names (first or last name)
+- Asset names
+- Asset barcodes or qr code
+`;
 
 export type BookingsIndexLoaderData = typeof loader;
 
@@ -175,6 +187,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfServiceOrBase,
         tags,
         totalTags: tags.length,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
       }),
       {
         headers: [
@@ -220,7 +236,6 @@ export default function BookingsIndexPage({
   className?: string;
   disableBulkActions?: boolean;
 }) {
-  const navigate = useNavigate();
   const matches = useMatches();
   const { isBaseOrSelfService } = useUserRoleHelper();
 
@@ -290,10 +305,10 @@ export default function BookingsIndexPage({
             )
           }
           ItemComponent={ListBookingsContent}
-          navigate={(id) => navigate(`/bookings/${id}`)}
           headerChildren={
             <>
               <Th />
+              <Th>Assets</Th>
               <Th>Description</Th>
 
               <Th>From</Th>
@@ -325,8 +340,27 @@ const ListBookingsContent = ({
       assets: {
         select: {
           id: true;
+          title: true;
           availableToBook: true;
           custody: true;
+          kitId: true;
+          status: true;
+          mainImage: true;
+          thumbnailImage: true;
+          mainImageExpiration: true;
+          category: {
+            select: {
+              id: true;
+              name: true;
+              color: true;
+            };
+          };
+          kit: {
+            select: {
+              id: true;
+              name: true;
+            };
+          };
         };
       };
       creator: {
@@ -361,7 +395,13 @@ const ListBookingsContent = ({
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
-                {item.name}
+                <Button
+                  to={`/bookings/${item.id}`}
+                  variant="link"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                >
+                  {item.name}
+                </Button>
               </span>
               <div className="">
                 <BookingStatusBadge
@@ -390,6 +430,11 @@ const ListBookingsContent = ({
             }
           />
         ) : null}
+      </Td>
+
+      {/* Assets count */}
+      <Td>
+        <BookingAssetsSidebar booking={item} />
       </Td>
 
       <Td className="max-w-62">
