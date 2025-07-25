@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import type { Booking, Tag, TeamMember, User } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { AdvancedAssetBooking } from "~/modules/asset/types";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { useHints } from "~/utils/client-hints";
@@ -45,11 +45,7 @@ export function useAssetAvailabilityData(items: Items) {
 
         return [
           ...asset.bookings.map((b) => {
-            const booking = b as Booking & {
-              custodianUser?: User;
-              custodianTeamMember?: TeamMember;
-              tags: Pick<Tag, "id" | "name">[];
-            };
+            const booking = b as AdvancedAssetBooking;
 
             const custodianName = booking?.custodianUser
               ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
@@ -70,7 +66,7 @@ export function useAssetAvailabilityData(items: Items) {
                 `bookingId-${booking.id}`,
                 ...getStatusClasses(
                   booking.status,
-                  isOneDayEvent(booking.from as Date, booking.to as Date),
+                  isOneDayEvent(new Date(booking.from), new Date(booking.to)),
                   "px-1"
                 ),
               ],
@@ -86,7 +82,7 @@ export function useAssetAvailabilityData(items: Items) {
                   name: custodianName,
                   user: booking.custodianUser
                     ? {
-                        id: booking.custodianUserId,
+                        id: booking.custodianUser?.id,
                         firstName: booking.custodianUser?.firstName,
                         lastName: booking.custodianUser?.lastName,
                         profilePicture: booking.custodianUser?.profilePicture,

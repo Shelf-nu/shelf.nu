@@ -1283,6 +1283,20 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'from', bk."from",
             'to', bk."to",
             'description', bk.description,
+            'tags', (
+              SELECT COALESCE(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'id', t.id,
+                    'name', t.name
+                  )
+                ),
+                '[]'::jsonb
+              )
+              FROM public."_BookingToTag" btt
+              JOIN public."Tag" t ON btt."B" = t.id
+              WHERE btt."A" = bk.id
+            ),
             'custodianTeamMember', CASE 
               WHEN bk."custodianTeamMemberId" IS NOT NULL THEN
                 jsonb_build_object(
