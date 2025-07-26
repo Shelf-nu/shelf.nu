@@ -12,7 +12,10 @@ import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
-import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import {
+  getCategoriesForCreateAndEdit,
+  getLocationsForCreateAndEdit,
+} from "~/modules/asset/service.server";
 import {
   getKit,
   updateKit,
@@ -69,13 +72,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
-        organizationId,
-        request,
-        defaultCategory: kit?.categoryId,
-      }
-    );
+    const [{ categories, totalCategories }, { locations, totalLocations }] =
+      await Promise.all([
+        getCategoriesForCreateAndEdit({
+          organizationId,
+          request,
+          defaultCategory: kit?.categoryId,
+        }),
+        getLocationsForCreateAndEdit({
+          request,
+          organizationId,
+        }),
+      ]);
 
     const header: HeaderData = {
       title: `Edit | ${kit.name}`,
@@ -88,6 +96,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         categories,
         totalCategories,
+        locations,
+        totalLocations,
       })
     );
   } catch (cause) {
@@ -143,6 +153,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         categoryId: payload.category ? payload.category : "uncategorized",
         barcodes,
+        locationId: payload.locationId,
       }),
       updateKitImage({
         request,

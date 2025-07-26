@@ -65,10 +65,16 @@ export async function createKit({
   organizationId,
   qrId,
   categoryId,
+  locationId,
   barcodes,
 }: Pick<
   Kit,
-  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+  | "name"
+  | "description"
+  | "createdById"
+  | "organizationId"
+  | "categoryId"
+  | "locationId"
 > & {
   qrId?: Qr["id"];
   barcodes?: Pick<Barcode, "type" | "value">[];
@@ -140,9 +146,11 @@ export async function createKit({
       });
     }
 
-    return await db.kit.create({
-      data,
-    });
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
+    }
+
+    return await db.kit.create({ data });
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -183,9 +191,10 @@ export async function updateKit({
   organizationId,
   categoryId,
   barcodes,
+  locationId,
 }: UpdateKitPayload) {
   try {
-    const data = {
+    const data: Prisma.KitUpdateInput = {
       name,
       description,
       image,
@@ -211,6 +220,10 @@ export async function updateKit({
           },
         },
       });
+    }
+
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
     }
 
     const kit = await db.kit.update({

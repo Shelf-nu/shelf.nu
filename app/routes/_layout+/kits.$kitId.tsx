@@ -18,6 +18,8 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
+import { Card } from "~/components/shared/card";
+import { Tag } from "~/components/shared/tag";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
@@ -148,6 +150,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               },
             },
           }),
+          location: true,
         },
         userOrganizations,
         request,
@@ -474,6 +477,16 @@ export default function KitDetails() {
 
         {/* Right column */}
         <div className="w-full md:w-[360px] lg:ml-4">
+          {kit?.location ? (
+            <Card className="mt-0 flex w-full items-center gap-2 py-4">
+              <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                Location
+              </span>
+
+              <Tag key={kit.location.id}>{kit.location.name}</Tag>
+            </Card>
+          ) : null}
+
           {/* Kit Custody */}
           <When truthy={!!kit.custody}>
             <CustodyCard
