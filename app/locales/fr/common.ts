@@ -1,0 +1,13 @@
+const en = {
+  login: {
+    title: "Se connecter",
+    subHeading:
+      "Bon retour ! Saisissez vos informations ci-dessous pour vous connecter.",
+  },
+  languageSwitch: {
+    title: "Paramètres de langue",
+    description: "Sélectionnez votre langue préférée pour l'application.",
+  },
+};
+export default en;
+export type CommonTranslations = typeof en;
