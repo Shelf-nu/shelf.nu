@@ -46,7 +46,7 @@ export default function PartialCheckinDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, partialCheckinProgress } = useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
@@ -265,11 +265,11 @@ export default function PartialCheckinDrawer({
       title={
         <div className="text-right">
           <span className="block text-gray-600">
-            {assetIdsForCheckin.length}/{booking.assets.length} Assets scanned
+            {assetIdsForCheckin.length}/{partialCheckinProgress?.uncheckedCount || booking.assets.length} Assets scanned
           </span>
           <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
             <Progress
-              value={(assetIdsForCheckin.length / booking.assets.length) * 100}
+              value={((assetIdsForCheckin.length) / (partialCheckinProgress?.uncheckedCount || booking.assets.length)) * 100}
             />
           </span>
         </div>

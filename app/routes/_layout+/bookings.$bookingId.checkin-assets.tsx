@@ -20,8 +20,10 @@ import PartialCheckinDrawer, {
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getBooking,
+  getDetailedPartialCheckinData,
   partialCheckinBooking,
 } from "~/modules/booking/service.server";
+import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canUserManageBookingAssets } from "~/utils/bookings";
@@ -86,12 +88,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
+    // Check if there might be partial check-ins by looking at asset statuses
+    const hasAvailableAssets = booking.assets.some(
+      (asset) => asset.status === "AVAILABLE"
+    );
+
+    // Only fetch partial check-in data if there might be partial check-ins
+    const { checkedInAssetIds } = hasAvailableAssets
+      ? await getDetailedPartialCheckinData(booking.id)
+      : { checkedInAssetIds: [] as string[] };
+
+    // Calculate partial check-in progress
+    const partialCheckinProgress = calculatePartialCheckinProgress(
+      booking.assets.length,
+      checkedInAssetIds
+    );
+
     const title = `Scan assets to check in | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return json(data({ title, header, booking }));
+    return json(data({ title, header, booking, partialCheckinProgress }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });

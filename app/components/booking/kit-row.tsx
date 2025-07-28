@@ -3,6 +3,7 @@ import type { BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import { tw } from "~/utils/tw";
 import KitImage from "../kits/kit-image";
@@ -13,11 +14,12 @@ import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
 import { CategoryBadge } from "../assets/category-badge";
+import { KitStatusBadge } from "../kits/kit-status-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import When from "../when/when";
 
 type KitRowProps = {
-  kit: Pick<Kit, "id" | "name" | "image"> & {
+  kit: Pick<Kit, "id" | "name" | "image" | "status"> & {
     imageExpiration: string | Date | null;
     category: Pick<Category, "name" | "id" | "color"> | null;
   };
@@ -26,6 +28,8 @@ type KitRowProps = {
   bookingId: string;
   assets: AssetWithBooking[];
   onToggleExpansion?: (kitId: string) => void;
+  partialCheckinDetails: PartialCheckinDetailsType;
+  shouldShowCheckinColumns: boolean;
 };
 
 export default function KitRow({
@@ -35,6 +39,8 @@ export default function KitRow({
   onToggleExpansion,
   assets,
   bookingId,
+  partialCheckinDetails,
+  shouldShowCheckinColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved } = useBookingStatusHelpers(bookingStatus);
@@ -73,7 +79,10 @@ export default function KitRow({
                   {kit.name}
                 </div>
               </Button>
-              <p className="text-sm text-gray-600">{assets.length} assets</p>
+              <KitStatusBadge status={kit.status} availableToBook={true} />
+            </div>
+            <div className="ml-auto text-sm text-gray-600">
+              {assets.length} assets
             </div>
           </div>
         </Td>
@@ -91,6 +100,19 @@ export default function KitRow({
         <Td>
           <CategoryBadge category={kit.category} />
         </Td>
+        {shouldShowCheckinColumns && (
+          <>
+            {/* Checked in on - for kits we don't show specific dates */}
+            <Td>
+              <span className="text-sm text-gray-400">-</span>
+            </Td>
+
+            {/* Checked in by - for kits we don't show specific users */}
+            <Td>
+              <span className="text-sm text-gray-400">-</span>
+            </Td>
+          </>
+        )}
 
         <Td className="pr-4 text-right align-middle">
           <div className="flex items-center justify-end gap-5">
@@ -129,14 +151,19 @@ export default function KitRow({
               },
             }}
           >
-            <ListAssetContent item={asset} isKitAsset />
+            <ListAssetContent
+              item={asset}
+              isKitAsset
+              partialCheckinDetails={partialCheckinDetails}
+              shouldShowCheckinColumns={shouldShowCheckinColumns}
+            />
           </ListItem>
         ))}
       </When>
 
       {/* Add a separator row after the kit assets */}
       <tr className="kit-separator h-1 bg-gray-100">
-        <td colSpan={5} className="h-1 p-0"></td>
+        <td colSpan={shouldShowCheckinColumns ? 7 : 5} className="h-1 p-0"></td>
       </tr>
     </React.Fragment>
   );

@@ -87,3 +87,27 @@ export function formatBookingsDates(bookings: Booking[], request: Request) {
     return b;
   });
 }
+
+/**
+ * Calculate partial check-in progress data for a booking
+ */
+export function calculatePartialCheckinProgress(
+  totalAssets: number,
+  checkedInAssetIds: string[]
+) {
+  const checkedInCount = checkedInAssetIds.length;
+  const uncheckedCount = totalAssets - checkedInCount;
+  const progressPercentage = totalAssets > 0 
+    ? Math.round((checkedInCount / totalAssets) * 100) 
+    : 0;
+  const hasPartialCheckins = checkedInCount > 0;
+
+  return {
+    totalAssets,
+    checkedInCount,
+    uncheckedCount, 
+    progressPercentage,
+    hasPartialCheckins,
+    checkedInAssetIds,
+  };
+}

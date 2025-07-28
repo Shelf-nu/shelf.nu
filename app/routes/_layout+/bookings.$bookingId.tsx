@@ -1,4 +1,4 @@
-import { BookingStatus, TagUseFor } from "@prisma/client";
+import { AssetStatus, BookingStatus, TagUseFor } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -44,11 +44,13 @@ import {
   extendBooking,
   getBooking,
   getBookingFlags,
+  getDetailedPartialCheckinData,
   removeAssets,
   reserveBooking,
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
+import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -100,6 +102,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
   const { page, perPageParam } = paramsValues;
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -157,6 +160,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
       }),
     ]);
+    //  * if the booking is ongoing and there is no status param, we need to set it to
+    // checked-out as that is the default
+    // * Only apply this redirect if we're on the main booking page, not child routes
+    // */
+    const url = new URL(request.url);
+    const isMainBookingPage = url.pathname === `/bookings/${bookingId}`;
+
+    /**
+     * if the booking is ongoing and there is no status param, we need to set it to checked-out as that is the default */
+    if (
+      isMainBookingPage &&
+      !searchParams.get("status") &&
+      ["ONGOING", "OVERDUE"].includes(booking.status)
+    ) {
+      return redirect(
+        `/bookings/${bookingId}?status=${AssetStatus.CHECKED_OUT}`
+      );
+    }
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
@@ -168,6 +189,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // Check if there might be partial check-ins by looking at asset statuses
+    const hasAvailableAssets = booking.assets.some(
+      (asset) => asset.status === "AVAILABLE"
+    );
+
+    // Only fetch partial check-in data if there might be partial check-ins
+    const { checkedInAssetIds, partialCheckinDetails } = hasAvailableAssets
+      ? await getDetailedPartialCheckinData(booking.id)
+      : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // Group assets by kitId for pagination purposes
     const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
@@ -329,9 +360,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const allCategories = [...assetCategories, ...kitCategories];
 
+    // Calculate partial check-in progress
+    const partialCheckinProgress = calculatePartialCheckinProgress(
+      booking.assets.length,
+      checkedInAssetIds
+    );
+
     const modelName = {
-      singular: "asset",
-      plural: "assets",
+      singular: "item",
+      plural: "items",
     };
 
     const header: HeaderData = {
@@ -363,6 +400,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         allCategories,
         tags,
         totalTags: tags.length,
+        partialCheckinProgress,
+        partialCheckinDetails,
+        // Asset search tooltip
+        searchFieldLabel: "Search by asset name",
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -646,7 +687,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * They have delete permissions but shouldnt be able to delete other people's bookings
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
-          const b = await getBooking({ id, organizationId });
+          const b = await getBooking({ id, organizationId, request });
           if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
             throw new ShelfError({
               cause: null,

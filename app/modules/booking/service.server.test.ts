@@ -281,7 +281,7 @@ describe("partialCheckinBooking", () => {
   };
 
   it("should perform partial check-in successfully", async () => {
-    expect.assertions(5);
+    expect.assertions(4);
 
     // Mock booking with assets for initial validation
     const bookingWithAssets = {
@@ -293,31 +293,22 @@ describe("partialCheckinBooking", () => {
       ],
     };
 
-    // Mock booking after update (remaining assets)
+    // Mock booking after transaction (assets remain in booking)
     const updatedBooking = {
       ...mockBookingData,
-      assets: [{ id: "asset-3", kitId: null }],
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null }, 
+        { id: "asset-3", kitId: null }
+      ],
     };
 
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
 
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(updatedBooking);
-
     const result = await partialCheckinBooking(mockPartialCheckinParams);
 
-    // Verify booking was updated to remove assets
-    expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
-      data: {
-        assets: {
-          disconnect: [{ id: "asset-1" }, { id: "asset-2" }],
-        },
-      },
-    });
-
-    // Verify assets status updated
+    // Verify assets status updated (no longer disconnecting from booking)
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] } },
       data: { status: AssetStatus.AVAILABLE },
@@ -343,9 +334,9 @@ describe("partialCheckinBooking", () => {
     });
 
     expect(result).toEqual({
-      booking: bookingWithAssets, // The function returns the original booking from findUniqueOrThrow
+      booking: bookingWithAssets, // Assets remain in booking with new approach
       checkedInAssetCount: 2,
-      remainingAssetCount: 3, // Original total asset count since we're getting the original booking
+      remainingAssetCount: 1, // 3 total - 2 checked in = 1 remaining
       isComplete: false,
     });
   });
@@ -1072,9 +1063,12 @@ describe("getBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue(mockBookingData);
 
+    const mockRequest = new Request("http://localhost/bookings/booking-1");
+
     const result = await getBooking({
       id: "booking-1",
       organizationId: "org-1",
+      request: mockRequest,
     });
 
     expect(result).toEqual(mockBookingData);
@@ -1086,8 +1080,14 @@ describe("getBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockRejectedValue(new Error("Not found"));
 
+    const mockRequest = new Request("http://localhost/bookings/booking-1");
+
     try {
-      await getBooking({ id: "booking-1", organizationId: "org-1" });
+      await getBooking({ 
+        id: "booking-1", 
+        organizationId: "org-1",
+        request: mockRequest,
+      });
     } catch (error) {
       expect(error).toBeDefined();
     }

@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
+import { useSearchParams } from "~/hooks/search-params";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import { BookingAssetsFilters } from "./booking-assets-filters";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
 import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
@@ -22,14 +24,37 @@ import { BookingPagination } from "./booking-pagination";
 import When from "../when/when";
 
 export function BookingAssetsColumn() {
-  const { userId, booking, paginatedItems } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    userId,
+    booking,
+    paginatedItems,
+    partialCheckinDetails,
+    partialCheckinProgress,
+  } = useLoaderData<BookingPageLoaderData>();
+  const [searchParams] = useSearchParams();
 
   const hasItems = paginatedItems?.length > 0;
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
   const { isCompleted, isArchived, isCancelled } = useBookingStatusHelpers(
     booking.status
   );
+
+  // Determine if we should show the check-in columns
+  const shouldShowCheckinColumns = useMemo(() => {
+    const currentStatusFilter = searchParams.get("status");
+    const isOngoing =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
+    const hasPartialCheckins = partialCheckinProgress?.hasPartialCheckins;
+    const isNotCheckedOutFilter =
+      currentStatusFilter !== AssetStatus.CHECKED_OUT;
+
+    return isOngoing && hasPartialCheckins && isNotCheckedOutFilter;
+  }, [
+    booking.status,
+    partialCheckinProgress?.hasPartialCheckins,
+    searchParams,
+  ]);
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -121,6 +146,11 @@ export function BookingAssetsColumn() {
         <TextualDivider text="Assets & Kits" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
+          {/* Filters */}
+          <div className="mb-2">
+            <BookingAssetsFilters />
+          </div>
+
           {/* This is a fake table header */}
           <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
             <BookingAssetsHeader
@@ -153,6 +183,12 @@ export function BookingAssetsColumn() {
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>
+                    {shouldShowCheckinColumns && (
+                      <>
+                        <Th className="whitespace-nowrap">Checked in on</Th>
+                        <Th className="whitespace-nowrap">Checked in by</Th>
+                      </>
+                    )}
                     <Th> </Th>
                   </ListHeader>
                   <tbody>
@@ -175,6 +211,8 @@ export function BookingAssetsColumn() {
                             onToggleExpansion={toggleKitExpansion}
                             bookingStatus={booking.status}
                             assets={item.assets as AssetWithBooking[]}
+                            partialCheckinDetails={partialCheckinDetails}
+                            shouldShowCheckinColumns={shouldShowCheckinColumns}
                           />
                         );
                       }
@@ -183,7 +221,11 @@ export function BookingAssetsColumn() {
                       const asset = item.assets[0];
                       return (
                         <ListItem key={`asset-${asset.id}`} item={asset}>
-                          <ListAssetContent item={asset as AssetWithBooking} />
+                          <ListAssetContent
+                            item={asset as AssetWithBooking}
+                            partialCheckinDetails={partialCheckinDetails}
+                            shouldShowCheckinColumns={shouldShowCheckinColumns}
+                          />
                         </ListItem>
                       );
                     })}
@@ -234,14 +276,14 @@ function BookingAssetsHeader({
               to="scan-assets"
               disabled={manageAssetsButtonDisabled}
             >
-              Scan
+              Scan to add
             </Button>
             <Button
               to={manageAssetsUrl}
               className="whitespace-nowrap"
               disabled={manageAssetsButtonDisabled}
             >
-              Manage assets
+              Add assets
             </Button>
           </div>
         </When>

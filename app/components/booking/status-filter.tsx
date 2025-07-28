@@ -9,23 +9,40 @@ import {
   SelectValue,
 } from "../forms/select";
 
-export function StatusFilter({
-  statusItems,
-  name = "status",
-}: {
+// Base props that are always available
+type BaseStatusFilterProps = {
   statusItems: Record<string, string>;
-  /**
-   * By default the name of the field is status,
-   * but it can cause conflicts if a parent and child route both use the name status
-   * for filtering but they have different status types */
   name?: string;
-}) {
+};
+
+// When defaultValue is provided, onValueChange is required
+type StatusFilterWithCustomDefault = BaseStatusFilterProps & {
+  defaultValue: string;
+  onValueChange: (value: string) => void;
+};
+
+// When defaultValue is not provided, onValueChange is optional (uses internal handler)
+type StatusFilterWithDefaultBehavior = BaseStatusFilterProps & {
+  defaultValue?: never;
+  onValueChange?: never;
+};
+
+// Union type for the component props
+type StatusFilterProps = StatusFilterWithCustomDefault | StatusFilterWithDefaultBehavior;
+
+export function StatusFilter(props: StatusFilterProps) {
+  const {
+    statusItems,
+    name = "status",
+    defaultValue,
+    onValueChange,
+  } = props;
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get(name);
 
-  function handleValueChange(value: string) {
+  function localHandleValueChange(value: string) {
     setSearchParams((prev) => {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
@@ -37,11 +54,17 @@ export function StatusFilter({
     });
   }
 
+  // Use custom handler if provided, otherwise use local handler
+  const handleValueChange = onValueChange || localHandleValueChange;
+  
+  // Use custom default if provided, otherwise use "ALL"
+  const effectiveDefaultValue = defaultValue || "ALL";
+
   return (
     <div className="w-full md:w-auto">
       <Select
         name={name}
-        defaultValue={status ? status : "ALL"}
+        defaultValue={status ? status : effectiveDefaultValue}
         onValueChange={handleValueChange}
         disabled={disabled}
       >

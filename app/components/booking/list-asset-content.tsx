@@ -4,6 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import { tw } from "~/utils/tw";
@@ -11,6 +12,8 @@ import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
+import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -20,11 +23,15 @@ import When from "../when/when";
 type ListAssetContentProps = {
   item: AssetWithBooking;
   isKitAsset?: boolean;
+  partialCheckinDetails: PartialCheckinDetailsType;
+  shouldShowCheckinColumns: boolean;
 };
 
 export default function ListAssetContent({
   item,
   isKitAsset,
+  partialCheckinDetails,
+  shouldShowCheckinColumns,
 }: ListAssetContentProps) {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
@@ -147,6 +154,55 @@ export default function ListAssetContent({
       >
         <CategoryBadge category={category} />
       </Td>
+
+      {shouldShowCheckinColumns && (
+        <>
+          {/* Checked in on */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {partialCheckinDetails?.[item.id] ? (
+              <span className="text-sm text-gray-600">
+                <DateS
+                  date={partialCheckinDetails[item.id].checkinDate}
+                  includeTime
+                />
+              </span>
+            ) : (
+              <span className="text-sm text-gray-400">-</span>
+            )}
+          </Td>
+
+          {/* Checked in by */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {partialCheckinDetails?.[item.id] ? (
+              <span className="text-sm text-gray-600">
+                {(() => {
+                  const details = partialCheckinDetails[item.id];
+                  const firstName = details.checkedInBy.firstName || "";
+                  const lastName = details.checkedInBy.lastName || "";
+
+                  return (
+                    <UserBadge
+                      name={`${firstName} ${lastName}`}
+                      img={details.checkedInBy.profilePicture}
+                    />
+                  );
+                })()}
+              </span>
+            ) : (
+              <span className="text-sm text-gray-400">-</span>
+            )}
+          </Td>
+        </>
+      )}
+
       <Td
         className={tw(
           "pr-4 text-right",

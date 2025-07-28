@@ -1059,16 +1059,6 @@ export async function partialCheckinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      // Remove the scanned assets from the booking
-      await tx.booking.update({
-        where: { id },
-        data: {
-          assets: {
-            disconnect: assetIds.map((assetId) => ({ id: assetId })),
-          },
-        },
-      });
-
       // Update the status of checked-in assets to AVAILABLE
       await tx.asset.updateMany({
         where: { id: { in: assetIds } },
@@ -1104,7 +1094,7 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
-      // Get the updated booking with remaining assets
+      // Get the updated booking with all original assets
       return tx.booking.findUniqueOrThrow({
         where: { id },
         include: {
@@ -1119,7 +1109,7 @@ export async function partialCheckinBooking({
     return {
       booking: updatedBooking,
       checkedInAssetCount: assetIds.length,
-      remainingAssetCount: updatedBooking.assets.length,
+      remainingAssetCount: updatedBooking.assets.length - assetIds.length,
       isComplete: false,
     };
   } catch (cause) {
@@ -2139,7 +2129,7 @@ export async function deleteBooking(
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
-    request?: Request;
+    request: Request;
     extraInclude?: T;
   }
 ) {
@@ -2147,14 +2137,50 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const { id, organizationId, userOrganizations, request, extraInclude } =
       booking;
 
+    // Extract search parameters from request
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
+    const { search } = paramsValues;
+    const status =
+      searchParams.get("status") === "ALL"
+        ? null
+        : (searchParams.get("status") as AssetStatus | null);
+
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
      *
      * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
+
+    // Build assets include with optional search and status filtering
+    let assetsInclude: Prisma.BookingInclude['assets'] = BOOKING_WITH_ASSETS_INCLUDE.assets;
+
+    // Add WHERE clause if search or status filters are provided
+    if (search || status) {
+      const assetsWhere: Prisma.AssetWhereInput = {};
+
+      if (search) {
+        assetsWhere.title = {
+          contains: search,
+          mode: "insensitive",
+        };
+      }
+
+      if (status) {
+        assetsWhere.status = status;
+      }
+
+      assetsInclude = {
+        select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
+        orderBy: BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy,
+        where: assetsWhere,
+      };
+    }
+
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
+      assets: assetsInclude,
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
@@ -3029,6 +3055,7 @@ export async function duplicateBooking({
     const bookingToDuplicate = await getBooking({
       id: bookingId,
       organizationId,
+      request,
     });
     const hints = getHints(request);
 
@@ -3137,3 +3164,72 @@ export async function getPartiallyCheckedInAssetIds(
   const allAssetIds = partialCheckins.flatMap((pc) => pc.assetIds);
   return [...new Set(allAssetIds)];
 }
+
+/**
+ * Get detailed partial check-in data with user and date information for each asset
+ * Returns both the asset IDs and the detailed check-in data in one query
+ */
+export async function getDetailedPartialCheckinData(bookingId: string) {
+  const partialCheckins = await db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    include: {
+      checkedInBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+    },
+    orderBy: { checkinTimestamp: "asc" },
+  });
+
+  // Create a record of asset ID to its check-in details
+  const assetCheckinRecord: Record<
+    string,
+    {
+      checkinDate: Date;
+      checkedInBy: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        profilePicture: string | null;
+      };
+    }
+  > = {};
+
+  // Collect all unique asset IDs
+  const checkedInAssetIds: string[] = [];
+
+  partialCheckins.forEach((checkin) => {
+    checkin.assetIds.forEach((assetId) => {
+      // Only store the first (earliest) check-in for each asset
+      if (!assetCheckinRecord[assetId]) {
+        assetCheckinRecord[assetId] = {
+          checkinDate: checkin.checkinTimestamp,
+          checkedInBy: checkin.checkedInBy,
+        };
+        checkedInAssetIds.push(assetId);
+      }
+    });
+  });
+
+  return {
+    checkedInAssetIds,
+    partialCheckinDetails: assetCheckinRecord,
+  };
+}
+
+export type PartialCheckinDetailsType = Record<
+  string,
+  {
+    checkinDate: Date | string;
+    checkedInBy: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePicture: string | null;
+    };
+  }
+>;

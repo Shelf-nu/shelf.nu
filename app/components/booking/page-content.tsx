@@ -17,6 +17,7 @@ export function BookingPageContent() {
     totalValue,
     allCategories,
     assetsCount,
+    partialCheckinProgress,
   } = useLoaderData<BookingPageLoaderData>();
   const custodian = teamMembers.find((member) =>
     booking.custodianUserId
@@ -48,6 +49,7 @@ export function BookingPageContent() {
             kitsCount={totalKits}
             assetsCount={assetsCount}
             totalValue={totalValue}
+            partialCheckinProgress={partialCheckinProgress}
             allCategories={allCategories}
             tags={booking.tags}
             creator={booking.creator}
