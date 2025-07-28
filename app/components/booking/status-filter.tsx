@@ -28,15 +28,12 @@ type StatusFilterWithDefaultBehavior = BaseStatusFilterProps & {
 };
 
 // Union type for the component props
-type StatusFilterProps = StatusFilterWithCustomDefault | StatusFilterWithDefaultBehavior;
+type StatusFilterProps =
+  | StatusFilterWithCustomDefault
+  | StatusFilterWithDefaultBehavior;
 
 export function StatusFilter(props: StatusFilterProps) {
-  const {
-    statusItems,
-    name = "status",
-    defaultValue,
-    onValueChange,
-  } = props;
+  const { statusItems, name = "status", defaultValue, onValueChange } = props;
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -56,7 +53,7 @@ export function StatusFilter(props: StatusFilterProps) {
 
   // Use custom handler if provided, otherwise use local handler
   const handleValueChange = onValueChange || localHandleValueChange;
-  
+
   // Use custom default if provided, otherwise use "ALL"
   const effectiveDefaultValue = defaultValue || "ALL";
 

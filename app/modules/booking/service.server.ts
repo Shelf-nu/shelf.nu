@@ -2154,7 +2154,8 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      */
 
     // Build assets include with optional search and status filtering
-    let assetsInclude: Prisma.BookingInclude['assets'] = BOOKING_WITH_ASSETS_INCLUDE.assets;
+    let assetsInclude: Prisma.BookingInclude["assets"] =
+      BOOKING_WITH_ASSETS_INCLUDE.assets;
 
     // Add WHERE clause if search or status filters are provided
     if (search || status) {

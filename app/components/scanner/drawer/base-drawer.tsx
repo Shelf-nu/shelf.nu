@@ -77,8 +77,9 @@ export default function BaseDrawer({
       const headerContentHeight = headerContentRef.current?.offsetHeight || 0;
       const baseHeaderHeight = baseHeaderRef.current?.offsetHeight || 60; // Default base header height
       const padding = 16; // Some padding for safety
-      
-      const totalHeight = dragHandleHeight + headerContentHeight + baseHeaderHeight + padding;
+
+      const totalHeight =
+        dragHandleHeight + headerContentHeight + baseHeaderHeight + padding;
       setHeaderHeight(totalHeight);
     };
 
@@ -87,11 +88,11 @@ export default function BaseDrawer({
 
     // Recalculate on window resize
     const handleResize = () => calculateHeaderHeight();
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
 
     // Use ResizeObserver to detect changes in header content
     const resizeObserver = new ResizeObserver(() => calculateHeaderHeight());
-    
+
     if (headerContentRef.current) {
       resizeObserver.observe(headerContentRef.current);
     }
@@ -100,7 +101,7 @@ export default function BaseDrawer({
     }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
     };
   }, [headerContent, title, hasItems, onClear]);
@@ -119,10 +120,10 @@ export default function BaseDrawer({
               ? vh - 400
               : vh - TOP_GAP
             : headerContent
-            ? headerHeight  // Use dynamic height when custom header content exists
+            ? headerHeight // Use dynamic height when custom header content exists
             : hasItems
-            ? 170           // Original logic: show first item when there are items
-            : 148,          // Original logic: minimal height when no items
+            ? 170 // Original logic: show first item when there are items
+            : 148, // Original logic: minimal height when no items
         }}
       >
         <div className={tw("h-full")} style={style}>
@@ -150,12 +151,10 @@ export default function BaseDrawer({
             </motion.div>
 
             {/* Extra Header Content - Always visible */}
-            <div ref={headerContentRef}>
-              {headerContent}
-            </div>
+            <div ref={headerContentRef}>{headerContent}</div>
 
             {/* Base Header */}
-            <div 
+            <div
               ref={baseHeaderRef}
               className="default-base-drawer-header flex items-center justify-between border-b text-left"
             >

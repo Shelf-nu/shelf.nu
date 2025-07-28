@@ -10,7 +10,7 @@ function Progress({
   ...props
 }: React.ComponentProps<typeof ProgressPrimitive.Root>) {
   const isComplete = (value || 0) === 100;
-  
+
   return (
     <ProgressPrimitive.Root
       data-slot="progress"

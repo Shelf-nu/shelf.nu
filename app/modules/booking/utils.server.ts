@@ -97,15 +97,14 @@ export function calculatePartialCheckinProgress(
 ) {
   const checkedInCount = checkedInAssetIds.length;
   const uncheckedCount = totalAssets - checkedInCount;
-  const progressPercentage = totalAssets > 0 
-    ? Math.round((checkedInCount / totalAssets) * 100) 
-    : 0;
+  const progressPercentage =
+    totalAssets > 0 ? Math.round((checkedInCount / totalAssets) * 100) : 0;
   const hasPartialCheckins = checkedInCount > 0;
 
   return {
     totalAssets,
     checkedInCount,
-    uncheckedCount, 
+    uncheckedCount,
     progressPercentage,
     hasPartialCheckins,
     checkedInAssetIds,

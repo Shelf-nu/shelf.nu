@@ -294,14 +294,14 @@ describe("partialCheckinBooking", () => {
     };
 
     // Mock booking after transaction (assets remain in booking)
-    const updatedBooking = {
-      ...mockBookingData,
-      assets: [
-        { id: "asset-1", kitId: null },
-        { id: "asset-2", kitId: null }, 
-        { id: "asset-3", kitId: null }
-      ],
-    };
+    // const updatedBooking = {
+    //   ...mockBookingData,
+    //   assets: [
+    //     { id: "asset-1", kitId: null },
+    //     { id: "asset-2", kitId: null },
+    //     { id: "asset-3", kitId: null },
+    //   ],
+    // };
 
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
@@ -1083,8 +1083,8 @@ describe("getBooking", () => {
     const mockRequest = new Request("http://localhost/bookings/booking-1");
 
     try {
-      await getBooking({ 
-        id: "booking-1", 
+      await getBooking({
+        id: "booking-1",
         organizationId: "org-1",
         request: mockRequest,
       });
