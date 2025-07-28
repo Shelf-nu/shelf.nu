@@ -1,9 +1,9 @@
 import { useFetcher } from "@remix-run/react";
+import { useTranslation } from "react-i18next";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-
 import type { action } from "~/routes/_auth+/send-otp";
 import { validEmail } from "~/utils/misc";
 import { tw } from "~/utils/tw";
@@ -24,16 +24,15 @@ export const SendOtpSchema = z.object({
 });
 
 export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
+  const { t } = useTranslation("auth");
   const sendOTP = useFetcher<typeof action>();
   const { data, state } = sendOTP;
   const zo = useZorm("NewQuestionWizardScreen", SendOtpSchema);
 
   const isLoading = state === "submitting" || state === "loading";
   const buttontext =
-    mode === "login" ? "Continue with OTP" : "Sign up with OTP";
-  const buttonLabel = isLoading
-    ? "Sending you a one time password..."
-    : buttontext;
+    mode === "login" ? t("login.continueOTP") : t("register.continueOTP");
+  const buttonLabel = isLoading ? t("login.sendingOTP") : buttontext;
 
   return (
     <sendOTP.Form method="post" action="/send-otp" ref={zo.ref}>
@@ -59,7 +58,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
         variant="secondary"
         className="mt-3"
         data-test-id="continueWithOtpButton"
-        title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email."
+        title={t("login.otpTitle")}
       >
         {buttonLabel}
       </Button>

@@ -1,6 +1,4 @@
-import type { CommonTranslations } from "../en/common";
-
-const fr: CommonTranslations = {
+const en = {
   login: {
     title: "Se connecter",
     subHeading:
@@ -11,4 +9,5 @@ const fr: CommonTranslations = {
     description: "Sélectionnez votre langue préférée pour l'application.",
   },
 };
-export default fr;
+export default en;
+export type CommonTranslations = typeof en;

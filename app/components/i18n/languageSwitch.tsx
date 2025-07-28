@@ -26,7 +26,7 @@ export default function LanguageSwitch({
   const { t } = useTranslation();
   const zo = useZorm("LanguageSwitchForm", LanguageSwitchSchema);
   const fetcher = useFetcher();
-  const availableLanguages = config.supportedLanguages
+  const availableLanguages = config.supportedLanguages;
 
   useEffect(() => {
     if (fetcher.data?.success) {

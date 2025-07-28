@@ -44,10 +44,11 @@ export async function createI18nInstance(
 }
 
 export async function initTranslationLoader(
-  request: Request
+  request: Request,
+  namespace: string = "common"
 ): Promise<TFunction> {
   const lng = getLng(request);
-  return remixI18n.getFixedT(lng);
+  return remixI18n.getFixedT(lng, namespace);
 }
 
 export default remixI18n;

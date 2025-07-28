@@ -1,7 +1,10 @@
 {
   "login": {
     "title": "Log in",
-    "subHeading": "Welcome back! Enter your details below to log in.",
-    "test": "Testicleszxx"
+    "subHeading": "Welcome back! Enter your details below to log in."
+  },
+  "languageSwitch": {
+    "title": "Language Settings",
+    "description": "Select your preferred language for the application."
   }
 }

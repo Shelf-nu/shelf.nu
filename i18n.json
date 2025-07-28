@@ -6,7 +6,7 @@
   },
   "buckets": {
     "typescript": {
-      "include": ["app/locales/[locale]/common.ts"]
+      "include": ["app/locales/[locale]/*.ts"]
     }
   },
   "$schema": "https://lingo.dev/schema/i18n.json"

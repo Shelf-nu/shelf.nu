@@ -41,7 +41,7 @@ import {
 import { validEmail } from "~/utils/misc";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const t = await initTranslationLoader(request);
+  const t = await initTranslationLoader(request, "auth");
   const title = t("login.title");
   const subHeading = t("login.subHeading");
   const { disableSignup, disableSSO } = config;
@@ -121,7 +121,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { t } = useTranslation();
+  const { t } = useTranslation("auth");
   const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
@@ -137,15 +137,13 @@ export default function IndexLoginForm() {
     <div className="w-full max-w-md">
       {acceptedInvite ? (
         <div className="mb-8 text-center text-success-600">
-          Successfully accepted workspace invite. Please login to see your new
-          workspace.
+          {t("login.acceptedInvite")}
         </div>
       ) : null}
 
       {passwordReset ? (
         <div className="mb-8 text-center text-success-600">
-          You have successfully reset your password. You can now use your new
-          password to login.
+          {t("login.passwordReset")}
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
@@ -185,7 +183,7 @@ export default function IndexLoginForm() {
         </Button>
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">
-            Don't remember your password?{" "}
+            {t("login.forgotPassword")}{" "}
             <Button
               variant="link"
               to={{
@@ -193,7 +191,7 @@ export default function IndexLoginForm() {
                 search: searchParams.toString(),
               }}
             >
-              Reset password
+              {t("login.resetPassword")}
             </Button>
           </div>
         </div>
@@ -201,7 +199,7 @@ export default function IndexLoginForm() {
       {!disableSSO && (
         <div className="mt-6 text-center">
           <Button variant="link" to="/sso-login">
-            Login with SSO
+            {t("login.continueWithSSO")}
           </Button>
         </div>
       )}
@@ -213,10 +211,8 @@ export default function IndexLoginForm() {
           </div>
           <div className="relative flex justify-center text-sm">
             <span className="bg-white px-2 text-gray-500">
-              Or use a{" "}
-              <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
-                One Time Password
-              </strong>
+              {t("login.otp1")}
+              <strong title={t("login.otpTitle")}>{t("login.otp2")}</strong>
             </span>
           </div>
         </div>
@@ -225,7 +221,7 @@ export default function IndexLoginForm() {
         </div>
         {disableSignup ? null : (
           <div className="mt-6 text-center text-sm text-gray-500">
-            Don't have an account?{" "}
+            {t("login.noAccount")}{" "}
             <Button
               variant="link"
               data-test-id="signupButton"
@@ -234,7 +230,7 @@ export default function IndexLoginForm() {
                 search: searchParams.toString(),
               }}
             >
-              Sign up
+              {t("login.signup")}
             </Button>
           </div>
         )}

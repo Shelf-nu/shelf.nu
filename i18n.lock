@@ -4,3 +4,21 @@ checksums:
     login/login: 9fb886eff8d1d67d8bb79f5c3f78edde
     login/subHeading: 6d9bca5301881a02518af8028b61d0ac
     lingo/test: 17a31e5b499126ecfab693c728a1c03a
+  58578dee89f03334ac462a68ffc01da5:
+    login/title: 9fb886eff8d1d67d8bb79f5c3f78edde
+    login/subHeading: 6d9bca5301881a02518af8028b61d0ac
+    languageSwitch/title: bff4627cb11a6ab62b91406d997b0678
+    languageSwitch/description: c0e477b0a17679c038f7a64abcd9b698
+  e264c5e7cf96ea97a105dd3a699111fd:
+    login/title: 9fb886eff8d1d67d8bb79f5c3f78edde
+    login/subHeading: 6d9bca5301881a02518af8028b61d0ac
+    login/acceptedInvite: 52d743780faa708f9f3be1b8d93f99e1
+    login/passwordReset: e90b7842e1574d993965a8bf09fe33b4
+    login/forgotPassword: a8a40eca5077f3d24cd7587f32c7230a
+    login/resetPassword: c21b33e73f096fd7b02171d399b36adf
+    login/continueWithSSO: c9c9cdf5a01426bb60dac238838ffdd3
+    login/otp1: c0c9fe069262f3f0074b147d52c6277d
+    login/otp2: 79874160341b2ec28c407a4121841ccb
+    login/otpTitle: c49cff4937464ca2750d8eac4c7c7374
+    login/noAccount: 613efdc05ae6d04b7136d199645c56ac
+    login/signup: a6a0b995463f62ce6a12e37f1d05a9bd
