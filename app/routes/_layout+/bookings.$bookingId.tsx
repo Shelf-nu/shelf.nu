@@ -1,4 +1,4 @@
-import { AssetStatus, BookingStatus, TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -50,7 +50,10 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
-import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import {
+  calculatePartialCheckinProgress,
+  getBookingStatusRedirect,
+} from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -167,16 +170,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const isMainBookingPage = url.pathname === `/bookings/${bookingId}`;
 
-    /**
-     * if the booking is ongoing and there is no status param, we need to set it to checked-out as that is the default */
-    if (
-      isMainBookingPage &&
-      !searchParams.get("status") &&
-      ["ONGOING", "OVERDUE"].includes(booking.status)
-    ) {
-      return redirect(
-        `/bookings/${bookingId}?status=${AssetStatus.CHECKED_OUT}`
-      );
+    // Smart status param handling using helper function
+    const statusRedirect = getBookingStatusRedirect({
+      bookingId,
+      booking,
+      currentStatusParam: searchParams.get("status"),
+      isMainBookingPage,
+    });
+
+    if (statusRedirect) {
+      return statusRedirect;
     }
 
     /** For self service & base users, we only allow them to read their own bookings */
@@ -190,15 +193,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    // Check if there might be partial check-ins by looking at asset statuses
+    // Check if there might be partial check-ins by looking at asset statuses OR booking status
+    // We need to check both AVAILABLE assets (already partially checked in) AND
+    // ONGOING/OVERDUE bookings (could have partial check-ins)
     const hasAvailableAssets = booking.assets.some(
       (asset) => asset.status === "AVAILABLE"
     );
+    const canHavePartialCheckins = ["ONGOING", "OVERDUE"].includes(
+      booking.status
+    );
 
-    // Only fetch partial check-in data if there might be partial check-ins
-    const { checkedInAssetIds, partialCheckinDetails } = hasAvailableAssets
-      ? await getDetailedPartialCheckinData(booking.id)
-      : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
+    // Fetch partial check-in data if there are already partial check-ins OR if the booking could have them
+    const { checkedInAssetIds, partialCheckinDetails } =
+      hasAvailableAssets || canHavePartialCheckins
+        ? await getDetailedPartialCheckinData(booking.id)
+        : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // Group assets by kitId for pagination purposes
     const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
@@ -361,8 +370,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const allCategories = [...assetCategories, ...kitCategories];
 
     // Calculate partial check-in progress
+    // For progress calculation, we need the TOTAL number of assets in the booking,
+    // not the filtered count from booking.assets (which may be filtered by status)
+    // So we need to get the unfiltered asset count
+    const totalBookingAssets = await db.asset.count({
+      where: {
+        bookings: {
+          some: { id: booking.id },
+        },
+      },
+    });
+
     const partialCheckinProgress = calculatePartialCheckinProgress(
-      booking.assets.length,
+      totalBookingAssets,
       checkedInAssetIds
     );
 

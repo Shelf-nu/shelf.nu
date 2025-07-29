@@ -53,7 +53,7 @@ export default function CheckinDialog({
         className={
           variant === "dropdown"
             ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-            : "grow"
+            : ""
         }
         variant={variant === "dropdown" ? "link" : "primary"}
         width={variant === "dropdown" ? "full" : undefined}
@@ -82,7 +82,7 @@ export default function CheckinDialog({
           className={
             variant === "dropdown"
               ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-              : "grow"
+              : ""
           }
           variant={variant === "dropdown" ? "link" : "primary"}
         >

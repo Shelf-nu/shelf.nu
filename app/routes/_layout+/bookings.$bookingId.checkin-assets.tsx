@@ -10,6 +10,7 @@ import { useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
+import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
@@ -17,6 +18,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer, {
   partialCheckinAssetsSchema,
 } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
+import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getBooking,
@@ -99,8 +101,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : { checkedInAssetIds: [] as string[] };
 
     // Calculate partial check-in progress
+    // For progress calculation, we need the TOTAL number of assets in the booking,
+    // not the filtered count from booking.assets (which may be filtered by status)
+    const totalBookingAssets = await db.asset.count({
+      where: {
+        bookings: {
+          some: { id: booking.id },
+        },
+      },
+    });
+
     const partialCheckinProgress = calculatePartialCheckinProgress(
-      booking.assets.length,
+      totalBookingAssets,
       checkedInAssetIds
     );
 
@@ -133,7 +145,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { assetIds } = parseData(formData, partialCheckinAssetsSchema);
+    const { assetIds, checkinIntentChoice } = parseData(
+      formData,
+      partialCheckinAssetsSchema.extend({
+        checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
+      })
+    );
     const hints = getClientHint(request);
 
     await partialCheckinBooking({
@@ -142,6 +159,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds,
       userId,
       hints,
+      intentChoice: checkinIntentChoice,
     });
 
     sendNotification({

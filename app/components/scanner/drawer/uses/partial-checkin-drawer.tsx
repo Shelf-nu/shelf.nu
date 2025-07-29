@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, Form } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -10,9 +11,11 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
+import CheckinDialog from "~/components/booking/checkin-dialog";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
+import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.checkin-assets";
 import type {
   AssetFromQr,
@@ -66,13 +69,39 @@ export default function PartialCheckinDrawer({
 
   // List of asset IDs for the form - only include assets that are actually in the booking
   const bookingAssetIds = new Set(booking.assets.map((a) => a.id));
+
+  // Get assets that have already been checked in (should be excluded from count)
+  const checkedInAssetIds = new Set(
+    partialCheckinProgress?.checkedInAssetIds || []
+  );
+
   const assetIdsForCheckin = Array.from(
     new Set([
-      ...assets.filter((a) => bookingAssetIds.has(a.id)).map((a) => a.id),
+      ...assets
+        .filter(
+          (a) => bookingAssetIds.has(a.id) && !checkedInAssetIds.has(a.id)
+        )
+        .map((a) => a.id),
       ...kits.flatMap((k) =>
-        k.assets.filter((a) => bookingAssetIds.has(a.id)).map((a) => a.id)
+        k.assets
+          .filter(
+            (a) => bookingAssetIds.has(a.id) && !checkedInAssetIds.has(a.id)
+          )
+          .map((a) => a.id)
       ),
     ])
+  );
+
+  // Check if this would be a final check-in (all remaining assets are being checked in)
+  const remainingAssetCount =
+    partialCheckinProgress?.uncheckedCount || booking.assets.length;
+  const isFinalCheckin =
+    assetIdsForCheckin.length === remainingAssetCount &&
+    remainingAssetCount > 0;
+
+  // Check if it's an early check-in (only relevant for final check-ins)
+  const isEarlyCheckin = Boolean(
+    isFinalCheckin && booking.to && isBookingEarlyCheckin(booking.to)
   );
 
   // Setup blockers
@@ -259,9 +288,18 @@ export default function PartialCheckinDrawer({
   return (
     <ConfigurableDrawer
       schema={partialCheckinAssetsSchema}
-      formData={{ assetIds: assetIdsForCheckin }}
       items={items}
       onClearItems={clearList}
+      form={
+        <CustomForm
+          items={items}
+          assetIdsForCheckin={assetIdsForCheckin}
+          isEarlyCheckin={isEarlyCheckin}
+          booking={booking}
+          isLoading={isLoading}
+          hasBlockers={hasBlockers}
+        />
+      }
       title={
         <div className="text-right">
           <span className="block text-gray-600">
@@ -284,15 +322,12 @@ export default function PartialCheckinDrawer({
       isLoading={isLoading}
       renderItem={renderItemRow}
       Blockers={Blockers}
-      disableSubmit={hasBlockers || assetIdsForCheckin.length === 0}
       defaultExpanded={defaultExpanded}
       className={tw(
         "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
         className
       )}
       style={style}
-      formName="PartialCheckinAssets"
-      submitButtonText="Check in assets"
       headerContent={<BookingHeader />}
     />
   );
@@ -389,7 +424,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, partialCheckinProgress } = useLoaderData<typeof loader>();
 
   // Check how many assets from this kit are in the booking
   const bookingAssetIds = new Set(booking.assets.map((a) => a.id));
@@ -398,6 +433,15 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   );
   const allKitAssetsInBooking = kitAssetsInBooking.length === kit.assets.length;
   const noKitAssetsInBooking = kitAssetsInBooking.length === 0;
+
+  // Calculate remaining assets that are still CHECKED_OUT
+  const checkedInAssetIds = new Set(
+    partialCheckinProgress?.checkedInAssetIds || []
+  );
+  const remainingKitAssetsInBooking = kitAssetsInBooking.filter(
+    (asset) => !checkedInAssetIds.has(asset.id)
+  );
+  const totalKitAssetsInBooking = kitAssetsInBooking.length;
 
   // Use preset configurations to define the availability labels
   // Note: In check-in context, we don't show "checked out" labels as that's expected
@@ -437,7 +481,8 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({remainingKitAssetsInBooking.length} of {totalKitAssetsInBooking}{" "}
+          assets remaining)
         </span>
       </p>
 
@@ -456,3 +501,79 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     </div>
   );
 }
+
+// Custom form component that handles early check-in dialog
+type CustomFormProps = {
+  items: Record<string, any>;
+  assetIdsForCheckin: string[];
+  isEarlyCheckin: boolean;
+  booking: {
+    id: string;
+    name: string;
+    to: string | Date | null;
+    from: string | Date | null;
+  };
+  isLoading?: boolean;
+  hasBlockers: boolean;
+};
+
+const CustomForm = ({
+  items,
+  assetIdsForCheckin,
+  isEarlyCheckin,
+  booking,
+  isLoading,
+  hasBlockers,
+}: CustomFormProps) => {
+  const formRef = useRef<HTMLFormElement>(null);
+  const hasItems = Object.keys(items).length > 0;
+
+  if (!hasItems || !assetIdsForCheckin.length) {
+    return null;
+  }
+
+  return (
+    <Form ref={formRef} className="mb-4 flex max-h-full w-full" method="post">
+      <div className="flex w-full gap-2 p-3">
+        {/* Hidden form fields */}
+        {assetIdsForCheckin.map((assetId, index) => (
+          <input
+            key={`assetIds-${index}`}
+            type="hidden"
+            name={`assetIds[${index}]`}
+            value={assetId}
+          />
+        ))}
+
+        {/* Cancel button */}
+        <Button type="button" variant="secondary" to=".." className="ml-auto">
+          Cancel
+        </Button>
+
+        {/* Submit button - conditional based on early check-in */}
+        {isEarlyCheckin ? (
+          <CheckinDialog
+            booking={{
+              id: booking.id,
+              name: booking.name,
+              to: booking.to!,
+              from: booking.from!,
+            }}
+            label="Check in assets"
+            variant="default"
+            disabled={isLoading || hasBlockers}
+            portalContainer={formRef.current || undefined}
+          />
+        ) : (
+          <Button
+            type="submit"
+            disabled={isLoading || hasBlockers}
+            className="w-auto"
+          >
+            Check in assets
+          </Button>
+        )}
+      </div>
+    </Form>
+  );
+};

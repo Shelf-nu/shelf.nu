@@ -952,10 +952,12 @@ export async function partialCheckinBooking({
   assetIds,
   userId,
   hints,
+  intentChoice,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
   userId: User["id"];
   hints: ClientHint;
+  intentChoice?: CheckinIntentEnum;
 }) {
   try {
     const user = await getUserByID(userId);
@@ -975,51 +977,63 @@ export async function partialCheckinBooking({
         });
       });
 
-    // Early exit: If we're checking in all assets, do a complete check-in instead
-    if (assetIds.length === bookingFound.assets.length) {
-      const allAssetIds = new Set(bookingFound.assets.map((a) => a.id));
-      const providedAssetIds = new Set(assetIds);
+    // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
+    // First, get the current status of all assets in the booking
+    const currentAssetStatuses = await db.asset.findMany({
+      where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+      select: { id: true, status: true },
+    });
 
-      // Check if the provided asset IDs match exactly with booking assets
-      if (
-        allAssetIds.size === providedAssetIds.size &&
-        [...allAssetIds].every((id) => providedAssetIds.has(id))
-      ) {
-        // Check if there are existing partial check-ins for this booking
-        const existingPartialCheckinsCount =
-          await db.partialBookingCheckin.count({
-            where: { bookingId: id },
-          });
+    // Find assets that are still CHECKED_OUT (not yet checked in)
+    const checkedOutAssets = currentAssetStatuses.filter(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
 
-        // Only create PartialBookingCheckin record if there were previous partial check-ins
-        // This maintains the audit trail for a multi-session partial check-in process
-        if (existingPartialCheckinsCount > 0) {
-          await db.partialBookingCheckin.create({
-            data: {
-              bookingId: id,
-              checkedInById: userId,
-              assetIds,
-              checkinCount: assetIds.length,
-            },
-          });
+    const checkedOutAssetIds = new Set(checkedOutAssets.map((a) => a.id));
+    const providedAssetIds = new Set(assetIds);
+
+    // Check if we're checking in all remaining CHECKED_OUT assets
+    if (
+      checkedOutAssetIds.size > 0 &&
+      checkedOutAssetIds.size === providedAssetIds.size &&
+      [...checkedOutAssetIds].every((id) => providedAssetIds.has(id))
+    ) {
+      // Check if there are existing partial check-ins for this booking
+      const existingPartialCheckinsCount = await db.partialBookingCheckin.count(
+        {
+          where: { bookingId: id },
         }
+      );
 
-        // Create notes before complete check-in since this was initiated as explicit check-in
-        const noteContent = `**${user.firstName} ${user.lastName}** checked in via explicit check-in scanner for booking **[${bookingFound.name}](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
-        await createNotes({
-          content: noteContent,
-          type: "UPDATE",
-          userId,
-          assetIds,
-        });
-
-        // Do complete check-in
-        return await checkinBooking({
-          id,
-          organizationId,
-          hints,
+      // Only create PartialBookingCheckin record if there were previous partial check-ins
+      // This maintains the audit trail for a multi-session partial check-in process
+      if (existingPartialCheckinsCount > 0) {
+        await db.partialBookingCheckin.create({
+          data: {
+            bookingId: id,
+            checkedInById: userId,
+            assetIds,
+            checkinCount: assetIds.length,
+          },
         });
       }
+
+      // Create notes before complete check-in since this was initiated as explicit check-in
+      const noteContent = `**${user.firstName} ${user.lastName}** checked in via explicit check-in scanner for booking **[${bookingFound.name}](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+      await createNotes({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetIds,
+      });
+
+      // Do complete check-in
+      return await checkinBooking({
+        id,
+        organizationId,
+        hints,
+        intentChoice,
+      });
     }
 
     // Validate that all provided assetIds are actually in the booking
@@ -1127,8 +1141,10 @@ export async function updateBookingAssets({
   id,
   organizationId,
   assetIds,
+  kitIds,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
+  kitIds?: Kit["id"][];
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
@@ -1153,10 +1169,20 @@ export async function updateBookingAssets({
         b.status === BookingStatus.ONGOING ||
         b.status === BookingStatus.OVERDUE
       ) {
-        await db.asset.updateMany({
+        await tx.asset.updateMany({
           where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.CHECKED_OUT },
         });
+
+        /**
+         * Also update kit status to CHECKED_OUT for any kits that contain these assets
+         */
+        if (kitIds && kitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
       }
       return b;
     });
