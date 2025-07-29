@@ -34,7 +34,6 @@ export function AvailabilityLabel({
   isAlreadyAdded?: boolean;
 }) {
   const isPartOfKit = !!asset.kitId;
-
   const { booking } = useLoaderData<{ booking: Booking }>();
 
   /** User scanned the asset and it is already in booking */
@@ -93,13 +92,9 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Is booked for period
+   * Is booked for period - using computed server-side field
    */
-  // Important not here is that the asset.bookings have to be queried/filtered based on the same date range as the current booking
-  if (
-    asset.bookings?.length > 0 &&
-    asset.bookings.some((b) => b.id !== booking?.id)
-  ) {
+  if ("alreadyBooked" in asset && asset.alreadyBooked) {
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}

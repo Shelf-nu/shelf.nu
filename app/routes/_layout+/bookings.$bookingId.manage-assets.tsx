@@ -61,6 +61,7 @@ import {
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
+import { isAssetAlreadyBooked } from "~/modules/booking/utils.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -85,6 +86,7 @@ export type AssetWithBooking = Asset & {
   category: Category;
   kitId?: string | null;
   qrScanned: string;
+  alreadyBooked?: boolean; // Optional for backward compatibility
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -172,10 +174,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
+    // Add computed alreadyBooked field to each asset
+    const assetsWithBookingStatus = assets.map((asset) => ({
+      ...asset,
+      alreadyBooked: isAssetAlreadyBooked(asset, booking.id),
+    }));
+
     return json(
       data({
         header: {
-          title: `Manage assets for ‘${booking?.name}’`,
+          title: `Manage assets for '${booking?.name}'`,
           subHeading: "Fill up the booking with the assets of your choice",
         },
         searchFieldLabel: "Search assets",
@@ -186,7 +194,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         showSidebar: true,
         noScroll: true,
         booking,
-        items: assets,
+        items: assetsWithBookingStatus,
         categories,
         tags,
         search,

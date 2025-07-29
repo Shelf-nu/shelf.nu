@@ -361,12 +361,6 @@ export async function getPaginatedAndFilterableKits<
       });
     }
 
-    const unavailableBookingStatuses = [
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
-
     if (currentBookingId && hideUnavailable) {
       where.assets = {
         every: {
@@ -379,22 +373,49 @@ export async function getPaginatedAndFilterableKits<
         where.assets = {
           every: {
             ...where.assets.every,
-            bookings: {
-              none: {
-                id: { not: currentBookingId },
-                status: { in: unavailableBookingStatuses },
-                OR: [
-                  {
-                    from: { lte: bookingTo },
-                    to: { gte: bookingFrom },
+            AND: [
+              // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
+              {
+                bookings: {
+                  none: {
+                    id: { not: currentBookingId },
+                    status: BookingStatus.RESERVED,
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
+                },
+              },
+              // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT assets
+              {
+                OR: [
+                  // Either asset is AVAILABLE (checked in from partial check-in)
+                  { status: AssetStatus.AVAILABLE },
+                  // Or asset has no conflicting ONGOING/OVERDUE bookings
                   {
-                    from: { gte: bookingFrom },
-                    to: { lte: bookingTo },
+                    bookings: {
+                      none: {
+                        id: { not: currentBookingId },
+                        status: {
+                          in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                        },
+                        OR: [
+                          {
+                            from: { lte: bookingTo },
+                            to: { gte: bookingFrom },
+                          },
+                          {
+                            from: { gte: bookingFrom },
+                            to: { lte: bookingTo },
+                          },
+                        ],
+                      },
+                    },
                   },
                 ],
               },
-            },
+            ],
           },
         };
       }

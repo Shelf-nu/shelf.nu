@@ -53,6 +53,7 @@ import {
 import {
   calculatePartialCheckinProgress,
   getBookingStatusRedirect,
+  isAssetAlreadyBooked,
 } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -209,11 +210,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
-    // Group assets by kitId for pagination purposes
-    const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
-    const individualAssets: Array<(typeof booking.assets)[0]> = [];
+    // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
+    const enhancedBooking = booking;
 
-    booking.assets.forEach((asset) => {
+    // Group assets by kitId for pagination purposes
+    const assetsByKit: Record<
+      string,
+      Array<(typeof enhancedBooking.assets)[0]>
+    > = {};
+    const individualAssets: Array<(typeof enhancedBooking.assets)[0]> = [];
+
+    enhancedBooking.assets.forEach((asset) => {
       if (asset.kitId) {
         if (!assetsByKit[asset.kitId]) {
           assetsByKit[asset.kitId] = [];
@@ -228,7 +235,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
-      assets: Array<(typeof booking.assets)[0]>;
+      assets: Array<(typeof enhancedBooking.assets)[0]>;
     }> = [
       ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
         type: "kit" as const,
@@ -286,15 +293,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               where: {
                 ...(booking.from && booking.to
                   ? {
-                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
                       OR: [
+                        // Include current booking for isCheckedOut logic
+                        { id: booking.id },
+                        // Rule 1: RESERVED bookings always conflict
                         {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
+                          status: "RESERVED",
+                          id: { not: booking.id }, // Exclude current booking from conflicts
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
                         },
+                        // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
                         {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
+                          status: { in: ["ONGOING", "OVERDUE"] },
+                          id: { not: booking.id }, // Exclude current booking from conflicts
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
                         },
                       ],
                     }
@@ -340,17 +370,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
 
-    // Enrich the paginated items with full asset details
+    // Enrich the paginated items with full asset details and compute alreadyBooked
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
         const details = assetDetailsMap.get(asset.id);
-        return details || asset;
+        if (details) {
+          // Compute alreadyBooked using the full asset details with bookings relation
+          return {
+            ...details,
+            alreadyBooked: isAssetAlreadyBooked(details, booking.id),
+          };
+        }
+        return asset;
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const assetCategories = booking.assets
+    const assetCategories = enhancedBooking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -399,7 +436,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         currentOrganization,
         header,
-        booking,
+        booking: enhancedBooking,
         modelName,
         paginatedItems: enrichedPaginatedItems,
         page,
@@ -411,7 +448,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: Object.keys(assetsByKit).length,
         totalValue: calculateTotalValueOfAssets({
-          assets: booking.assets,
+          assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),

@@ -39,6 +39,8 @@ export function BookingAssetsColumn() {
     booking.status
   );
 
+  console.log(paginatedItems);
+
   // Determine if we should show the check-in columns
   const shouldShowCheckinColumns = useMemo(() => {
     const currentStatusFilter = searchParams.get("status");

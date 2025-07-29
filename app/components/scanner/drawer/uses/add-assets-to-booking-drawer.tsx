@@ -231,6 +231,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     },
   ];
 
+  console.log(asset);
+
   // Create the availability labels component
   const [, AssetAvailabilityLabels] =
     createAvailabilityLabels(availabilityConfigs);

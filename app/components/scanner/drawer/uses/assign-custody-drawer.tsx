@@ -70,7 +70,7 @@ const BulkAssignCustodySchema = z
   });
 
 /**
- * Drawer component for managing scanned assets to be added to bookings
+ * Drawer component for assigning custody to scanned assets and kits
  */
 export default function AssignCustodyDrawer({
   className,

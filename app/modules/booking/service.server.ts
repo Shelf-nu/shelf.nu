@@ -2427,19 +2427,39 @@ export async function getBookingFlags(
         where: {
           ...(booking.from && booking.to
             ? {
-                status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                id: { not: booking.id }, // Exclude current booking
                 OR: [
+                  // Rule 1: RESERVED bookings always conflict
                   {
-                    from: { lte: booking.to },
-                    to: { gte: booking.from },
+                    status: "RESERVED",
+                    OR: [
+                      {
+                        from: { lte: booking.to },
+                        to: { gte: booking.from },
+                      },
+                      {
+                        from: { gte: booking.from },
+                        to: { lte: booking.to },
+                      },
+                    ],
                   },
+                  // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in logic below)
                   {
-                    from: { gte: booking.from },
-                    to: { lte: booking.to },
+                    status: { in: ["ONGOING", "OVERDUE"] },
+                    OR: [
+                      {
+                        from: { lte: booking.to },
+                        to: { gte: booking.from },
+                      },
+                      {
+                        from: { gte: booking.from },
+                        to: { lte: booking.to },
+                      },
+                    ],
                   },
                 ],
               }
-            : {}),
+            : { id: { not: booking.id } }),
         },
       },
     },
@@ -2453,9 +2473,24 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.CHECKED_OUT
   );
 
-  const hasAlreadyBookedAssets = assets.some(
-    (asset) => asset.bookings && asset.bookings.length > 0
-  );
+  const hasAlreadyBookedAssets = assets.some((asset) => {
+    if (!asset.bookings || asset.bookings.length === 0) return false;
+
+    return asset.bookings.some((conflictingBooking) => {
+      // RESERVED bookings always conflict
+      if (conflictingBooking.status === "RESERVED") return true;
+
+      // For ONGOING/OVERDUE bookings, only conflict if asset is actually CHECKED_OUT
+      if (
+        conflictingBooking.status === "ONGOING" ||
+        conflictingBooking.status === "OVERDUE"
+      ) {
+        return asset.status === AssetStatus.CHECKED_OUT;
+      }
+
+      return false;
+    });
+  });
 
   const hasAssetsInCustody = assets.some(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
