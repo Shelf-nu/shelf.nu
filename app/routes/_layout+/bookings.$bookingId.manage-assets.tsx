@@ -172,7 +172,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
-
     return json(
       data({
         header: {

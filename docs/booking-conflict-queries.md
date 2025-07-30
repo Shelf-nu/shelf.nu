@@ -213,7 +213,7 @@ if (bookingFrom && bookingTo) {
 
 **Used in**:
 
-- `app/modules/booking/helpers.ts` - `hasAssetBookingConflicts()` and `isAssetAlreadyBooked()` functions  
+- `app/modules/booking/helpers.ts` - `hasAssetBookingConflicts()` and `isAssetAlreadyBooked()` functions
 - `app/modules/booking/utils.server.ts` - Server-side utilities and route helpers
 - Called from multiple booking routes and UI components
 
@@ -309,10 +309,22 @@ if (isAlreadyBooked) {
 
 ### AvailabilityLabel Component
 
-The availability label component relies on proper data enrichment:
+The availability label component uses client-side helper functions:
 
 ```typescript
-// In list-asset-content.tsx - inside component function
+// In AvailabilityLabel component
+export function AvailabilityLabel({ asset, isCheckedOut, ... }) {
+  const { booking } = useLoaderData<{ booking: Booking }>();
+
+  // Use centralized helper function for conflict detection
+  if (hasAssetBookingConflicts(asset, booking.id)) {
+    return <AvailabilityBadge badgeText="Already booked" ... />;
+  }
+
+  // Other availability checks...
+}
+
+// In parent components like list-asset-content.tsx
 const isCheckedOut = useMemo(
   () =>
     (item.status === AssetStatus.CHECKED_OUT &&
@@ -321,7 +333,6 @@ const isCheckedOut = useMemo(
   [item.status, item.bookings, booking.id]
 );
 
-// Shows "Checked out" only if asset is checked out in a DIFFERENT booking
 <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
 ```
 
@@ -403,7 +414,7 @@ When changing booking conflict logic, ensure you update ALL of these locations:
 
 ### Pattern 3 (Availability Logic)
 
-- `app/modules/booking/helpers.ts` - `hasAssetBookingConflicts()` and `isAssetAlreadyBooked()` functions  
+- `app/modules/booking/helpers.ts` - `hasAssetBookingConflicts()` and `isAssetAlreadyBooked()` functions
 - `app/modules/booking/utils.server.ts` - Server-side utilities and route helpers
 
 ### UI Components
