@@ -665,7 +665,7 @@ export async function createAsset({
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
-  barcodes?: { type: BarcodeType; value: string }[];
+  barcodes?: { type: BarcodeType; value: string; existingId?: string }[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
   id?: Asset["id"]; // Make ID optional
@@ -808,23 +808,39 @@ export async function createAsset({
       });
     }
 
-    /** If barcodes are passed, validate them and include them in asset creation */
+    /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
     if (barcodes && barcodes.length > 0) {
       const barcodesToAdd = barcodes.filter(
         (barcode) => !!barcode.value && !!barcode.type
       );
 
-      // Let Prisma handle unique constraint violations for performance
       if (barcodesToAdd.length > 0) {
-        Object.assign(data, {
-          barcodes: {
-            create: barcodesToAdd.map(({ type, value }) => ({
-              type,
-              value: value.toUpperCase(),
-              organizationId,
-            })),
-          },
-        });
+        const barcodesToConnect = barcodesToAdd
+          .filter(b => b.existingId)
+          .map(b => ({ id: b.existingId! }));
+        
+        const barcodesToCreate = barcodesToAdd
+          .filter(b => !b.existingId)
+          .map(({ type, value }) => ({
+            type,
+            value: value.toUpperCase(),
+            organizationId,
+          }));
+
+        // Build barcodes relation data
+        const barcodeRelationData: any = {};
+        
+        if (barcodesToConnect.length > 0) {
+          barcodeRelationData.connect = barcodesToConnect;
+        }
+        
+        if (barcodesToCreate.length > 0) {
+          barcodeRelationData.create = barcodesToCreate;
+        }
+
+        if (Object.keys(barcodeRelationData).length > 0) {
+          Object.assign(data, { barcodes: barcodeRelationData });
+        }
       }
     }
 
