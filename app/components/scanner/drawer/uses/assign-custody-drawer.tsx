@@ -30,7 +30,6 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.manage-kits";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import type {
   AssetFromQr,
@@ -38,6 +37,7 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import type { KitFromScanner } from "~/utils/scanner-includes.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -140,7 +140,7 @@ export default function AssignCustodyDrawer({
     Object.entries(items)
       .filter(([, item]) => {
         if (!item || item.type !== "kit") return false;
-        return kitIds.includes((item.data as KitForBooking)?.id);
+        return kitIds.includes((item.data as KitFromScanner)?.id);
       })
       .map(([qrId]) => qrId);
 

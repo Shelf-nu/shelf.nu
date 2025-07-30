@@ -362,6 +362,7 @@ export async function getPaginatedAndFilterableKits<
     }
 
     if (currentBookingId && hideUnavailable) {
+      // Basic filters that apply to all kits
       where.assets = {
         every: {
           organizationId,
@@ -370,14 +371,14 @@ export async function getPaginatedAndFilterableKits<
       };
 
       if (bookingFrom && bookingTo) {
-        where.assets = {
-          every: {
-            ...where.assets.every,
-            AND: [
-              // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
-              {
+        // Apply booking conflict logic similar to assets, but through kit assets
+        const kitWhere: Prisma.KitWhereInput[] = [
+          // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
+          {
+            assets: {
+              none: {
                 bookings: {
-                  none: {
+                  some: {
                     id: { not: currentBookingId },
                     status: BookingStatus.RESERVED,
                     OR: [
@@ -387,15 +388,19 @@ export async function getPaginatedAndFilterableKits<
                   },
                 },
               },
-              // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT assets
+            },
+          },
+          // Rule 2: For ONGOING/OVERDUE bookings, allow kits that are AVAILABLE or have no conflicting assets
+          {
+            OR: [
+              // Either kit is AVAILABLE (checked in from partial check-in)
+              { status: KitStatus.AVAILABLE },
+              // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
               {
-                OR: [
-                  // Either asset is AVAILABLE (checked in from partial check-in)
-                  { status: AssetStatus.AVAILABLE },
-                  // Or asset has no conflicting ONGOING/OVERDUE bookings
-                  {
+                assets: {
+                  none: {
                     bookings: {
-                      none: {
+                      some: {
                         id: { not: currentBookingId },
                         status: {
                           in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
@@ -413,11 +418,14 @@ export async function getPaginatedAndFilterableKits<
                       },
                     },
                   },
-                ],
+                },
               },
             ],
           },
-        };
+        ];
+
+        // Combine the basic filters with booking conflict filters
+        where.AND = kitWhere;
       }
     }
 

@@ -39,8 +39,6 @@ export function BookingAssetsColumn() {
     booking.status
   );
 
-  console.log(paginatedItems);
-
   // Determine if we should show the check-in columns
   const shouldShowCheckinColumns = useMemo(() => {
     const currentStatusFilter = searchParams.get("status");
@@ -257,13 +255,27 @@ function BookingAssetsHeader({
   manageAssetsButtonDisabled,
 }: BookingAssetsHeaderProps) {
   const { isMd } = useViewportHeight();
+  const [searchParams] = useSearchParams();
+  const statusFilter = searchParams.get("status");
+
+  const title = useMemo(() => {
+    switch (statusFilter) {
+      case "AVAILABLE":
+        return "Available Assets & Kits";
+      case "CHECKED_OUT":
+        return "Checked out Assets & Kits";
+      default:
+        return "Assets & Kits";
+    }
+  }, [statusFilter]);
 
   if (isMd) {
     // Desktop layout: everything in one row
     return (
       <div className="flex justify-between">
         <ListTitle
-          title="Assets & Kits"
+          title={title}
+          titleClassName="text-transform normal-case"
           hasBulkActions
           itemsGetter={itemsGetter}
           disableSelectAllItems

@@ -53,7 +53,6 @@ import {
 import {
   calculatePartialCheckinProgress,
   getBookingStatusRedirect,
-  isAssetAlreadyBooked,
 } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -370,19 +369,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
 
-    // Enrich the paginated items with full asset details and compute alreadyBooked
+    // Enrich the paginated items with full asset details
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
         const details = assetDetailsMap.get(asset.id);
-        if (details) {
-          // Compute alreadyBooked using the full asset details with bookings relation
-          return {
-            ...details,
-            alreadyBooked: isAssetAlreadyBooked(details, booking.id),
-          };
-        }
-        return asset;
+        return details || asset;
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));

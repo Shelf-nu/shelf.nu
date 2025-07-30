@@ -3,6 +3,7 @@ import type { BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import { tw } from "~/utils/tw";
@@ -45,10 +46,11 @@ export default function KitRow({
   const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved } = useBookingStatusHelpers(bookingStatus);
 
-  const isOverlapping = assets.some(
-    (asset) =>
-      asset.bookings?.length && asset.bookings.some((b) => b.id !== bookingId)
-  );
+  // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
+  // Use centralized booking conflict logic
+  const isOverlapping =
+    kit.status !== "AVAILABLE" &&
+    assets.some((asset) => hasAssetBookingConflicts(asset, bookingId));
 
   return (
     <React.Fragment>
