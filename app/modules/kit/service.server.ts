@@ -1360,3 +1360,38 @@ export async function getAvailableKitAssetForBooking(
     });
   }
 }
+
+export async function updateKitLocation({
+  id,
+  organizationId,
+  currentLocationId,
+  newLocationId,
+}: {
+  id: Kit["id"];
+  organizationId: Kit["organizationId"];
+  currentLocationId: Kit["locationId"];
+  newLocationId: Kit["locationId"];
+}) {
+  try {
+    const data: Prisma.KitUpdateInput = {};
+
+    if (newLocationId) {
+      data.location = { connect: { id: newLocationId } };
+    }
+
+    if (currentLocationId && !newLocationId) {
+      data.location = { disconnect: true };
+    }
+
+    return await db.kit.update({
+      where: { id, organizationId },
+      data,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}

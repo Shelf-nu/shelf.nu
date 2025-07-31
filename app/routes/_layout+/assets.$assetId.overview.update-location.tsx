@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { LocationMarkerIcon } from "~/components/icons/library";
@@ -115,6 +115,8 @@ export default function Custody() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
 
+  const { asset } = useLoaderData<typeof loader>();
+
   return (
     <>
       <Form method="post">
@@ -127,7 +129,7 @@ export default function Custody() {
             <p>Adjust the location of this asset.</p>
           </div>
           <div className=" relative z-50 mb-8">
-            <LocationSelect />
+            <LocationSelect locationId={asset.locationId} isBulk={false} />
           </div>
 
           <div className="flex gap-3">

@@ -483,7 +483,9 @@ export default function KitDetails() {
                 Location
               </span>
 
-              <Tag key={kit.location.id}>{kit.location.name}</Tag>
+              <Tag key={kit.location.id} className="mb-0">
+                {kit.location.name}
+              </Tag>
             </Card>
           ) : null}
 
