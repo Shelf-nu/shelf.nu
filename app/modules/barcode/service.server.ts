@@ -697,7 +697,7 @@ export async function updateBarcodes({
 export type BarcodePerImportedAsset = {
   key: string;
   title: string;
-  barcodes: { type: BarcodeType; value: string }[];
+  barcodes: { type: BarcodeType; value: string; existingId?: string }[];
 };
 
 export async function parseBarcodesFromImportData({
@@ -844,7 +844,22 @@ export async function parseBarcodesFromImportData({
       });
     }
 
-    return barcodePerAsset;
+    // Create a map of existing orphaned barcodes that can be reused
+    const orphanedBarcodeMap = new Map<string, string>();
+    existingBarcodes
+      .filter((barcode) => !barcode.assetId && !barcode.kitId) // Only orphaned barcodes
+      .forEach((barcode) => {
+        orphanedBarcodeMap.set(barcode.value, barcode.id);
+      });
+
+    // Add existing IDs to barcodes that can be reused
+    return barcodePerAsset.map((asset) => ({
+      ...asset,
+      barcodes: asset.barcodes.map((barcode) => ({
+        ...barcode,
+        existingId: orphanedBarcodeMap.get(barcode.value),
+      })),
+    }));
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
