@@ -1032,18 +1032,18 @@ describe("parseBarcodesFromImportData", () => {
       key: "asset-1",
       title: "Test Asset 1",
       barcodes: [
-        { type: BarcodeType.Code128, value: "ABCD1234" },
-        { type: BarcodeType.Code39, value: "ABC123" },
-        { type: BarcodeType.DataMatrix, value: "WXYZ5678" },
+        { type: BarcodeType.Code128, value: "ABCD1234", existingId: undefined },
+        { type: BarcodeType.Code39, value: "ABC123", existingId: undefined },
+        { type: BarcodeType.DataMatrix, value: "WXYZ5678", existingId: undefined },
       ],
     });
     expect(result[1]).toEqual({
       key: "asset-2",
       title: "Test Asset 2",
       barcodes: [
-        { type: BarcodeType.Code128, value: "EFGH5678" },
-        { type: BarcodeType.Code128, value: "IJKL9012" },
-        { type: BarcodeType.Code39, value: "DEF456" },
+        { type: BarcodeType.Code128, value: "EFGH5678", existingId: undefined },
+        { type: BarcodeType.Code128, value: "IJKL9012", existingId: undefined },
+        { type: BarcodeType.Code39, value: "DEF456", existingId: undefined },
       ],
     });
   });
@@ -1207,9 +1207,9 @@ describe("parseBarcodesFromImportData", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].barcodes).toEqual([
-      { type: BarcodeType.Code128, value: "ABC123" },
-      { type: BarcodeType.Code128, value: "DEF456" },
-      { type: BarcodeType.Code128, value: "GHI789" },
+      { type: BarcodeType.Code128, value: "ABC123", existingId: undefined },
+      { type: BarcodeType.Code128, value: "DEF456", existingId: undefined },
+      { type: BarcodeType.Code128, value: "GHI789", existingId: undefined },
     ]);
   });
 
@@ -1235,8 +1235,8 @@ describe("parseBarcodesFromImportData", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].barcodes).toEqual([
-      { type: BarcodeType.Code128, value: "ABC123" },
-      { type: BarcodeType.Code39, value: "DEF456" },
+      { type: BarcodeType.Code128, value: "ABC123", existingId: undefined },
+      { type: BarcodeType.Code39, value: "DEF456", existingId: undefined },
     ]);
   });
 
@@ -1263,8 +1263,8 @@ describe("parseBarcodesFromImportData", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].barcodes).toEqual([
-      { type: BarcodeType.Code128, value: "ABC123" },
-      { type: BarcodeType.Code128, value: "DEF456" },
+      { type: BarcodeType.Code128, value: "ABC123", existingId: undefined },
+      { type: BarcodeType.Code128, value: "DEF456", existingId: undefined },
     ]);
   });
 
@@ -1354,9 +1354,103 @@ describe("parseBarcodesFromImportData", () => {
 
     expect(result).toHaveLength(3);
     expect(result.map((r) => r.barcodes)).toEqual([
-      [{ type: BarcodeType.Code128, value: "ABC123" }],
-      [{ type: BarcodeType.Code39, value: "DEF456" }],
-      [{ type: BarcodeType.DataMatrix, value: "GHIJ7890" }],
+      [{ type: BarcodeType.Code128, value: "ABC123", existingId: undefined }],
+      [{ type: BarcodeType.Code39, value: "DEF456", existingId: undefined }],
+      [{ type: BarcodeType.DataMatrix, value: "GHIJ7890", existingId: undefined }],
     ]);
+  });
+
+  it("should identify and reuse orphaned barcodes", async () => {
+    expect.assertions(3);
+    const orphanedBarcodes = [
+      {
+        id: "orphan-1",
+        value: "ORPHAN123",
+        assetId: null, // Orphaned - no asset
+        kitId: null,   // Orphaned - no kit
+        asset: null,
+        kit: null,
+      },
+      {
+        id: "orphan-2", 
+        value: "ORPHAN456",
+        assetId: null, // Orphaned - no asset
+        kitId: null,   // Orphaned - no kit
+        asset: null,
+        kit: null,
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue(orphanedBarcodes);
+
+    const dataWithOrphanedBarcodes = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "ORPHAN123,NEW123", // One orphaned, one new
+      },
+      {
+        key: "asset-2", 
+        title: "Test Asset 2",
+        barcode_Code39: "ORPHAN456", // Reuse orphaned
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithOrphanedBarcodes,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result[0].barcodes).toEqual([
+      { type: BarcodeType.Code128, value: "ORPHAN123", existingId: "orphan-1" }, // Reuse orphaned
+      { type: BarcodeType.Code128, value: "NEW123", existingId: undefined }, // Create new
+    ]);
+    expect(result[1].barcodes).toEqual([
+      { type: BarcodeType.Code39, value: "ORPHAN456", existingId: "orphan-2" }, // Reuse orphaned
+    ]);
+  });
+
+  it("should not reuse barcodes that are linked to assets or kits", async () => {
+    expect.assertions(1);
+    const linkedBarcodes = [
+      {
+        id: "linked-1",
+        value: "LINKED123",
+        assetId: "other-asset", // Linked to an asset
+        kitId: null,
+        asset: { title: "Other Asset" },
+        kit: null,
+      },
+      {
+        id: "linked-2",
+        value: "LINKED456", 
+        assetId: null,
+        kitId: "other-kit", // Linked to a kit
+        asset: null,
+        kit: { name: "Other Kit" },
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue(linkedBarcodes);
+
+    const dataWithLinkedBarcodes = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "LINKED123",
+      },
+    ];
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: dataWithLinkedBarcodes,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      "Some barcodes are already linked to other assets or kits in your organization"
+    );
   });
 });
