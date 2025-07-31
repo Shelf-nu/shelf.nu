@@ -28,6 +28,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import { Tag } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -126,6 +127,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
           category: true,
+          location: true,
         },
       }),
       db.teamMember
@@ -321,6 +323,7 @@ export default function KitsIndexPage() {
             headerChildren={
               <>
                 <Th>Category</Th>
+                <Th>Location</Th>
                 <Th>Description</Th>
                 <Th>Assets</Th>
                 <Th className="flex items-center gap-1 whitespace-nowrap">
@@ -364,6 +367,7 @@ function ListContent({
           select: { id: true; availableToBook: true; status: true };
         };
         category: true;
+        location: true;
       }
     >;
   }>;
@@ -408,6 +412,12 @@ function ListContent({
 
       <Td>
         <CategoryBadge category={item.category} />
+      </Td>
+
+      <Td>
+        {item.location ? (
+          <Tag className="mb-0">{item.location.name}</Tag>
+        ) : null}
       </Td>
 
       <Td className="max-w-62 md:max-w-96">
