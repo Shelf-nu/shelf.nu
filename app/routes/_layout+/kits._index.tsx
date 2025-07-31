@@ -35,6 +35,7 @@ import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -96,6 +97,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
+      { locations, totalLocations },
     ] = await Promise.all([
       getPaginatedAndFilterableKits({
         request,
@@ -151,6 +153,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           });
         }),
       db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+      }),
     ]);
 
     if (totalPages !== 0 && page > totalPages) {
@@ -185,6 +191,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
         },
+        locations,
+        totalLocations,
       }),
       {
         headers: [...(filtersCookie ? [setCookie(filtersCookie)] : [])],

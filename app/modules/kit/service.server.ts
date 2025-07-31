@@ -1395,3 +1395,34 @@ export async function updateKitLocation({
     });
   }
 }
+
+export async function bulkUpdateKitLocation({
+  kitIds,
+  organizationId,
+  newLocationId,
+  currentSearchParams,
+}: {
+  kitIds: Array<Kit["id"]>;
+  organizationId: Kit["organizationId"];
+  newLocationId: Kit["locationId"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    return await db.kit.updateMany({
+      where,
+      data: {
+        locationId: newLocationId,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
