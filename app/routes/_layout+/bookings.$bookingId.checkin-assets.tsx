@@ -145,10 +145,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { assetIds, checkinIntentChoice } = parseData(
+    const { assetIds, checkinIntentChoice, returnJson } = parseData(
       formData,
       partialCheckinAssetsSchema.extend({
         checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
+        returnJson: z
+          .string()
+          .optional()
+          .transform((val) => val === "true"),
       })
     );
     const hints = getClientHint(request);
@@ -170,6 +174,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
+
+    // Return JSON if requested by bulk dialog, otherwise redirect
+    if (returnJson) {
+      return json(
+        data({
+          success: true,
+          message: `Successfully checked in ${assetIds.length} asset${
+            assetIds.length > 1 ? "s" : ""
+          }`,
+        })
+      );
+    }
 
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {

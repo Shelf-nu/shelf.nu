@@ -138,7 +138,7 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const currentBooking = asset?.bookings?.find(
+    const conflictingBooking = asset?.bookings?.find(
       (b) =>
         b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
     );
@@ -148,15 +148,15 @@ export function AvailabilityLabel({
         badgeText={"Checked out"}
         tooltipTitle={"Asset is currently checked out"}
         tooltipContent={
-          currentBooking ? (
+          conflictingBooking ? (
             <span>
-              This asset is currently checked out as part of another booking ( -{" "}
+              This asset is currently checked out as part of another booking (
               <Link
                 to={`${SERVER_URL}/bookings/
-                ${currentBooking.id}`}
+                ${conflictingBooking.id}`}
                 target="_blank"
               >
-                {currentBooking?.name}
+                {conflictingBooking?.name}
               </Link>
               ) and should be available for your selected date range period
             </span>

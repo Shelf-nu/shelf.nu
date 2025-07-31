@@ -257,11 +257,14 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   disabled ||
                   isLoadingWorkingHours ||
                   bookingFlags?.hasUnavailableAssets ||
+                  bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasCheckedOutAssets ||
                   bookingFlags?.hasAssetsInCustody
                     ? {
                         reason: bookingFlags?.hasAssetsInCustody
                           ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                          : bookingFlags?.hasAlreadyBookedAssets
+                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can check-out"
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
                           : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",

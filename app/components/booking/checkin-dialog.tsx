@@ -1,6 +1,7 @@
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
+import { tw } from "~/utils/tw";
 import { Button, type ButtonProps } from "../shared/button";
 import { DateS } from "../shared/date";
 import {
@@ -27,18 +28,21 @@ type CheckinDialogProps = {
   };
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
+  /** Form ID to submit to (for use in portal contexts) */
+  formId?: string;
   /** Callback to close parent dropdown/menu */
   onClose?: () => void;
   /** Custom label for the button */
   label?: string;
   /** Variant for different contexts */
-  variant?: "default" | "dropdown";
+  variant?: "default" | "dropdown" | "primary";
 };
 
 export default function CheckinDialog({
   disabled,
   booking,
   portalContainer,
+  formId,
   label = "Check-in",
   variant = "default",
 }: CheckinDialogProps) {
@@ -50,11 +54,13 @@ export default function CheckinDialog({
         type="submit"
         name="intent"
         value="checkIn"
-        className={
+        form={formId}
+        className={tw(
+          "whitespace-nowrap",
           variant === "dropdown"
             ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-            : ""
-        }
+            : "w-full"
+        )}
         variant={variant === "dropdown" ? "link" : "primary"}
         width={variant === "dropdown" ? "full" : undefined}
       >
@@ -79,11 +85,12 @@ export default function CheckinDialog({
       <AlertDialogTrigger asChild>
         <Button
           disabled={disabled}
-          className={
+          className={tw(
+            "whitespace-nowrap",
             variant === "dropdown"
               ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-              : ""
-          }
+              : "w-full"
+          )}
           variant={variant === "dropdown" ? "link" : "primary"}
         >
           {variant === "dropdown" ? (
@@ -148,6 +155,7 @@ export default function CheckinDialog({
             disabled={disabled}
             className="flex-1"
             type="submit"
+            form={formId}
             variant={currentTimeIsBeforeFrom ? "primary" : "secondary"}
             name="checkinIntentChoice"
             value={CheckinIntentEnum["without-adjusted-date"]}
@@ -159,6 +167,7 @@ export default function CheckinDialog({
               disabled={disabled}
               className="flex-1"
               type="submit"
+              form={formId}
               name="checkinIntentChoice"
               value={CheckinIntentEnum["with-adjusted-date"]}
             >

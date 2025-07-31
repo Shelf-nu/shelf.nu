@@ -169,7 +169,7 @@ export function BookingAssetsColumn() {
                   title: "Start by defining a booking period",
                   text: "Assets added to your booking will show up here. Scan tags or search for assets to add to your booking.",
                   newButtonRoute: manageAssetsUrl,
-                  newButtonContent: "Manage assets",
+                  newButtonContent: "Add assets",
                   buttonProps: {
                     disabled: manageAssetsButtonDisabled,
                   },

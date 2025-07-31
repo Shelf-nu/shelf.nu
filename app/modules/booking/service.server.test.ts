@@ -967,10 +967,27 @@ describe("reserveBooking", () => {
     tags: [],
   };
 
-  it("should reserve booking successfully", async () => {
+  it("should reserve booking successfully with no conflicts", async () => {
     expect.assertions(2);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      assets: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          status: "AVAILABLE",
+          bookings: [], // No conflicting bookings
+        },
+        {
+          id: "asset-2",
+          title: "Asset 2",
+          status: "AVAILABLE",
+          bookings: [], // No conflicting bookings
+        },
+      ],
+    };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
 
     //@ts-expect-error missing vitest type
@@ -997,10 +1014,44 @@ describe("reserveBooking", () => {
     expect(result).toEqual(reservedBooking);
   });
 
+  it("should throw error when assets have booking conflicts", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      assets: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          status: "CHECKED_OUT",
+          bookings: [
+            {
+              id: "other-booking",
+              status: "ONGOING",
+              name: "Conflicting Booking",
+            },
+          ],
+        },
+      ],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+      "Cannot reserve booking. Some assets are already booked or checked out: Asset 1. Please remove conflicted assets and try again."
+    );
+  });
+
   it("should handle booking reservation with different status", async () => {
     expect.assertions(1);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [], // No assets to conflict
+    };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
 
     //@ts-expect-error missing vitest type
@@ -1022,17 +1073,31 @@ describe("checkoutBooking", () => {
     id: "booking-1",
     organizationId: "org-1",
     hints: mockClientHints,
+    from: new Date("2025-12-01T09:00:00Z"),
+    to: new Date("2025-12-01T17:00:00Z"),
   };
 
-  it("should checkout booking successfully", async () => {
+  it("should checkout booking successfully with no conflicts", async () => {
     expect.assertions(3);
 
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.RESERVED,
       assets: [
-        { id: "asset-1", kitId: null },
-        { id: "asset-2", kitId: "kit-1" },
+        {
+          id: "asset-1",
+          kitId: null,
+          title: "Asset 1",
+          status: "AVAILABLE",
+          bookings: [], // No conflicting bookings
+        },
+        {
+          id: "asset-2",
+          kitId: "kit-1",
+          title: "Asset 2",
+          status: "AVAILABLE",
+          bookings: [], // No conflicting bookings
+        },
       ],
     };
     const checkedOutBooking = { ...mockBooking, status: BookingStatus.ONGOING };
@@ -1058,10 +1123,45 @@ describe("checkoutBooking", () => {
     expect(result).toEqual(checkedOutBooking);
   });
 
+  it("should throw error when assets have booking conflicts", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          title: "Asset 1",
+          status: "CHECKED_OUT",
+          bookings: [
+            {
+              id: "other-booking",
+              status: "ONGOING",
+              name: "Conflicting Booking",
+            },
+          ],
+        },
+      ],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      "Cannot check out booking. Some assets are already booked or checked out: Asset 1. Please remove conflicted assets and try again."
+    );
+  });
+
   it("should handle checkout for non-reserved booking", async () => {
     expect.assertions(1);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      assets: [], // No assets to conflict
+    };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
     //@ts-expect-error missing vitest type
