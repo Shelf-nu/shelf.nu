@@ -156,3 +156,65 @@ export function getBookingStatusRedirect({
   // Case 3: All other cases - no redirect needed
   return null;
 }
+
+/**
+ * Creates standardized booking conflict query conditions for asset.bookings includes
+ * This implements Pattern 1 from booking-conflict-queries.md documentation
+ */
+export function createBookingConflictConditions({
+  currentBookingId,
+  fromDate,
+  toDate,
+  includeCurrentBooking = false,
+}: {
+  currentBookingId: string;
+  fromDate?: Date | string | null;
+  toDate?: Date | string | null;
+  includeCurrentBooking?: boolean;
+}): Prisma.Asset$bookingsArgs {
+  return {
+    where: {
+      ...(fromDate && toDate
+        ? {
+            OR: [
+              // Rule 1: RESERVED bookings always conflict
+              {
+                status: BookingStatus.RESERVED,
+                ...(includeCurrentBooking
+                  ? {}
+                  : { id: { not: currentBookingId } }),
+                OR: [
+                  {
+                    from: { lte: toDate },
+                    to: { gte: fromDate },
+                  },
+                  {
+                    from: { gte: fromDate },
+                    to: { lte: toDate },
+                  },
+                ],
+              },
+              // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in helpers)
+              {
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+                ...(includeCurrentBooking
+                  ? {}
+                  : { id: { not: currentBookingId } }),
+                OR: [
+                  {
+                    from: { lte: toDate },
+                    to: { gte: fromDate },
+                  },
+                  {
+                    from: { gte: fromDate },
+                    to: { lte: toDate },
+                  },
+                ],
+              },
+            ],
+          }
+        : {}),
+    },
+    select: { id: true, status: true, name: true },
+  };
+}

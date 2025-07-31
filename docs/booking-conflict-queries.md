@@ -44,8 +44,6 @@ bookings: {
     ...(booking.from && booking.to
       ? {
           OR: [
-            // Include current booking for isCheckedOut logic
-            { id: booking.id },
             // Rule 1: RESERVED bookings always conflict
             {
               status: "RESERVED",
@@ -61,7 +59,7 @@ bookings: {
                 },
               ],
             },
-            // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
+            // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in helpers)
             {
               status: { in: ["ONGOING", "OVERDUE"] },
               id: { not: booking.id }, // Exclude current booking from conflicts
@@ -85,10 +83,11 @@ bookings: {
 
 ### Key Features
 
-- **Includes current booking**: Needed for `isCheckedOut` logic in UI components
-- **Excludes current booking from conflicts**: Prevents self-conflicts in availability detection
+- **Excludes current booking**: Prevents self-conflicts and unnecessary data
+- **Clean conflict data**: Only includes actual conflicting bookings from other bookings
 - **Date-range aware**: Only applies conflict logic when booking has dates
 - **Two-tier conflict rules**: Different handling for RESERVED vs ONGOING/OVERDUE
+- **Complete conflict data**: Returns ALL conflicting bookings, not just first one
 
 ## Pattern 2: Asset/Kit Filtering
 
@@ -304,6 +303,8 @@ if (isAlreadyBooked) {
 - **Excludes current booking**: Prevents self-conflicts
 - **Status-aware**: Different logic for RESERVED vs ONGOING/OVERDUE
 - **Partial check-in compatible**: Respects asset status in conflict detection
+- **Complete conflict data**: Returns ALL conflicting bookings, not just first one
+- **Clean data separation**: Current booking excluded from conflict arrays
 
 ## UI Component Integration
 
@@ -444,6 +445,27 @@ When changing booking conflict logic, ensure you update ALL of these locations:
 - **Refactored**: All duplicate booking conflict logic now uses centralized function
 - **Updated**: `KitRow`, `getKitAvailabilityStatus` now use shared logic
 - **Impact**: Reduced code duplication, easier maintenance, consistent behavior, proper client/server separation
+
+### ✅ Multi-Booking Query Optimization
+
+- **Fixed**: `app/modules/asset/fields.ts` `assetIndexFields()` function removed `take: 1` limitation
+- **Issue**: Assets with multiple overlapping bookings only showed first booking, missing important conflicts
+- **Change**: Bookings query now returns ALL conflicting bookings per asset, not just first one
+- **Impact**: Complete conflict detection for complex multi-booking scenarios
+
+### ✅ Current Booking Data Cleanup
+
+- **Fixed**: `app/routes/_layout+/bookings.$bookingId.tsx` asset query excludes current booking from conflict arrays
+- **Issue**: Current booking (DRAFT status) appeared in asset.bookings arrays, causing confusion
+- **Change**: Removed `{ id: booking.id }` inclusion from asset bookings query
+- **Impact**: Cleaner data structure, no false conflicts, reduced unnecessary data fetching
+
+### ✅ RESERVED Booking Detection in Labels
+
+- **Fixed**: `app/components/booking/availability-label.tsx` conflict finder includes RESERVED bookings
+- **Issue**: Only ONGOING/OVERDUE bookings were checked for conflict tooltip messages
+- **Change**: Updated `conflictingBooking` finder to include RESERVED status
+- **Impact**: RESERVED bookings now show proper "Already booked in [BookingName]" tooltip messages
 
 ## Status Summary
 

@@ -99,7 +99,9 @@ export function AvailabilityLabel({
   if (hasAssetBookingConflicts(asset, booking.id)) {
     const conflictingBooking = asset?.bookings?.find(
       (b) =>
-        b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
+        b.status === BookingStatus.ONGOING ||
+        b.status === BookingStatus.OVERDUE ||
+        b.status === BookingStatus.RESERVED
     );
     return (
       <AvailabilityBadge

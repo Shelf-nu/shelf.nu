@@ -816,11 +816,11 @@ export async function createAsset({
 
       if (barcodesToAdd.length > 0) {
         const barcodesToConnect = barcodesToAdd
-          .filter(b => b.existingId)
-          .map(b => ({ id: b.existingId! }));
-        
+          .filter((b) => b.existingId)
+          .map((b) => ({ id: b.existingId! }));
+
         const barcodesToCreate = barcodesToAdd
-          .filter(b => !b.existingId)
+          .filter((b) => !b.existingId)
           .map(({ type, value }) => ({
             type,
             value: value.toUpperCase(),
@@ -829,11 +829,11 @@ export async function createAsset({
 
         // Build barcodes relation data
         const barcodeRelationData: any = {};
-        
+
         if (barcodesToConnect.length > 0) {
           barcodeRelationData.connect = barcodesToConnect;
         }
-        
+
         if (barcodesToCreate.length > 0) {
           barcodeRelationData.create = barcodesToCreate;
         }

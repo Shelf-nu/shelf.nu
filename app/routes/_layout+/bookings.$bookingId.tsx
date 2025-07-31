@@ -293,8 +293,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                 ...(booking.from && booking.to
                   ? {
                       OR: [
-                        // Include current booking for isCheckedOut logic
-                        { id: booking.id },
                         // Rule 1: RESERVED bookings always conflict
                         {
                           status: "RESERVED",
@@ -553,7 +551,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, from: true, to: true },
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
@@ -679,6 +677,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           hints: getClientHint(request),
           intentChoice: checkoutIntentChoice,
+          from: basicBookingInfo.from,
+          to: basicBookingInfo.to,
         });
 
         await createNotes({

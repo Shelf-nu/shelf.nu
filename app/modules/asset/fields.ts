@@ -181,7 +181,6 @@ export const assetIndexFields = ({
             },
           ],
         },
-        take: 1,
         select: {
           from: true,
           to: true,

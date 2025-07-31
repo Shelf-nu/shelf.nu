@@ -53,7 +53,11 @@ import {
   extendBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
+import {
+  hasAssetBookingConflicts,
+  isBookingEarlyCheckin,
+  isBookingEarlyCheckout,
+} from "./helpers";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -61,6 +65,7 @@ import type {
   SchedulerData,
 } from "./types";
 import {
+  createBookingConflictConditions,
   formatBookingsDates,
   getBookingWhereInput,
   isBookingExpired,
@@ -439,6 +444,15 @@ export async function reserveBooking({
         where: { id, organizationId },
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
+          assets: {
+            include: {
+              bookings: createBookingConflictConditions({
+                currentBookingId: id,
+                fromDate: from,
+                toDate: to,
+              }),
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -449,6 +463,30 @@ export async function reserveBooking({
             "Booking not found. Are you sure it exists in current workspace?",
         });
       });
+
+    /** Server-side conflict validation to prevent race conditions */
+    if (from && to && bookingFound.assets) {
+      const conflictedAssets = bookingFound.assets.filter((asset) =>
+        hasAssetBookingConflicts(asset, id)
+      );
+
+      if (conflictedAssets.length > 0) {
+        const conflictedAssetNames = conflictedAssets
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+        });
+      }
+    }
 
     /** Validate the booking dates */
     if (!from || !to) {
@@ -642,16 +680,28 @@ export async function checkoutBooking({
   organizationId,
   intentChoice,
   hints,
+  from,
+  to,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
+  from?: Date | null;
+  to?: Date | null;
 }) {
   try {
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: true,
+          assets: {
+            include: {
+              bookings: createBookingConflictConditions({
+                currentBookingId: id,
+                fromDate: from,
+                toDate: to,
+              }),
+            },
+          },
           ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       })
@@ -663,6 +713,30 @@ export async function checkoutBooking({
             "Booking not found, are you sure it exists in current workspace?",
         });
       });
+
+    /** Server-side conflict validation to prevent race conditions */
+    if (from && to && bookingFound.assets) {
+      const conflictedAssets = bookingFound.assets.filter((asset) =>
+        hasAssetBookingConflicts(asset, id)
+      );
+
+      if (conflictedAssets.length > 0) {
+        const conflictedAssetNames = conflictedAssets
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+        });
+      }
+    }
 
     /**
      * This checks if the booking end date is in the past
