@@ -1034,7 +1034,11 @@ describe("parseBarcodesFromImportData", () => {
       barcodes: [
         { type: BarcodeType.Code128, value: "ABCD1234", existingId: undefined },
         { type: BarcodeType.Code39, value: "ABC123", existingId: undefined },
-        { type: BarcodeType.DataMatrix, value: "WXYZ5678", existingId: undefined },
+        {
+          type: BarcodeType.DataMatrix,
+          value: "WXYZ5678",
+          existingId: undefined,
+        },
       ],
     });
     expect(result[1]).toEqual({
@@ -1356,7 +1360,13 @@ describe("parseBarcodesFromImportData", () => {
     expect(result.map((r) => r.barcodes)).toEqual([
       [{ type: BarcodeType.Code128, value: "ABC123", existingId: undefined }],
       [{ type: BarcodeType.Code39, value: "DEF456", existingId: undefined }],
-      [{ type: BarcodeType.DataMatrix, value: "GHIJ7890", existingId: undefined }],
+      [
+        {
+          type: BarcodeType.DataMatrix,
+          value: "GHIJ7890",
+          existingId: undefined,
+        },
+      ],
     ]);
   });
 
@@ -1367,15 +1377,15 @@ describe("parseBarcodesFromImportData", () => {
         id: "orphan-1",
         value: "ORPHAN123",
         assetId: null, // Orphaned - no asset
-        kitId: null,   // Orphaned - no kit
+        kitId: null, // Orphaned - no kit
         asset: null,
         kit: null,
       },
       {
-        id: "orphan-2", 
+        id: "orphan-2",
         value: "ORPHAN456",
         assetId: null, // Orphaned - no asset
-        kitId: null,   // Orphaned - no kit
+        kitId: null, // Orphaned - no kit
         asset: null,
         kit: null,
       },
@@ -1390,7 +1400,7 @@ describe("parseBarcodesFromImportData", () => {
         barcode_Code128: "ORPHAN123,NEW123", // One orphaned, one new
       },
       {
-        key: "asset-2", 
+        key: "asset-2",
         title: "Test Asset 2",
         barcode_Code39: "ORPHAN456", // Reuse orphaned
       },
@@ -1425,7 +1435,7 @@ describe("parseBarcodesFromImportData", () => {
       },
       {
         id: "linked-2",
-        value: "LINKED456", 
+        value: "LINKED456",
         assetId: null,
         kitId: "other-kit", // Linked to a kit
         asset: null,
