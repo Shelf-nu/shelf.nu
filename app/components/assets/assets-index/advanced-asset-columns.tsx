@@ -543,7 +543,11 @@ function UpcomingBookingsColumn({
         </PopoverTrigger>
 
         <PopoverPortal>
-          <PopoverContent className="flex max-h-64 max-w-60 flex-col gap-1 divide-y overflow-auto rounded-md border bg-white p-4">
+          <PopoverContent
+            align="start"
+            className="flex max-h-64 w-auto max-w-full flex-col gap-1 divide-y overflow-auto rounded-md border bg-white p-4"
+          >
+            <h5 className="mb-1 border-b pb-2 text-sm">Upcoming Bookings</h5>
             {bookings.map((booking) => {
               const custodianName = booking?.custodianUser
                 ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
