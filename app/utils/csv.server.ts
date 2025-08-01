@@ -376,6 +376,12 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.upcomingReminder?.displayDate;
             break;
           }
+          case "upcomingBookings": {
+            value = asset.bookings
+              ? asset.bookings.map((b) => b.name).join(", ")
+              : "";
+            break;
+          }
           case "actions":
             value = "";
             break;
