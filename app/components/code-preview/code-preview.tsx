@@ -94,10 +94,15 @@ export const CodePreview = ({
     // Add barcodes if available and permissions allow
     if (canUseBarcodes) {
       barcodes.forEach((barcode) => {
+        const isExternalQr = barcode.type === "ExternalQR";
+        const label = isExternalQr
+          ? "External QR Code"
+          : `${barcode.type} - ${barcode.value}`;
+
         codes.push({
           id: barcode.id,
           type: "barcode",
-          label: `${barcode.type} - ${barcode.value}`,
+          label,
           barcodeData: {
             type: barcode.type,
             value: barcode.value,

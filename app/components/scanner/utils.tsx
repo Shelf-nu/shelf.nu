@@ -1,11 +1,54 @@
 import { BarcodeType } from "@prisma/client";
 import { readBarcodes, type ReadResult } from "zxing-wasm";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
+import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import { isQrId } from "~/utils/id";
 import type { OnCodeDetectionSuccess } from "./code-scanner";
 
 // Supported barcode formats that match our BarcodeType enum
 export const SUPPORTED_BARCODE_FORMATS = Object.values(BarcodeType) as string[];
+
+/**
+ * Checks if a QR code value is a Shelf QR code
+ * Shelf QR codes can be:
+ * 1. Raw QR ID (e.g., "cm4abc123...")
+ * 2. SERVER_URL/qr/{qrId} format (e.g., "https://shelf.nu/qr/cm4abc123")
+ * 3. URL_SHORTENER/{qrId} format (e.g., "https://eam.sh/cm4abc123")
+ */
+function isShelfQrCode(value: string): boolean {
+  // Check if it's a raw QR ID
+  if (isQrId(value)) {
+    return true;
+  }
+
+  // Check if it matches SERVER_URL/qr/{qrId} pattern
+  if (SERVER_URL) {
+    const serverPattern = new RegExp(
+      `^${SERVER_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/qr/([a-zA-Z0-9]+)$`
+    );
+    if (serverPattern.test(value)) {
+      return true;
+    }
+  }
+
+  // Check if it matches URL_SHORTENER/{qrId} pattern
+  if (URL_SHORTENER) {
+    const shortenerPattern = new RegExp(
+      `^https://${URL_SHORTENER.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      )}/([a-zA-Z0-9]+)$`
+    );
+    if (shortenerPattern.test(value)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -260,13 +303,27 @@ export const processFrame = async ({
 
       // Check if it's a QR code first
       if (detectedFormat === "QRCode") {
-        // Handle QR codes normally
-        await handleDetection({
-          result: result.text,
-          onCodeDetectionSuccess,
-          allowNonShelfCodes,
-          paused,
-        });
+        // Check if it's a Shelf QR code by checking against known Shelf QR patterns
+        const isShelfQr = isShelfQrCode(result.text);
+
+        if (isShelfQr) {
+          // Handle as Shelf QR code
+          await handleDetection({
+            result: result.text,
+            onCodeDetectionSuccess,
+            allowNonShelfCodes,
+            paused,
+          });
+        } else {
+          // Handle as external QR code (treat as ExternalQR barcode type)
+          await handleDetection({
+            result: result.text,
+            onCodeDetectionSuccess,
+            allowNonShelfCodes,
+            paused,
+            barcodeType: "ExternalQR",
+          });
+        }
       } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
         // It's a supported barcode type
         // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
@@ -361,15 +418,33 @@ export const handleDetection = async ({
     return;
   }
 
+  // If we have a specific barcode type passed in (like ExternalQR), use it
+  if (barcodeType) {
+    // Validate the value for the specific barcode type
+    const normalizedValue = normalizeBarcodeValue(barcodeType, result);
+    const validationError = validateBarcodeValue(barcodeType, normalizedValue);
+
+    if (!validationError) {
+      await onCodeDetectionSuccess?.({
+        value: normalizedValue,
+        type: "barcode",
+        barcodeType: barcodeType,
+      });
+      return;
+    }
+  }
+
   // If not a QR code, check if it's a valid barcode
   const barcodeCheck = isValidBarcode(result);
 
   if (barcodeCheck.isValid) {
     // It's a valid barcode
+    const detectedBarcodeType = barcodeType || barcodeCheck.type;
+    const normalizedValue = normalizeBarcodeValue(detectedBarcodeType!, result);
     await onCodeDetectionSuccess?.({
-      value: result.toUpperCase(),
+      value: normalizedValue,
       type: "barcode",
-      barcodeType: barcodeType || barcodeCheck.type,
+      barcodeType: detectedBarcodeType,
     });
     return;
   }

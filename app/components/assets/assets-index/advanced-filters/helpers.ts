@@ -239,33 +239,67 @@ export function getAvailableColumns(
 }
 
 /**
- * Extracts the QR ID from a URL or returns the original value if it's not a URL
- * Removes any query parameters and returns the last path segment
+ * Extracts the QR ID from a Shelf QR URL or returns the full value for external QR codes
  *
- * @example
- * localhost:3000/qr/abc123?hello=world -> abc123
- * https://example.com/abc123 -> abc123
- * abc123 -> abc123
+ * For Shelf QR codes, extracts the ID:
+ * - localhost:3000/qr/abc123?hello=world -> abc123
+ * - https://shelf.nu/qr/abc123 -> abc123
+ * - https://eam.sh/abc123 -> abc123
+ * - abc123 -> abc123
+ *
+ * For external QR codes, returns full value:
+ * - https://example.com/product/123 -> https://example.com/product/123
+ * - Any other QR content -> original value
  *
  * @param value - The input value (URL or QR ID)
- * @returns The extracted QR ID or original value
+ * @returns The extracted QR ID for Shelf QRs or full value for external QRs
  */
 export function extractQrIdFromValue(value: string): string {
-  try {
-    // Try to parse as URL first
-    const url = new URL(value);
+  // First check if it's a Shelf QR code
+  if (isShelfQrCode(value)) {
+    try {
+      // Try to parse as URL first
+      const url = new URL(value);
 
-    // Remove leading and trailing slashes and split path
-    const pathParts = url.pathname.split("/").filter(Boolean);
+      // Remove leading and trailing slashes and split path
+      const pathParts = url.pathname.split("/").filter(Boolean);
 
-    // Get the last part of the path (if exists)
-    if (pathParts.length > 0) {
-      return pathParts[pathParts.length - 1];
+      // Get the last part of the path (if exists)
+      if (pathParts.length > 0) {
+        return pathParts[pathParts.length - 1];
+      }
+
+      return value;
+    } catch (e) {
+      // If URL parsing fails, return original value (raw QR ID case)
+      return value;
     }
-
-    return value;
-  } catch (e) {
-    // If URL parsing fails, return original value
-    return value;
   }
+
+  // For external QR codes, return the full value
+  return value;
+}
+
+/**
+ * Helper function to check if a QR code value is a Shelf QR code
+ * Note: This is duplicated from scanner utils to avoid circular imports
+ */
+function isShelfQrCode(value: string): boolean {
+  // Check if it's a raw QR ID (simple cuid pattern check)
+  if (/^[a-z0-9]{25}$/.test(value)) {
+    return true;
+  }
+
+  // Check common Shelf QR patterns (simplified version)
+  // This covers most cases without importing SERVER_URL/URL_SHORTENER
+  if (value.includes("/qr/") && /\/qr\/[a-z0-9]{25}/.test(value)) {
+    return true;
+  }
+
+  // Check for short URL pattern (domain + cuid)
+  if (/^https:\/\/[^\/]+\/[a-z0-9]{25}$/.test(value)) {
+    return true;
+  }
+
+  return false;
 }
