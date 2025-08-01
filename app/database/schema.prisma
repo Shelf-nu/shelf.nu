@@ -34,17 +34,17 @@ model Image {
 }
 
 model User {
-  id                String  @id @default(cuid())
-  email             String  @unique
-  username          String  @unique @default(cuid())
-  firstName         String?
-  lastName          String?
-  profilePicture    String?
-  usedFreeTrial     Boolean @default(false)
-  onboarded         Boolean @default(false)
-  customerId        String? @unique // Stripe customer id
-  sso               Boolean @default(false)
-  createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  id                    String  @id @default(cuid())
+  email                 String  @unique
+  username              String  @unique @default(cuid())
+  firstName             String?
+  lastName              String?
+  profilePicture        String?
+  usedFreeTrial         Boolean @default(false)
+  onboarded             Boolean @default(false)
+  customerId            String? @unique // Stripe customer id
+  sso                   Boolean @default(false)
+  createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
 
   // Datetime
@@ -370,14 +370,12 @@ model Barcode {
   @@index([organizationId]) // For org-level queries
 }
 
-
 // Barcode types matching zxing format names exactly
 enum BarcodeType {
   Code128
   Code39
   DataMatrix
 }
-
 
 model PrintBatch {
   id String @id @default(cuid())
@@ -423,7 +421,6 @@ enum ErrorCorrection {
   Q
   H
 }
-
 
 model Scan {
   id String @id @default(cuid())
@@ -479,6 +476,7 @@ model Location {
   organizationId String
 
   assets Asset[]
+  kits   Kit[]
 
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
@@ -902,10 +900,10 @@ model Booking {
 model BookingSettings {
   id String @id @default(cuid())
 
-  bufferStartTime Int @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
-  tagsRequired Boolean @default(false) // Whether tags are required for bookings
+  bufferStartTime Int     @default(0) // Buffer time in hours for bookings. This is used to prevent short term bookings
+  tagsRequired    Boolean @default(false) // Whether tags are required for bookings
 
-  maxBookingLength Int? // Maximum booking length in hours. NULL means no limit
+  maxBookingLength               Int? // Maximum booking length in hours. NULL means no limit
   maxBookingLengthSkipClosedDays Boolean @default(false) // If true, the max booking length will skip closed days
 
   // Relationships
@@ -930,11 +928,11 @@ model Kit {
   image           String?
   imageExpiration DateTime?
 
-  assets  Asset[]
-  custody KitCustody?
-  qrCodes Qr[]
+  assets   Asset[]
+  custody  KitCustody?
+  qrCodes  Qr[]
   barcodes Barcode[]
-  reports ReportFound[]
+  reports  ReportFound[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
@@ -947,6 +945,9 @@ model Kit {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  location   Location? @relation(fields: [locationId], references: [id])
+  locationId String?
 
   // Indexes for foreign keys
   @@index([createdById])
