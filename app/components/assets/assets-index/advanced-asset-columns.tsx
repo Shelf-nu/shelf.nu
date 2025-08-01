@@ -1,6 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { CustomFieldType, type AssetStatus } from "@prisma/client";
+import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
   PopoverTrigger,
@@ -8,10 +9,16 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "@remix-run/react";
+import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "~/components/shared/hover-card";
 import {
   Tooltip,
   TooltipContent,
@@ -26,6 +33,7 @@ import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
@@ -36,9 +44,12 @@ import type {
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isLink } from "~/utils/misc";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -275,6 +286,9 @@ export function AdvancedIndexColumn({
     case "barcode_DataMatrix":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "upcomingBookings":
+      return <UpcomingBookingsColumn bookings={item.bookings} />;
+
     default:
       return <Td> </Td>;
   }
@@ -497,6 +511,104 @@ function BarcodeColumn({
           )}
         </span>
       ))}
+    </Td>
+  );
+}
+
+function UpcomingBookingsColumn({
+  bookings,
+}: {
+  bookings: AdvancedIndexAsset["bookings"];
+}) {
+  const { roles } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
+  const canSeeAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
+  });
+
+  if (!bookings || bookings.length === 0) {
+    return <Td>No upcoming bookings</Td>;
+  }
+
+  return (
+    <Td>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="link-gray">
+            {bookings.length > 1
+              ? `${bookings.length} upcoming bookings`
+              : "1 upcoming booking"}
+          </Button>
+        </PopoverTrigger>
+
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className="flex max-h-64 w-auto max-w-full flex-col gap-1 divide-y overflow-auto rounded-md border bg-white p-4"
+          >
+            <h5 className="mb-1 border-b pb-2 text-sm">Upcoming Bookings</h5>
+            {bookings.map((booking) => {
+              const custodianName = booking?.custodianUser
+                ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+                : booking.custodianTeamMember?.name;
+
+              let title = booking.name;
+              if (canSeeAllCustody) {
+                title += ` | ${custodianName}`;
+              }
+
+              return (
+                <HoverCard key={booking.id} openDelay={0} closeDelay={0}>
+                  <HoverCardTrigger
+                    className={tw(
+                      getStatusClasses(
+                        booking.status,
+                        isOneDayEvent(booking.from, booking.to)
+                      ),
+                      "min-w-48 px-2 py-1 text-left"
+                    )}
+                  >
+                    <DateS
+                      date={booking.from}
+                      options={{ timeStyle: "short" }}
+                    />{" "}
+                    | {title}
+                  </HoverCardTrigger>
+
+                  <HoverCardPortal>
+                    <HoverCardContent className="!mt-0 w-full rounded-md border bg-white px-4 py-2">
+                      <EventCardContent
+                        booking={{
+                          id: booking.id,
+                          name: booking.name,
+                          description: booking.description,
+                          status: booking.status,
+                          tags: booking.tags,
+                          start: booking.from,
+                          end: booking.to,
+                          custodian: {
+                            name: custodianName ?? "",
+                            user: booking.custodianUser
+                              ? {
+                                  id: booking.custodianUser.id,
+                                  firstName: booking.custodianUser.firstName,
+                                  lastName: booking.custodianUser.lastName,
+                                  profilePicture:
+                                    booking.custodianUser.profilePicture,
+                                }
+                              : null,
+                          },
+                        }}
+                      />
+                    </HoverCardContent>
+                  </HoverCardPortal>
+                </HoverCard>
+              );
+            })}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
     </Td>
   );
 }
