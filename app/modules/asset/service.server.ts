@@ -1446,6 +1446,7 @@ export async function getAllEntriesForCreateAndEdit({
             ...(tagUseFor ? [{ useFor: { has: tagUseFor } }] : []),
           ],
         },
+        orderBy: { name: "asc" },
       }),
 
       /** Get the locations */
@@ -3116,6 +3117,7 @@ export async function getEntitiesWithSelectedValues({
         ],
       },
       take: allSelectedEntries.includes("tag") ? undefined : 12,
+      orderBy: { name: "asc" },
     }),
     db.tag.findMany({
       where: {
@@ -3126,6 +3128,7 @@ export async function getEntitiesWithSelectedValues({
           { useFor: { has: TagUseFor.ASSET } },
         ],
       },
+      orderBy: { name: "asc" },
     }),
     db.tag.count({
       where: {
