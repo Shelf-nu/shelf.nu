@@ -98,7 +98,7 @@ Replace the entire email content with:
 <p>
   To confirm your account, please use the following One Time Password (OTP):
 </p>
-<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
+<h2><b>{{ .Token }}</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
@@ -115,7 +115,7 @@ Replace the entire email content with:
 
 ```html
 <p>To authenticate, please use the following One Time Password (OTP):</p>
-<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
+<h2><b>{{ .Token }}</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
@@ -133,7 +133,7 @@ Replace the entire email content with:
 ```html
 <h2>Reset Password</h2>
 <p>To reset your password, please use the following (OTP):</p>
-<h2><b>&#123;&#123; .Token &#125;&#125;</b></h2>
+<h2><b>{{ .Token }}</b></h2>
 <p>
   Don't share this OTP with anyone. Our customer service team will never ask you
   for your password, OTP, credit card, or banking info. We hope to see you again
