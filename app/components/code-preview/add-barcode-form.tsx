@@ -4,7 +4,10 @@ import { useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
 import Input from "../forms/input";
 
 interface AddBarcodeFormProps {
@@ -36,7 +39,8 @@ export function AddBarcodeForm({
 
   // Validate barcode value when it changes
   const handleValueChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.toUpperCase();
+    // Normalize value based on barcode type (preserves case for URLs)
+    const value = normalizeBarcodeValue(barcodeType, e.target.value);
     setBarcodeValue(value);
 
     if (value) {
@@ -53,7 +57,11 @@ export function AddBarcodeForm({
     setBarcodeType(type);
 
     if (barcodeValue) {
-      const error = validateBarcodeValue(type, barcodeValue);
+      // Adjust value case based on new type
+      const adjustedValue = normalizeBarcodeValue(type, barcodeValue);
+      setBarcodeValue(adjustedValue);
+
+      const error = validateBarcodeValue(type, adjustedValue);
       setValidationError(error);
     }
   };

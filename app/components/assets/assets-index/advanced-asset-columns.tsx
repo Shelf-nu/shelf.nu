@@ -284,6 +284,7 @@ export function AdvancedIndexColumn({
     case "barcode_Code128":
     case "barcode_Code39":
     case "barcode_DataMatrix":
+    case "barcode_ExternalQR":
       return <BarcodeColumn column={column} item={item} />;
 
     case "upcomingBookings":
@@ -458,6 +459,7 @@ function BarcodeColumn({
     Code128: "Code128",
     Code39: "Code39",
     DataMatrix: "DataMatrix",
+    ExternalQR: "ExternalQR",
   };
 
   const columnType = column.split("_")[1];

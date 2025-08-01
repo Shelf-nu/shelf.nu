@@ -34,6 +34,7 @@ export function BarcodeDisplay({
           Code128: "code128",
           Code39: "code39",
           DataMatrix: "datamatrix",
+          ExternalQR: "qrcode",
         };
 
         const bcid = formatMap[type];
@@ -46,7 +47,9 @@ export function BarcodeDisplay({
           bcid: bcid,
           text: value,
           scale: scale, // Use scale for all barcode types
-          ...(type !== "DataMatrix" && { height: height }), // Height only for linear barcodes (in mm)
+          // Height only for linear barcodes (not for DataMatrix or QR codes)
+          ...(type !== "DataMatrix" &&
+            type !== "ExternalQR" && { height: height }),
           includetext: displayValue,
           textxalign: "center",
           textsize: fontSize,

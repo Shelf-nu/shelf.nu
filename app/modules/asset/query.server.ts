@@ -1375,7 +1375,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'DataMatrix'
       LIMIT 1
-    ) AS barcode_DataMatrix`
+    ) AS barcode_DataMatrix,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'ExternalQR'
+      LIMIT 1
+    ) AS barcode_ExternalQR`
     : Prisma.sql``;
 
   return Prisma.sql`

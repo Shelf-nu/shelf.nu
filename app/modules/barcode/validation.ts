@@ -10,6 +10,8 @@ export const BARCODE_LENGTHS = {
   CODE39_MAX: 43,
   DATAMATRIX_MIN: 4,
   DATAMATRIX_MAX: 100,
+  EXTERNAL_QR_MIN: 1,
+  EXTERNAL_QR_MAX: 2048,
 } as const;
 
 /**
@@ -91,6 +93,39 @@ const validateDataMatrix = (value: string) => {
 };
 
 /**
+ * Validation rules for External QR codes
+ * Flexible validation for URLs, text, structured data
+ */
+const validateExternalQR = (value: string) => {
+  if (!value || value.trim().length === 0) {
+    return "External QR data is required";
+  }
+
+  if (value.length < BARCODE_LENGTHS.EXTERNAL_QR_MIN) {
+    return `External QR data must be at least ${BARCODE_LENGTHS.EXTERNAL_QR_MIN} character`;
+  }
+
+  if (value.length > BARCODE_LENGTHS.EXTERNAL_QR_MAX) {
+    return `External QR data too long (max ${BARCODE_LENGTHS.EXTERNAL_QR_MAX} characters)`;
+  }
+
+  // Allow any UTF-8 content (URLs, text, structured data, etc.)
+  // No character restrictions for maximum flexibility
+  return null;
+};
+
+/**
+ * Normalizes a barcode value based on its type
+ * ExternalQR preserves original case, others are converted to uppercase
+ */
+export function normalizeBarcodeValue(
+  type: BarcodeType,
+  value: string
+): string {
+  return type === BarcodeType.ExternalQR ? value : value.toUpperCase();
+}
+
+/**
  * Check if Code128 value should show warning (over 30 characters)
  */
 export function shouldWarnLongBarcode(
@@ -117,6 +152,8 @@ export function validateBarcodeValue(
       return validateCode39(value);
     case BarcodeType.DataMatrix:
       return validateDataMatrix(value);
+    case BarcodeType.ExternalQR:
+      return validateExternalQR(value);
     default:
       return "Unknown barcode type";
   }

@@ -29,7 +29,10 @@ import {
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -239,7 +242,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         // Validate barcode value
-        const normalizedValue = barcodeValue.toUpperCase();
+        const normalizedValue = normalizeBarcodeValue(
+          barcodeType,
+          barcodeValue
+        );
         const validationError = validateBarcodeValue(
           barcodeType,
           normalizedValue
