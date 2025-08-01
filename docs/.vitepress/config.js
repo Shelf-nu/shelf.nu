@@ -113,6 +113,10 @@ export default {
             text: "Barcode Types Guide",
             link: "/barcode-types-development-guide",
           },
+          {
+            text: "Booking conflict handling",
+            link: "/booking-conflict-queries",
+          },
         ],
       },
       {

@@ -353,25 +353,47 @@ async function getAssets(params: {
       //not assigned to team meber
       where.custody = null;
       if (bookingFrom && bookingTo) {
-        //reserved during that time
-        where.bookings = {
-          none: {
-            ...(unhideAssetsBookigIds?.length && {
-              id: { notIn: unhideAssetsBookigIds },
-            }),
-            status: { in: unavailableBookingStatuses },
-            OR: [
-              {
-                from: { lte: bookingTo },
-                to: { gte: bookingFrom },
+        where.AND = [
+          // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
+          {
+            bookings: {
+              none: {
+                ...(unhideAssetsBookigIds?.length && {
+                  id: { notIn: unhideAssetsBookigIds },
+                }),
+                status: BookingStatus.RESERVED,
+                OR: [
+                  { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                  { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                ],
               },
+            },
+          },
+          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT assets
+          {
+            OR: [
+              // Either asset is AVAILABLE (checked in from partial check-in)
+              { status: AssetStatus.AVAILABLE },
+              // Or asset has no conflicting ONGOING/OVERDUE bookings
               {
-                from: { gte: bookingFrom },
-                to: { lte: bookingTo },
+                bookings: {
+                  none: {
+                    ...(unhideAssetsBookigIds?.length && {
+                      id: { notIn: unhideAssetsBookigIds },
+                    }),
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    },
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
+                  },
+                },
               },
             ],
           },
-        };
+        ];
       }
     }
     if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
@@ -794,11 +816,11 @@ export async function createAsset({
 
       if (barcodesToAdd.length > 0) {
         const barcodesToConnect = barcodesToAdd
-          .filter(b => b.existingId)
-          .map(b => ({ id: b.existingId! }));
-        
+          .filter((b) => b.existingId)
+          .map((b) => ({ id: b.existingId! }));
+
         const barcodesToCreate = barcodesToAdd
-          .filter(b => !b.existingId)
+          .filter((b) => !b.existingId)
           .map(({ type, value }) => ({
             type,
             value: value.toUpperCase(),
@@ -807,11 +829,11 @@ export async function createAsset({
 
         // Build barcodes relation data
         const barcodeRelationData: any = {};
-        
+
         if (barcodesToConnect.length > 0) {
           barcodeRelationData.connect = barcodesToConnect;
         }
-        
+
         if (barcodesToCreate.length > 0) {
           barcodeRelationData.create = barcodesToCreate;
         }

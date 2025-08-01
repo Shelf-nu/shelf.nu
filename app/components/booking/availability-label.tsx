@@ -1,10 +1,12 @@
 import type { Booking } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
+import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.manage-kits";
 import { SERVER_URL } from "~/utils/env";
 import { tw } from "~/utils/tw";
+import { Button } from "../shared/button";
 import {
   Tooltip,
   TooltipContent,
@@ -33,9 +35,8 @@ export function AvailabilityLabel({
   isAddedThroughKit?: boolean;
   isAlreadyAdded?: boolean;
 }) {
-  const isPartOfKit = !!asset.kitId;
-
   const { booking } = useLoaderData<{ booking: Booking }>();
+  const isPartOfKit = !!asset.kitId;
 
   /** User scanned the asset and it is already in booking */
   if (isAlreadyAdded) {
@@ -93,19 +94,37 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Is booked for period
+   * Is booked for period - using client-side helper function
    */
-  // Important not here is that the asset.bookings have to be queried/filtered based on the same date range as the current booking
-  if (
-    asset.bookings?.length > 0 &&
-    asset.bookings.some((b) => b.id !== booking?.id)
-  ) {
+  if (hasAssetBookingConflicts(asset, booking.id)) {
+    const conflictingBooking = asset?.bookings?.find(
+      (b) =>
+        b.status === BookingStatus.ONGOING ||
+        b.status === BookingStatus.OVERDUE ||
+        b.status === BookingStatus.RESERVED
+    );
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}
         tooltipTitle={"Asset is already part of a booking"}
         tooltipContent={
-          "This asset is added to a booking that is overlapping the selected time period."
+          conflictingBooking ? (
+            <span>
+              This asset is added to a booking (
+              <Button
+                to={`${SERVER_URL}/bookings/
+                ${conflictingBooking.id}`}
+                target="_blank"
+                variant={"inherit"}
+                className={"!underline"}
+              >
+                {conflictingBooking?.name}
+              </Button>
+              ) that is overlapping the selected time period.
+            </span>
+          ) : (
+            "This asset is added to a booking that is overlapping the selected time period."
+          )
         }
       />
     );
@@ -119,7 +138,7 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const currentBooking = asset?.bookings?.find(
+    const conflictingBooking = asset?.bookings?.find(
       (b) =>
         b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
     );
@@ -129,15 +148,15 @@ export function AvailabilityLabel({
         badgeText={"Checked out"}
         tooltipTitle={"Asset is currently checked out"}
         tooltipContent={
-          currentBooking ? (
+          conflictingBooking ? (
             <span>
-              This asset is currently checked out as part of another booking ( -{" "}
+              This asset is currently checked out as part of another booking (
               <Link
                 to={`${SERVER_URL}/bookings/
-                ${currentBooking.id}`}
+                ${conflictingBooking.id}`}
                 target="_blank"
               >
-                {currentBooking?.name}
+                {conflictingBooking?.name}
               </Link>
               ) and should be available for your selected date range period
             </span>
@@ -219,14 +238,13 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
-  const kitBookings = kit.assets.length ? kit.assets[0].bookings : [];
-
-  const isCheckedOut = kit.assets.some(
-    (a) =>
-      (a.status === "CHECKED_OUT" &&
-        !a.bookings.some((b) => b.id === currentBookingId)) ??
-      false
-  );
+  // Kit is checked out if it's not AVAILABLE and has conflicting bookings
+  // Use centralized booking conflict logic
+  const isCheckedOut =
+    kit.status !== "AVAILABLE" &&
+    kit.assets.some((asset) =>
+      hasAssetBookingConflicts(asset, currentBookingId)
+    );
 
   const isInCustody =
     kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
@@ -235,19 +253,10 @@ export function getKitAvailabilityStatus(
 
   const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
 
-  const unavailableBookingStatuses = [
-    BookingStatus.RESERVED,
-    BookingStatus.ONGOING,
-    BookingStatus.OVERDUE,
-  ] as BookingStatus[];
-
-  const someAssetHasUnavailableBooking =
-    kitBookings.length > 0 &&
-    kitBookings.some(
-      (b) =>
-        unavailableBookingStatuses.includes(b.status) &&
-        b.id !== currentBookingId
-    );
+  // Apply same booking conflict logic as isCheckedOut
+  const someAssetHasUnavailableBooking = kit.assets.some((asset) =>
+    hasAssetBookingConflicts(asset, currentBookingId)
+  );
 
   return {
     isCheckedOut,

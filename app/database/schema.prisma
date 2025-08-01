@@ -83,6 +83,8 @@ model User {
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
 
+  partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
@@ -880,6 +882,7 @@ model Booking {
   assets Asset[]
 
   tags Tag[]
+  partialCheckins PartialBookingCheckin[]
 
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
@@ -919,6 +922,34 @@ model BookingSettings {
   // Index for foreign key
   @@index([organizationId])
 }
+
+
+  model PartialBookingCheckin {
+    id String @id @default(cuid())
+
+    // Track which assets were checked in during this session
+    assetIds String[] // Array of asset IDs checked in
+    checkinCount Int   // Number of assets checked in (for quick reference)
+
+    // Metadata
+    checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
+
+    // Relationships
+    booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+    bookingId String
+
+    checkedInBy   User @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
+    checkedInById String
+
+    // Timestamps
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([bookingId])
+    @@index([checkedInById])
+    @@index([checkinTimestamp])
+    @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+  }
 
 model Kit {
   id String @id @default(cuid())

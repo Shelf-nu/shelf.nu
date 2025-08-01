@@ -1,9 +1,13 @@
+import type { BookingStatus } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ChevronRight } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";
+import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkRemoveAssetAndKitDialog from "./bulk-remove-asset-and-kit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
@@ -36,7 +40,26 @@ export default function ListBulkActionsDropdown() {
 
 function ConditionalDropdown() {
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const { booking } = useLoaderData<{ booking: { status: string } }>();
+  const bookingStatus = useBookingStatusHelpers(
+    booking.status as BookingStatus
+  );
   const actionsButtonDisabled = selectedItems.length === 0;
+
+  // Show partial check-in option only for ONGOING/OVERDUE bookings
+  const showPartialCheckin =
+    bookingStatus?.isOngoing || bookingStatus?.isOverdue;
+
+  // Check if any selected items are AVAILABLE (already checked in)
+  const hasAvailableAssets = selectedItems.some(
+    (item: any) => item.status === "AVAILABLE"
+  );
+  const partialCheckinDisabled = hasAvailableAssets
+    ? {
+        reason:
+          "Some selected assets are already checked in. Please select only checked-out assets for partial check-in.",
+      }
+    : false;
 
   const {
     ref: dropdownRef,
@@ -61,6 +84,7 @@ function ConditionalDropdown() {
       )}
 
       <BulkRemoveAssetAndKitDialog />
+      <BulkPartialCheckinDialog />
 
       <DropdownMenu
         modal={false}
@@ -115,6 +139,23 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            {showPartialCheckin && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="partial-checkbox"
+                  label={`Check in ${selectedItems.length} asset${
+                    selectedItems.length !== 1 ? "s" : ""
+                  }`}
+                  onClick={closeMenu}
+                  disabled={partialCheckinDisabled}
+                />
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

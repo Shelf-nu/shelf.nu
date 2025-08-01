@@ -1,3 +1,4 @@
+import React from "react";
 import { Form } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
 import { useZorm } from "react-zorm";
@@ -7,6 +8,7 @@ import { ListHeader } from "~/components/list/list-header";
 import { Button } from "~/components/shared/button";
 import { Table, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { tw } from "~/utils/tw";
 import BaseDrawer from "./base-drawer";
 
 // Props for the configurable drawer
@@ -24,7 +26,7 @@ type ConfigurableDrawerProps<T> = {
   // Function to clear all items
   onClearItems: () => void;
   // Title for the drawer
-  title: string;
+  title: string | React.ReactNode;
   // Custom empty state content
   emptyStateContent?:
     | React.ReactNode
@@ -37,8 +39,12 @@ type ConfigurableDrawerProps<T> = {
   Blockers?: React.ComponentType;
   // Whether form submission should be disabled
   disableSubmit?: boolean;
+
   // Custom submit button text
   submitButtonText?: string;
+  // Custom class name for the submit button
+  submitButtonClassName?: string;
+
   // Default expanded state
   defaultExpanded?: boolean;
   // Form submission handler (if you need custom handling)
@@ -52,6 +58,9 @@ type ConfigurableDrawerProps<T> = {
 
   // Optional form component to completely replace the default form
   form?: React.ReactNode;
+
+  // Optional header content to render above the item list
+  headerContent?: React.ReactNode;
 };
 
 /**
@@ -71,19 +80,22 @@ export default function ConfigurableDrawer<T>({
   Blockers,
   disableSubmit = false,
   submitButtonText = "Confirm",
+  submitButtonClassName,
   defaultExpanded = false,
   onSubmit,
   className,
   style,
   formName = "ConfigurableDrawerForm",
   form,
+  headerContent,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
 
   // Create the title with item count
-  const drawerTitle = `${title} (${itemsLength})`;
+  const drawerTitle =
+    typeof title === "string" ? `${title} (${itemsLength})` : title;
 
   // Default empty state content if none provided
   const defaultEmptyState = (expanded: boolean) => (
@@ -114,6 +126,7 @@ export default function ConfigurableDrawer<T>({
       onClear={onClearItems}
       hasItems={hasItems}
       emptyStateContent={emptyStateContent || defaultEmptyState}
+      headerContent={headerContent}
     >
       {/* No need to pass expanded state to this content since we don't use it */}
       <>
@@ -165,11 +178,20 @@ export default function ConfigurableDrawer<T>({
                     <input key={key} type="hidden" name={key} value={value} />
                   );
                 })}
-
+                {/* Candel button */}
                 <Button
-                  width="full"
+                  type="button"
+                  variant="secondary"
+                  to={".."}
+                  className={"ml-auto"}
+                >
+                  Cancel
+                </Button>
+                {/* Submit button */}
+                <Button
                   type="submit"
                   disabled={isLoading || disableSubmit}
+                  className={tw(submitButtonClassName, "w-auto")}
                 >
                   {submitButtonText}
                 </Button>

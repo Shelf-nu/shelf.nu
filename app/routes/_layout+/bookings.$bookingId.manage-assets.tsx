@@ -175,7 +175,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header: {
-          title: `Manage assets for ‘${booking?.name}’`,
+          title: `Manage assets for '${booking?.name}'`,
           subHeading: "Fill up the booking with the assets of your choice",
         },
         searchFieldLabel: "Search assets",

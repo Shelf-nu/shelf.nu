@@ -292,6 +292,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets from kits
+        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
       });
 
       /** We create notes for the newly added assets */

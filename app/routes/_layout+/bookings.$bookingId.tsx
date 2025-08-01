@@ -44,11 +44,16 @@ import {
   extendBooking,
   getBooking,
   getBookingFlags,
+  getDetailedPartialCheckinData,
   removeAssets,
   reserveBooking,
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
+import {
+  calculatePartialCheckinProgress,
+  getBookingStatusRedirect,
+} from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -100,6 +105,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
   const { page, perPageParam } = paramsValues;
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -157,6 +163,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
       }),
     ]);
+    //  * if the booking is ongoing and there is no status param, we need to set it to
+    // checked-out as that is the default
+    // * Only apply this redirect if we're on the main booking page, not child routes
+    // */
+    const url = new URL(request.url);
+    const isMainBookingPage = url.pathname === `/bookings/${bookingId}`;
+
+    // Smart status param handling using helper function
+    const statusRedirect = getBookingStatusRedirect({
+      bookingId,
+      booking,
+      currentStatusParam: searchParams.get("status"),
+      isMainBookingPage,
+    });
+
+    if (statusRedirect) {
+      return statusRedirect;
+    }
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
@@ -169,11 +193,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    // Group assets by kitId for pagination purposes
-    const assetsByKit: Record<string, Array<(typeof booking.assets)[0]>> = {};
-    const individualAssets: Array<(typeof booking.assets)[0]> = [];
+    // Check if there might be partial check-ins by looking at asset statuses OR booking status
+    // We need to check both AVAILABLE assets (already partially checked in) AND
+    // ONGOING/OVERDUE bookings (could have partial check-ins)
+    const hasAvailableAssets = booking.assets.some(
+      (asset) => asset.status === "AVAILABLE"
+    );
+    const canHavePartialCheckins = ["ONGOING", "OVERDUE"].includes(
+      booking.status
+    );
 
-    booking.assets.forEach((asset) => {
+    // Fetch partial check-in data if there are already partial check-ins OR if the booking could have them
+    const { checkedInAssetIds, partialCheckinDetails } =
+      hasAvailableAssets || canHavePartialCheckins
+        ? await getDetailedPartialCheckinData(booking.id)
+        : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
+
+    // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
+    const enhancedBooking = booking;
+
+    // Group assets by kitId for pagination purposes
+    const assetsByKit: Record<
+      string,
+      Array<(typeof enhancedBooking.assets)[0]>
+    > = {};
+    const individualAssets: Array<(typeof enhancedBooking.assets)[0]> = [];
+
+    enhancedBooking.assets.forEach((asset) => {
       if (asset.kitId) {
         if (!assetsByKit[asset.kitId]) {
           assetsByKit[asset.kitId] = [];
@@ -188,7 +234,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
-      assets: Array<(typeof booking.assets)[0]>;
+      assets: Array<(typeof enhancedBooking.assets)[0]>;
     }> = [
       ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
         type: "kit" as const,
@@ -246,15 +292,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               where: {
                 ...(booking.from && booking.to
                   ? {
-                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
                       OR: [
+                        // Rule 1: RESERVED bookings always conflict
                         {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
+                          status: "RESERVED",
+                          id: { not: booking.id }, // Exclude current booking from conflicts
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
                         },
+                        // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
                         {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
+                          status: { in: ["ONGOING", "OVERDUE"] },
+                          id: { not: booking.id }, // Exclude current booking from conflicts
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
                         },
                       ],
                     }
@@ -310,7 +377,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const assetCategories = booking.assets
+    const assetCategories = enhancedBooking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -329,9 +396,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const allCategories = [...assetCategories, ...kitCategories];
 
+    // Calculate partial check-in progress
+    // For progress calculation, we need the TOTAL number of assets in the booking,
+    // not the filtered count from booking.assets (which may be filtered by status)
+    // So we need to get the unfiltered asset count
+    const totalBookingAssets = await db.asset.count({
+      where: {
+        bookings: {
+          some: { id: booking.id },
+        },
+      },
+    });
+
+    const partialCheckinProgress = calculatePartialCheckinProgress(
+      totalBookingAssets,
+      checkedInAssetIds
+    );
+
     const modelName = {
-      singular: "asset",
-      plural: "assets",
+      singular: "item",
+      plural: "items",
     };
 
     const header: HeaderData = {
@@ -342,7 +426,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         currentOrganization,
         header,
-        booking,
+        booking: enhancedBooking,
         modelName,
         paginatedItems: enrichedPaginatedItems,
         page,
@@ -354,7 +438,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: Object.keys(assetsByKit).length,
         totalValue: calculateTotalValueOfAssets({
-          assets: booking.assets,
+          assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
@@ -363,6 +447,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         allCategories,
         tags,
         totalTags: tags.length,
+        partialCheckinProgress,
+        partialCheckinDetails,
+        // Asset search tooltip
+        searchFieldLabel: "Search by asset name",
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -463,7 +551,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, from: true, to: true },
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
@@ -589,6 +677,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           hints: getClientHint(request),
           intentChoice: checkoutIntentChoice,
+          from: basicBookingInfo.from,
+          to: basicBookingInfo.to,
         });
 
         await createNotes({
@@ -646,7 +736,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * They have delete permissions but shouldnt be able to delete other people's bookings
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
-          const b = await getBooking({ id, organizationId });
+          const b = await getBooking({ id, organizationId, request });
           if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
             throw new ShelfError({
               cause: null,
@@ -890,8 +980,10 @@ export default function BookingPage() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**When we are on the booking.scan-assets route, we render an outlet */
-  const shouldRenderOutlet =
-    currentRoute?.handle?.name === "booking.scan-assets";
+  const shouldRenderOutlet = [
+    "booking.scan-assets",
+    "booking.checkin-assets",
+  ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (
     <Outlet />
