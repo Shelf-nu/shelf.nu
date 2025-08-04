@@ -5,6 +5,7 @@ import type {
   Column,
   ColumnLabelKey,
 } from "~/modules/asset-index-settings/helpers";
+import { isShelfQrCode } from "~/utils/qr-code";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
 
@@ -280,26 +281,4 @@ export function extractQrIdFromValue(value: string): string {
   return value;
 }
 
-/**
- * Helper function to check if a QR code value is a Shelf QR code
- * Note: This is duplicated from scanner utils to avoid circular imports
- */
-function isShelfQrCode(value: string): boolean {
-  // Check if it's a raw QR ID (simple cuid pattern check)
-  if (/^[a-z0-9]{25}$/.test(value)) {
-    return true;
-  }
-
-  // Check common Shelf QR patterns (simplified version)
-  // This covers most cases without importing SERVER_URL/URL_SHORTENER
-  if (value.includes("/qr/") && /\/qr\/[a-z0-9]{25}/.test(value)) {
-    return true;
-  }
-
-  // Check for short URL pattern (domain + cuid)
-  if (/^https:\/\/[^\/]+\/[a-z0-9]{25}$/.test(value)) {
-    return true;
-  }
-
-  return false;
-}
+// isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage
