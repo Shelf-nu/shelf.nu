@@ -165,17 +165,18 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
  * to avoid misclassification of shorter values as Code128
  */
 function detectBarcodeType(value: string): BarcodeType | null {
-  const normalizedValue = value.toUpperCase();
-
   // Check types by specificity: most restrictive validation rules first
-  // Order by specificity: most restrictive validation rules first
+  // Order by specificity: URLs and flexible content first, then structured barcodes
   const orderedTypes: BarcodeType[] = [
+    BarcodeType.ExternalQR, // 1-2048 characters, URLs and flexible content (check first for URLs)
     BarcodeType.Code39, // 4-43 characters, alphanumeric only
-    BarcodeType.DataMatrix, // 4-100 characters, but check before Code128
+    BarcodeType.DataMatrix, // 4-100 characters
     BarcodeType.Code128, // 4-40 characters, most permissive (check last)
   ];
 
   for (const type of orderedTypes) {
+    // Use proper normalization for each type
+    const normalizedValue = normalizeBarcodeValue(type, value);
     const validationError = validateBarcodeValue(type, normalizedValue);
     if (!validationError) {
       return type;

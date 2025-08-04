@@ -205,7 +205,7 @@ export async function updateBarcode({
       updateData.type = type;
     }
 
-    if (value !== undefined) {
+    if (value !== undefined && type !== undefined) {
       updateData.value = normalizeBarcodeValue(type, value);
     }
 
