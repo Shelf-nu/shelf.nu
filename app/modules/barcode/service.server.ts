@@ -501,7 +501,7 @@ export async function validateBarcodeUniqueness(
 
   // OPTIMIZED: Single query to get all existing barcodes with these values
   const submittedValues = barcodes.map((b) =>
-    b.type === "ExternalQR" ? b.value : b.value.toUpperCase()
+    b.type === BarcodeType.ExternalQR ? b.value : b.value.toUpperCase()
   );
 
   const isEditing = !!currentItemId && !!relationshipType;
