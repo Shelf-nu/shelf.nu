@@ -392,6 +392,7 @@ describe("updateBarcode", () => {
 
     await updateBarcode({
       id: "barcode-1",
+      type: BarcodeType.Code128,
       value: "upd123",
       organizationId: "org-1",
       assetId: "asset-1",
@@ -399,7 +400,7 @@ describe("updateBarcode", () => {
 
     expect(db.barcode.update).toHaveBeenCalledWith({
       where: { id: "barcode-1", organizationId: "org-1" },
-      data: { value: "UPD123" },
+      data: { type: BarcodeType.Code128, value: "UPD123" },
     });
   });
 
@@ -499,7 +500,7 @@ describe("getBarcodeByValue", () => {
 
     expect(db.barcode.findFirst).toHaveBeenCalledWith({
       where: {
-        value: "TEST123",
+        OR: [{ value: "test123" }, { value: "TEST123" }],
         organizationId: "org-1",
       },
       include: {

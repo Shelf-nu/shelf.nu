@@ -23,6 +23,7 @@ export const fixedFields = [
   "custody",
   "upcomingReminder",
   "actions",
+  "upcomingBookings",
 ] as const;
 
 // Define barcode field names
@@ -30,6 +31,7 @@ export const barcodeFields = [
   "barcode_Code128",
   "barcode_Code39",
   "barcode_DataMatrix",
+  "barcode_ExternalQR",
 ] as const;
 
 export type BarcodeField = (typeof barcodeFields)[number];
@@ -65,6 +67,8 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_Code128: "Code128",
   barcode_Code39: "Code39",
   barcode_DataMatrix: "DataMatrix",
+  barcode_ExternalQR: "External QR",
+  upcomingBookings: "Upcoming Bookings",
 };
 
 export const defaultFields: Column[] = [
@@ -82,6 +86,7 @@ export const defaultFields: Column[] = [
   { name: "custody", visible: true, position: 11 },
   { name: "upcomingReminder", visible: true, position: 12 },
   { name: "actions", visible: true, position: 13 },
+  { name: "upcomingBookings", visible: true, position: 14 },
 ];
 
 // Generate barcode columns when barcodes are enabled

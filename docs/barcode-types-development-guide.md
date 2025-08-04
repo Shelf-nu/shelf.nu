@@ -118,6 +118,49 @@ export function validateBarcodeValue(
 }
 ```
 
+#### 2.4 Update Normalization Function
+
+**File:** `app/modules/barcode/validation.ts`
+
+⚠️ **CRITICAL**: The `normalizeBarcodeValue` function handles case conversion for different barcode types. This is essential for consistent database storage and validation.
+
+```typescript
+/**
+ * Normalizes a barcode value based on its type
+ * Most barcode types are converted to uppercase, but some (like ExternalQR) preserve original case
+ */
+export function normalizeBarcodeValue(
+  type: BarcodeType,
+  value: string
+): string {
+  switch (type) {
+    case BarcodeType.ExternalQR:
+      return value; // Preserve original case for URLs and flexible content
+    case BarcodeType.Code128:
+    case BarcodeType.Code39:
+    case BarcodeType.DataMatrix:
+    case BarcodeType.YourNewType: // Add your new type here
+      return value.toUpperCase(); // Convert to uppercase for consistency
+    default:
+      return value.toUpperCase(); // Default to uppercase
+  }
+}
+```
+
+**Usage Examples:**
+
+```typescript
+// Before storing in database
+const normalizedValue = normalizeBarcodeValue(
+  BarcodeType.YourNewType,
+  userInput
+);
+
+// Before validation
+const normalizedValue = normalizeBarcodeValue(type, value);
+const validationError = validateBarcodeValue(type, normalizedValue);
+```
+
 ### 3. Constants and Configuration
 
 #### 3.1 Add Type Option Configuration
@@ -352,6 +395,7 @@ Use this checklist to ensure all necessary changes are made:
 - [ ] **Validation Constants** - Added length constants
 - [ ] **Validation Function** - Created type-specific validation
 - [ ] **Validation Switch** - Updated switch statement
+- [ ] **Normalization Function** - Updated normalizeBarcodeValue function ⚠️ **CRITICAL**
 - [ ] **Type Options** - Added to BARCODE_TYPE_OPTIONS
 - [ ] **Field Definition** - Added to barcodeFields array
 - [ ] **Column Label** - Added to columnsLabelsMap
@@ -404,12 +448,13 @@ Use this checklist to ensure all necessary changes are made:
 
 ## Common Pitfalls
 
-1. **Missing CSV Template Update** - Users won't be able to import the new type
-2. **Incorrect SQL Subquery** - Sorting/filtering won't work
-3. **Missing Scanner Detection** - Camera scanning won't recognize the type
-4. **Incomplete Test Coverage** - Edge cases may break production
-5. **Missing Column Rendering** - UI will show empty cells
-6. **Incorrect Validation Regex** - Users can't enter valid barcodes
+1. **Missing Normalization Function Update** - Values won't be processed correctly, causing validation and database issues ⚠️ **CRITICAL**
+2. **Missing CSV Template Update** - Users won't be able to import the new type
+3. **Incorrect SQL Subquery** - Sorting/filtering won't work
+4. **Missing Scanner Detection** - Camera scanning won't recognize the type
+5. **Incomplete Test Coverage** - Edge cases may break production
+6. **Missing Column Rendering** - UI will show empty cells
+7. **Incorrect Validation Regex** - Users can't enter valid barcodes
 
 ## Troubleshooting
 

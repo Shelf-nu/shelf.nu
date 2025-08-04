@@ -218,42 +218,54 @@ export default function renderEventCard({ event }: EventCardProps) {
           sideOffset={8}
           collisionPadding={16}
         >
-          <div className="mb-3 mt-2 flex items-center gap-2 ">
-            <div className="text-text-md font-medium">{booking.name}</div>
-            <BookingStatusBadge
-              status={booking.status}
-              custodianUserId={booking.custodian.user?.id}
-            />
-          </div>
-
-          <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
-            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
-            <ArrowRightIcon className="size-3 text-gray-600" />
-            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
-          </div>
-
-          <p className="mb-1 text-sm font-normal">Custodian:</p>
-          <div className="mb-3 flex items-center gap-2">
-            <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
-          </div>
-          {booking.tags && booking.tags.length ? (
-            <>
-              <p className="mb-1 text-sm font-normal">Tags:</p>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                {booking.tags.map((tag) => (
-                  <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          {booking.description ? (
-            <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
-              {booking.description}
-            </div>
-          ) : null}
+          <EventCardContent booking={booking} />
         </HoverCardContent>
       </HoverCardPortal>
     </HoverCard>
+  );
+}
+
+export function EventCardContent({
+  booking,
+}: {
+  booking: CalendarExtendedProps;
+}) {
+  return (
+    <>
+      <div className="mb-3 mt-2 flex items-center gap-2 ">
+        <div className="text-text-md font-medium">{booking.name}</div>
+        <BookingStatusBadge
+          status={booking.status}
+          custodianUserId={booking.custodian.user?.id}
+        />
+      </div>
+
+      <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
+        <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
+        <ArrowRightIcon className="size-3 text-gray-600" />
+        <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
+      </div>
+
+      <p className="mb-1 text-sm font-normal">Custodian:</p>
+      <div className="mb-3 flex items-center gap-2">
+        <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
+      </div>
+      {booking.tags && booking.tags.length ? (
+        <>
+          <p className="mb-1 text-sm font-normal">Tags:</p>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {booking.tags.map((tag) => (
+              <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {booking.description ? (
+        <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
+          {booking.description}
+        </div>
+      ) : null}
+    </>
   );
 }
