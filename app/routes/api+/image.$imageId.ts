@@ -60,7 +60,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       });
     }
 
-    return new Response(image.blob, {
+    return new Response(new Uint8Array(image.blob), {
       headers: {
         "Content-Type": image.contentType,
         "Cache-Control": "max-age=31536000",

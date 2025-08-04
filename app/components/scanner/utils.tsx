@@ -1,11 +1,17 @@
 import { BarcodeType } from "@prisma/client";
 import { readBarcodes, type ReadResult } from "zxing-wasm";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
 import { isQrId } from "~/utils/id";
+import { isShelfQrCode } from "~/utils/qr-code";
 import type { OnCodeDetectionSuccess } from "./code-scanner";
 
 // Supported barcode formats that match our BarcodeType enum
 export const SUPPORTED_BARCODE_FORMATS = Object.values(BarcodeType) as string[];
+
+// isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -122,17 +128,18 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
  * to avoid misclassification of shorter values as Code128
  */
 function detectBarcodeType(value: string): BarcodeType | null {
-  const normalizedValue = value.toUpperCase();
-
   // Check types by specificity: most restrictive validation rules first
-  // Order by specificity: most restrictive validation rules first
+  // Order by specificity: URLs and flexible content first, then structured barcodes
   const orderedTypes: BarcodeType[] = [
+    BarcodeType.ExternalQR, // 1-2048 characters, URLs and flexible content (check first for URLs)
     BarcodeType.Code39, // 4-43 characters, alphanumeric only
-    BarcodeType.DataMatrix, // 4-100 characters, but check before Code128
+    BarcodeType.DataMatrix, // 4-100 characters
     BarcodeType.Code128, // 4-40 characters, most permissive (check last)
   ];
 
   for (const type of orderedTypes) {
+    // Use proper normalization for each type
+    const normalizedValue = normalizeBarcodeValue(type, value);
     const validationError = validateBarcodeValue(type, normalizedValue);
     if (!validationError) {
       return type;
@@ -260,13 +267,27 @@ export const processFrame = async ({
 
       // Check if it's a QR code first
       if (detectedFormat === "QRCode") {
-        // Handle QR codes normally
-        await handleDetection({
-          result: result.text,
-          onCodeDetectionSuccess,
-          allowNonShelfCodes,
-          paused,
-        });
+        // Check if it's a Shelf QR code by checking against known Shelf QR patterns
+        const isShelfQr = isShelfQrCode(result.text);
+
+        if (isShelfQr) {
+          // Handle as Shelf QR code
+          await handleDetection({
+            result: result.text,
+            onCodeDetectionSuccess,
+            allowNonShelfCodes,
+            paused,
+          });
+        } else {
+          // Handle as external QR code (treat as ExternalQR barcode type)
+          await handleDetection({
+            result: result.text,
+            onCodeDetectionSuccess,
+            allowNonShelfCodes,
+            paused,
+            barcodeType: "ExternalQR",
+          });
+        }
       } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
         // It's a supported barcode type
         // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
@@ -361,15 +382,33 @@ export const handleDetection = async ({
     return;
   }
 
+  // If we have a specific barcode type passed in (like ExternalQR), use it
+  if (barcodeType) {
+    // Validate the value for the specific barcode type
+    const normalizedValue = normalizeBarcodeValue(barcodeType, result);
+    const validationError = validateBarcodeValue(barcodeType, normalizedValue);
+
+    if (!validationError) {
+      await onCodeDetectionSuccess?.({
+        value: normalizedValue,
+        type: "barcode",
+        barcodeType: barcodeType,
+      });
+      return;
+    }
+  }
+
   // If not a QR code, check if it's a valid barcode
   const barcodeCheck = isValidBarcode(result);
 
   if (barcodeCheck.isValid) {
     // It's a valid barcode
+    const detectedBarcodeType = barcodeType || barcodeCheck.type;
+    const normalizedValue = normalizeBarcodeValue(detectedBarcodeType!, result);
     await onCodeDetectionSuccess?.({
-      value: result.toUpperCase(),
+      value: normalizedValue,
       type: "barcode",
-      barcodeType: barcodeType || barcodeCheck.type,
+      barcodeType: detectedBarcodeType,
     });
     return;
   }

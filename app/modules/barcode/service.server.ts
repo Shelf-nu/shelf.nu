@@ -1,11 +1,5 @@
-import type {
-  Barcode,
-  BarcodeType,
-  Organization,
-  User,
-  Asset,
-  Kit,
-} from "@prisma/client";
+import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
+import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -15,7 +9,7 @@ import {
   isLikeShelfError,
 } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
-import { validateBarcodeValue } from "./validation";
+import { validateBarcodeValue, normalizeBarcodeValue } from "./validation";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Barcode";
@@ -50,8 +44,9 @@ export async function createBarcode({
   kitId,
 }: CreateBarcodeParams): Promise<Barcode> {
   try {
-    // Validate barcode value format (using uppercase version)
-    const validationError = validateBarcodeValue(type, value.toUpperCase());
+    // Validate barcode value format (preserve case for ExternalQR)
+    const normalizedValue = normalizeBarcodeValue(type, value);
+    const validationError = validateBarcodeValue(type, normalizedValue);
     if (validationError) {
       throw new ShelfError({
         cause: null,
@@ -65,7 +60,7 @@ export async function createBarcode({
     const barcode = await db.barcode.create({
       data: {
         type,
-        value: value.toUpperCase(), // Normalize to uppercase
+        value: normalizedValue, // Preserve case for ExternalQR, uppercase others
         organizationId,
         ...(assetId && { assetId }),
         ...(kitId && { kitId }),
@@ -123,11 +118,15 @@ export async function createBarcodes({
       return;
     }
 
-    // Validate all barcode values first (using uppercase version)
+    // Validate all barcode values first (preserve case for ExternalQR)
     for (const barcode of barcodes) {
+      const normalizedValue = normalizeBarcodeValue(
+        barcode.type,
+        barcode.value
+      );
       const validationError = validateBarcodeValue(
         barcode.type,
-        barcode.value.toUpperCase()
+        normalizedValue
       );
       if (validationError) {
         throw new ShelfError({
@@ -146,7 +145,7 @@ export async function createBarcodes({
     await db.barcode.createMany({
       data: barcodes.map((barcode) => ({
         type: barcode.type,
-        value: barcode.value.toUpperCase(),
+        value: normalizeBarcodeValue(barcode.type, barcode.value),
         organizationId,
         ...(assetId && { assetId }),
         ...(kitId && { kitId }),
@@ -200,13 +199,14 @@ export async function updateBarcode({
       updateData.type = type;
     }
 
-    if (value !== undefined) {
-      updateData.value = value.toUpperCase();
+    if (value !== undefined && type !== undefined) {
+      updateData.value = normalizeBarcodeValue(type, value);
     }
 
-    // Validate new values if provided (using uppercase version)
+    // Validate new values if provided (preserve case for ExternalQR)
     if (type !== undefined && value !== undefined) {
-      const validationError = validateBarcodeValue(type, value.toUpperCase());
+      const normalizedValue = normalizeBarcodeValue(type, value);
+      const validationError = validateBarcodeValue(type, normalizedValue);
       if (validationError) {
         throw new ShelfError({
           cause: null,
@@ -326,9 +326,13 @@ export async function getBarcodeByValue<
   include?: T;
 }): Promise<any> {
   try {
+    // Try to find barcode with original case first (for ExternalQR), then uppercase (for other types)
     const barcode = await db.barcode.findFirst({
       where: {
-        value: value.toUpperCase(),
+        OR: [
+          { value: value }, // Try original case first (ExternalQR)
+          { value: value.toUpperCase() }, // Try uppercase (other barcode types)
+        ],
         organizationId,
       },
       include: include || {
@@ -474,7 +478,10 @@ export async function validateBarcodeUniqueness(
   const seenValues = new Map<string, number>();
 
   for (let i = 0; i < barcodes.length; i++) {
-    const normalizedValue = barcodes[i].value.toUpperCase();
+    const normalizedValue = normalizeBarcodeValue(
+      barcodes[i].type,
+      barcodes[i].value
+    );
 
     if (seenValues.has(normalizedValue)) {
       // Mark both the first occurrence and current as duplicates
@@ -487,7 +494,9 @@ export async function validateBarcodeUniqueness(
   }
 
   // OPTIMIZED: Single query to get all existing barcodes with these values
-  const submittedValues = barcodes.map((b) => b.value.toUpperCase());
+  const submittedValues = barcodes.map((b) =>
+    b.type === BarcodeType.ExternalQR ? b.value : b.value.toUpperCase()
+  );
 
   const isEditing = !!currentItemId && !!relationshipType;
   const existingBarcodes = await db.barcode.findMany({
@@ -524,7 +533,7 @@ export async function validateBarcodeUniqueness(
   // Check each submitted barcode against the map
   for (let i = 0; i < barcodes.length; i++) {
     const barcode = barcodes[i];
-    const normalizedValue = barcode.value.toUpperCase();
+    const normalizedValue = normalizeBarcodeValue(barcode.type, barcode.value);
     const existingBarcode = existingValueMap.get(normalizedValue);
 
     if (existingBarcode) {
@@ -572,11 +581,15 @@ export async function updateBarcodes({
   userId: User["id"];
 }): Promise<void> {
   try {
-    // Validate all barcode values first (using uppercase version)
+    // Validate all barcode values first (preserve case for ExternalQR)
     for (const barcode of barcodes) {
+      const normalizedValue = normalizeBarcodeValue(
+        barcode.type,
+        barcode.value
+      );
       const validationError = validateBarcodeValue(
         barcode.type,
-        barcode.value.toUpperCase()
+        normalizedValue
       );
       if (validationError) {
         throw new ShelfError({
@@ -622,7 +635,7 @@ export async function updateBarcodes({
           },
           data: {
             type: barcode.type,
-            value: barcode.value.toUpperCase(),
+            value: normalizeBarcodeValue(barcode.type, barcode.value),
           },
         })
       );
@@ -634,7 +647,7 @@ export async function updateBarcodes({
         db.barcode.create({
           data: {
             type: barcode.type,
-            value: barcode.value.toUpperCase(),
+            value: normalizeBarcodeValue(barcode.type, barcode.value),
             organizationId,
             ...(assetId && { assetId }),
             ...(kitId && { kitId }),
@@ -721,6 +734,7 @@ export async function parseBarcodesFromImportData({
         { column: "barcode_Code128", type: "Code128" },
         { column: "barcode_Code39", type: "Code39" },
         { column: "barcode_DataMatrix", type: "DataMatrix" },
+        { column: "barcode_ExternalQR", type: "ExternalQR" },
       ];
 
       barcodeTypes.forEach(({ column, type }) => {
@@ -736,11 +750,9 @@ export async function parseBarcodesFromImportData({
             .map((v) => v.trim())
             .filter(Boolean);
           values.forEach((value) => {
-            // Validate barcode format
-            const validationError = validateBarcodeValue(
-              type,
-              value.toUpperCase()
-            );
+            // Validate barcode format (preserve case for ExternalQR)
+            const normalizedValue = normalizeBarcodeValue(type, value);
+            const validationError = validateBarcodeValue(type, normalizedValue);
             if (validationError) {
               throw new ShelfError({
                 cause: null,
@@ -750,7 +762,7 @@ export async function parseBarcodesFromImportData({
                 shouldBeCaptured: false,
               });
             }
-            assetBarcodes.push({ type, value: value.toUpperCase() });
+            assetBarcodes.push({ type, value: normalizedValue });
           });
         }
       });

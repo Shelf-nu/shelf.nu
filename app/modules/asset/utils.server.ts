@@ -254,6 +254,7 @@ export const ASSET_CSV_HEADERS = [
   "barcode_Code128",
   "barcode_Code39",
   "barcode_DataMatrix",
+  "barcode_ExternalQR",
 ];
 
 type AllSelectedValues = {

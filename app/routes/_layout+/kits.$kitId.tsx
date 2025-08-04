@@ -23,7 +23,10 @@ import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createBarcode } from "~/modules/barcode/service.server";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
 import {
   deleteKit,
   deleteKitImage,
@@ -342,7 +345,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         // Validate barcode value
-        const normalizedValue = barcodeValue.toUpperCase();
+        const normalizedValue = normalizeBarcodeValue(
+          barcodeType,
+          barcodeValue
+        );
         const validationError = validateBarcodeValue(
           barcodeType,
           normalizedValue
