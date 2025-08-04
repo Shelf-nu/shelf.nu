@@ -5,10 +5,14 @@ import {
   FREE_TRIAL_DAYS,
   SEND_ONBOARDING_EMAIL,
   SHOW_HOW_DID_YOU_FIND_US,
+  SUPPORTED_LANGUAGES,
+  FALLBACK_LANGUAGE,
 } from "~/utils/env";
 import { Config } from "./types";
 
 export const config: Config = {
+  supportedLanguages: SUPPORTED_LANGUAGES || ["en", "fr"],
+  fallbackLanguage: FALLBACK_LANGUAGE || "en",
   sendOnboardingEmail: SEND_ONBOARDING_EMAIL || false,
   enablePremiumFeatures: ENABLE_PREMIUM_FEATURES || false,
   freeTrialDays: Number(FREE_TRIAL_DAYS || 7),

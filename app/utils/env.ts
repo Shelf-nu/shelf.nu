@@ -59,6 +59,8 @@ declare global {
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
+      SUPPORTED_LANGUAGES: Array<string>;
+      FALLBACK_LANGUAGE: string;
     }
   }
 }
@@ -150,7 +152,15 @@ export const SENTRY_DSN = getEnv("SENTRY_DSN", {
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
   isRequired: false,
 });
-
+/**
+ *   Supported languages for i18n.
+ */
+export const SUPPORTED_LANGUAGES = getEnv("SUPPORTED_LANGUAGES", {
+  isRequired: false,
+});
+export const FALLBACK_LANGUAGE = getEnv("FALLBACK_LANGUAGE", {
+  isRequired: false,
+});
 /**
  * A comma separated list of customerIds that have custom install of shelf.
  * We need this in order to make our webhook work properly.

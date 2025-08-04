@@ -109,6 +109,7 @@ export default {
         items: [
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Utility Hooks", link: "/hooks" },
+          { text: "Internationalization", link: "/internationalization" },
           {
             text: "Barcode Types Guide",
             link: "/barcode-types-development-guide",

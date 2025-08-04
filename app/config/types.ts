@@ -51,4 +51,7 @@ export interface Config {
    * This is useful for gathering feedback on how users discover the platform.
    */
   showHowDidYouFindUs: boolean;
+
+  supportedLanguages: Array<string>;
+  fallbackLanguage: string;
 }
