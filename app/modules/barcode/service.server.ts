@@ -1,11 +1,5 @@
-import type {
-  Barcode,
-  BarcodeType,
-  Organization,
-  User,
-  Asset,
-  Kit,
-} from "@prisma/client";
+import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
+import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
