@@ -27,11 +27,38 @@ export function isValidImageUrl(url: string): boolean {
     if (!["http:", "https:"].includes(parsedUrl.protocol)) {
       return false;
     }
+    
     // Check if URL ends with common image extensions
     const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-    return imageExtensions.some((ext) =>
+    const hasImageExtension = imageExtensions.some((ext) =>
       parsedUrl.pathname.toLowerCase().endsWith(ext)
     );
+    
+    // If it has a clear image extension, it's valid
+    if (hasImageExtension) {
+      return true;
+    }
+    
+    // Allow URLs from known image services that use dynamic URLs
+    const imageServiceDomains = [
+      'lnk.sortly.co',
+      'cloudinary.com',
+      'amazonaws.com',
+      'googleusercontent.com',
+      'imgur.com',
+      'unsplash.com',
+      'pexels.com'
+    ];
+    
+    // Check if the hostname contains any known image service domains
+    const isImageService = imageServiceDomains.some(domain => 
+      parsedUrl.hostname.includes(domain)
+    );
+    
+    // Also check for common image-related path patterns
+    const hasImagePath = /\/(photo|image|img|pic|picture|download|media|asset)/i.test(parsedUrl.pathname);
+    
+    return isImageService || hasImagePath;
   } catch {
     return false;
   }
