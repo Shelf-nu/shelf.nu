@@ -370,27 +370,29 @@ export async function uploadImageFromUrl(
     // If not in cache, download the image with retry logic
     let response: Response | null = null;
     let fetchError: Error | null = null;
-    
+
     // Try to fetch the image up to 2 times
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         response = await fetch(imageUrl);
-        
+
         if (response.ok) {
           fetchError = null;
           break; // Success, exit retry loop
         } else {
-          fetchError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+          fetchError = new Error(
+            `HTTP ${response.status}: ${response.statusText}`
+          );
           if (attempt === 2) {
             // Last attempt failed, log and return null
             Logger.error(
               new ShelfError({
                 cause: fetchError,
                 message: "Failed to fetch image from URL after 2 attempts",
-                additionalData: { 
-                  imageUrl, 
+                additionalData: {
+                  imageUrl,
                   status: response.status,
-                  attempts: 2
+                  attempts: 2,
                 },
                 label,
                 shouldBeCaptured: false,
@@ -399,7 +401,7 @@ export async function uploadImageFromUrl(
             return null;
           }
           // Wait a moment before retrying
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } catch (cause) {
         fetchError = cause as Error;
@@ -409,9 +411,9 @@ export async function uploadImageFromUrl(
             new ShelfError({
               cause: fetchError,
               message: "Failed to fetch image from URL after 2 attempts",
-              additionalData: { 
-                imageUrl, 
-                attempts: 2
+              additionalData: {
+                imageUrl,
+                attempts: 2,
               },
               label,
               shouldBeCaptured: false,
@@ -420,7 +422,7 @@ export async function uploadImageFromUrl(
           return null;
         }
         // Wait a moment before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
@@ -513,7 +515,7 @@ export async function uploadImageFromUrl(
     return data.path;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
-    
+
     // Log the error and return null instead of throwing
     // This allows the import process to continue without the image
     Logger.error(
@@ -527,7 +529,7 @@ export async function uploadImageFromUrl(
         shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
       })
     );
-    
+
     return null; // Return null to indicate failure, allowing import to continue
   }
 }
