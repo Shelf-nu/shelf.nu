@@ -1942,15 +1942,16 @@ export async function createAssetsFromContentImport({
             mainImageExpiration = oneDayFromNow();
           }
         } catch (cause) {
+          // This catch block should rarely be reached now since uploadImageFromUrl returns null instead of throwing
+          // But we keep it for any unexpected errors in createSignedUrl or other operations
           const isShelfError = isLikeShelfError(cause);
 
-          // Log the error but don't stop the import process
           Logger.error(
             new ShelfError({
               cause,
               message: isShelfError
                 ? `${cause?.message} for asset: ${asset.title}`
-                : `Failed to upload image for asset ${asset.title}`,
+                : `Unexpected error during image processing for asset ${asset.title}`,
               additionalData: { imageUrl: asset.imageUrl, assetId },
               label: "Assets",
             })
