@@ -34,6 +34,7 @@ import {
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
 } from "~/modules/barcode/service.server";
+import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
@@ -809,7 +810,7 @@ export async function createAsset({
           .filter((b) => !b.existingId)
           .map(({ type, value }) => ({
             type,
-            value: value.toUpperCase(),
+            value: normalizeBarcodeValue(type, value),
             organizationId,
           }));
 
