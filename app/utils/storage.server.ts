@@ -328,7 +328,7 @@ export async function uploadImageFromUrl(
   imageUrl: string,
   { filename, contentType, bucketName, resizeOptions }: UploadOptions,
   cache?: LRUCache<string, CachedImage>
-) {
+): Promise<string | null> {
   try {
     let buffer: Buffer;
     let actualContentType: string;
@@ -367,25 +367,77 @@ export async function uploadImageFromUrl(
       }
     }
 
-    // If not in cache, download the image
-    const response = await fetch(imageUrl).catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to fetch image from URL",
-        additionalData: { imageUrl },
-        label,
-        shouldBeCaptured: false,
-      });
-    });
+    // If not in cache, download the image with retry logic
+    let response: Response | null = null;
+    let fetchError: Error | null = null;
 
-    if (!response.ok) {
-      throw new ShelfError({
-        cause: null,
-        message: "Failed to fetch image from URL",
-        shouldBeCaptured: false,
-        additionalData: { imageUrl, status: response.status },
-        label,
-      });
+    // Try to fetch the image up to 2 times
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        response = await fetch(imageUrl);
+
+        if (response.ok) {
+          fetchError = null;
+          break; // Success, exit retry loop
+        } else {
+          fetchError = new Error(
+            `HTTP ${response.status}: ${response.statusText}`
+          );
+          if (attempt === 2) {
+            // Last attempt failed, log and return null
+            Logger.error(
+              new ShelfError({
+                cause: fetchError,
+                message: "Failed to fetch image from URL after 2 attempts",
+                additionalData: {
+                  imageUrl,
+                  status: response.status,
+                  attempts: 2,
+                },
+                label,
+                shouldBeCaptured: false,
+              })
+            );
+            return null;
+          }
+          // Wait a moment before retrying
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      } catch (cause) {
+        fetchError = cause as Error;
+        if (attempt === 2) {
+          // Last attempt failed, log and return null
+          Logger.error(
+            new ShelfError({
+              cause: fetchError,
+              message: "Failed to fetch image from URL after 2 attempts",
+              additionalData: {
+                imageUrl,
+                attempts: 2,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          return null;
+        }
+        // Wait a moment before retrying
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    // This should not happen due to the early returns above, but TypeScript needs the check
+    if (!response) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Unexpected null response after retry loop",
+          additionalData: { imageUrl },
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+      return null;
     }
 
     actualContentType = response.headers.get("content-type") || contentType;
@@ -463,15 +515,22 @@ export async function uploadImageFromUrl(
     return data.path;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
-    throw new ShelfError({
-      cause,
-      message: isShelfError
-        ? cause.message
-        : "Failed to process and upload image from URL",
-      additionalData: { imageUrl, filename, contentType, bucketName },
-      label,
-      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
-    });
+
+    // Log the error and return null instead of throwing
+    // This allows the import process to continue without the image
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: isShelfError
+          ? cause.message
+          : "Failed to process and upload image from URL",
+        additionalData: { imageUrl, filename, contentType, bucketName },
+        label,
+        shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
+      })
+    );
+
+    return null; // Return null to indicate failure, allowing import to continue
   }
 }
 
