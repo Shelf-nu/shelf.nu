@@ -178,7 +178,7 @@ export default function ConfigurableDrawer<T>({
                     <input key={key} type="hidden" name={key} value={value} />
                   );
                 })}
-                {/* Candel button */}
+                {/* Cancel button */}
                 <Button
                   type="button"
                   variant="secondary"

@@ -88,7 +88,10 @@ export default function BaseDrawer({
 
     // Recalculate on window resize
     const handleResize = () => calculateHeaderHeight();
-    window.addEventListener("resize", handleResize);
+    const abortController = new AbortController();
+    window.addEventListener("resize", handleResize, {
+      signal: abortController.signal,
+    });
 
     // Use ResizeObserver to detect changes in header content
     const resizeObserver = new ResizeObserver(() => calculateHeaderHeight());

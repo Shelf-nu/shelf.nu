@@ -892,7 +892,7 @@ export async function checkinBooking({
           status: 404,
           label,
           message:
-            "Booking not found, are you sure it exists in current workspace.",
+            "Booking not found, are you sure it exists in current workspace?",
         });
       });
 
@@ -1047,7 +1047,7 @@ export async function partialCheckinBooking({
           status: 404,
           label,
           message:
-            "Booking not found, are you sure it exists in current workspace.",
+            "Booking not found, are you sure it exists in current workspace?",
         });
       });
 
@@ -1093,7 +1093,9 @@ export async function partialCheckinBooking({
       }
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**${user.firstName} ${user.lastName}** checked in via explicit check-in scanner for booking **[${bookingFound.name}](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via explicit check-in scanner for booking **[${
+        bookingFound.name
+      }](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
