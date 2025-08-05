@@ -1806,7 +1806,11 @@ export async function createAssetsFromContentImport({
     // Create cache instance for this import operation
     const imageCache = new LRUCache<string, CachedImage>({
       maxSize: importImageCacheServer.MAX_CACHE_SIZE,
-      sizeCalculation: (value) => value.size,
+      sizeCalculation: (value) => {
+        // Ensure size is always a positive integer to prevent LRU cache errors
+        const size = value?.size || 0;
+        return typeof size === "number" && size > 0 ? size : 1;
+      },
     });
 
     const qrCodesPerAsset = await parseQrCodesFromImportData({
@@ -1940,14 +1944,21 @@ export async function createAssetsFromContentImport({
         } catch (cause) {
           const isShelfError = isLikeShelfError(cause);
 
-          throw new ShelfError({
-            cause,
-            message: isShelfError
-              ? `${cause?.message} for asset: ${asset.title}`
-              : `Failed to upload image for asset ${asset.title}`,
-            additionalData: { imageUrl: asset.imageUrl, assetId },
-            label: "Assets",
-          });
+          // Log the error but don't stop the import process
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: isShelfError
+                ? `${cause?.message} for asset: ${asset.title}`
+                : `Failed to upload image for asset ${asset.title}`,
+              additionalData: { imageUrl: asset.imageUrl, assetId },
+              label: "Assets",
+            })
+          );
+
+          // Continue with asset creation without the image
+          mainImage = undefined;
+          mainImageExpiration = undefined;
         }
       }
 
