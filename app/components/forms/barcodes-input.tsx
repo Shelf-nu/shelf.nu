@@ -16,7 +16,10 @@ import { useActionData } from "@remix-run/react";
 import { ChevronRight, HelpIcon } from "~/components/icons/library";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
-import { validateBarcodeValue } from "~/modules/barcode/validation";
+import {
+  validateBarcodeValue,
+  normalizeBarcodeValue,
+} from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import Input from "./input";
@@ -129,13 +132,17 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
           return;
         }
 
-        // Check for duplicates
-        if (values.has(barcode.value.toUpperCase())) {
+        // Check for duplicates (normalize values for comparison)
+        const normalizedValue = normalizeBarcodeValue(
+          barcode.type,
+          barcode.value
+        );
+        if (values.has(normalizedValue)) {
           errors[index] = "Duplicate barcode values are not allowed";
           return;
         }
 
-        values.add(barcode.value.toUpperCase());
+        values.add(normalizedValue);
       });
 
       return errors;
@@ -295,7 +302,10 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     value={barcode.value}
                     placeholder="Enter barcode value"
                     onChange={(e) => {
-                      barcodes[i].value = e.target.value.toUpperCase();
+                      barcodes[i].value = normalizeBarcodeValue(
+                        barcodes[i].type,
+                        e.target.value
+                      );
                       setBarcodes([...barcodes]);
 
                       // Clear server error for this field when user starts typing

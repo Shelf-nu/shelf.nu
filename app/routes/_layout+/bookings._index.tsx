@@ -156,6 +156,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               { useFor: { has: TagUseFor.BOOKING } },
             ],
           },
+          orderBy: { name: "asc" },
         }),
       ]);
 

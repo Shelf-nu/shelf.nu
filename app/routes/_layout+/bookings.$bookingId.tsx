@@ -161,6 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             { useFor: { has: TagUseFor.BOOKING } },
           ],
         },
+        orderBy: { name: "asc" },
       }),
     ]);
     //  * if the booking is ongoing and there is no status param, we need to set it to

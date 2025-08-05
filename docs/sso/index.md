@@ -15,7 +15,7 @@ Shelf supports most identity providers that support the SAML 2.0 SSO protocol. W
 Accounts signing in with SSO have certain limitations. The following sections outline the limitations when SSO is enabled or disabled for your team.
 
 > [!IMPORTANT]
-> When setting up SSO for your organization, you **must ensure that at least one non-SSO user remains as the owner** of all workspaces. This user will serve as the administrative fallback and maintain ownership of organizational resources. 
+> When setting up SSO for your organization, you **must ensure that at least one non-SSO user remains as the owner** of all workspaces. This user will serve as the administrative fallback and maintain ownership of organizational resources.
 >
 > This non-SSO user account is only needed for rare administrative tasks such as SSO configuration changes - your team members will not need to access this account during normal operations and can use their SSO credentials for daily work.
 

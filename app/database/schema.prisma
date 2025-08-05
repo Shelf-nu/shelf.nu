@@ -378,6 +378,7 @@ enum BarcodeType {
   Code128
   Code39
   DataMatrix
+  ExternalQR
 }
 
 

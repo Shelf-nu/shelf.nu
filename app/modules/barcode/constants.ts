@@ -18,4 +18,10 @@ export const BARCODE_TYPE_OPTIONS = [
     description:
       "4-100 characters, supports letters, numbers, and symbols (e.g., ABC-123)",
   },
+  {
+    value: BarcodeType.ExternalQR,
+    label: "External QR",
+    description:
+      "1-2048 characters, URLs, text, or any external QR content (e.g., https://example.com)",
+  },
 ];
