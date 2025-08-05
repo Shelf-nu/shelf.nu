@@ -112,8 +112,7 @@ export function AvailabilityLabel({
             <span>
               This asset is added to a booking (
               <Button
-                to={`${SERVER_URL}/bookings/
-                ${conflictingBooking.id}`}
+                to={`/bookings/${conflictingBooking.id}`}
                 target="_blank"
                 variant={"inherit"}
                 className={"!underline"}
