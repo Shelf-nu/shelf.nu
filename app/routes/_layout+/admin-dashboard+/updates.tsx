@@ -100,6 +100,7 @@ export default function Updates() {
               <Th>Analytics</Th>
               <Th>Status</Th>
               <Th>Created By</Th>
+              <Th>Actions</Th>
             </Tr>
           </thead>
           <tbody>
@@ -161,6 +162,15 @@ export default function Updates() {
                 </Td>
                 <Td className="text-sm">
                   {update.createdBy.firstName} {update.createdBy.lastName}
+                </Td>
+                <Td>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    to={`${update.id}/edit`}
+                  >
+                    Edit
+                  </Button>
                 </Td>
               </Tr>
             ))}

@@ -1,34 +1,54 @@
 import { UpdateStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
-import { createUpdate } from "~/modules/update/service.server";
+import { getUpdateById, updateUpdate } from "~/modules/update/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ context }: LoaderFunctionArgs) => {
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { updateId } = params;
 
   try {
     await requireAdmin(userId);
 
-    return json(data(null));
+    if (!updateId) {
+      throw new Error("Update ID is required");
+    }
+
+    const update = await getUpdateById(updateId);
+    if (!update) {
+      throw new Error("Update not found");
+    }
+
+    return json(data({ update }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
   }
 };
 
-export const action = async ({ context, request }: ActionFunctionArgs) => {
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { updateId } = params;
 
   try {
     await requireAdmin(userId);
+
+    if (!updateId) {
+      throw new Error("Update ID is required");
+    }
 
     const formData = await request.formData();
 
@@ -51,10 +71,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       })
     );
 
-    await createUpdate({
+    await updateUpdate({
+      id: updateId,
       ...payload,
       targetRoles,
-      createdById: userId,
     });
 
     return redirect("/admin-dashboard/updates");
@@ -64,11 +84,21 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   }
 };
 
-export default function NewUpdate() {
+export default function EditUpdate() {
+  const { update } = useLoaderData<typeof loader>();
+
   return (
     <Card>
-      <h3 className="mb-6 text-lg font-semibold">Create New Update</h3>
-      <UpdateForm />
+      <h3 className="mb-6 text-lg font-semibold">Edit Update</h3>
+      <UpdateForm
+        id={update.id}
+        title={update.title}
+        content={update.content}
+        url={update.url}
+        publishDate={new Date(update.publishDate)}
+        status={update.status}
+        targetRoles={update.targetRoles}
+      />
     </Card>
   );
 }

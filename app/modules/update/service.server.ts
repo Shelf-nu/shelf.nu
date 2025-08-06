@@ -267,6 +267,30 @@ export async function trackUpdateClick({
 // ===== ADMIN FUNCTIONS =====
 
 /**
+ * Get a single update by ID for admin editing
+ */
+export function getUpdateById(id: string): Promise<UpdateWithRelations | null> {
+  return db.update.findUnique({
+    where: { id },
+    include: {
+      createdBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      userReads: true,
+      _count: {
+        select: {
+          userReads: true,
+        },
+      },
+    },
+  });
+}
+
+/**
  * Get all updates for admin dashboard with analytics
  */
 export function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
@@ -288,34 +312,6 @@ export function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
     },
     orderBy: {
       publishDate: "desc",
-    },
-  });
-}
-
-/**
- * Get a single update by ID for admin
- */
-export function getUpdateById({
-  id,
-}: {
-  id: string;
-}): Promise<UpdateWithRelations | null> {
-  return db.update.findUnique({
-    where: { id },
-    include: {
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      userReads: true,
-      _count: {
-        select: {
-          userReads: true,
-        },
-      },
     },
   });
 }
