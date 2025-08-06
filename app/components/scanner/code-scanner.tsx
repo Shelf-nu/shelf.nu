@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
@@ -297,26 +297,29 @@ function ScannerMode({
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleInputSubmit = async (input: HTMLInputElement) => {
-    if (!input.value.trim()) return;
+  const handleInputSubmit = useCallback(
+    async (input: HTMLInputElement) => {
+      if (!input.value.trim()) return;
 
-    const result = extractQrIdFromValue(input.value);
-    await handleDetection({
-      result,
-      onCodeDetectionSuccess,
-      allowNonShelfCodes,
-      paused,
-    });
+      const result = extractQrIdFromValue(input.value);
+      await handleDetection({
+        result,
+        onCodeDetectionSuccess,
+        allowNonShelfCodes,
+        paused,
+      });
 
-    // Run the callback if passed
-    if (callback) {
-      callback(input, paused);
-    } else {
-      /** Clean up the input */
-      input.value = "";
-      setInputValue("");
-    }
-  };
+      // Run the callback if passed
+      if (callback) {
+        callback(input, paused);
+      } else {
+        /** Clean up the input */
+        input.value = "";
+        setInputValue("");
+      }
+    },
+    [onCodeDetectionSuccess, allowNonShelfCodes, paused, callback]
+  );
 
   const handleEnterPress = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
