@@ -25,11 +25,16 @@ export default function UpdatesNavItem() {
   const [readUpdateIds, setReadUpdateIds] = useState<Set<string>>(new Set());
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
   const { isMd } = useViewportHeight();
+
   // Fetch updates when popover opens
   const { data: updates = [], isLoading } = useApiQuery<UpdateForUser[]>({
     api: "/api/updates",
     enabled: open,
-  });
+  }); // Only show Updates on desktop
+
+  if (!isMd) {
+    return null;
+  }
 
   // Calculate unread count including optimistic updates
   const unreadCount =
@@ -61,7 +66,6 @@ export default function UpdatesNavItem() {
       }
     } else {
       // Reset the ref when popover closes
-
       viewsTrackedRef.current = false;
     }
   };
@@ -96,7 +100,7 @@ export default function UpdatesNavItem() {
 
     // Open URL
     window.open(url, "_blank");
-    setOpen(false);
+    handleOpenChange(false);
   };
 
   return (
@@ -125,17 +129,10 @@ export default function UpdatesNavItem() {
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
-          align={!isMd ? "center" : "end"}
-          side={!isMd ? "top" : "right"}
+          align="end"
+          side="right"
           sideOffset={8}
-          className={tw(
-            "z-50 rounded-md border border-gray-200 bg-white shadow-lg",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
-            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-            "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-            // Mobile: full width with margins, Desktop: fixed width
-            !isMd ? "mx-4 w-[calc(100vw-2rem)] max-w-sm" : "w-[450px]"
-          )}
+          className="z-50 w-[450px] rounded-md border border-gray-200 bg-white shadow-lg"
         >
           <div className="p-4">
             <div className="mb-4 flex items-center justify-between">
@@ -160,11 +157,11 @@ export default function UpdatesNavItem() {
               </div>
             ) : updates && updates?.length > 0 ? (
               <div
-                className={tw(
-                  "space-y-3 overflow-y-auto overscroll-contain",
-                  // Mobile: smaller max height to fit screen, Desktop: larger max height
-                  !isMd ? "max-h-60" : "max-h-80"
-                )}
+                className="max-h-80 space-y-3 overflow-y-auto"
+                style={{
+                  WebkitOverflowScrolling: "touch",
+                  touchAction: "pan-y",
+                }}
               >
                 {updates.map((update) => {
                   const isUnread =
