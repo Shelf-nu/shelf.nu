@@ -2,6 +2,7 @@ import { Fragment, useCallback } from "react";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import ChildNavItem from "./child-nav-item";
 import ParentNavItem from "./parent-nav-item";
+import UpdatesNavItem from "./updates-nav-item";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -81,6 +82,11 @@ export default function SidebarNav({
         }
 
         case "button": {
+          // Special handling for Updates button
+          if (navItem.title === "Updates") {
+            return <UpdatesNavItem />;
+          }
+
           return (
             <SidebarMenuItem onClick={navItem.onClick}>
               <SidebarMenuButton
