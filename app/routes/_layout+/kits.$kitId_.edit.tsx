@@ -82,6 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getLocationsForCreateAndEdit({
           request,
           organizationId,
+          defaultLocation: kit?.locationId,
         }),
       ]);
 
@@ -182,7 +183,7 @@ export default function KitEdit() {
   const { kit } = useLoaderData<typeof loader>();
 
   return (
-    <>
+    <div className="relative">
       <Header
         title={
           <Button to={`/kits/${kit.id}`} variant={"inherit"}>
@@ -198,8 +199,9 @@ export default function KitEdit() {
           categoryId={kit.categoryId}
           saveButtonLabel="Save"
           barcodes={kit.barcodes}
+          locationId={kit?.locationId}
         />
       </div>
-    </>
+    </div>
   );
 }
