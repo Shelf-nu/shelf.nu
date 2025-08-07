@@ -1,5 +1,10 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
-import { CalendarCheck, MousePointerClick, QrCode } from "lucide-react";
+import {
+  CalendarCheck,
+  MousePointerClick,
+  PackageCheck,
+  QrCode,
+} from "lucide-react";
 import { Spinner } from "./spinner";
 
 import {
@@ -39,7 +44,6 @@ import {
   CheckOutIcon,
   CheckInIcon,
   CheckIcon,
-  PartialCheckboxIcon,
   AssetLabel,
   NoPermissionsIcon,
   ActiveSwitchIcon,
@@ -103,7 +107,7 @@ export type IconType =
   | "bookings"
   | "assign-custody"
   | "release-custody"
-  | "partial-checkbox"
+  | "partial-checkin"
   | "asset-label"
   | "lock"
   | "activate"
@@ -172,7 +176,7 @@ export const iconsMap: IconsMap = {
   kit: <KitIcon />,
   "assign-custody": <CheckOutIcon />,
   "release-custody": <CheckInIcon />,
-  "partial-checkbox": <PartialCheckboxIcon />,
+  "partial-checkin": <PackageCheck />,
   "asset-label": <AssetLabel />,
   "no-permissions": <NoPermissionsIcon />,
   activate: <ActiveSwitchIcon />,

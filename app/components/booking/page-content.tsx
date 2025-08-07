@@ -12,7 +12,7 @@ export function BookingPageContent() {
     booking,
     teamMembers,
     bookingFlags,
-    totalItems: totalAssets,
+    totalAssets,
     totalKits,
     totalValue,
     allCategories,

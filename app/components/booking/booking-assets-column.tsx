@@ -27,7 +27,7 @@ export function BookingAssetsColumn() {
   const {
     userId,
     booking,
-    paginatedItems,
+    items: paginatedItems,
     partialCheckinDetails,
     partialCheckinProgress,
   } = useLoaderData<BookingPageLoaderData>();
@@ -135,7 +135,7 @@ export function BookingAssetsColumn() {
     (isBaseOrSelfService && booking?.custodianUser?.id === userId);
 
   function itemsGetter(data: LoaderData) {
-    return data.paginatedItems
+    return data.items
       .map((item) => [item, ...(item?.type === "kit" ? item.assets : [])])
       .flat();
   }

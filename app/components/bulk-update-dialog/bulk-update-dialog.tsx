@@ -46,7 +46,7 @@ type BulkDialogType =
   | "bookings"
   | "booking-exist"
   | "download-qr"
-  | "partial-checkbox";
+  | "partial-checkin";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;

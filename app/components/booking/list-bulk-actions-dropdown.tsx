@@ -51,13 +51,20 @@ function ConditionalDropdown() {
     bookingStatus?.isOngoing || bookingStatus?.isOverdue;
 
   // Check if any selected items are AVAILABLE (already checked in)
-  const hasAvailableAssets = selectedItems.some(
-    (item: any) => item.status === "AVAILABLE"
-  );
-  const partialCheckinDisabled = hasAvailableAssets
+  // For kits, we allow partial check-in as long as some assets are still CHECKED_OUT
+  const hasOnlyAvailableAssets = selectedItems.every((item: any) => {
+    if (item.type === "kit") {
+      // For kits, check if ALL assets are AVAILABLE
+      return item.assets.every((asset: any) => asset.status === "AVAILABLE");
+    }
+    // For individual assets, check the asset status
+    return item.status === "AVAILABLE";
+  });
+
+  const partialCheckinDisabled = hasOnlyAvailableAssets
     ? {
         reason:
-          "Some selected assets are already checked in. Please select only checked-out assets for partial check-in.",
+          "All selected assets are already checked in. Please select assets that are still checked out.",
       }
     : false;
 
@@ -147,10 +154,8 @@ function ConditionalDropdown() {
                 }}
               >
                 <BulkUpdateDialogTrigger
-                  type="partial-checkbox"
-                  label={`Check in ${selectedItems.length} asset${
-                    selectedItems.length !== 1 ? "s" : ""
-                  }`}
+                  type="partial-checkin"
+                  label="Check in selected items"
                   onClick={closeMenu}
                   disabled={partialCheckinDisabled}
                 />

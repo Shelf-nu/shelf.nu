@@ -429,7 +429,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking: enhancedBooking,
         modelName,
-        paginatedItems: enrichedPaginatedItems,
+        items: enrichedPaginatedItems,
         page,
         totalItems: totalPaginationItems,
         totalPaginationItems,
@@ -445,6 +445,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         }),
         /** Assets inside the booking without kits */
         assetsCount: individualAssets.length,
+        totalAssets: totalBookingAssets,
         allCategories,
         tags,
         totalTags: tags.length,
