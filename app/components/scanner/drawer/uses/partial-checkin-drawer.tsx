@@ -439,18 +439,18 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const checkedInAssetIds = new Set(
     partialCheckinProgress?.checkedInAssetIds || []
   );
-  
+
   // Check if this kit is currently scanned
   const isKitScanned = Object.values(items).some(
     (item) => item?.type === "kit" && (item?.data as KitFromQr)?.id === kit.id
   );
-  
+
   // Calculate remaining assets (not already checked in)
   const uncheckedKitAssetsInBooking = kitAssetsInBooking.filter(
     (asset) => !checkedInAssetIds.has(asset.id)
   );
-  
-  const remainingKitAssetsInBooking = isKitScanned 
+
+  const remainingKitAssetsInBooking = isKitScanned
     ? [] // If kit is scanned, no assets are remaining (the unchecked ones will be checked in)
     : uncheckedKitAssetsInBooking;
   const totalKitAssetsInBooking = kitAssetsInBooking.length;
@@ -494,9 +494,15 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
           {isKitScanned ? (
-            <>({uncheckedKitAssetsInBooking.length} of {totalKitAssetsInBooking} assets to be checked in)</>
+            <>
+              ({uncheckedKitAssetsInBooking.length} of {totalKitAssetsInBooking}{" "}
+              assets to be checked in)
+            </>
           ) : (
-            <>({remainingKitAssetsInBooking.length} of {totalKitAssetsInBooking} assets remaining)</>
+            <>
+              ({remainingKitAssetsInBooking.length} of {totalKitAssetsInBooking}{" "}
+              assets remaining)
+            </>
           )}
         </span>
       </p>

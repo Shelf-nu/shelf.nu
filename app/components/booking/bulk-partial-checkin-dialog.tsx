@@ -78,7 +78,7 @@ export default function BulkPartialCheckinDialog() {
         <>
           {/* Hidden field to request JSON response */}
           <input type="hidden" name="returnJson" value="true" />
-          
+
           {/* Filter out kit IDs - only send asset IDs to backend */}
           {selectedItems
             .filter((item: any) => item.title && !item._count) // Only assets, not kits
