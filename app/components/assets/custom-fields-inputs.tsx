@@ -184,6 +184,22 @@ export default function AssetCustomFields({
         </span>
       </div>
     ),
+    NUMBER: (field) => (
+      <Input
+        hideLabel
+        type="number"
+        label={field.name}
+        name={`cf-${field.id}`}
+        placeholder={field.helpText || undefined}
+        error={zo.errors[`cf-${field.id}`]()?.message}
+        defaultValue={getCustomFieldVal(field.id)}
+        disabled={disabled}
+        step="any"
+        min={0}
+        className="w-full"
+        required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
+      />
+    ),
   };
 
   const requiredFields = customFields.filter(

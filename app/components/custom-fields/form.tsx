@@ -73,6 +73,7 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
     "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes.",
   AMOUNT:
     "Enter numerical values to be formatted in your workspace's currency. Supports decimals.",
+  NUMBER: "Enter numerical values. Supports decimals.",
 };
 
 export const CustomFieldForm = ({

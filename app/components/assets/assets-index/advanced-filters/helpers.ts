@@ -98,6 +98,7 @@ export function getUIFieldType({
             fieldType = "enum";
             break;
           case "AMOUNT":
+          case "NUMBER":
             fieldType = "number";
             break;
           default:

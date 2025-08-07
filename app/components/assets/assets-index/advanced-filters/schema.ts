@@ -116,6 +116,7 @@ filterSchema.refine(
         DATE: "date",
         OPTION: "enum",
         AMOUNT: "number",
+        NUMBER: "number",
       };
       const filterType = customFieldTypeToFilterType[data.fieldType];
       return operatorsPerType[filterType].includes(data.operator);

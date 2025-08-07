@@ -136,6 +136,7 @@ function addCustomFieldFilter(
     case "OPTION":
       return addCustomFieldOptionFilter(whereClause, filter, subquery);
     case "AMOUNT":
+    case "NUMBER":
       return addCustomFieldNumberFilter(whereClause, filter, subquery);
     default:
       return whereClause;
@@ -1044,6 +1045,7 @@ function parseFilterValue(
           return value.toLowerCase() === "true";
         case CustomFieldType.DATE:
         case CustomFieldType.AMOUNT:
+        case CustomFieldType.NUMBER:
           return operator === "between" ? value.split(",") : value;
         default:
           return value;
