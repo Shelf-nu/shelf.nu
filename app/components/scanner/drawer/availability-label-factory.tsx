@@ -1,4 +1,3 @@
-// components/scanner/availability-label-factory.tsx
 import type { ReactNode } from "react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 

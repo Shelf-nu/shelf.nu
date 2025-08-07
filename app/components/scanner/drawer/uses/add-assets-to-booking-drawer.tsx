@@ -1,5 +1,4 @@
-// components/scanner/drawer.tsx
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";

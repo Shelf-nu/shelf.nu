@@ -1,4 +1,3 @@
-// components/scanner/base-drawer.tsx
 import { useEffect, useRef, useState } from "react";
 import { useRouteLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
