@@ -47,7 +47,6 @@ export default function CheckinDialog({
   variant = "default",
 }: CheckinDialogProps) {
   const isEarlyCheckin = isBookingEarlyCheckin(booking.to);
-  console.log(portalContainer, "portalContainer");
   if (!isEarlyCheckin) {
     return (
       <Button

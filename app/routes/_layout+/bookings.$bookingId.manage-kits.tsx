@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  KitStatus,
+  type Prisma,
+} from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -270,8 +275,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },
-      select: { assets: { select: { id: true } } },
+      select: { name: true, status: true, assets: { select: { id: true } } },
     });
+
+    const checkedOutKits = selectedKits.filter(
+      (k) => k.status === KitStatus.CHECKED_OUT
+    );
+
+    if (
+      checkedOutKits.length > 0 &&
+      ["ONGOING", "OVERDUE"].includes(booking.status)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        title: "Not allowed. Assets already checked out",
+
+        message: `You cannot add checked out kits to a ongoing booking. Please check the status of the following kits: ${checkedOutKits
+          .map((k) => k.name)
+          .join(", ")}`,
+        additionalData: {
+          booking,
+          checkedOutKits,
+          selectedKits,
+        },
+        shouldBeCaptured: false,
+      });
+    }
 
     const allSelectedAssetIds = selectedKits.flatMap((k) =>
       k.assets.map((a) => a.id)

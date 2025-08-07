@@ -323,6 +323,35 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (assetId) => !existingAssetIds.includes(assetId)
     );
 
+    // Query to see if any of the newAssetIds are already checked out
+    const checkedOutAssets = await db.asset.findMany({
+      where: {
+        id: { in: newAssetIds },
+        status: AssetStatus.CHECKED_OUT,
+      },
+      select: { id: true, title: true },
+    });
+
+    if (
+      checkedOutAssets.length > 0 &&
+      ["ONGOING", "OVERDUE"].includes(booking.status)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        title: "Not allowed. Assets already checked out",
+        message: `The following assets are already checked out and cannot be added to the booking: ${checkedOutAssets
+          .map((asset) => asset.title)
+          .join(", ")}`,
+        additionalData: {
+          checkedOutAssets,
+          bookingId,
+          newAssetIds,
+        },
+        shouldBeCaptured: false,
+      });
+    }
+
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */

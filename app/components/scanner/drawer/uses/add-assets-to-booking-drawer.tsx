@@ -1,5 +1,5 @@
 // components/scanner/drawer.tsx
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
@@ -99,8 +99,52 @@ export default function AddAssetsToBookingDrawer({
     })
     .map(([qrId]) => qrId);
 
+  // Assets already checked out as current booking is checked out
+  const checkedOutAssetsIds = assets
+    .filter((asset) => asset.status === AssetStatus.CHECKED_OUT)
+    .map((asset) => asset.id);
+  const tryingToAddCheckedOutAssets =
+    checkedOutAssetsIds.length > 0 &&
+    ["ONGOING", "OVERDUE"].includes(booking.status);
+
+  // Kits already checked out as current booking is checked out
+  const checkedOutKitsIds = kits
+    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
+    .map((kit) => kit.id);
+  const qrIdsOfCheckedOutKits = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item || item.type !== "kit") return false;
+      return checkedOutKitsIds.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+  const tryingToAddCheckedOutKits =
+    checkedOutKitsIds.length > 0 &&
+    ["ONGOING", "OVERDUE"].includes(booking.status);
+
   // Create blockers configuration
   const blockerConfigs = [
+    {
+      condition: tryingToAddCheckedOutAssets,
+      count: checkedOutAssetsIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          already checked out.
+        </>
+      ),
+      onResolve: () => removeAssetsFromList(checkedOutAssetsIds),
+    },
+    {
+      condition: tryingToAddCheckedOutKits,
+      count: checkedOutKitsIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          already checked out.
+        </>
+      ),
+      onResolve: () => removeItemsFromList(qrIdsOfCheckedOutKits),
+    },
     {
       condition: unavailableAssetsIds.length > 0,
       count: unavailableAssetsIds.length,
@@ -166,10 +210,12 @@ export default function AddAssetsToBookingDrawer({
         ...assetsAlreadyAddedIds,
         ...assetsPartOfKitIds,
         ...unavailableAssetsIds,
+        ...checkedOutAssetsIds,
       ]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
         ...qrIdsOfUnavailableKits,
+        ...qrIdsOfCheckedOutKits,
       ]);
     },
   });
@@ -217,6 +263,10 @@ export default function AddAssetsToBookingDrawer({
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const { booking } = useLoaderData<typeof loader>();
+  // Check if booking is in checked-out state and asset is checked out
+  const bookingIsCheckedOut = ["ONGOING", "OVERDUE"].includes(booking.status);
+  const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
+
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.unavailable(!asset.availableToBook),
@@ -228,6 +278,16 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",
       priority: 70,
+    },
+    // Custom preset for "already checked out" - blocking issue
+    {
+      condition: bookingIsCheckedOut && isCheckedOut,
+      badgeText: "Already checked out",
+      tooltipTitle: "Asset is checked out",
+      tooltipContent:
+        "This asset is already checked out and cannot be added to a checked-out booking.",
+      priority: 80, // High priority - blocking issue
+      // Uses default warning colors (red/orange) appropriate for blocking issue
     },
   ];
 
@@ -258,16 +318,31 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
+  const { booking } = useLoaderData<typeof loader>();
+
+  // Check if booking is in checked-out state and kit is checked out
+  const bookingIsCheckedOut = ["ONGOING", "OVERDUE"].includes(booking.status);
+  const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
+
   // Use preset configurations to define the availability labels
   const availabilityConfigs = [
-    kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
-    kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
+    kitLabelPresets.inCustody(kit.status === KitStatus.IN_CUSTODY),
     kitLabelPresets.hasAssetsInCustody(
       kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
       kit.assets.some((asset) => !asset.availableToBook)
     ),
+    // Custom preset for "already checked out" - only show when booking is checked out
+    {
+      condition: bookingIsCheckedOut && isCheckedOut,
+      badgeText: "Already checked out",
+      tooltipTitle: "Kit is checked out",
+      tooltipContent:
+        "This kit is already checked out and cannot be added to a checked-out booking.",
+      priority: 80, // High priority - blocking issue
+      // Uses default warning colors (red/orange) appropriate for blocking issue
+    },
   ];
 
   // Create the availability labels component with default options
