@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetStatus, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -6,7 +6,7 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "@remix-run/node";
-import { useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
@@ -207,6 +207,7 @@ export default function CheckinAssetsFromBooking() {
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
+  const { booking } = useLoaderData<typeof loader>();
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
@@ -231,6 +232,7 @@ export default function CheckinAssetsFromBooking() {
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Booking"
+          backButtonUrl={`/bookings/${booking.id}?state=${AssetStatus.CHECKED_OUT}`}
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}

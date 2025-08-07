@@ -47,6 +47,7 @@ type CodeScannerProps = {
   onCodeDetectionSuccess: OnCodeDetectionSuccess;
   isLoading?: boolean;
   backButtonText?: string;
+  backButtonUrl?: string; // URL to navigate back, defaults to ".." if not provided
   allowNonShelfCodes?: boolean;
   hideBackButtonText?: boolean;
   className?: string;
@@ -81,6 +82,7 @@ type Mode = "camera" | "scanner";
 export const CodeScanner = ({
   onCodeDetectionSuccess,
   backButtonText = "Back",
+  backButtonUrl = "..",
   allowNonShelfCodes = false,
   hideBackButtonText = false,
   className,
@@ -144,7 +146,7 @@ export const CodeScanner = ({
             >
               {!hideBackButtonText && (
                 <Link
-                  to=".."
+                  to={backButtonUrl}
                   className={tw(
                     "inline-flex items-center justify-start text-[11px] leading-[11px]",
                     actionSwitcher && isMd
