@@ -292,7 +292,6 @@ export default function PartialCheckinDrawer({
       onClearItems={clearList}
       form={
         <CustomForm
-          items={items}
           assetIdsForCheckin={assetIdsForCheckin}
           isEarlyCheckin={isEarlyCheckin}
           booking={booking}
@@ -525,7 +524,6 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 
 // Custom form component that handles early check-in dialog
 type CustomFormProps = {
-  items: Record<string, any>;
   assetIdsForCheckin: string[];
   isEarlyCheckin: boolean;
   booking: {
@@ -539,7 +537,6 @@ type CustomFormProps = {
 };
 
 const CustomForm = ({
-  items,
   assetIdsForCheckin,
   isEarlyCheckin,
   booking,
@@ -547,11 +544,6 @@ const CustomForm = ({
   hasBlockers,
 }: CustomFormProps) => {
   const formRef = useRef<HTMLFormElement>(null);
-  const hasItems = Object.keys(items).length > 0;
-
-  if (!hasItems || !assetIdsForCheckin.length) {
-    return null;
-  }
 
   return (
     <Form ref={formRef} className="mb-4 flex max-h-full w-full" method="post">
