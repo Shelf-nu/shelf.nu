@@ -12,7 +12,6 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { UpdateForUser } from "~/modules/update/service.server";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
@@ -24,17 +23,12 @@ export default function UpdatesNavItem() {
   const viewsTrackedRef = useRef(false);
   const [readUpdateIds, setReadUpdateIds] = useState<Set<string>>(new Set());
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
-  const { isMd } = useViewportHeight();
 
   // Fetch updates when popover opens
   const { data: updates = [], isLoading } = useApiQuery<UpdateForUser[]>({
     api: "/api/updates",
     enabled: open,
-  }); // Only show Updates on desktop
-
-  if (!isMd) {
-    return null;
-  }
+  }); // Only show Updates on desktop - handled with CSS instead of conditional return
 
   // Calculate unread count including optimistic updates
   const unreadCount =
@@ -106,7 +100,7 @@ export default function UpdatesNavItem() {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <SidebarMenuItem>
+        <SidebarMenuItem className="hidden md:block">
           <SidebarMenuButton
             className={tw(
               "font-semibold",
