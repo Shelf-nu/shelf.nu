@@ -220,7 +220,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
       // If both have partial check-in dates, sort by most recent first
       if (aPartialCheckin && bPartialCheckin) {
-        return bPartialCheckin.checkinDate.getTime() - aPartialCheckin.checkinDate.getTime();
+        return (
+          bPartialCheckin.checkinDate.getTime() -
+          aPartialCheckin.checkinDate.getTime()
+        );
       }
 
       // Assets with partial check-ins come first (already checked in = higher priority)
