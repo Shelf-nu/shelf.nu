@@ -2275,9 +2275,9 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         };
       }
 
-      if (status) {
-        assetsWhere.status = status;
-      }
+      // if (status) {
+      //   assetsWhere.status = status;
+      // }
 
       assetsInclude = {
         select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
