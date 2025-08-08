@@ -93,6 +93,8 @@ export default function ListAssetContent({
     isBaseOrSelfService,
   ]);
 
+  const isPartiallyCheckedIn = Boolean(partialCheckinDetails?.[item.id]);
+
   return (
     <>
       <When truthy={!isKitAsset} fallback={<Td> </Td>}>
@@ -140,7 +142,9 @@ export default function ListAssetContent({
               </span>
               <div>
                 <AssetStatusBadge
-                  status={item.status}
+                  status={
+                    isPartiallyCheckedIn ? "PARTIALLY_CHECKED_IN" : item.status
+                  }
                   availableToBook={item.availableToBook}
                 />
               </div>
@@ -175,7 +179,7 @@ export default function ListAssetContent({
               isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
             )}
           >
-            {partialCheckinDetails?.[item.id] ? (
+            {isPartiallyCheckedIn ? (
               <span className="text-sm text-gray-600">
                 <DateS
                   date={partialCheckinDetails[item.id].checkinDate}
@@ -193,7 +197,7 @@ export default function ListAssetContent({
               isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
             )}
           >
-            {partialCheckinDetails?.[item.id] ? (
+            {isPartiallyCheckedIn ? (
               <span className="text-sm text-gray-600">
                 {(() => {
                   const details = partialCheckinDetails[item.id];

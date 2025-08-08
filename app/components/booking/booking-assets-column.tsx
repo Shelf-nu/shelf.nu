@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { useSearchParams } from "~/hooks/search-params";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -31,7 +30,7 @@ export function BookingAssetsColumn() {
     partialCheckinDetails,
     partialCheckinProgress,
   } = useLoaderData<BookingPageLoaderData>();
-  const [searchParams] = useSearchParams();
+  // const [searchParams] = useSearchParams();
 
   const hasItems = paginatedItems?.length > 0;
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
@@ -41,19 +40,20 @@ export function BookingAssetsColumn() {
 
   // Determine if we should show the check-in columns
   const shouldShowCheckinColumns = useMemo(() => {
-    const currentStatusFilter = searchParams.get("status");
+    // const currentStatusFilter = searchParams.get("status");
     const isOngoing =
       booking.status === BookingStatus.ONGOING ||
       booking.status === BookingStatus.OVERDUE;
     const hasPartialCheckins = partialCheckinProgress?.hasPartialCheckins;
-    const isNotCheckedOutFilter =
-      currentStatusFilter !== AssetStatus.CHECKED_OUT;
+    // const isNotCheckedOutFilter =
+    //   currentStatusFilter !== AssetStatus.CHECKED_OUT;
 
-    return isOngoing && hasPartialCheckins && isNotCheckedOutFilter;
+    return isOngoing && hasPartialCheckins;
+    // && isNotCheckedOutFilter;
   }, [
     booking.status,
     partialCheckinProgress?.hasPartialCheckins,
-    searchParams,
+    // searchParams,
   ]);
 
   const manageAssetsUrl = useMemo(
@@ -255,26 +255,26 @@ function BookingAssetsHeader({
   manageAssetsButtonDisabled,
 }: BookingAssetsHeaderProps) {
   const { isMd } = useViewportHeight();
-  const [searchParams] = useSearchParams();
-  const statusFilter = searchParams.get("status");
+  // const [searchParams] = useSearchParams();
+  // const statusFilter = searchParams.get("status");
 
-  const title = useMemo(() => {
-    switch (statusFilter) {
-      case "AVAILABLE":
-        return "Available Assets & Kits";
-      case "CHECKED_OUT":
-        return "Checked out Assets & Kits";
-      default:
-        return "Assets & Kits";
-    }
-  }, [statusFilter]);
+  // const title = useMemo(() => {
+  //   switch (statusFilter) {
+  //     case "AVAILABLE":
+  //       return "Available Assets & Kits";
+  //     case "CHECKED_OUT":
+  //       return "Checked out Assets & Kits";
+  //     default:
+  //       return "Assets & Kits";
+  //   }
+  // }, [statusFilter]);
 
   if (isMd) {
     // Desktop layout: everything in one row
     return (
       <div className="flex justify-between">
         <ListTitle
-          title={title}
+          title={"Assets & Kits"}
           titleClassName="text-transform normal-case"
           hasBulkActions
           itemsGetter={itemsGetter}

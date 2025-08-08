@@ -96,7 +96,10 @@ export function AvailabilityLabel({
   /**
    * Is booked for period - using client-side helper function
    */
-  if (hasAssetBookingConflicts(asset, booking.id)) {
+  if (
+    hasAssetBookingConflicts(asset, booking.id) &&
+    !["ONGOING", "OVERDUE"].includes(booking.status)
+  ) {
     const conflictingBooking = asset?.bookings?.find(
       (b) =>
         b.status === BookingStatus.ONGOING ||

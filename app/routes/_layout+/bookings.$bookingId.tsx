@@ -51,10 +51,7 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
 } from "~/modules/booking/service.server";
-import {
-  calculatePartialCheckinProgress,
-  getBookingStatusRedirect,
-} from "~/modules/booking/utils.server";
+import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -165,24 +162,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: { name: "asc" },
       }),
     ]);
+    // DEPRECATED for now
     //  * if the booking is ongoing and there is no status param, we need to set it to
     // checked-out as that is the default
     // * Only apply this redirect if we're on the main booking page, not child routes
     // */
-    const url = new URL(request.url);
-    const isMainBookingPage = url.pathname === `/bookings/${bookingId}`;
+    // const url = new URL(request.url);
+    // const isMainBookingPage = url.pathname === `/bookings/${bookingId}`;
 
-    // Smart status param handling using helper function
-    const statusRedirect = getBookingStatusRedirect({
-      bookingId,
-      booking,
-      currentStatusParam: searchParams.get("status"),
-      isMainBookingPage,
-    });
+    // // Smart status param handling using helper function
+    // const statusRedirect = getBookingStatusRedirect({
+    //   bookingId,
+    //   booking,
+    //   currentStatusParam: searchParams.get("status"),
+    //   isMainBookingPage,
+    // });
 
-    if (statusRedirect) {
-      return statusRedirect;
-    }
+    // if (statusRedirect) {
+    //   return statusRedirect;
+    // }
 
     /** For self service & base users, we only allow them to read their own bookings */
     if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
