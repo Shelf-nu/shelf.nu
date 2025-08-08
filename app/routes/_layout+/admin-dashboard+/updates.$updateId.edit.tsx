@@ -65,7 +65,7 @@ export const action = async ({
       z.object({
         title: z.string().min(1, "Title is required"),
         content: z.string().min(1, "Content is required"),
-        url: z.string().url("Must be a valid URL"),
+        url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
         publishDate: z.string().transform((str) => new Date(str)),
         status: z.nativeEnum(UpdateStatus),
       })
@@ -74,6 +74,7 @@ export const action = async ({
     await updateUpdate({
       id: updateId,
       ...payload,
+      url: payload.url || undefined, // Convert empty string to undefined
       targetRoles,
     });
 

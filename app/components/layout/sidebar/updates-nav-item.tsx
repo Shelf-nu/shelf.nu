@@ -19,7 +19,7 @@ import { SidebarMenuButton, SidebarMenuItem } from "./sidebar";
 
 export default function UpdatesNavItem() {
   const [open, setOpen] = useState(false);
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: "updates-change" });
   const viewsTrackedRef = useRef(false);
   const [readUpdateIds, setReadUpdateIds] = useState<Set<string>>(new Set());
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
@@ -82,7 +82,7 @@ export default function UpdatesNavItem() {
     );
   };
 
-  const handleUpdateClick = (updateId: string, url: string) => {
+  const handleUpdateClick = (updateId: string, url?: string | null) => {
     // Optimistic update - mark as read immediately in local state
     setReadUpdateIds((prev) => new Set(prev).add(updateId));
 
@@ -92,8 +92,10 @@ export default function UpdatesNavItem() {
       { method: "POST", action: "/api/updates" }
     );
 
-    // Open URL
-    window.open(url, "_blank");
+    // Open URL only if it exists
+    if (url) {
+      window.open(url, "_blank");
+    }
     handleOpenChange(false);
   };
 
@@ -165,10 +167,13 @@ export default function UpdatesNavItem() {
                     <div
                       key={update.id}
                       className={tw(
-                        "cursor-pointer rounded-md border p-3 transition-colors",
+                        "rounded-md border p-3 transition-colors",
+                        update.url ? "cursor-pointer" : "cursor-default",
                         isUnread
-                          ? "border-blue-200 bg-blue-50 hover:bg-blue-100"
-                          : "border-gray-200 bg-gray-50 hover:bg-gray-100"
+                          ? "border-blue-200 bg-blue-50"
+                          : "border-gray-200 bg-gray-50",
+                        update.url &&
+                          (isUnread ? "hover:bg-blue-100" : "hover:bg-gray-100")
                       )}
                       onClick={() => handleUpdateClick(update.id, update.url)}
                     >
@@ -204,12 +209,14 @@ export default function UpdatesNavItem() {
                             >
                               <DateS date={update.publishDate} />
                             </p>
-                            <ExternalLinkIcon
-                              className={tw(
-                                "size-3",
-                                isUnread ? "text-blue-600" : "text-gray-400"
-                              )}
-                            />
+                            {update.url && (
+                              <ExternalLinkIcon
+                                className={tw(
+                                  "size-3",
+                                  isUnread ? "text-blue-600" : "text-gray-400"
+                                )}
+                              />
+                            )}
                           </div>
                         </div>
                       </div>

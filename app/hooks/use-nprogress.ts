@@ -11,6 +11,7 @@ export function useNprogress() {
   const excludeFetchers = [
     "asset-index-settings-show-image",
     "asset-index-settings-freeze-column",
+    "updates-change",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   let filteredFetchers = fetchers.filter(

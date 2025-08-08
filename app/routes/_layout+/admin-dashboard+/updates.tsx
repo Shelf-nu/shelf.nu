@@ -116,14 +116,18 @@ export default function Updates() {
                   </div>
                 </Td>
                 <Td className="max-w-48">
-                  <a
-                    href={update.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block truncate text-blue-600 underline hover:text-blue-800"
-                  >
-                    {update.url}
-                  </a>
+                  {update.url ? (
+                    <a
+                      href={update.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block truncate text-blue-600 underline hover:text-blue-800"
+                    >
+                      {update.url}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 text-sm">No URL</span>
+                  )}
                 </Td>
                 <Td>{getRoleBadges(update.targetRoles)}</Td>
                 <Td className="text-sm">

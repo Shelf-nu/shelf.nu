@@ -9,7 +9,7 @@ interface UpdateFormProps {
   id?: string;
   title?: string;
   content?: string;
-  url?: string;
+  url?: string | null;
   publishDate?: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -19,7 +19,7 @@ export function UpdateForm({
   id,
   title = "",
   content = "",
-  url = "",
+  url = null,
   publishDate,
   status = UpdateStatus.DRAFT,
   targetRoles = [],
@@ -58,12 +58,11 @@ export function UpdateForm({
       </div>
 
       <Input
-        label="URL"
+        label="URL (optional)"
         name="url"
         type="url"
-        defaultValue={url}
-        placeholder="https://example.com"
-        required
+        defaultValue={url || ""}
+        placeholder="https://example.com (leave empty for updates without links)"
       />
 
       <div>

@@ -330,7 +330,7 @@ export async function createUpdate({
 }: {
   title: string;
   content: string;
-  url: string;
+  url?: string | null;
   publishDate: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -341,7 +341,7 @@ export async function createUpdate({
       data: {
         title,
         content,
-        url,
+        url: url === undefined ? null : url, // Convert undefined to null for database
         publishDate,
         status,
         targetRoles,
@@ -373,7 +373,7 @@ export async function updateUpdate({
   id: string;
   title?: string;
   content?: string;
-  url?: string;
+  url?: string | null;
   publishDate?: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
