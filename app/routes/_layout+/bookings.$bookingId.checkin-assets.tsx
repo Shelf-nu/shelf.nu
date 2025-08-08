@@ -1,5 +1,5 @@
 import { AssetStatus, OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -10,36 +10,26 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
-import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
-import PartialCheckinDrawer, {
-  partialCheckinAssetsSchema,
-} from "~/components/scanner/drawer/uses/partial-checkin-drawer";
+import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
+  checkinAssets,
   getBooking,
   getDetailedPartialCheckinData,
-  partialCheckinBooking,
 } from "~/modules/booking/service.server";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canUserManageBookingAssets } from "~/utils/bookings";
-import { getClientHint } from "~/utils/client-hints";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
+
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  assertIsPost,
-  data,
-  error,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
+import { assertIsPost, data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -143,51 +133,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.checkin,
     });
-
-    const formData = await request.formData();
-    const { assetIds, checkinIntentChoice, returnJson } = parseData(
-      formData,
-      partialCheckinAssetsSchema.extend({
-        checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
-        returnJson: z
-          .string()
-          .optional()
-          .transform((val) => val === "true"),
-      })
-    );
-    const hints = getClientHint(request);
-
-    await partialCheckinBooking({
-      id: bookingId,
+    return await checkinAssets({
+      bookingId,
       organizationId,
-      assetIds,
       userId,
-      hints,
-      intentChoice: checkinIntentChoice,
+      authSession,
+      request,
     });
-
-    sendNotification({
-      title: "Assets checked in",
-      message: `Successfully checked in ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
-      } from booking.`,
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
-
-    // Return JSON if requested by bulk dialog, otherwise redirect
-    if (returnJson) {
-      return json(
-        data({
-          success: true,
-          message: `Successfully checked in ${assetIds.length} asset${
-            assetIds.length > 1 ? "s" : ""
-          }`,
-        })
-      );
-    }
-
-    return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     return json(error(reason), { status: reason.status });

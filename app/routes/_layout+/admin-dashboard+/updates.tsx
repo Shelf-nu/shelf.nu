@@ -126,7 +126,7 @@ export default function Updates() {
                       {update.url}
                     </a>
                   ) : (
-                    <span className="text-gray-400 text-sm">No URL</span>
+                    <span className="text-sm text-gray-400">No URL</span>
                   )}
                 </Td>
                 <Td>{getRoleBadges(update.targetRoles)}</Td>

@@ -38,6 +38,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import {
   archiveBooking,
   cancelBooking,
+  checkinAssets,
   checkinBooking,
   checkoutBooking,
   deleteBooking,
@@ -483,7 +484,8 @@ export const handle = {
 export type BookingPageActionData = typeof action;
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const { userId } = context.getSession();
+  const authSession = context.getSession();
+  const { userId } = authSession;
   const { bookingId: id } = getParams(
     params,
     z.object({ bookingId: z.string() }),
@@ -509,6 +511,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "revert-to-draft",
           "extend-booking",
           "bulk-remove-asset-or-kit",
+          "partial-checkin",
         ]),
         nameChangeOnly: z
           .string()
@@ -535,6 +538,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.update,
       "bulk-remove-asset-or-kit": PermissionAction.update,
+      "partial-checkin": PermissionAction.checkin,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -550,7 +554,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
-    const formData = await request.formData();
+    const formData = await request.clone().formData();
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
       select: { id: true, status: true, from: true, to: true },
@@ -727,10 +731,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking }), {
+        return json(data({ booking, success: true }), {
           headers,
         });
-
+      case "partial-checkin": {
+        return await checkinAssets({
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
+          request: request.clone(),
+        });
+      }
       case "delete": {
         if (isSelfServiceOrBase) {
           /**

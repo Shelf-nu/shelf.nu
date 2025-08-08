@@ -1,7 +1,8 @@
+import { useState } from "react";
 import type { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, PackageCheck } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
@@ -80,6 +81,9 @@ function ConditionalDropdown() {
     setOpen(false);
   }
 
+  const [partialCheckinDialogOpen, setPartialCheckinDialogOpen] =
+    useState(false);
+
   return (
     <>
       {open && (
@@ -91,7 +95,10 @@ function ConditionalDropdown() {
       )}
 
       <BulkRemoveAssetAndKitDialog />
-      <BulkPartialCheckinDialog />
+      <BulkPartialCheckinDialog
+        open={partialCheckinDialogOpen}
+        setOpen={setPartialCheckinDialogOpen}
+      />
 
       <DropdownMenu
         modal={false}
@@ -153,12 +160,20 @@ function ConditionalDropdown() {
                   e.preventDefault();
                 }}
               >
-                <BulkUpdateDialogTrigger
-                  type="partial-checkin"
-                  label="Check in selected items"
-                  onClick={closeMenu}
+                <Button
+                  variant="link"
+                  className={tw(
+                    "flex w-full items-center  justify-start gap-2 px-4 py-3 text-gray-700 hover:text-gray-700"
+                  )}
+                  onClick={() => {
+                    setPartialCheckinDialogOpen(true);
+                    closeMenu();
+                  }}
                   disabled={partialCheckinDisabled}
-                />
+                >
+                  <PackageCheck className="mr-2 inline size-5" />
+                  <span>Check in selected items</span>
+                </Button>
               </DropdownMenuItem>
             )}
             <DropdownMenuItem

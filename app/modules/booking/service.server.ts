@@ -9,12 +9,16 @@ import type {
   UserOrganization,
   Tag,
 } from "@prisma/client";
+import { json, redirect } from "@remix-run/react";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
+import z from "zod";
+import type { AuthSession } from "server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
+import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
@@ -31,10 +35,11 @@ import {
   updateCookieWithPerPage,
 } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import { getCurrentSearchParams } from "~/utils/http.server";
+import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -3371,3 +3376,62 @@ export type PartialCheckinDetailsType = Record<
     };
   }
 >;
+
+export async function checkinAssets({
+  request,
+  bookingId,
+  organizationId,
+  userId,
+  authSession,
+}: {
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  authSession: AuthSession;
+}) {
+  const formData = await request.formData();
+  const { assetIds, checkinIntentChoice, returnJson } = parseData(
+    formData,
+    partialCheckinAssetsSchema.extend({
+      checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
+      returnJson: z
+        .string()
+        .optional()
+        .transform((val) => val === "true"),
+    })
+  );
+  const hints = getClientHint(request);
+
+  await partialCheckinBooking({
+    id: bookingId,
+    organizationId,
+    assetIds,
+    userId,
+    hints,
+    intentChoice: checkinIntentChoice,
+  });
+
+  sendNotification({
+    title: "Assets checked in",
+    message: `Successfully checked in ${assetIds.length} asset${
+      assetIds.length > 1 ? "s" : ""
+    } from booking.`,
+    icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
+  });
+
+  // Return JSON if requested by bulk dialog, otherwise redirect
+  if (returnJson) {
+    return json(
+      data({
+        success: true,
+        message: `Successfully checked in ${assetIds.length} asset${
+          assetIds.length > 1 ? "s" : ""
+        }`,
+      })
+    );
+  }
+
+  return redirect(`/bookings/${bookingId}`);
+}

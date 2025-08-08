@@ -1,47 +1,110 @@
-import { useCallback, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useActionData, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { useZorm } from "react-zorm";
 import z from "zod";
 import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
+import { useDisabled } from "~/hooks/use-disabled";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type {
+  BookingPageLoaderData,
+  BookingPageActionData,
+} from "~/routes/_layout+/bookings.$bookingId";
+import { tw } from "~/utils/tw";
 import CheckinDialog from "./checkin-dialog";
 import { AssetImage } from "../assets/asset-image/component";
-import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
+import { Form } from "../custom-form";
 import KitImage from "../kits/kit-image";
+import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-
 export const BulkPartialCheckinSchema = z.object({
   assetIds: z
     .array(z.string())
     .min(1, "Please select at least one asset to check in."),
 });
-
-export default function BulkPartialCheckinDialog() {
-  const zo = useZorm("BulkPartialCheckin", BulkPartialCheckinSchema);
+export default function BulkPartialCheckinDialog({
+  open,
+  setOpen,
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) {
+  const disabled = useDisabled();
   const totalSelectedItems = useAtomValue(selectedBulkItemsCountAtom);
-  let selectedItems = useAtomValue(selectedBulkItemsAtom);
-  selectedItems = selectedItems.filter(
-    (a) => a.status === AssetStatus.CHECKED_OUT
-  );
-  // Create a mutable ref object for the portal container
-  const formRef = useRef<{ current: HTMLFormElement | null }>({
-    current: null,
-  });
+  const { booking, partialCheckinProgress } =
+    useLoaderData<BookingPageLoaderData>();
 
-  const { booking } = useLoaderData<BookingPageLoaderData>();
+  let selectedItems = useAtomValue(selectedBulkItemsAtom);
+
+  // Create a map for quick asset lookup
+  const bookingAssetsMap = new Map(
+    booking.assets.map((asset) => [asset.id, asset])
+  );
+
+  // Enrich selection data with booking asset information and filter for CHECKED_OUT
+  selectedItems = selectedItems
+    .flatMap((item: any) => {
+      // Handle pagination wrapper objects (has type: "asset" and assets array)
+      if (item.type === "asset" && item.assets) {
+        return item.assets.map((asset: any) => {
+          const bookingAsset = bookingAssetsMap.get(asset.id);
+          return bookingAsset ? { ...asset, ...bookingAsset } : asset;
+        });
+      }
+
+      // Handle kit objects (has type: "kit")
+      if (item.type === "kit") {
+        // Flatten kit properties to match rendering expectations
+        const flattenedKit = {
+          ...item,
+          name: item.kit?.name,
+          _count: item.kit?._count,
+        };
+        return flattenedKit;
+      }
+
+      // Handle kit objects with traditional structure (has name and _count, not title)
+      if (item.name && item._count) {
+        return item; // Return kit as-is, no need to filter by status
+      }
+
+      // Handle direct asset objects (has title, not name)
+      if (item.title) {
+        const bookingAsset = bookingAssetsMap.get(item.id);
+        return bookingAsset ? { ...item, ...bookingAsset } : item;
+      }
+
+      return item; // Fallback for any other structure
+    })
+    .filter((item) => {
+      // Keep kits regardless of status (both type structures)
+      if (item.type === "kit" || (item.name && item._count)) return true;
+      // Only keep assets that are CHECKED_OUT
+      return item.status === AssetStatus.CHECKED_OUT;
+    });
+
+  // Create a mutable ref object for the portal container
+  const formRef = useRef<HTMLFormElement>(null);
 
   // Check if this would be a final check-in (all remaining CHECKED_OUT assets are being selected)
-  const remainingCheckedOutAssets = booking.assets.filter(
-    (asset) => asset.status === "CHECKED_OUT"
+  // Need to exclude assets that have already been checked in through partial check-ins
+  const checkedInAssetIds = new Set(
+    partialCheckinProgress?.checkedInAssetIds || []
   );
+  const remainingCheckedOutAssets = booking.assets.filter(
+    (asset) =>
+      asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
+  );
+  // Count only individual assets (exclude kit IDs) for final check-in detection
+  const selectedAssetIds = selectedItems
+    .filter((item: any) => item.title && !item._count) // Only assets, not kits
+    .map((asset: any) => asset.id);
+
   const isFinalCheckin =
-    selectedItems.length === remainingCheckedOutAssets.length &&
+    selectedAssetIds.length === remainingCheckedOutAssets.length &&
     remainingCheckedOutAssets.length > 0;
 
   // Check if it's an early check-in (only relevant for final check-ins)
@@ -49,34 +112,47 @@ export default function BulkPartialCheckinDialog() {
     isFinalCheckin && booking.to && isBookingEarlyCheckin(booking.to)
   );
 
-  // Form ID for CheckinDialog to reference
-  const formId = `bulk-partial-checkin-form-${booking.id}`;
+  function handleCloseDialog() {
+    setOpen(false);
+  }
 
-  // Combined ref callback for both zo.ref and formRef
-  const combinedRef = useCallback(
-    (form: HTMLFormElement | null) => {
-      zo.ref(form);
-      formRef.current.current = form;
-      // Set the form ID when available
-      if (form && !form.id) {
-        form.id = formId;
-      }
-    },
-    [zo, formId]
-  );
+  const [shouldClose, setShouldClose] = useState(false);
+
+  const actionData = useActionData<BookingPageActionData>();
+
+  // First, detect when we get a success response
+  useEffect(() => {
+    if (actionData && "success" in actionData && actionData.success) {
+      setShouldClose(true);
+    }
+  }, [actionData]);
+
+  // Then, close the dialog when revalidation completes
+  useEffect(() => {
+    if (shouldClose && !disabled) {
+      setOpen(false);
+      setShouldClose(false); // Reset for future uses
+    }
+  }, [shouldClose, disabled, setOpen]);
 
   return (
-    <BulkUpdateDialogContent
-      ref={combinedRef}
-      type="partial-checkin"
-      title={`Check in selected items`}
-      arrayFieldId="__unused" // We manually add assetIds above to filter out kits
-      description={`The following items will be checked in and marked as Available.`}
-      actionUrl={`/bookings/${booking.id}/checkin-assets`}
-    >
-      {({ fetcherError, disabled, handleCloseDialog }) => (
-        <>
-          {/* Hidden field to request JSON response */}
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={handleCloseDialog}
+        className={tw("bulk-tagging-dialog lg:w-[400px]")}
+        title={
+          <div className="w-full">
+            <div className={tw("mb-5")}>
+              <h4>Check in selected items</h4>
+              <p>
+                The following items will be checked in and marked as Available.
+              </p>
+            </div>
+          </div>
+        }
+      >
+        <Form method="post" className="px-6 pb-6" ref={formRef}>
           <input type="hidden" name="returnJson" value="true" />
 
           {/* Filter out kit IDs - only send asset IDs to backend */}
@@ -202,9 +278,9 @@ export default function BulkPartialCheckinDialog() {
             })()}
           </div>
 
-          {fetcherError ? (
+          {/* {fetcherError ? (
             <p className="mb-4 text-sm text-error-500">{fetcherError}</p>
-          ) : null}
+          ) : null} */}
 
           <div className="flex gap-3">
             <Button
@@ -225,13 +301,11 @@ export default function BulkPartialCheckinDialog() {
                   to: booking.to!,
                   from: booking.from!,
                 }}
-                label={`Check in ${totalSelectedItems} item${
-                  totalSelectedItems !== 1 ? "s" : ""
-                }`}
+                label={`Check in  item${totalSelectedItems !== 1 ? "s" : ""}`}
                 variant="primary"
                 disabled={disabled}
-                formId={formId}
-                portalContainer={formRef.current.current || undefined}
+                portalContainer={formRef.current || undefined}
+                onClose={handleCloseDialog}
               />
             ) : (
               <Button
@@ -239,13 +313,15 @@ export default function BulkPartialCheckinDialog() {
                 variant="primary"
                 width="full"
                 disabled={disabled}
+                name="intent"
+                value="partial-checkin"
               >
                 Check in items
               </Button>
             )}
           </div>
-        </>
-      )}
-    </BulkUpdateDialogContent>
+        </Form>
+      </Dialog>
+    </DialogPortal>
   );
 }
