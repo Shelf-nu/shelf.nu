@@ -20,7 +20,6 @@ export const CUSTODY_INCLUDE = {
 };
 
 export const ASSET_INCLUDE = {
-  bookings: true,
   location: {
     select: {
       id: true,
@@ -38,7 +37,6 @@ export const KIT_INCLUDE = {
       status: true,
       availableToBook: true,
       custody: true,
-      bookings: { select: { id: true, status: true } },
     },
   },
   ...CUSTODY_INCLUDE,

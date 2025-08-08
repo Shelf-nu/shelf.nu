@@ -50,6 +50,7 @@ export async function fetchAllPdfRelatedData(
     const booking = await getBooking({
       id: bookingId,
       organizationId,
+      request,
       extraInclude: { tags: { select: { id: true, name: true } } },
     });
 

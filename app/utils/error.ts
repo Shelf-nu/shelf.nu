@@ -97,7 +97,8 @@ export type FailureReason = {
     | "Image Import"
     | "Image Cache"
     | "Asset Reminder"
-    | "Asset Scheduler"; // Error related to the image import
+    | "Asset Scheduler" // Error related to the image import
+    | "Update";
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

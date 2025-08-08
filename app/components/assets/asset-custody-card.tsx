@@ -103,7 +103,6 @@ export function CustodyCard({
       </Card>
     );
   }
-
   /** If booking is present, we render the card showing custody via booking */
   if (booking) {
     let teamMemberName = "";

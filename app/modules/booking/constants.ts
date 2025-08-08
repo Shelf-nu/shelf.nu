@@ -40,6 +40,10 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
         },
       },
     },
+    orderBy: [
+      { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
+      { createdAt: "asc" }, // Then by creation order as fallback
+    ],
   },
 } satisfies Prisma.BookingInclude;
 

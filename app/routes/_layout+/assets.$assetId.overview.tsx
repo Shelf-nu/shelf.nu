@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType } from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -269,7 +269,10 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
   } = useLoaderData<typeof loader>();
-  const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
+  const booking =
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
+      ? asset?.bookings[0]
+      : undefined;
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0

@@ -6,6 +6,7 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { tw } from "~/utils/tw";
 import type { IndexResponse } from ".";
 import type { ListItemData } from "./list-item";
 import { Button } from "../shared/button";
@@ -34,6 +35,11 @@ type ListTitleProps = {
    * @returns An array of ListItemData to be used in the header
    */
   itemsGetter?: (data: LoaderData) => ListItemData[];
+
+  /**
+   * Optional class name for the title element
+   */
+  titleClassName?: string;
 };
 
 export default function ListTitle({
@@ -41,6 +47,7 @@ export default function ListTitle({
   hasBulkActions,
   disableSelectAllItems = false,
   itemsGetter,
+  titleClassName,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -71,7 +78,9 @@ export default function ListTitle({
 
   return (
     <div>
-      <h5 className="text-left capitalize">{title || plural}</h5>
+      <h5 className={tw("text-left capitalize", titleClassName)}>
+        {title || plural}
+      </h5>
       <div className="h-7">
         {hasBulkActions && hasSelectedItems ? (
           <div className="flex items-start gap-2">
