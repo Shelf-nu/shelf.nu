@@ -195,7 +195,6 @@ export default function AssetCustomFields({
         defaultValue={getCustomFieldVal(field.id)}
         disabled={disabled}
         step="any"
-        min={0}
         className="w-full"
         required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
       />
