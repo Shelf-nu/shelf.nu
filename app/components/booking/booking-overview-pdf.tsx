@@ -99,10 +99,12 @@ export const BookingOverviewPDF = ({
                   </div>
                 </div>
               ) : (
-                <BookingPDFPreview
-                  pdfMeta={pdfMeta}
-                  componentRef={componentRef}
-                />
+                <div className="overflow-x-auto">
+                  <BookingPDFPreview
+                    pdfMeta={pdfMeta}
+                    componentRef={componentRef}
+                  />
+                </div>
               )}
             </div>
             <div className="flex justify-end gap-3 py-4">
@@ -121,7 +123,7 @@ export const BookingOverviewPDF = ({
         width="full"
         name="generate pdf"
         disabled={disabled}
-        // onClick={handleMobileView}
+        onClick={handleOpenDialog}
       >
         Generate overview PDF
       </Button>
