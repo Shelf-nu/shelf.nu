@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: getAssetOverviewFields(canUseBarcodes),
+      include: getAssetOverviewFields(id, canUseBarcodes),
     });
 
     /**
@@ -144,7 +144,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       request,
     });
-
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     let currentBooking: any = null;
 

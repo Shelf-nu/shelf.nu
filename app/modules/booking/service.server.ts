@@ -958,7 +958,7 @@ export async function checkinBooking({
     const updatedBooking = await db.$transaction(async (tx) => {
       // Create set of asset IDs that have been partially checked in
       const partiallyCheckedInAssetIds = new Set(
-        bookingFound.partialCheckins.flatMap((pc) => pc.assetIds)
+        (bookingFound.partialCheckins || []).flatMap((pc) => pc.assetIds)
       );
 
       // Only update assets that are CHECKED_OUT in this booking's context

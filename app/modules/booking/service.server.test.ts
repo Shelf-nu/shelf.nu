@@ -1193,9 +1193,10 @@ describe("checkinBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       assets: [
-        { id: "asset-1", kitId: null },
-        { id: "asset-2", kitId: "kit-1" },
+        { id: "asset-1", kitId: null, status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", kitId: "kit-1", status: AssetStatus.CHECKED_OUT },
       ],
+      partialCheckins: [],
     };
     const checkedInBooking = { ...mockBooking, status: BookingStatus.COMPLETE };
 
