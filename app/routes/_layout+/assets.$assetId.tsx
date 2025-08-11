@@ -363,6 +363,7 @@ export default function AssetDetailsPage() {
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
+              id={asset.id}
               status={asset.status}
               availableToBook={asset.availableToBook}
             />

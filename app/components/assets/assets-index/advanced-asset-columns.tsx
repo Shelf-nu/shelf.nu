@@ -199,7 +199,13 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn status={item.status} bookings={item.bookings} />;
+      return (
+        <StatusColumn
+          id={item.id}
+          status={item.status}
+          bookings={item.bookings}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -333,47 +339,22 @@ function TextColumn({
 }
 
 function StatusColumn({
+  id,
   status,
   bookings,
 }: {
+  id: string;
   status: AssetStatus;
   bookings?: Pick<Booking, "id" | "name" | "status">[];
 }) {
-  const checkedOutBooking = bookings?.find(
-    (booking) =>
-      booking.status === BookingStatus.ONGOING ||
-      booking.status === BookingStatus.OVERDUE
-  );
-
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <When
-        truthy={
-          status === AssetStatus.CHECKED_OUT && Boolean(checkedOutBooking)
-        }
-        fallback={<AssetStatusBadge status={status} availableToBook={true} />}
-      >
-        <HoverCard openDelay={0}>
-          <HoverCardTrigger asChild>
-            {/* Here we pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
-            <button>
-              <AssetStatusBadge status={status} availableToBook={true} />
-            </button>
-          </HoverCardTrigger>
-
-          <HoverCardPortal>
-            <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-              <Button
-                variant="link-gray"
-                to={`/bookings/${checkedOutBooking?.id}`}
-                target="_blank"
-              >
-                {checkedOutBooking?.name}
-              </Button>
-            </HoverCardContent>
-          </HoverCardPortal>
-        </HoverCard>
-      </When>
+      <AssetStatusBadge
+        bookings={bookings}
+        id={id}
+        status={status}
+        availableToBook={true}
+      />
     </Td>
   );
 }
