@@ -168,8 +168,8 @@ export function sortBookingAssets<T extends AssetWithStatus>(
     // Within same priority, sort partial check-ins by most recent first
     if (aPartialCheckin && bPartialCheckin) {
       return (
-        bPartialCheckin.checkinDate.getTime() -
-        aPartialCheckin.checkinDate.getTime()
+        new Date(bPartialCheckin.checkinDate).getTime() -
+        new Date(aPartialCheckin.checkinDate).getTime()
       );
     }
 

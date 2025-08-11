@@ -53,6 +53,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   getBooking,
+  getDetailedPartialCheckinData,
   getKitIdsByAssets,
   removeAssets,
   updateBookingAssets,
@@ -60,6 +61,7 @@ import {
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -275,12 +277,50 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },
-      select: { name: true, status: true, assets: { select: { id: true } } },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        assets: { select: { id: true, status: true } },
+      },
     });
 
-    const checkedOutKits = selectedKits.filter(
-      (k) => k.status === KitStatus.CHECKED_OUT
+    const allSelectedAssetIds = selectedKits.flatMap((k) =>
+      k.assets.map((a) => a.id)
     );
+
+    // Get existing asset IDs from the booking
+    const existingAssetIds = booking.assets.map((asset) => asset.id);
+
+    // Filter out existing assets to get only newly added ones
+    const newAssetIds = allSelectedAssetIds.filter(
+      (assetId) => !existingAssetIds.includes(assetId)
+    );
+
+    // Only validate kits that are actually adding NEW assets to the booking
+    const newlyAddedKits = selectedKits.filter((kit) =>
+      kit.assets.some((asset) => newAssetIds.includes(asset.id))
+    );
+
+    // Get partial check-in details to determine actual availability using context-aware status
+    const { partialCheckinDetails } =
+      await getDetailedPartialCheckinData(bookingId);
+
+    const bookingAssetIds = new Set(existingAssetIds);
+
+    // Filter kits that are truly unavailable (using centralized helper for consistency)
+    const checkedOutKits = newlyAddedKits.filter((kit) => {
+      // If kit status is not CHECKED_OUT, it's available
+      if (kit.status !== KitStatus.CHECKED_OUT) return false;
+
+      // Use centralized helper to check if kit is partially checked in within this booking context
+      // If it is, then it's effectively available for other bookings
+      return !isKitPartiallyCheckedIn(
+        kit,
+        partialCheckinDetails,
+        bookingAssetIds
+      );
+    });
 
     if (
       checkedOutKits.length > 0 &&
@@ -302,18 +342,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
-    const allSelectedAssetIds = selectedKits.flatMap((k) =>
-      k.assets.map((a) => a.id)
-    );
-
-    // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
-
-    // Filter out existing assets to get only newly added ones
-    const newAssetIds = allSelectedAssetIds.filter(
-      (assetId) => !existingAssetIds.includes(assetId)
-    );
 
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {

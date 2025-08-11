@@ -7,10 +7,13 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkRemoveAssetAndKitDialog from "./bulk-remove-asset-and-kit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
+import type { ListItemData } from "../list/list-item";
 import { Button } from "../shared/button";
 import {
   DropdownMenu,
@@ -41,7 +44,8 @@ export default function ListBulkActionsDropdown() {
 
 function ConditionalDropdown() {
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
-  const { booking } = useLoaderData<{ booking: { status: string } }>();
+  const { booking, partialCheckinDetails = {} } =
+    useLoaderData<BookingPageLoaderData>();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus
   );
@@ -51,18 +55,22 @@ function ConditionalDropdown() {
   const showPartialCheckin =
     bookingStatus?.isOngoing || bookingStatus?.isOverdue;
 
-  // Check if any selected items are AVAILABLE (already checked in)
-  // For kits, we allow partial check-in as long as some assets are still CHECKED_OUT
-  const hasOnlyAvailableAssets = selectedItems.every((item: any) => {
-    if (item.type === "kit") {
-      // For kits, check if ALL assets are AVAILABLE
-      return item.assets.every((asset: any) => asset.status === "AVAILABLE");
-    }
-    // For individual assets, check the asset status
-    return item.status === "AVAILABLE";
+  // Check if any selected items are already checked in using context-aware status
+  // Filter out kit entries (which have undefined title) since bulk selection includes both kit AND its individual assets
+  // We only need to check the individual assets for validation
+  const assetsToCheck = selectedItems.filter(
+    (item) => item.title !== undefined
+  );
+
+  const hasOnlyAlreadyCheckedInItems = assetsToCheck.every((item) => {
+    // Type assertion since ListItemData includes asset properties via [x: string]: any
+    // and we know these are asset items with status property
+    const asset = item as ListItemData & { status: string };
+    // For individual assets, check if already partially checked in
+    return isAssetPartiallyCheckedIn(asset, partialCheckinDetails);
   });
 
-  const partialCheckinDisabled = hasOnlyAvailableAssets
+  const partialCheckinDisabled = hasOnlyAlreadyCheckedInItems
     ? {
         reason:
           "All selected assets are already checked in. Please select assets that are still checked out.",

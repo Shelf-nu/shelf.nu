@@ -57,12 +57,14 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getBooking,
+  getDetailedPartialCheckinData,
   getKitIdsByAssets,
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -323,14 +325,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (assetId) => !existingAssetIds.includes(assetId)
     );
 
-    // Query to see if any of the newAssetIds are already checked out
-    const checkedOutAssets = await db.asset.findMany({
+    // Get partial check-in details to determine actual availability using context-aware status
+    const { partialCheckinDetails } =
+      await getDetailedPartialCheckinData(bookingId);
+
+    // Query to get potentially checked out assets
+    const potentiallyCheckedOutAssets = await db.asset.findMany({
       where: {
         id: { in: newAssetIds },
         status: AssetStatus.CHECKED_OUT,
       },
-      select: { id: true, title: true },
+      select: { id: true, title: true, status: true },
     });
+
+    // Filter out assets that are partially checked in within this booking context using centralized helper
+    // These are effectively available for other bookings
+    const checkedOutAssets = potentiallyCheckedOutAssets.filter(
+      (asset) => !isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+    );
 
     if (
       checkedOutAssets.length > 0 &&

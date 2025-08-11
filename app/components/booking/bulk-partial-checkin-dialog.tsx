@@ -13,6 +13,7 @@ import type {
   BookingPageLoaderData,
   BookingPageActionData,
 } from "~/routes/_layout+/bookings.$bookingId";
+import { getBookingContextAssetStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import CheckinDialog from "./checkin-dialog";
 import { AssetImage } from "../assets/asset-image/component";
@@ -34,7 +35,7 @@ export default function BulkPartialCheckinDialog({
 }) {
   const disabled = useDisabled();
   const totalSelectedItems = useAtomValue(selectedBulkItemsCountAtom);
-  const { booking, partialCheckinProgress } =
+  const { booking, partialCheckinProgress, partialCheckinDetails } =
     useLoaderData<BookingPageLoaderData>();
 
   let selectedItems = useAtomValue(selectedBulkItemsAtom);
@@ -82,8 +83,12 @@ export default function BulkPartialCheckinDialog({
     .filter((item) => {
       // Keep kits regardless of status (both type structures)
       if (item.type === "kit" || (item.name && item._count)) return true;
+      const contextStatus = getBookingContextAssetStatus(
+        item,
+        partialCheckinDetails
+      );
       // Only keep assets that are CHECKED_OUT
-      return item.status === AssetStatus.CHECKED_OUT;
+      return contextStatus === AssetStatus.CHECKED_OUT;
     });
 
   // Create a mutable ref object for the portal container
@@ -181,13 +186,15 @@ export default function BulkPartialCheckinDialog({
                 (asset: any) => !asset.kitId
               );
 
-              // Group assets by kit
-              const kitGroups = kits.map((kit: any) => {
-                const kitAssets = assets.filter(
-                  (asset: any) => asset.kitId === kit.id
-                );
-                return { kit, assets: kitAssets };
-              });
+              // Group assets by kit and filter out kits with no assets to check in
+              const kitGroups = kits
+                .map((kit: any) => {
+                  const kitAssets = assets.filter(
+                    (asset: any) => asset.kitId === kit.id
+                  );
+                  return { kit, assets: kitAssets };
+                })
+                .filter(({ assets: kitAssets }) => kitAssets.length > 0);
 
               return (
                 <div className="space-y-3">
