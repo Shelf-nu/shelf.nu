@@ -119,7 +119,7 @@ export default function PartialCheckinDrawer({
     .filter(
       (asset) =>
         bookingAssetIds.has(asset.id) &&
-        isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+        isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
     )
     .map((a) => a.id);
 
@@ -157,7 +157,7 @@ export default function PartialCheckinDrawer({
       return (
         kitAssetsInBooking.length > 0 &&
         kitAssetsInBooking.every((asset) =>
-          isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+          isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
         )
       );
     })
@@ -415,7 +415,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Check if asset is already checked in within this booking using centralized helper
   const isAlreadyCheckedIn = isAssetPartiallyCheckedIn(
     asset,
-    partialCheckinDetails
+    partialCheckinDetails,
+    booking.status
   );
 
   // Check if this asset is redundant (kit is also scanned)
@@ -546,7 +547,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const allKitAssetsInBookingAreCheckedIn =
     kitAssetsInBooking.length > 0 &&
     kitAssetsInBooking.every((asset) =>
-      isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+      isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
     );
 
   // Use preset configurations to define the availability labels

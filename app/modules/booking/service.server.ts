@@ -889,7 +889,14 @@ export async function checkinBooking({
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        include: { assets: { select: { id: true, kitId: true } } },
+        include: {
+          assets: { select: { id: true, kitId: true, status: true } },
+          partialCheckins: {
+            select: {
+              assetIds: true,
+            },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -949,18 +956,49 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      /* Updating the status of all assets inside booking */
-      await tx.asset.updateMany({
-        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
+      // Create set of asset IDs that have been partially checked in
+      const partiallyCheckedInAssetIds = new Set(
+        bookingFound.partialCheckins.flatMap((pc) => pc.assetIds)
+      );
+
+      // Only update assets that are CHECKED_OUT in this booking's context
+      // Skip assets that have partial check-ins (they're effectively available in this booking's context)
+      const assetsToCheckin = bookingFound.assets
+        .filter((asset) => 
+          asset.status === AssetStatus.CHECKED_OUT && 
+          !partiallyCheckedInAssetIds.has(asset.id)
+        )
+        .map((asset) => asset.id);
+
+      if (assetsToCheckin.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToCheckin } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
 
       /* If there are any kits associated with the booking, then update their status */
       if (hasKits) {
-        await tx.kit.updateMany({
-          where: { id: { in: kitIds } },
-          data: { status: KitStatus.AVAILABLE },
+        // Determine which kits should be checked in based on their assets being checked in
+        const assetsToCheckinSet = new Set(assetsToCheckin);
+        const kitsToCheckin = kitIds.filter((kitId) => {
+          // Get all assets of this kit that are in this booking
+          const kitAssetsInBooking = bookingFound.assets.filter(
+            (asset) => asset.kitId === kitId
+          );
+          
+          // Only check in the kit if ALL its assets in the booking are being checked in
+          return kitAssetsInBooking.every((asset) => 
+            assetsToCheckinSet.has(asset.id)
+          );
         });
+
+        if (kitsToCheckin.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitsToCheckin } },
+            data: { status: KitStatus.AVAILABLE },
+          });
+        }
       }
 
       /** Finally update the booking */

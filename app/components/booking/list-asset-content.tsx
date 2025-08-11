@@ -100,11 +100,13 @@ export default function ListAssetContent({
   // Use centralized status resolver for consistency
   const contextStatus = getBookingContextAssetStatus(
     item,
-    partialCheckinDetails
+    partialCheckinDetails,
+    booking.status
   );
   const isPartiallyCheckedIn = isAssetPartiallyCheckedIn(
     item,
-    partialCheckinDetails
+    partialCheckinDetails,
+    booking.status
   );
 
   return (

@@ -85,7 +85,8 @@ export default function BulkPartialCheckinDialog({
       if (item.type === "kit" || (item.name && item._count)) return true;
       const contextStatus = getBookingContextAssetStatus(
         item,
-        partialCheckinDetails
+        partialCheckinDetails,
+        booking.status
       );
       // Only keep assets that are CHECKED_OUT
       return contextStatus === AssetStatus.CHECKED_OUT;

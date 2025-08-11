@@ -318,7 +318,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return !isKitPartiallyCheckedIn(
         kit,
         partialCheckinDetails,
-        bookingAssetIds
+        bookingAssetIds,
+        booking.status
       );
     });
 

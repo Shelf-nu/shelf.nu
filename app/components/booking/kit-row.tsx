@@ -55,9 +55,11 @@ export default function KitRow({
   const contextAwareKitStatus = getBookingContextKitStatus(
     { ...kit, assets: assets },
     partialCheckinDetails,
-    bookingAssetIds
+    bookingAssetIds,
+    bookingStatus
   );
 
+  console.log(contextAwareKitStatus, "contextAwareKitStatus");
   // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
   // Use centralized booking conflict logic
   const isOverlapping =

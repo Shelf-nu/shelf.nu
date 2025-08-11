@@ -21,19 +21,27 @@ export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
  * Context-aware asset status resolver for booking operations
  *
  * Determines the effective status of an asset within a booking context:
- * - If asset has partial check-in details -> PARTIALLY_CHECKED_IN
+ * - If asset has partial check-in details AND booking is ONGOING/OVERDUE -> PARTIALLY_CHECKED_IN
+ * - If asset has partial check-in details AND booking is COMPLETE -> AVAILABLE
  * - Otherwise -> original database status
  *
  * This ensures consistent logic across validation, display, and business operations
  */
 export function getBookingContextAssetStatus(
   asset: AssetWithStatus,
-  partialCheckinDetails: PartialCheckinDetailsType
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
 ): ExtendedAssetStatus {
   // Check if asset is partially checked in within this booking context
   const hasPartialCheckin = Boolean(partialCheckinDetails[asset.id]);
 
-  if (hasPartialCheckin) {
+  // Only show as PARTIALLY_CHECKED_IN for active bookings
+  // For COMPLETE bookings, assets should show as its Real status
+  if (
+    hasPartialCheckin &&
+    bookingStatus &&
+    ["ONGOING", "OVERDUE"].includes(bookingStatus)
+  ) {
     return "PARTIALLY_CHECKED_IN";
   }
 
@@ -46,30 +54,42 @@ export function getBookingContextAssetStatus(
  */
 export function isAssetCheckedOutInBooking(
   asset: AssetWithStatus,
-  partialCheckinDetails: PartialCheckinDetailsType
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
 ): boolean {
   const contextStatus = getBookingContextAssetStatus(
     asset,
-    partialCheckinDetails
+    partialCheckinDetails,
+    bookingStatus
   );
   return contextStatus === AssetStatus.CHECKED_OUT;
 }
 
 /**
  * Helper to check if asset is partially checked in within booking
+ * Only returns true for ONGOING/OVERDUE bookings, false for COMPLETE bookings
  */
 export function isAssetPartiallyCheckedIn(
   asset: AssetWithStatus,
-  partialCheckinDetails: PartialCheckinDetailsType
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
 ): boolean {
-  return Boolean(partialCheckinDetails[asset.id]);
+  const hasPartialCheckin = Boolean(partialCheckinDetails[asset.id]);
+
+  if (!hasPartialCheckin) {
+    return false;
+  }
+
+  // Only consider as "partially checked in" for active bookings
+  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
 }
 
 /**
  * Context-aware kit status resolver for booking operations
  *
  * Determines the effective status of a kit within a booking context:
- * - If ALL kit assets in booking have partial check-in details -> PARTIALLY_CHECKED_IN
+ * - If ALL kit assets in booking have partial check-in details AND booking is ONGOING/OVERDUE -> PARTIALLY_CHECKED_IN
+ * - If ALL kit assets in booking have partial check-in details AND booking is COMPLETE -> AVAILABLE
  * - Otherwise -> original database status
  *
  * This follows kit logic: Available = ALL assets available, Checked In = ALL assets checked in
@@ -77,7 +97,8 @@ export function isAssetPartiallyCheckedIn(
 export function getBookingContextKitStatus(
   kit: KitWithStatus,
   partialCheckinDetails: PartialCheckinDetailsType,
-  bookingAssetIds: Set<string>
+  bookingAssetIds: Set<string>,
+  bookingStatus: string
 ): ExtendedKitStatus {
   const kitAssetsInBooking =
     kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
@@ -89,7 +110,13 @@ export function getBookingContextKitStatus(
       Boolean(partialCheckinDetails[asset.id])
     );
 
-  if (allAssetsCheckedIn) {
+  // Only show as PARTIALLY_CHECKED_IN for active bookings
+  // For COMPLETE bookings, kits should show as AVAILABLE
+  if (
+    allAssetsCheckedIn &&
+    bookingStatus &&
+    ["ONGOING", "OVERDUE"].includes(bookingStatus)
+  ) {
     return "PARTIALLY_CHECKED_IN";
   }
 
@@ -103,12 +130,14 @@ export function getBookingContextKitStatus(
 export function isKitCheckedOutInBooking(
   kit: KitWithStatus,
   partialCheckinDetails: PartialCheckinDetailsType,
-  bookingAssetIds: Set<string>
+  bookingAssetIds: Set<string>,
+  bookingStatus: string
 ): boolean {
   const contextStatus = getBookingContextKitStatus(
     kit,
     partialCheckinDetails,
-    bookingAssetIds
+    bookingAssetIds,
+    bookingStatus
   );
   return contextStatus === KitStatus.CHECKED_OUT;
 }
@@ -116,23 +145,31 @@ export function isKitCheckedOutInBooking(
 /**
  * Helper to check if kit is partially checked in within booking
  * A kit is considered partially checked in only if ALL of its assets in the booking are checked in
+ * AND the booking is ONGOING/OVERDUE (not COMPLETE)
  * This follows kit logic: Available = ALL assets available, Checked In = ALL assets checked in
  */
 export function isKitPartiallyCheckedIn(
   kit: KitWithStatus,
   partialCheckinDetails: PartialCheckinDetailsType,
-  bookingAssetIds: Set<string>
+  bookingAssetIds: Set<string>,
+  bookingStatus: string
 ): boolean {
   const kitAssetsInBooking =
     kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
 
-  // Only return true if ALL kit assets in booking are checked in
-  return (
+  // Check if ALL kit assets in booking are checked in
+  const allAssetsCheckedIn =
     kitAssetsInBooking.length > 0 &&
     kitAssetsInBooking.every((asset) =>
       Boolean(partialCheckinDetails[asset.id])
-    )
-  );
+    );
+
+  if (!allAssetsCheckedIn) {
+    return false;
+  }
+
+  // Only consider as "partially checked in" for active bookings
+  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
 }
 
 /**
