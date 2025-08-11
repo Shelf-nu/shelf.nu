@@ -1,7 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { Booking } from "@prisma/client";
-import { AssetStatus, BookingStatus, CustomFieldType } from "@prisma/client";
+import type { Booking, AssetStatus } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,

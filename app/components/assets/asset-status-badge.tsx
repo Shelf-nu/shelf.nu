@@ -1,16 +1,17 @@
-import { AssetStatus, Booking, BookingStatus } from "@prisma/client";
-import { Badge } from "../shared/badge";
-import { UnavailableBadge } from "../shared/unavailable-badge";
+import { useMemo } from "react";
+import type { Booking } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
+import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
+import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "../shared/hover-card";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
-import { useMemo } from "react";
+import { UnavailableBadge } from "../shared/unavailable-badge";
 import When from "../when/when";
-import { Button } from "../shared/button";
 
 export const userFriendlyAssetStatus = (status: AssetStatus) => {
   switch (status) {

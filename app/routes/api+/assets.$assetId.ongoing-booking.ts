@@ -1,4 +1,5 @@
-import { json, LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { z } from "zod";
 import { getOngoingBookingForAsset } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
