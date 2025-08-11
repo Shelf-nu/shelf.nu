@@ -21,6 +21,7 @@ import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
+import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -49,7 +50,8 @@ export default function PartialCheckinDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking, partialCheckinProgress } = useLoaderData<typeof loader>();
+  const { booking, partialCheckinProgress, partialCheckinDetails } =
+    useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
@@ -112,6 +114,22 @@ export default function PartialCheckinDrawer({
     .filter((asset) => !bookingAssetIds.has(asset.id))
     .map((a) => a.id);
 
+  // Assets that are already checked in for this booking
+  const alreadyCheckedInAssets = assets
+    .filter(
+      (asset) =>
+        bookingAssetIds.has(asset.id) &&
+        isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+    )
+    .map((a) => a.id);
+
+  const qrIdsOfAlreadyCheckedInAssets = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item || item.type !== "asset") return false;
+      return alreadyCheckedInAssets.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+
   // Note: In partial check-in context, we allow individual kit assets to be checked in
   // so we don't create blockers for assets that are part of kits
 
@@ -124,6 +142,34 @@ export default function PartialCheckinDrawer({
     .filter(([, item]) => {
       if (!item || item.type !== "kit") return false;
       return kitsNotInBooking.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+
+  // Kits that are already checked in for this booking (ALL kit assets in booking are checked in)
+  const alreadyCheckedInKits = kits
+    .filter((kit) => {
+      // Get kit assets that are in this booking
+      const kitAssetsInBooking = kit.assets.filter((asset) =>
+        bookingAssetIds.has(asset.id)
+      );
+
+      // Kit is considered already checked in only if ALL its assets in booking are checked in
+      return (
+        kitAssetsInBooking.length > 0 &&
+        kitAssetsInBooking.every((asset) =>
+          isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+        )
+      );
+    })
+    .map((kit) => kit.id);
+
+  const qrIdsOfAlreadyCheckedInKits = Object.entries(items)
+    .filter(([qrId, item]) => {
+      if (!item || item.type !== "kit") return false;
+      const kitId = (item?.data as any)?.id;
+      const isAlreadyCheckedIn = alreadyCheckedInKits.includes(kitId);
+
+      return isAlreadyCheckedIn;
     })
     .map(([qrId]) => qrId);
 
@@ -164,6 +210,30 @@ export default function PartialCheckinDrawer({
         </>
       ),
       onResolve: () => removeAssetsFromList(assetsNotInBookingIds),
+    },
+    {
+      condition: alreadyCheckedInAssets.length > 0,
+      count: alreadyCheckedInAssets.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong>{" "}
+          already been checked in for this booking.
+        </>
+      ),
+      description: "These assets cannot be checked in again",
+      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedInAssets),
+    },
+    {
+      condition: alreadyCheckedInKits.length > 0,
+      count: alreadyCheckedInKits.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s have" : " has"}`}</strong>{" "}
+          already been checked in for this booking.
+        </>
+      ),
+      description: "All assets from these kits have already been checked in",
+      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedInKits),
     },
     {
       condition: redundantAssetIds.length > 0,
@@ -209,6 +279,8 @@ export default function PartialCheckinDrawer({
         ...errors.map(([qrId]) => qrId),
         ...qrIdsOfKitsNotInBooking,
         ...qrIdsOfRedundantAssets,
+        ...qrIdsOfAlreadyCheckedInAssets,
+        ...qrIdsOfAlreadyCheckedInKits,
       ]);
     },
   });
@@ -334,11 +406,17 @@ export default function PartialCheckinDrawer({
 
 // Asset row renderer
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, partialCheckinDetails } = useLoaderData<typeof loader>();
   const items = useAtomValue(scannedItemsAtom);
 
   // Check if asset is in this booking
   const isInBooking = booking.assets.some((a) => a.id === asset.id);
+
+  // Check if asset is already checked in within this booking using centralized helper
+  const isAlreadyCheckedIn = isAssetPartiallyCheckedIn(
+    asset,
+    partialCheckinDetails
+  );
 
   // Check if this asset is redundant (kit is also scanned)
   const isRedundant =
@@ -372,6 +450,15 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       tooltipContent:
         "This asset is already covered by the scanned kit QR code. Remove this individual asset scan.",
       priority: 90, // Highest priority - blocking issue
+    },
+    // Custom preset for already checked in assets
+    {
+      condition: isAlreadyCheckedIn && isInBooking,
+      badgeText: "Already checked in",
+      tooltipTitle: "Asset already checked in",
+      tooltipContent:
+        "This asset has already been checked in for this booking and cannot be checked in again.",
+      priority: 85, // High priority - blocking issue
     },
     // Custom preset for "not in this booking"
     {
@@ -423,7 +510,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
-  const { booking, partialCheckinProgress } = useLoaderData<typeof loader>();
+  const { booking, partialCheckinProgress, partialCheckinDetails } =
+    useLoaderData<typeof loader>();
   const items = useAtomValue(scannedItemsAtom);
 
   // Check how many assets from this kit are in the booking
@@ -454,9 +542,25 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     : uncheckedKitAssetsInBooking;
   const totalKitAssetsInBooking = kitAssetsInBooking.length;
 
+  // Check if all kit assets in booking are already checked in
+  const allKitAssetsInBookingAreCheckedIn =
+    kitAssetsInBooking.length > 0 &&
+    kitAssetsInBooking.every((asset) =>
+      isAssetPartiallyCheckedIn(asset, partialCheckinDetails)
+    );
+
   // Use preset configurations to define the availability labels
   // Note: In check-in context, we don't show "checked out" labels as that's expected
   const availabilityConfigs = [
+    // Custom preset for "already checked in" kits (highest priority - blocking issue)
+    {
+      condition: allKitAssetsInBookingAreCheckedIn,
+      badgeText: "Already checked in",
+      tooltipTitle: "Kit already checked in",
+      tooltipContent:
+        "All assets from this kit have already been checked in for this booking and cannot be checked in again.",
+      priority: 85, // High priority - blocking issue
+    },
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
     // Removed checkedOut label - expected in check-in context
     kitLabelPresets.hasAssetsInCustody(

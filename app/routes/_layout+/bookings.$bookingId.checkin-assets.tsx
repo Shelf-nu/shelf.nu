@@ -80,15 +80,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    // Check if there might be partial check-ins by looking at asset statuses
-    const hasAvailableAssets = booking.assets.some(
-      (asset) => asset.status === "AVAILABLE"
-    );
-
-    // Only fetch partial check-in data if there might be partial check-ins
-    const { checkedInAssetIds } = hasAvailableAssets
-      ? await getDetailedPartialCheckinData(booking.id)
-      : { checkedInAssetIds: [] as string[] };
+    // Always fetch partial check-in data for scanner validation
+    // We need this data to detect blockers for already checked-in assets/kits
+    const { checkedInAssetIds, partialCheckinDetails } =
+      await getDetailedPartialCheckinData(booking.id);
 
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
@@ -111,7 +106,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, booking, partialCheckinProgress }));
+    return json(
+      data({
+        title,
+        header,
+        booking,
+        partialCheckinProgress,
+        partialCheckinDetails,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });

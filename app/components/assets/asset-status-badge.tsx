@@ -1,8 +1,7 @@
 import { AssetStatus } from "@prisma/client";
+import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import { Badge } from "../shared/badge";
 import { UnavailableBadge } from "../shared/unavailable-badge";
-
-type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
 
 /**
  * We have a special status called CHECKED_IN which is only valid within a booking context

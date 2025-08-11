@@ -62,6 +62,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sortBookingAssets } from "~/utils/booking-assets";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -212,32 +213,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
     const enhancedBooking = booking;
 
-    // Sort assets by partial check-in date, then by status, then by asset ID
-    enhancedBooking.assets.sort((a, b) => {
-      // Check if assets have partial check-in dates
-      const aPartialCheckin = partialCheckinDetails[a.id];
-      const bPartialCheckin = partialCheckinDetails[b.id];
-
-      // If both have partial check-in dates, sort by most recent first
-      if (aPartialCheckin && bPartialCheckin) {
-        return (
-          bPartialCheckin.checkinDate.getTime() -
-          aPartialCheckin.checkinDate.getTime()
-        );
-      }
-
-      // Assets with partial check-ins come first (already checked in = higher priority)
-      if (aPartialCheckin && !bPartialCheckin) return -1;
-      if (!aPartialCheckin && bPartialCheckin) return 1;
-
-      // For assets without partial check-ins, sort by status (CHECKED_OUT first)
-      if (a.status !== b.status) {
-        return a.status === "CHECKED_OUT" ? -1 : 1;
-      }
-
-      // Finally, sort by asset ID as fallback for consistency
-      return a.id.localeCompare(b.id);
-    });
+    // Sort assets by booking context priority
+    enhancedBooking.assets = sortBookingAssets(
+      enhancedBooking.assets,
+      partialCheckinDetails
+    );
 
     // Group assets by kitId for pagination purposes
     const assetsByKit: Record<

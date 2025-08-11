@@ -7,6 +7,10 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import {
+  getBookingContextAssetStatus,
+  isAssetPartiallyCheckedIn,
+} from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -93,7 +97,15 @@ export default function ListAssetContent({
     isBaseOrSelfService,
   ]);
 
-  const isPartiallyCheckedIn = Boolean(partialCheckinDetails?.[item.id]);
+  // Use centralized status resolver for consistency
+  const contextStatus = getBookingContextAssetStatus(
+    item,
+    partialCheckinDetails
+  );
+  const isPartiallyCheckedIn = isAssetPartiallyCheckedIn(
+    item,
+    partialCheckinDetails
+  );
 
   return (
     <>
@@ -142,9 +154,7 @@ export default function ListAssetContent({
               </span>
               <div>
                 <AssetStatusBadge
-                  status={
-                    isPartiallyCheckedIn ? "PARTIALLY_CHECKED_IN" : item.status
-                  }
+                  status={contextStatus}
                   availableToBook={item.availableToBook}
                 />
               </div>

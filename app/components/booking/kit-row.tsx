@@ -6,6 +6,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import { getBookingContextKitStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import KitImage from "../kits/kit-image";
 import { ListItem } from "../list/list-item";
@@ -44,7 +45,18 @@ export default function KitRow({
   shouldShowCheckinColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
-  const { isDraft, isReserved } = useBookingStatusHelpers(bookingStatus);
+  const { isDraft, isReserved, isInProgress } =
+    useBookingStatusHelpers(bookingStatus);
+
+  // Create booking asset IDs set for context-aware status calculation
+  const bookingAssetIds = new Set(assets.map((asset) => asset.id));
+
+  // Get context-aware kit status using centralized helper
+  const contextAwareKitStatus = getBookingContextKitStatus(
+    { ...kit, assets: assets },
+    partialCheckinDetails,
+    bookingAssetIds
+  );
 
   // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
   // Use centralized booking conflict logic
@@ -81,7 +93,10 @@ export default function KitRow({
                   {kit.name}
                 </div>
               </Button>
-              <KitStatusBadge status={kit.status} availableToBook={true} />
+              <KitStatusBadge
+                status={contextAwareKitStatus}
+                availableToBook={true}
+              />
             </div>
             <div className="ml-auto text-sm text-gray-600">
               {assets.length} assets
@@ -89,7 +104,7 @@ export default function KitRow({
           </div>
         </Td>
 
-        <When truthy={isOverlapping} fallback={<Td> </Td>}>
+        <When truthy={isOverlapping && !isInProgress} fallback={<Td> </Td>}>
           <Td>
             <AvailabilityBadge
               badgeText="Already booked"
