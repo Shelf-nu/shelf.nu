@@ -157,7 +157,11 @@ export default function PartialCheckinDrawer({
       return (
         kitAssetsInBooking.length > 0 &&
         kitAssetsInBooking.every((asset) =>
-          isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+          isAssetPartiallyCheckedIn(
+            asset,
+            partialCheckinDetails,
+            booking.status
+          )
         )
       );
     })

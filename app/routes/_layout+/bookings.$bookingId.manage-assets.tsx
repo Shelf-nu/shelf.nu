@@ -341,7 +341,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Filter out assets that are partially checked in within this booking context using centralized helper
     // These are effectively available for other bookings
     const checkedOutAssets = potentiallyCheckedOutAssets.filter(
-      (asset) => !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+      (asset) =>
+        !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
     );
 
     if (

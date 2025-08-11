@@ -67,7 +67,11 @@ function ConditionalDropdown() {
     // and we know these are asset items with status property
     const asset = item as ListItemData & { status: string };
     // For individual assets, check if already partially checked in
-    return isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status);
+    return isAssetPartiallyCheckedIn(
+      asset,
+      partialCheckinDetails,
+      booking.status
+    );
   });
 
   const partialCheckinDisabled = hasOnlyAlreadyCheckedInItems

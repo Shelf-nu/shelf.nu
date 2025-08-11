@@ -964,9 +964,10 @@ export async function checkinBooking({
       // Only update assets that are CHECKED_OUT in this booking's context
       // Skip assets that have partial check-ins (they're effectively available in this booking's context)
       const assetsToCheckin = bookingFound.assets
-        .filter((asset) => 
-          asset.status === AssetStatus.CHECKED_OUT && 
-          !partiallyCheckedInAssetIds.has(asset.id)
+        .filter(
+          (asset) =>
+            asset.status === AssetStatus.CHECKED_OUT &&
+            !partiallyCheckedInAssetIds.has(asset.id)
         )
         .map((asset) => asset.id);
 
@@ -986,9 +987,9 @@ export async function checkinBooking({
           const kitAssetsInBooking = bookingFound.assets.filter(
             (asset) => asset.kitId === kitId
           );
-          
+
           // Only check in the kit if ALL its assets in the booking are being checked in
-          return kitAssetsInBooking.every((asset) => 
+          return kitAssetsInBooking.every((asset) =>
             assetsToCheckinSet.has(asset.id)
           );
         });
