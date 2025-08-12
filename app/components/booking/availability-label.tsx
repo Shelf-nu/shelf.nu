@@ -249,7 +249,7 @@ export function getKitAvailabilityStatus(
     })
     .filter(Boolean)
     .flat();
-  
+
   /** Checks whether this is checked out in another not overlapping booking */
   const isCheckedOutInANonConflictingBooking =
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
@@ -290,9 +290,13 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   } = getKitAvailabilityStatus(kit, booking.id);
 
   // Check if kit is checked out in current booking - don't show availability label
-  const isCheckedOutInCurrentBooking = isCheckedOut && kit.assets.some(asset => 
-    asset.bookings.some(b => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status))
-  );
+  const isCheckedOutInCurrentBooking =
+    isCheckedOut &&
+    kit.assets.some((asset) =>
+      asset.bookings.some(
+        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      )
+    );
 
   // Case 1: Kit is checked out in current booking - don't show availability label
   // The KitStatusBadge with CHECKED_OUT should be shown instead in the Row component

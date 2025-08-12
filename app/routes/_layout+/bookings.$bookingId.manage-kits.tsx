@@ -82,14 +82,14 @@ export type KitForBooking = Prisma.KitGetPayload<{
         status: true;
         availableToBook: true;
         custody: true;
-        bookings: { 
-          select: { 
-            id: true; 
+        bookings: {
+          select: {
+            id: true;
             status: true;
             name: true;
             from: true;
             to: true;
-          } 
+          };
         };
       };
     };
@@ -185,12 +185,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       ],
                     }),
                 },
-                select: { 
-                  id: true, 
+                select: {
+                  id: true,
                   status: true,
                   name: true,
                   from: true,
-                  to: true
+                  to: true,
                 },
               },
             },
@@ -627,16 +627,17 @@ export default function AddKitsToBooking() {
 
 function Row({ item: kit }: { item: KitForBooking }) {
   const { booking } = useLoaderData<typeof loader>();
-  const { isCheckedOut } = getKitAvailabilityStatus(
-    kit,
-    booking.id
-  );
+  const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
 
   // For Case 1: Check if kit is checked out in current booking
   // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
-  const isCheckedOutInCurrentBooking = isCheckedOut && kit.assets.some(asset => 
-    asset.bookings.some(b => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status))
-  );
+  const isCheckedOutInCurrentBooking =
+    isCheckedOut &&
+    kit.assets.some((asset) =>
+      asset.bookings.some(
+        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      )
+    );
 
   return (
     <>
@@ -670,7 +671,12 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   />
                 </When>
                 {/* Show regular status badge for other available kits */}
-                <When truthy={kit.status === AssetStatus.AVAILABLE && !isCheckedOutInCurrentBooking}>
+                <When
+                  truthy={
+                    kit.status === AssetStatus.AVAILABLE &&
+                    !isCheckedOutInCurrentBooking
+                  }
+                >
                   <KitStatusBadge
                     status={kit.status}
                     availableToBook={

@@ -977,7 +977,6 @@ export async function checkinBooking({
           data: { status: AssetStatus.AVAILABLE },
         });
       }
-
       /* If there are any kits associated with the booking, then update their status */
       if (hasKits) {
         // Determine which kits should be checked in based on their assets being checked in
@@ -988,9 +987,12 @@ export async function checkinBooking({
             (asset) => asset.kitId === kitId
           );
 
-          // Only check in the kit if ALL its assets in the booking are being checked in
-          return kitAssetsInBooking.every((asset) =>
-            assetsToCheckinSet.has(asset.id)
+          // Check in the kit if ALL its assets in the booking will be AVAILABLE after this operation
+          // This includes: assets being checked in now OR assets already AVAILABLE (from partial check-ins)
+          return kitAssetsInBooking.every(
+            (asset) =>
+              assetsToCheckinSet.has(asset.id) ||
+              asset.status === AssetStatus.AVAILABLE
           );
         });
 
@@ -1116,25 +1118,9 @@ export async function partialCheckinBooking({
       checkedOutAssetIds.size === providedAssetIds.size &&
       [...checkedOutAssetIds].every((id) => providedAssetIds.has(id))
     ) {
-      // Check if there are existing partial check-ins for this booking
-      const existingPartialCheckinsCount = await db.partialBookingCheckin.count(
-        {
-          where: { bookingId: id },
-        }
-      );
-
-      // Only create PartialBookingCheckin record if there were previous partial check-ins
-      // This maintains the audit trail for a multi-session partial check-in process
-      if (existingPartialCheckinsCount > 0) {
-        await db.partialBookingCheckin.create({
-          data: {
-            bookingId: id,
-            checkedInById: userId,
-            assetIds,
-            checkinCount: assetIds.length,
-          },
-        });
-      }
+      // DON'T create PartialBookingCheckin record when doing complete check-in redirect
+      // The checkinBooking function will handle the completion properly
+      // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
       const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via explicit check-in scanner for booking **[${

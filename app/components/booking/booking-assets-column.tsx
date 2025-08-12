@@ -197,7 +197,6 @@ export function BookingAssetsColumn() {
                       if (item.type === "kit") {
                         const kit = item.kit;
                         const isExpanded = expandedKits[item.id] ?? false;
-
                         if (!kit) {
                           return null;
                         }
