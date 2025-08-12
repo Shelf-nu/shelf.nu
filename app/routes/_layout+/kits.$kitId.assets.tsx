@@ -179,6 +179,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 </Button>
               </span>
               <AssetStatusBadge
+                id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

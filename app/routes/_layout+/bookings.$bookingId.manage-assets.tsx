@@ -664,6 +664,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
               <div className="flex flex-row gap-x-2">
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    id={item.id}
                     status={item.status}
                     availableToBook={item.availableToBook}
                   />

@@ -163,6 +163,7 @@ export const AssetsList = ({
                       </div>
                       <div className="flex items-center gap-2">
                         <AssetStatusBadge
+                          id={resource.id}
                           status={resource.extendedProps?.status}
                           availableToBook={
                             resource.extendedProps?.availableToBook
@@ -262,6 +263,7 @@ const ListAssetContent = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
