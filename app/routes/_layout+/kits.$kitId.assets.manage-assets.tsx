@@ -724,6 +724,7 @@ const RowComponent = ({
                 */}
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    id={item.id}
                     status={item.status}
                     availableToBook={item.availableToBook}
                   />
