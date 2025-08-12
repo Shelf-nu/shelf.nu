@@ -391,7 +391,7 @@ export const buildCsvExportDataFromAssets = ({
           case "barcode_ExternalQR": {
             value =
               asset.barcodes?.find(
-                (b) => b.type === columnsLabelsMap[fieldName].replace(" ", "")
+                (b) => b.type === columnsLabelsMap[fieldName].replace(/ /g, "")
               )?.value ?? "";
             break;
           }
