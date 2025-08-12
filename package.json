@@ -182,7 +182,7 @@
     "vitest": "^2.1.9"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "prisma": {
     "schema": "app/database/schema.prisma"
