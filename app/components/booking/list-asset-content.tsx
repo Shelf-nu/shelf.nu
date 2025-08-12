@@ -156,6 +156,7 @@ export default function ListAssetContent({
               </span>
               <div>
                 <AssetStatusBadge
+                  id={item.id}
                   status={contextStatus}
                   availableToBook={item.availableToBook}
                 />

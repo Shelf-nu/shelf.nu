@@ -3474,3 +3474,31 @@ export async function checkinAssets({
 
   return redirect(`/bookings/${bookingId}`);
 }
+
+export async function getOngoingBookingForAsset({
+  assetId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  organizationId: Asset["organizationId"];
+}) {
+  try {
+    const booking = await db.booking.findFirst({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId,
+        assets: { some: { id: assetId } },
+      },
+    });
+
+    return booking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while getting ongoing booking for asset.",
+    });
+  }
+}

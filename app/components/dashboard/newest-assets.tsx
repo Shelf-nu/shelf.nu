@@ -114,6 +114,7 @@ const Row = ({
               </span>
               <div>
                 <AssetStatusBadge
+                  id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
