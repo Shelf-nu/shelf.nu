@@ -26,10 +26,14 @@ import type {
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import type {
+  BarcodeField,
   Column,
   FixedField,
 } from "~/modules/asset-index-settings/helpers";
-import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import {
+  columnsLabelsMap,
+  parseColumnName,
+} from "~/modules/asset-index-settings/helpers";
 import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
   getBookings,
@@ -252,18 +256,18 @@ export async function exportAssetsBackupToCsv({
 export async function exportAssetsFromIndexToCsv({
   request,
   assetIds,
-  organizationId,
   settings,
+  currentOrganization,
 }: {
   request: Request;
   assetIds: string;
-  organizationId: string;
   settings: AssetIndexSettings;
+  currentOrganization: Pick<Organization, "id" | "barcodesEnabled">;
 }) {
   /** Parse filters */
   const { filters } = await getAdvancedFiltersFromRequest(
     request,
-    organizationId,
+    currentOrganization.id,
     settings
   );
 
@@ -273,13 +277,14 @@ export async function exportAssetsFromIndexToCsv({
 
   const { assets } = await getAdvancedPaginatedAndFilterableAssets({
     request,
-    organizationId,
+    organizationId: currentOrganization.id,
     filters,
     settings,
     takeAll,
     assetIds: takeAll ? undefined : ids,
+    canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
-
+  console.log("settings", settings.columns);
   // Pass both assets and columns to the build function
   const csvData = buildCsvExportDataFromAssets({
     assets,
@@ -317,7 +322,8 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
-
+  console.log(JSON.stringify(assets));
+  console.log(visibleColumns);
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
@@ -326,7 +332,7 @@ export const buildCsvExportDataFromAssets = ({
 
       // If it's not a custom field, it must be a fixed field or 'name'
       if (!column.name.startsWith("cf_")) {
-        const fieldName = column.name as FixedField | "name";
+        const fieldName = column.name as FixedField | BarcodeField | "name";
 
         switch (fieldName) {
           case "id":
@@ -382,6 +388,17 @@ export const buildCsvExportDataFromAssets = ({
               : "";
             break;
           }
+          case "barcode_Code128":
+          case "barcode_Code39":
+          case "barcode_DataMatrix":
+          case "barcode_ExternalQR": {
+            value =
+              asset.barcodes?.find(
+                (b) => b.type === columnsLabelsMap[fieldName].replace(" ", "")
+              )?.value ?? "";
+            break;
+          }
+
           case "actions":
             value = "";
             break;
