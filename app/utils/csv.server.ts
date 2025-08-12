@@ -284,7 +284,6 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
-  console.log("settings", settings.columns);
   // Pass both assets and columns to the build function
   const csvData = buildCsvExportDataFromAssets({
     assets,
@@ -322,8 +321,6 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
-  console.log(JSON.stringify(assets));
-  console.log(visibleColumns);
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
