@@ -136,7 +136,16 @@ export function BookingAssetsColumn() {
 
   function itemsGetter(data: LoaderData) {
     return data.items
-      .map((item) => [item, ...(item?.type === "kit" ? item.assets : [])])
+      .map((item) => {
+        if (item?.type === "kit") {
+          // For kits, return the kit's assets first, then the actual kit object
+          // This matches what individual kit selection puts in the atom
+          return [...item.assets, item.kit];
+        } else {
+          // For individual assets, return the asset
+          return item.assets[0];
+        }
+      })
       .flat();
   }
 

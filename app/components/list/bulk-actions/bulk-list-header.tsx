@@ -48,6 +48,8 @@ export default function BulkListHeader({
       ? itemsGetter(loaderData)
       : loaderData.items;
 
+  // console.log("items", items);
+
   const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();
 

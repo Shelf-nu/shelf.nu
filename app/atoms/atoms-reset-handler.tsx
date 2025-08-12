@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useLocation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { fileErrorAtom } from "./file";
-import { setDisabledBulkItemsAtom, setSelectedBulkItemsAtom } from "./list";
+import { clearSelectedBulkItemsAtom, setDisabledBulkItemsAtom } from "./list";
 import { clearScannedItemsAtom } from "./qr-scanner";
 
 /**
@@ -17,14 +17,14 @@ import { clearScannedItemsAtom } from "./qr-scanner";
 export function AtomsResetHandler() {
   const location = useLocation();
   const resetDisabledItems = useSetAtom(setDisabledBulkItemsAtom);
-  const resetSelectedItems = useSetAtom(setSelectedBulkItemsAtom);
+  const resetSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
   const resetFileAtom = useSetAtom(fileErrorAtom);
   const resetScannedItems = useSetAtom(clearScannedItemsAtom);
 
   useEffect(() => {
     // Reset when the route changes
     resetDisabledItems([]);
-    resetSelectedItems([]);
+    resetSelectedItems();
     resetFileAtom(undefined);
     resetScannedItems();
   }, [
