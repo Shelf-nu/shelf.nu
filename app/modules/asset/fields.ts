@@ -72,10 +72,10 @@ export const getAssetOverviewFields = (
         NOT: {
           partialCheckins: {
             some: {
-              assetIds: { has: assetId }
-            }
-          }
-        }
+              assetIds: { has: assetId },
+            },
+          },
+        },
       },
       select: {
         id: true,
