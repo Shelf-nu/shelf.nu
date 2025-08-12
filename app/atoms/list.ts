@@ -16,10 +16,20 @@ selectedBulkItemsAtom.onMount = (setAtom) => {
 };
 
 /* This atom is used to keep track of the number of selected items */
-export const selectedBulkItemsCountAtom = atom(
-  (get) => get(selectedBulkItemsAtom).length
-);
+export const selectedBulkItemsCountAtom = atom((get) => {
+  const selectedItems = get(selectedBulkItemsAtom);
+  const kits = selectedItems.filter((i) => "_count" in i);
+  const kitIds = kits.map((kit) => kit.id);
 
+  const count = selectedItems.filter((item) => {
+    if ("_count" in item) return true; // count kits
+    if (!item.kitId) return true; // count assets without a kit
+    if (item.kitId && !kitIds.includes(item.kitId)) return true; // count assets with a kit that's not selected
+    return false;
+  }).length;
+
+  return count;
+});
 /**
  * Set an item in selectedBulkItems
  */
@@ -46,6 +56,7 @@ export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
   null,
   (get, set, update) => {
     const disabledItems = get(disabledBulkItemsAtom);
+    const prevItems = get(selectedBulkItemsAtom);
 
     // Filter out disabled items from the update
     const filteredUpdate = update.filter(
@@ -53,7 +64,15 @@ export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
         !disabledItems.some((disabledItem) => disabledItem.id === item.id)
     );
 
-    set(selectedBulkItemsAtom, filteredUpdate);
+    // Create a map of previous items
+    const prevItemsMap = new Map(prevItems.map((item) => [item.id, item]));
+
+    // Merge with previous items
+    filteredUpdate.forEach((item) => {
+      prevItemsMap.set(item.id, item);
+    });
+
+    set(selectedBulkItemsAtom, Array.from(prevItemsMap.values()));
   }
 );
 
@@ -80,5 +99,15 @@ export const removeSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
           !update.some((updateItem) => updateItem.id === prevItem.id)
       )
     );
+  }
+);
+
+/**
+ * Clears selected bulk items
+ */
+export const clearSelectedBulkItemsAtom = atom<null, [], void>(
+  null,
+  (_, set) => {
+    set(selectedBulkItemsAtom, []);
   }
 );

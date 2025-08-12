@@ -1,6 +1,8 @@
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { X } from "lucide-react";
 import {
+  clearSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemsAtom,
@@ -65,6 +67,7 @@ export default function ListTitle({
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+  const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
   /**
@@ -85,27 +88,11 @@ export default function ListTitle({
         {hasBulkActions && hasSelectedItems ? (
           <div className="flex items-start gap-2">
             <Button
-              onClick={() => setSelectedBulkItems([])}
+              onClick={clearSelectedItems}
               variant="secondary"
-              className="p-1 text-[14px]"
+              className="p-[2px] text-[14px]"
             >
-              <span className="block size-2">
-                <svg
-                  width="100%"
-                  height="100%"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M9 1 1 9m0-8 8 8"
-                    stroke="currentColor"
-                    strokeWidth={1.333}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
+              <X size={12} strokeWidth={3} className="text-gray-600" />
             </Button>
             {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
             {!disableSelectAllItems &&

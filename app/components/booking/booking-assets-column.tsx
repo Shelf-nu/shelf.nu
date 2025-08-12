@@ -152,7 +152,7 @@ export function BookingAssetsColumn() {
           </div>
 
           {/* This is a fake table header */}
-          <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
+          <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t ">
             <BookingAssetsHeader
               canSeeActions={canSeeActions}
               itemsGetter={itemsGetter}

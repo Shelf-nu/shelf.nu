@@ -59,7 +59,6 @@ export default function KitRow({
     bookingStatus
   );
 
-  console.log(contextAwareKitStatus, "contextAwareKitStatus");
   // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
   // Use centralized booking conflict logic
   const isOverlapping =

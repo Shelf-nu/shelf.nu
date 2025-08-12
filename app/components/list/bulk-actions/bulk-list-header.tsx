@@ -1,6 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
+  clearSelectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
@@ -58,8 +59,14 @@ export default function BulkListHeader({
 
   const allItemsSelected = totalItemsSelected >= items.length;
 
+  const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
+
   function handleSelectAllIncomingItems() {
-    setSelectedBulkItems(allItemsSelected ? [] : items);
+    if (allItemsSelected) {
+      clearSelectedItems();
+    } else {
+      setSelectedBulkItems(items);
+    }
   }
 
   return (
@@ -77,9 +84,7 @@ export default function BulkListHeader({
         {partialItemsSelected ? (
           <PartialCheckboxIcon
             className="cursor-pointer"
-            onClick={() => {
-              setSelectedBulkItems([]);
-            }}
+            onClick={clearSelectedItems}
           />
         ) : (
           <FakeCheckbox
