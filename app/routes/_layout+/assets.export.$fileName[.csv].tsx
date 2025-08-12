@@ -19,12 +19,13 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.export,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.export,
+      });
 
     await assertUserCanExportAssets({ organizationId, organizations });
 
@@ -32,6 +33,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const settings = await getAssetIndexSettings({
       userId,
       organizationId,
+      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     });
     const { mode } = settings;
 
@@ -45,8 +47,8 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         ? await exportAssetsFromIndexToCsv({
             request,
             assetIds,
-            organizationId,
             settings,
+            currentOrganization,
           })
         : await exportAssetsBackupToCsv({ organizationId });
 
