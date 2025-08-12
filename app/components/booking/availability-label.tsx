@@ -1,5 +1,5 @@
 import type { Booking } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
@@ -240,14 +240,18 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
-  // Kit is checked out if it's not AVAILABLE and has conflicting bookings
-  // Use centralized booking conflict logic
-  const isCheckedOut =
-    kit.status !== "AVAILABLE" &&
-    kit.assets.some((asset) =>
-      hasAssetBookingConflicts(asset, currentBookingId)
-    );
-
+  const bookings = kit.assets
+    .map((asset) => {
+      if (asset?.bookings.length) {
+        return asset.bookings;
+      }
+      return null;
+    })
+    .filter(Boolean);
+  /** Checks whether this is checked out in anothe not overlapping booking */
+  const isCheckedOutInANonConflictingBooking =
+    kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
+  const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
   const isInCustody =
     kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
 
@@ -262,6 +266,7 @@ export function getKitAvailabilityStatus(
 
   return {
     isCheckedOut,
+    isCheckedOutInANonConflictingBooking,
     isInCustody,
     isKitWithoutAssets,
     someAssetMarkedUnavailable,
@@ -275,6 +280,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
 
   const {
     isCheckedOut,
+    isCheckedOutInANonConflictingBooking,
     someAssetMarkedUnavailable,
     isInCustody,
     isKitWithoutAssets,
@@ -292,13 +298,15 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   }
 
   if (isCheckedOut) {
-    return (
-      <AvailabilityBadge
-        badgeText="Checked out"
-        tooltipTitle="Kit is checked out"
-        tooltipContent="This kit is currently checked out as part of another booking."
-      />
-    );
+    <AvailabilityBadge
+      badgeText="Checked out"
+      tooltipTitle="Kit is checked out"
+      tooltipContent={
+        isCheckedOutInANonConflictingBooking
+          ? "This kit is currently checked out as part of another booking and should be available for your selected date range period"
+          : "This kit is currently checked out and is not available for your selected date range period"
+      }
+    />;
   }
 
   if (isKitWithoutAssets) {

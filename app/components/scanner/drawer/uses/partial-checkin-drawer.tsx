@@ -168,7 +168,7 @@ export default function PartialCheckinDrawer({
     .map((kit) => kit.id);
 
   const qrIdsOfAlreadyCheckedInKits = Object.entries(items)
-    .filter(([qrId, item]) => {
+    .filter(([_qrId, item]) => {
       if (!item || item.type !== "kit") return false;
       const kitId = (item?.data as any)?.id;
       const isAlreadyCheckedIn = alreadyCheckedInKits.includes(kitId);

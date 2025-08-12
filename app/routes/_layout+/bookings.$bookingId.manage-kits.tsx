@@ -156,6 +156,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                  * Important to make sure the bookings are overlapping the period of the current booking
                  */
                 where: {
+                  status: {
+                    in: [
+                      BookingStatus.RESERVED,
+                      BookingStatus.ONGOING,
+                      BookingStatus.OVERDUE,
+                    ],
+                  },
                   ...(booking.from &&
                     booking.to && {
                       OR: [
