@@ -247,8 +247,10 @@ export function getKitAvailabilityStatus(
       }
       return null;
     })
-    .filter(Boolean);
-  /** Checks whether this is checked out in anothe not overlapping booking */
+    .filter(Boolean)
+    .flat();
+  
+  /** Checks whether this is checked out in another not overlapping booking */
   const isCheckedOutInANonConflictingBooking =
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
@@ -287,6 +289,17 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
 
+  // Check if kit is checked out in current booking - don't show availability label
+  const isCheckedOutInCurrentBooking = isCheckedOut && kit.assets.some(asset => 
+    asset.bookings.some(b => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status))
+  );
+
+  // Case 1: Kit is checked out in current booking - don't show availability label
+  // The KitStatusBadge with CHECKED_OUT should be shown instead in the Row component
+  if (isCheckedOutInCurrentBooking) {
+    return null;
+  }
+
   if (isInCustody) {
     return (
       <AvailabilityBadge
@@ -298,15 +311,17 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   }
 
   if (isCheckedOut) {
-    <AvailabilityBadge
-      badgeText="Checked out"
-      tooltipTitle="Kit is checked out"
-      tooltipContent={
-        isCheckedOutInANonConflictingBooking
-          ? "This kit is currently checked out as part of another booking and should be available for your selected date range period"
-          : "This kit is currently checked out and is not available for your selected date range period"
-      }
-    />;
+    return (
+      <AvailabilityBadge
+        badgeText="Checked out"
+        tooltipTitle="Kit is checked out"
+        tooltipContent={
+          isCheckedOutInANonConflictingBooking
+            ? "This kit is currently checked out as part of another booking and should be available for your selected date range period"
+            : "This kit is currently checked out and is not available for your selected date range period"
+        }
+      />
+    );
   }
 
   if (isKitWithoutAssets) {
