@@ -206,6 +206,9 @@ export const buildCustomFieldValue = (
       case "AMOUNT": {
         return { raw: Number(raw), valueText: String(raw) };
       }
+      case "NUMBER": {
+        return { raw: Number(raw), valueText: String(raw) };
+      }
     }
 
     return { raw, valueText: String(raw) };
