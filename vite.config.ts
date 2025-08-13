@@ -25,13 +25,15 @@ export default defineConfig({
       clientFiles: [
         "./app/entry.client.tsx",
         "./app/root.tsx",
-        "./app/routes/**/*",
+        "./app/routes/**/*.tsx",
+        "./app/routes/**/*.ts",
+        "!./app/routes/**/*.test.server.ts",
       ],
     },
   },
   optimizeDeps: {
-    include: ["./app/routes/**/*"],
-    exclude: ["./app/routes/**/*.test.server.ts"],
+    include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
+    exclude: ["**/*.test.server.ts"],
   },
   build: {
     target: "ES2022",
