@@ -150,6 +150,7 @@ Always run `npm run validate` before committing - this runs:
 
 - add and commit automatically whenever a task is finished\
 - use descriptive commit messages that capture the full scope of the changes
+- dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 
 ## Rule Improvement Triggers
 
