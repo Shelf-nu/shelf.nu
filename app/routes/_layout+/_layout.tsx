@@ -28,6 +28,7 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -113,6 +114,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await getSelectedOrganisation({ userId: authSession.userId, request });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
+    // Get current user's organization role for updates filtering
+    const currentOrganizationUserRoles = user?.userOrganizations.find(
+      (userOrg) => userOrg.organization.id === organizationId
+    )?.roles;
+
+    // Get unread updates count for the current user (using first organization role)
+    const unreadUpdatesCount = currentOrganizationUserRoles?.[0]
+      ? await getUnreadCountForUser({
+          userId: authSession.userId,
+          userRole: currentOrganizationUserRoles[0],
+        })
+      : 0;
+
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -133,9 +147,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization.id
         ),
         currentOrganization,
-        currentOrganizationUserRoles: user?.userOrganizations.find(
-          (userOrg) => userOrg.organization.id === organizationId
-        )?.roles,
+        currentOrganizationUserRoles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
@@ -143,6 +155,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
+        unreadUpdatesCount,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
           ? false

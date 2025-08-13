@@ -26,6 +26,8 @@ export function useBookingStatusHelpers(status: BookingStatus | undefined) {
       isArchived: status === BookingStatus.ARCHIVED,
       isOverdue: status === BookingStatus.OVERDUE,
       isCancelled: status === BookingStatus.CANCELLED,
+      isInProgress:
+        status === BookingStatus.ONGOING || status === BookingStatus.OVERDUE,
     };
   }, [status]);
 

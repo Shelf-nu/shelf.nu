@@ -9,12 +9,16 @@ import type {
   UserOrganization,
   Tag,
 } from "@prisma/client";
+import { json, redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
+import z from "zod";
+import type { AuthSession } from "server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
+import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
@@ -31,10 +35,11 @@ import {
   updateCookieWithPerPage,
 } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import { getCurrentSearchParams } from "~/utils/http.server";
+import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -53,7 +58,11 @@ import {
   extendBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { isBookingEarlyCheckin, isBookingEarlyCheckout } from "./helpers";
+import {
+  hasAssetBookingConflicts,
+  isBookingEarlyCheckin,
+  isBookingEarlyCheckout,
+} from "./helpers";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -61,6 +70,7 @@ import type {
   SchedulerData,
 } from "./types";
 import {
+  createBookingConflictConditions,
   formatBookingsDates,
   getBookingWhereInput,
   isBookingExpired,
@@ -439,6 +449,15 @@ export async function reserveBooking({
         where: { id, organizationId },
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
+          assets: {
+            include: {
+              bookings: createBookingConflictConditions({
+                currentBookingId: id,
+                fromDate: from,
+                toDate: to,
+              }),
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -449,6 +468,30 @@ export async function reserveBooking({
             "Booking not found. Are you sure it exists in current workspace?",
         });
       });
+
+    /** Server-side conflict validation to prevent race conditions */
+    if (from && to && bookingFound.assets) {
+      const conflictedAssets = bookingFound.assets.filter((asset) =>
+        hasAssetBookingConflicts(asset, id)
+      );
+
+      if (conflictedAssets.length > 0) {
+        const conflictedAssetNames = conflictedAssets
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+        });
+      }
+    }
 
     /** Validate the booking dates */
     if (!from || !to) {
@@ -642,16 +685,28 @@ export async function checkoutBooking({
   organizationId,
   intentChoice,
   hints,
+  from,
+  to,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
+  from?: Date | null;
+  to?: Date | null;
 }) {
   try {
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: true,
+          assets: {
+            include: {
+              bookings: createBookingConflictConditions({
+                currentBookingId: id,
+                fromDate: from,
+                toDate: to,
+              }),
+            },
+          },
           ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       })
@@ -663,6 +718,30 @@ export async function checkoutBooking({
             "Booking not found, are you sure it exists in current workspace?",
         });
       });
+
+    /** Server-side conflict validation to prevent race conditions */
+    if (from && to && bookingFound.assets) {
+      const conflictedAssets = bookingFound.assets.filter((asset) =>
+        hasAssetBookingConflicts(asset, id)
+      );
+
+      if (conflictedAssets.length > 0) {
+        const conflictedAssetNames = conflictedAssets
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+        });
+      }
+    }
 
     /**
      * This checks if the booking end date is in the past
@@ -810,7 +889,14 @@ export async function checkinBooking({
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        include: { assets: { select: { id: true, kitId: true } } },
+        include: {
+          assets: { select: { id: true, kitId: true, status: true } },
+          partialCheckins: {
+            select: {
+              assetIds: true,
+            },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -818,7 +904,7 @@ export async function checkinBooking({
           status: 404,
           label,
           message:
-            "Booking not found, are you sure it exists in current workspace.",
+            "Booking not found, are you sure it exists in current workspace?",
         });
       });
 
@@ -870,18 +956,52 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      /* Updating the status of all assets inside booking */
-      await tx.asset.updateMany({
-        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
+      // Create set of asset IDs that have been partially checked in
+      const partiallyCheckedInAssetIds = new Set(
+        (bookingFound.partialCheckins || []).flatMap((pc) => pc.assetIds)
+      );
 
+      // Only update assets that are CHECKED_OUT in this booking's context
+      // Skip assets that have partial check-ins (they're effectively available in this booking's context)
+      const assetsToCheckin = bookingFound.assets
+        .filter(
+          (asset) =>
+            asset.status === AssetStatus.CHECKED_OUT &&
+            !partiallyCheckedInAssetIds.has(asset.id)
+        )
+        .map((asset) => asset.id);
+
+      if (assetsToCheckin.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToCheckin } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
       /* If there are any kits associated with the booking, then update their status */
       if (hasKits) {
-        await tx.kit.updateMany({
-          where: { id: { in: kitIds } },
-          data: { status: KitStatus.AVAILABLE },
+        // Determine which kits should be checked in based on their assets being checked in
+        const assetsToCheckinSet = new Set(assetsToCheckin);
+        const kitsToCheckin = kitIds.filter((kitId) => {
+          // Get all assets of this kit that are in this booking
+          const kitAssetsInBooking = bookingFound.assets.filter(
+            (asset) => asset.kitId === kitId
+          );
+
+          // Check in the kit if ALL its assets in the booking will be AVAILABLE after this operation
+          // This includes: assets being checked in now OR assets already AVAILABLE (from partial check-ins)
+          return kitAssetsInBooking.every(
+            (asset) =>
+              assetsToCheckinSet.has(asset.id) ||
+              asset.status === AssetStatus.AVAILABLE
+          );
         });
+
+        if (kitsToCheckin.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitsToCheckin } },
+            data: { status: KitStatus.AVAILABLE },
+          });
+        }
       }
 
       /** Finally update the booking */
@@ -946,12 +1066,191 @@ export async function checkinBooking({
   }
 }
 
+export async function partialCheckinBooking({
+  id,
+  organizationId,
+  assetIds,
+  userId,
+  hints,
+  intentChoice,
+}: Pick<Booking, "id" | "organizationId"> & {
+  assetIds: Asset["id"][];
+  userId: User["id"];
+  hints: ClientHint;
+  intentChoice?: CheckinIntentEnum;
+}) {
+  try {
+    const user = await getUserByID(userId);
+    // First, validate the booking exists and get its current assets
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: { assets: { select: { id: true, kitId: true } } },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          status: 404,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace?",
+        });
+      });
+
+    // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
+    // First, get the current status of all assets in the booking
+    const currentAssetStatuses = await db.asset.findMany({
+      where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+      select: { id: true, status: true },
+    });
+
+    // Find assets that are still CHECKED_OUT (not yet checked in)
+    const checkedOutAssets = currentAssetStatuses.filter(
+      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    );
+
+    const checkedOutAssetIds = new Set(checkedOutAssets.map((a) => a.id));
+    const providedAssetIds = new Set(assetIds);
+
+    // Check if we're checking in all remaining CHECKED_OUT assets
+    if (
+      checkedOutAssetIds.size > 0 &&
+      checkedOutAssetIds.size === providedAssetIds.size &&
+      [...checkedOutAssetIds].every((id) => providedAssetIds.has(id))
+    ) {
+      // DON'T create PartialBookingCheckin record when doing complete check-in redirect
+      // The checkinBooking function will handle the completion properly
+      // Creating the record here would cause checkinBooking to filter out the current assets
+
+      // Create notes before complete check-in since this was initiated as explicit check-in
+      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via explicit check-in scanner for booking **[${
+        bookingFound.name
+      }](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+      await createNotes({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetIds,
+      });
+
+      // Do complete check-in
+      return await checkinBooking({
+        id,
+        organizationId,
+        hints,
+        intentChoice,
+      });
+    }
+
+    // Validate that all provided assetIds are actually in the booking
+    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+    const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
+
+    if (invalidAssetIds.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Some assets are not part of this booking: ${invalidAssetIds.join(
+          ", "
+        )}`,
+      });
+    }
+
+    // For kits: only update kit status if ALL assets of a kit are being checked in
+    const assetsBeingCheckedIn = bookingFound.assets.filter((a) =>
+      assetIds.includes(a.id)
+    );
+    const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
+
+    // Only process kits where ALL their assets in this booking are being checked in
+    const completeKitIds: string[] = [];
+    for (const kitId of kitIdsBeingCheckedIn) {
+      const kitAssetsInBooking = bookingFound.assets.filter(
+        (a) => a.kitId === kitId
+      );
+      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
+        (a) => a.kitId === kitId
+      );
+
+      if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
+        completeKitIds.push(kitId);
+      }
+    }
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      // Update the status of checked-in assets to AVAILABLE
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      // Only update kit status for kits that are completely checked in
+      if (completeKitIds.length > 0) {
+        await tx.kit.updateMany({
+          where: { id: { in: completeKitIds } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
+
+      // Create partial check-in record for tracking
+      await tx.partialBookingCheckin.create({
+        data: {
+          bookingId: id,
+          checkedInById: userId,
+          assetIds,
+          checkinCount: assetIds.length,
+        },
+      });
+
+      // Create audit notes for each checked-in asset using createNotes
+      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via partial check-in for booking **[${
+        bookingFound.name
+      }](/bookings/${bookingFound.id})**.`;
+      await createNotes({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetIds,
+      });
+
+      // Get the updated booking with all original assets
+      return tx.booking.findUniqueOrThrow({
+        where: { id },
+        include: {
+          assets: true,
+          custodianUser: true,
+          custodianTeamMember: true,
+          _count: { select: { assets: true } },
+        },
+      });
+    });
+
+    return {
+      booking: updatedBooking,
+      checkedInAssetCount: assetIds.length,
+      remainingAssetCount: updatedBooking.assets.length - assetIds.length,
+      isComplete: false,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while partially checking in booking.",
+    });
+  }
+}
+
 export async function updateBookingAssets({
   id,
   organizationId,
   assetIds,
+  kitIds,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
+  kitIds?: Kit["id"][];
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
@@ -976,10 +1275,20 @@ export async function updateBookingAssets({
         b.status === BookingStatus.ONGOING ||
         b.status === BookingStatus.OVERDUE
       ) {
-        await db.asset.updateMany({
+        await tx.asset.updateMany({
           where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.CHECKED_OUT },
         });
+
+        /**
+         * Also update kit status to CHECKED_OUT for any kits that contain these assets
+         */
+        if (kitIds && kitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
       }
       return b;
     });
@@ -1952,7 +2261,7 @@ export async function deleteBooking(
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
-    request?: Request;
+    request: Request;
     extraInclude?: T;
   }
 ) {
@@ -1960,14 +2269,51 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const { id, organizationId, userOrganizations, request, extraInclude } =
       booking;
 
+    // Extract search parameters from request
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
+    const { search } = paramsValues;
+    const status =
+      searchParams.get("status") === "ALL"
+        ? null
+        : (searchParams.get("status") as AssetStatus | null);
+
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
      *
      * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
+
+    // Build assets include with optional search and status filtering
+    let assetsInclude: Prisma.BookingInclude["assets"] =
+      BOOKING_WITH_ASSETS_INCLUDE.assets;
+
+    // Add WHERE clause if search or status filters are provided
+    if (search || status) {
+      const assetsWhere: Prisma.AssetWhereInput = {};
+
+      if (search) {
+        assetsWhere.title = {
+          contains: search,
+          mode: "insensitive",
+        };
+      }
+
+      // if (status) {
+      //   assetsWhere.status = status;
+      // }
+
+      assetsInclude = {
+        select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
+        orderBy: BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy,
+        where: assetsWhere,
+      };
+    }
+
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
+      assets: assetsInclude,
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
@@ -2187,19 +2533,39 @@ export async function getBookingFlags(
         where: {
           ...(booking.from && booking.to
             ? {
-                status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                id: { not: booking.id }, // Exclude current booking
                 OR: [
+                  // Rule 1: RESERVED bookings always conflict
                   {
-                    from: { lte: booking.to },
-                    to: { gte: booking.from },
+                    status: "RESERVED",
+                    OR: [
+                      {
+                        from: { lte: booking.to },
+                        to: { gte: booking.from },
+                      },
+                      {
+                        from: { gte: booking.from },
+                        to: { lte: booking.to },
+                      },
+                    ],
                   },
+                  // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in logic below)
                   {
-                    from: { gte: booking.from },
-                    to: { lte: booking.to },
+                    status: { in: ["ONGOING", "OVERDUE"] },
+                    OR: [
+                      {
+                        from: { lte: booking.to },
+                        to: { gte: booking.from },
+                      },
+                      {
+                        from: { gte: booking.from },
+                        to: { lte: booking.to },
+                      },
+                    ],
                   },
                 ],
               }
-            : {}),
+            : { id: { not: booking.id } }),
         },
       },
     },
@@ -2213,9 +2579,24 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.CHECKED_OUT
   );
 
-  const hasAlreadyBookedAssets = assets.some(
-    (asset) => asset.bookings && asset.bookings.length > 0
-  );
+  const hasAlreadyBookedAssets = assets.some((asset) => {
+    if (!asset.bookings || asset.bookings.length === 0) return false;
+
+    return asset.bookings.some((conflictingBooking) => {
+      // RESERVED bookings always conflict
+      if (conflictingBooking.status === "RESERVED") return true;
+
+      // For ONGOING/OVERDUE bookings, only conflict if asset is actually CHECKED_OUT
+      if (
+        conflictingBooking.status === "ONGOING" ||
+        conflictingBooking.status === "OVERDUE"
+      ) {
+        return asset.status === AssetStatus.CHECKED_OUT;
+      }
+
+      return false;
+    });
+  });
 
   const hasAssetsInCustody = assets.some(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
@@ -2842,6 +3223,7 @@ export async function duplicateBooking({
     const bookingToDuplicate = await getBooking({
       id: bookingId,
       organizationId,
+      request,
     });
     const hints = getHints(request);
 
@@ -2887,6 +3269,196 @@ export async function duplicateBooking({
       label,
     });
   }
+}
+
+/**
+ * Helper functions for partial check-in tracking
+ */
+
+/**
+ * Check if a booking has any partial check-ins
+ */
+export async function hasPartialCheckins(bookingId: string): Promise<boolean> {
+  const count = await db.partialBookingCheckin.count({
+    where: { bookingId },
+  });
+  return count > 0;
+}
+
+/**
+ * Get partial check-in history for a booking
+ */
+export function getPartialCheckinHistory(bookingId: string) {
+  return db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    include: {
+      checkedInBy: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: { checkinTimestamp: "desc" },
+  });
+}
+
+/**
+ * Get total assets checked in via partial check-ins for a booking
+ */
+export async function getTotalPartialCheckinCount(
+  bookingId: string
+): Promise<number> {
+  const result = await db.partialBookingCheckin.aggregate({
+    where: { bookingId },
+    _sum: { checkinCount: true },
+  });
+  return result._sum.checkinCount || 0;
+}
+
+/**
+ * Get all unique asset IDs that have been checked in via partial check-ins
+ */
+export async function getPartiallyCheckedInAssetIds(
+  bookingId: string
+): Promise<string[]> {
+  const partialCheckins = await db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    select: { assetIds: true },
+  });
+
+  // Flatten all asset ID arrays and get unique values
+  const allAssetIds = partialCheckins.flatMap((pc) => pc.assetIds);
+  return [...new Set(allAssetIds)];
+}
+
+/**
+ * Get detailed partial check-in data with user and date information for each asset
+ * Returns both the asset IDs and the detailed check-in data in one query
+ */
+export async function getDetailedPartialCheckinData(bookingId: string) {
+  const partialCheckins = await db.partialBookingCheckin.findMany({
+    where: { bookingId },
+    include: {
+      checkedInBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+    },
+    orderBy: { checkinTimestamp: "asc" },
+  });
+
+  // Create a record of asset ID to its check-in details
+  const assetCheckinRecord: Record<
+    string,
+    {
+      checkinDate: Date;
+      checkedInBy: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        profilePicture: string | null;
+      };
+    }
+  > = {};
+
+  // Collect all unique asset IDs
+  const checkedInAssetIds: string[] = [];
+
+  partialCheckins.forEach((checkin) => {
+    checkin.assetIds.forEach((assetId) => {
+      // Only store the first (earliest) check-in for each asset
+      if (!assetCheckinRecord[assetId]) {
+        assetCheckinRecord[assetId] = {
+          checkinDate: checkin.checkinTimestamp,
+          checkedInBy: checkin.checkedInBy,
+        };
+        checkedInAssetIds.push(assetId);
+      }
+    });
+  });
+
+  return {
+    checkedInAssetIds,
+    partialCheckinDetails: assetCheckinRecord,
+  };
+}
+
+export type PartialCheckinDetailsType = Record<
+  string,
+  {
+    checkinDate: Date | string;
+    checkedInBy: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePicture: string | null;
+    };
+  }
+>;
+
+export async function checkinAssets({
+  request,
+  bookingId,
+  organizationId,
+  userId,
+  authSession,
+}: {
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  authSession: AuthSession;
+}) {
+  const formData = await request.formData();
+  const { assetIds, checkinIntentChoice, returnJson } = parseData(
+    formData,
+    partialCheckinAssetsSchema.extend({
+      checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
+      returnJson: z
+        .string()
+        .optional()
+        .transform((val) => val === "true"),
+    })
+  );
+  const hints = getClientHint(request);
+
+  await partialCheckinBooking({
+    id: bookingId,
+    organizationId,
+    assetIds,
+    userId,
+    hints,
+    intentChoice: checkinIntentChoice,
+  });
+
+  sendNotification({
+    title: "Assets checked in",
+    message: `Successfully checked in ${assetIds.length} asset${
+      assetIds.length > 1 ? "s" : ""
+    } from booking.`,
+    icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
+  });
+
+  // Return JSON if requested by bulk dialog, otherwise redirect
+  if (returnJson) {
+    return json(
+      data({
+        success: true,
+        message: `Successfully checked in ${assetIds.length} asset${
+          assetIds.length > 1 ? "s" : ""
+        }`,
+      })
+    );
+  }
+
+  return redirect(`/bookings/${bookingId}`);
 }
 
 export async function getOngoingBookingForAsset({
