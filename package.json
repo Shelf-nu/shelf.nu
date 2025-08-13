@@ -183,8 +183,5 @@
   },
   "engines": {
     "node": ">=22"
-  },
-  "prisma": {
-    "schema": "app/database/schema.prisma"
   }
 }
