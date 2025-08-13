@@ -16,9 +16,7 @@ tsconfig.tsbuildinfo
 /prisma/data.db-journal
 
 # Claude Code development notes (local only)
-CLAUDE.md
 .claude-notes/
-claude-switch.sh
 
 /coverage
 
