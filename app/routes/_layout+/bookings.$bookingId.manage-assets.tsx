@@ -57,12 +57,14 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getBooking,
+  getDetailedPartialCheckinData,
   getKitIdsByAssets,
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -175,7 +177,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header: {
-          title: `Manage assets for ‘${booking?.name}’`,
+          title: `Manage assets for '${booking?.name}'`,
           subHeading: "Fill up the booking with the assets of your choice",
         },
         searchFieldLabel: "Search assets",
@@ -322,6 +324,46 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const newAssetIds = assetIds.filter(
       (assetId) => !existingAssetIds.includes(assetId)
     );
+
+    // Get partial check-in details to determine actual availability using context-aware status
+    const { partialCheckinDetails } =
+      await getDetailedPartialCheckinData(bookingId);
+
+    // Query to get potentially checked out assets
+    const potentiallyCheckedOutAssets = await db.asset.findMany({
+      where: {
+        id: { in: newAssetIds },
+        status: AssetStatus.CHECKED_OUT,
+      },
+      select: { id: true, title: true, status: true },
+    });
+
+    // Filter out assets that are partially checked in within this booking context using centralized helper
+    // These are effectively available for other bookings
+    const checkedOutAssets = potentiallyCheckedOutAssets.filter(
+      (asset) =>
+        !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+    );
+
+    if (
+      checkedOutAssets.length > 0 &&
+      ["ONGOING", "OVERDUE"].includes(booking.status)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        title: "Not allowed. Assets already checked out",
+        message: `The following assets are already checked out and cannot be added to the booking: ${checkedOutAssets
+          .map((asset) => asset.title)
+          .join(", ")}`,
+        additionalData: {
+          checkedOutAssets,
+          bookingId,
+          newAssetIds,
+        },
+        shouldBeCaptured: false,
+      });
+    }
 
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
@@ -664,6 +706,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
               <div className="flex flex-row gap-x-2">
                 <When truthy={item.status === AssetStatus.AVAILABLE}>
                   <AssetStatusBadge
+                    id={item.id}
                     status={item.status}
                     availableToBook={item.availableToBook}
                   />

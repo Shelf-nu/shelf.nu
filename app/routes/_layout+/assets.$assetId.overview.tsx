@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType } from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: getAssetOverviewFields(canUseBarcodes),
+      include: getAssetOverviewFields(id, canUseBarcodes),
     });
 
     /**
@@ -144,7 +144,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       request,
     });
-
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     let currentBooking: any = null;
 
@@ -269,7 +268,10 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
   } = useLoaderData<typeof loader>();
-  const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
+  const booking =
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
+      ? asset?.bookings[0]
+      : undefined;
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0

@@ -25,12 +25,14 @@ export default defineConfig({
       clientFiles: [
         "./app/entry.client.tsx",
         "./app/root.tsx",
-        "./app/routes/**/*",
+        "./app/routes/**/*.tsx",
+        "./app/routes/**/*.ts",
+        "!./app/routes/**/*.test.server.ts",
       ],
     },
   },
   optimizeDeps: {
-    include: ["./app/routes/**/*"],
+    include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
   },
   build: {
     target: "ES2022",
@@ -65,7 +67,7 @@ export default defineConfig({
     devServer(),
 
     remix({
-      ignoredRouteFiles: ["**/.*"],
+      ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
       future: {
         // unstable_optimizeDeps: true,
       },

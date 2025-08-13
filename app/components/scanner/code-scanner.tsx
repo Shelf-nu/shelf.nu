@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
-import lodash from "lodash";
-import { Camera, CameraIcon, QrCode, ScanQrCode } from "lucide-react";
+import {
+  ArrowRight,
+  Camera,
+  CameraIcon,
+  QrCode,
+  ScanQrCode,
+} from "lucide-react";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
@@ -42,6 +47,7 @@ type CodeScannerProps = {
   onCodeDetectionSuccess: OnCodeDetectionSuccess;
   isLoading?: boolean;
   backButtonText?: string;
+  backButtonUrl?: string; // URL to navigate back, defaults to ".." if not provided
   allowNonShelfCodes?: boolean;
   hideBackButtonText?: boolean;
   className?: string;
@@ -76,6 +82,7 @@ type Mode = "camera" | "scanner";
 export const CodeScanner = ({
   onCodeDetectionSuccess,
   backButtonText = "Back",
+  backButtonUrl = "..",
   allowNonShelfCodes = false,
   hideBackButtonText = false,
   className,
@@ -139,7 +146,7 @@ export const CodeScanner = ({
             >
               {!hideBackButtonText && (
                 <Link
-                  to=".."
+                  to={backButtonUrl}
                   className={tw(
                     "inline-flex items-center justify-start text-[11px] leading-[11px]",
                     actionSwitcher && isMd
@@ -289,11 +296,13 @@ function ScannerMode({
   action?: ActionType;
 }) {
   const [inputIsFocused, setInputIsFocused] = useState(false);
+  const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const debouncedHandleInputChange = lodash.debounce(
-    async (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const input = e.target as HTMLInputElement;
+  const handleInputSubmit = useCallback(
+    async (input: HTMLInputElement) => {
+      if (!input.value.trim()) return;
+
       const result = extractQrIdFromValue(input.value);
       await handleDetection({
         result,
@@ -308,10 +317,25 @@ function ScannerMode({
       } else {
         /** Clean up the input */
         input.value = "";
+        setInputValue("");
       }
     },
-    300
+    [onCodeDetectionSuccess, allowNonShelfCodes, paused, callback]
   );
+
+  const handleEnterPress = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      await handleInputSubmit(input);
+    }
+  };
+
+  const handleButtonClick = async () => {
+    if (inputRef.current) {
+      await handleInputSubmit(inputRef.current);
+    }
+  };
 
   return (
     <div
@@ -328,28 +352,43 @@ function ScannerMode({
         </div>
         <div className="animate-ping absolute inset-0 rounded-full border-4 text-white/80 opacity-30"></div>
       </div>
-      <Input
-        ref={inputRef}
-        autoFocus
-        className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
-        inputClassName="scanner-mode-input max-w-[460px] min-w-[360px]"
-        disabled={paused}
-        name="code"
-        label={
-          paused
-            ? "Scanner paused"
-            : inputIsFocused
-            ? "Waiting for scan..."
-            : "Please click on the text field before scanning"
-        }
-        icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
-        iconClassName={tw("text-gray-600", !inputIsFocused && "animate-bounce")}
-        onChange={debouncedHandleInputChange}
-        onFocus={() => setInputIsFocused(true)}
-        onBlur={() => setInputIsFocused(false)}
-      />
+      <div className="relative flex items-center gap-3">
+        <Input
+          ref={inputRef}
+          autoFocus
+          className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
+          inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
+          disabled={paused}
+          name="code"
+          label={
+            paused
+              ? "Scanner paused"
+              : inputIsFocused
+              ? "Waiting for scan..."
+              : "Please click on the text field before scanning"
+          }
+          icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
+          iconClassName={tw(
+            "text-gray-600",
+            !inputIsFocused && "animate-bounce"
+          )}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleEnterPress}
+          onFocus={() => setInputIsFocused(true)}
+          onBlur={() => setInputIsFocused(false)}
+        />
+        <Button
+          onClick={handleButtonClick}
+          disabled={paused || !inputValue.trim()}
+          variant="secondary"
+          className="absolute bottom-1 right-1"
+        >
+          <ArrowRight className="size-4" />
+        </Button>
+      </div>
       <p className="mt-4 max-w-[360px] text-white/70">
-        Focus the field and use your barcode scanner to scan any Shelf QR code.
+        Focus the field and use your barcode scanner to scan any code, or type
+        the code ID and press Enter.
       </p>
     </div>
   );

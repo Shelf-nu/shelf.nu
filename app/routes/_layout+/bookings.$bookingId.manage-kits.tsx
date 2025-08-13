@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  KitStatus,
+  type Prisma,
+} from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -48,6 +53,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   getBooking,
+  getDetailedPartialCheckinData,
   getKitIdsByAssets,
   removeAssets,
   updateBookingAssets,
@@ -55,6 +61,7 @@ import {
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -75,7 +82,15 @@ export type KitForBooking = Prisma.KitGetPayload<{
         status: true;
         availableToBook: true;
         custody: true;
-        bookings: { select: { id: true; status: true } };
+        bookings: {
+          select: {
+            id: true;
+            status: true;
+            name: true;
+            from: true;
+            to: true;
+          };
+        };
       };
     };
   };
@@ -149,6 +164,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                  * Important to make sure the bookings are overlapping the period of the current booking
                  */
                 where: {
+                  status: {
+                    in: [
+                      BookingStatus.RESERVED,
+                      BookingStatus.ONGOING,
+                      BookingStatus.OVERDUE,
+                    ],
+                  },
                   ...(booking.from &&
                     booking.to && {
                       OR: [
@@ -163,7 +185,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       ],
                     }),
                 },
-                select: { id: true, status: true },
+                select: {
+                  id: true,
+                  status: true,
+                  name: true,
+                  from: true,
+                  to: true,
+                },
               },
             },
           },
@@ -270,7 +298,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },
-      select: { assets: { select: { id: true } } },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        assets: { select: { id: true, status: true } },
+      },
     });
 
     const allSelectedAssetIds = selectedKits.flatMap((k) =>
@@ -285,6 +318,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (assetId) => !existingAssetIds.includes(assetId)
     );
 
+    // Only validate kits that are actually adding NEW assets to the booking
+    const newlyAddedKits = selectedKits.filter((kit) =>
+      kit.assets.some((asset) => newAssetIds.includes(asset.id))
+    );
+
+    // Get partial check-in details to determine actual availability using context-aware status
+    const { partialCheckinDetails } =
+      await getDetailedPartialCheckinData(bookingId);
+
+    const bookingAssetIds = new Set(existingAssetIds);
+
+    // Filter kits that are truly unavailable (using centralized helper for consistency)
+    const checkedOutKits = newlyAddedKits.filter((kit) => {
+      // If kit status is not CHECKED_OUT, it's available
+      if (kit.status !== KitStatus.CHECKED_OUT) return false;
+
+      // Use centralized helper to check if kit is partially checked in within this booking context
+      // If it is, then it's effectively available for other bookings
+      return !isKitPartiallyCheckedIn(
+        kit,
+        partialCheckinDetails,
+        bookingAssetIds,
+        booking.status
+      );
+    });
+
+    if (
+      checkedOutKits.length > 0 &&
+      ["ONGOING", "OVERDUE"].includes(booking.status)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label: "Kit",
+        title: "Not allowed. Assets already checked out",
+
+        message: `You cannot add checked out kits to a ongoing booking. Please check the status of the following kits: ${checkedOutKits
+          .map((k) => k.name)
+          .join(", ")}`,
+        additionalData: {
+          booking,
+          checkedOutKits,
+          selectedKits,
+        },
+        shouldBeCaptured: false,
+      });
+    }
+
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
@@ -292,6 +372,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets from kits
+        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
       });
 
       /** We create notes for the newly added assets */
@@ -545,6 +626,19 @@ export default function AddKitsToBooking() {
 }
 
 function Row({ item: kit }: { item: KitForBooking }) {
+  const { booking } = useLoaderData<typeof loader>();
+  const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
+
+  // For Case 1: Check if kit is checked out in current booking
+  // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
+  const isCheckedOutInCurrentBooking =
+    isCheckedOut &&
+    kit.assets.some((asset) =>
+      asset.bookings.some(
+        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      )
+    );
+
   return (
     <>
       {/* Name */}
@@ -567,7 +661,22 @@ function Row({ item: kit }: { item: KitForBooking }) {
                 {kit.name}
               </span>
               <div className="flex flex-col items-start gap-2 lg:flex-row lg:items-center">
-                <When truthy={kit.status === AssetStatus.AVAILABLE}>
+                {/* Case 1: Show KitStatusBadge if checked out in current booking */}
+                <When truthy={isCheckedOutInCurrentBooking}>
+                  <KitStatusBadge
+                    status={KitStatus.CHECKED_OUT}
+                    availableToBook={
+                      !kit.assets.some((a) => !a.availableToBook)
+                    }
+                  />
+                </When>
+                {/* Show regular status badge for other available kits */}
+                <When
+                  truthy={
+                    kit.status === AssetStatus.AVAILABLE &&
+                    !isCheckedOutInCurrentBooking
+                  }
+                >
                   <KitStatusBadge
                     status={kit.status}
                     availableToBook={

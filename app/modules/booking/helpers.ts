@@ -1,3 +1,4 @@
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
@@ -51,4 +52,55 @@ export function formatBookingDuration(from: string, to: string): string {
   }
 
   return durationStr;
+}
+
+/**
+ * Core logic for determining if an asset has booking conflicts
+ * Used by both isAssetAlreadyBooked and kit-related functions
+ */
+export function hasAssetBookingConflicts(
+  asset: {
+    status: string;
+    bookings?: { id: string; status: string }[];
+  },
+  currentBookingId: string
+): boolean {
+  if (!asset.bookings?.length) return false;
+
+  const conflictingBookings = asset.bookings.filter(
+    (b) => b.id !== currentBookingId
+  );
+
+  if (conflictingBookings.length === 0) return false;
+
+  // Check if any conflicting booking is RESERVED (always conflicts)
+  const hasReservedConflict = conflictingBookings.some(
+    (b) => b.status === BookingStatus.RESERVED
+  );
+
+  if (hasReservedConflict) return true;
+
+  // For ONGOING/OVERDUE bookings, only conflict if asset is actually CHECKED_OUT
+  const hasOngoingConflict = conflictingBookings.some(
+    (b) =>
+      (b.status === BookingStatus.ONGOING ||
+        b.status === BookingStatus.OVERDUE) &&
+      asset.status === AssetStatus.CHECKED_OUT
+  );
+
+  return hasOngoingConflict;
+}
+
+/**
+ * Determines if an asset is already booked and unavailable for the current booking context
+ * Handles partial check-in logic properly
+ */
+export function isAssetAlreadyBooked(
+  asset: {
+    status: string;
+    bookings?: { id: string; status: string }[];
+  },
+  currentBookingId: string
+): boolean {
+  return hasAssetBookingConflicts(asset, currentBookingId);
 }

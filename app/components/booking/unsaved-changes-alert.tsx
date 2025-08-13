@@ -1,4 +1,5 @@
 import { AlertDialog } from "@radix-ui/react-alert-dialog";
+import { useDisabled } from "~/hooks/use-disabled";
 import { Button } from "../shared/button";
 import {
   AlertDialogCancel,
@@ -28,6 +29,7 @@ export default function UnsavedChangesAlert({
   onCancel,
   onYes,
 }: UnsavedChangesAlertProps) {
+  const disabled = useDisabled();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className={className} style={style}>
@@ -42,12 +44,18 @@ export default function UnsavedChangesAlert({
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary" onClick={onCancel}>
+              <Button
+                variant="secondary"
+                onClick={onCancel}
+                disabled={disabled}
+              >
                 No, discard changes
               </Button>
             </AlertDialogCancel>
 
-            <Button onClick={onYes}>Yes, confirm change</Button>
+            <Button onClick={onYes} disabled={disabled} variant="primary">
+              Yes, confirm change
+            </Button>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>
