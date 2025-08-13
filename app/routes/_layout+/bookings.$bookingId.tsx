@@ -559,6 +559,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
+    // We get the form data again from the request, so it can be used within the switch statements below
     const formData = await request.clone().formData();
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
