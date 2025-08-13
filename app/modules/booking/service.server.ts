@@ -9,7 +9,7 @@ import type {
   UserOrganization,
   Tag,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/react";
+import { json, redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import z from "zod";
