@@ -10,6 +10,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "./sidebar";
+import UpdatesNavItem from "./updates-nav-item";
 
 type SidebarNavProps = {
   className?: string;
@@ -81,6 +82,11 @@ export default function SidebarNav({
         }
 
         case "button": {
+          // Special handling for Updates button
+          if (navItem.title === "Updates") {
+            return <UpdatesNavItem />;
+          }
+
           return (
             <SidebarMenuItem onClick={navItem.onClick}>
               <SidebarMenuButton

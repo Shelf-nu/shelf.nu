@@ -50,7 +50,6 @@ export default function BulkListItemCheckbox({
 
     if (bulkItems && bulkItems.length > 0) {
       const itemsToSet = [...bulkItems, item];
-
       const itemsExists = selectedBulkItems.some((item) =>
         itemsToSet.some((bulkItem) => bulkItem.id === item.id)
       );

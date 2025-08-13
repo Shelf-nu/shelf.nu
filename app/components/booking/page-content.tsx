@@ -12,11 +12,12 @@ export function BookingPageContent() {
     booking,
     teamMembers,
     bookingFlags,
-    totalItems: totalAssets,
+    totalAssets,
     totalKits,
     totalValue,
     allCategories,
     assetsCount,
+    partialCheckinProgress,
   } = useLoaderData<BookingPageLoaderData>();
   const custodian = teamMembers.find((member) =>
     booking.custodianUserId
@@ -24,8 +25,8 @@ export function BookingPageContent() {
       : booking.custodianTeamMemberId === member.id
   );
   return (
-    <div className="md:mt-5">
-      <div className="mb-8 flex h-full flex-col items-stretch gap-3 lg:mb-4 lg:flex-row">
+    <div className="md:mt-4">
+      <div className="mb-8 flex h-full flex-col items-stretch gap-2 lg:mb-2 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm
             booking={{
@@ -48,6 +49,7 @@ export function BookingPageContent() {
             kitsCount={totalKits}
             assetsCount={assetsCount}
             totalValue={totalValue}
+            partialCheckinProgress={partialCheckinProgress}
             allCategories={allCategories}
             tags={booking.tags}
             creator={booking.creator}

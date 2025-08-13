@@ -83,6 +83,12 @@ model User {
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
 
+  partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+
+  // Updates feature
+  createdUpdates Update[]
+  updateReads    UserUpdateRead[]
+
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
@@ -881,6 +887,7 @@ model Booking {
   assets Asset[]
 
   tags Tag[]
+  partialCheckins PartialBookingCheckin[]
 
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
@@ -920,6 +927,34 @@ model BookingSettings {
   // Index for foreign key
   @@index([organizationId])
 }
+
+
+  model PartialBookingCheckin {
+    id String @id @default(cuid())
+
+    // Track which assets were checked in during this session
+    assetIds String[] // Array of asset IDs checked in
+    checkinCount Int   // Number of assets checked in (for quick reference)
+
+    // Metadata
+    checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
+
+    // Relationships
+    booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+    bookingId String
+
+    checkedInBy   User @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
+    checkedInById String
+
+    // Timestamps
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([bookingId])
+    @@index([checkedInById])
+    @@index([checkinTimestamp])
+    @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+  }
 
 model Kit {
   id String @id @default(cuid())
@@ -1055,4 +1090,60 @@ model WorkingHoursOverride {
   @@unique([workingHoursId, date])
   @@index([workingHoursId, date])
   @@index([date, isOpen])
+}
+
+enum UpdateStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Update {
+  id String @id @default(cuid())
+
+  title       String
+  content     String   // Markdown content
+  url         String?  // Optional URL to redirect to when clicked
+  publishDate DateTime // When the update should be visible to users
+  status      UpdateStatus @default(DRAFT)
+
+  // Role targeting - if null, visible to all roles
+  targetRoles OrganizationRoles[]
+
+  // Analytics
+  clickCount  Int @default(0)
+  viewCount   Int @default(0)
+
+  // Relations
+  userReads UserUpdateRead[]
+
+  // Creator tracking
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdById String
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, publishDate])
+  @@index([publishDate])
+  @@index([createdById])
+}
+
+model UserUpdateRead {
+  id String @id @default(cuid())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  update   Update @relation(fields: [updateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  updateId String
+
+  // Track when it was read
+  readAt DateTime @default(now())
+
+  @@unique([userId, updateId])
+  @@index([userId])
+  @@index([updateId])
+  @@index([readAt])
 }
