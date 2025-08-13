@@ -33,7 +33,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
-    exclude: ["**/*.test.server.ts"],
   },
   build: {
     target: "ES2022",
