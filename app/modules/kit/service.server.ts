@@ -361,13 +361,8 @@ export async function getPaginatedAndFilterableKits<
       });
     }
 
-    const unavailableBookingStatuses = [
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
-
     if (currentBookingId && hideUnavailable) {
+      // Basic filters that apply to all kits
       where.assets = {
         every: {
           organizationId,
@@ -376,27 +371,61 @@ export async function getPaginatedAndFilterableKits<
       };
 
       if (bookingFrom && bookingTo) {
-        where.assets = {
-          every: {
-            ...where.assets.every,
-            bookings: {
+        // Apply booking conflict logic similar to assets, but through kit assets
+        const kitWhere: Prisma.KitWhereInput[] = [
+          // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
+          {
+            assets: {
               none: {
-                id: { not: currentBookingId },
-                status: { in: unavailableBookingStatuses },
-                OR: [
-                  {
-                    from: { lte: bookingTo },
-                    to: { gte: bookingFrom },
+                bookings: {
+                  some: {
+                    id: { not: currentBookingId },
+                    status: BookingStatus.RESERVED,
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
-                  {
-                    from: { gte: bookingFrom },
-                    to: { lte: bookingTo },
-                  },
-                ],
+                },
               },
             },
           },
-        };
+          // Rule 2: For ONGOING/OVERDUE bookings, allow kits that are AVAILABLE or have no conflicting assets
+          {
+            OR: [
+              // Either kit is AVAILABLE (checked in from partial check-in)
+              { status: KitStatus.AVAILABLE },
+              // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
+              {
+                assets: {
+                  none: {
+                    bookings: {
+                      some: {
+                        id: { not: currentBookingId },
+                        status: {
+                          in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                        },
+                        OR: [
+                          {
+                            from: { lte: bookingTo },
+                            to: { gte: bookingFrom },
+                          },
+                          {
+                            from: { gte: bookingFrom },
+                            to: { lte: bookingTo },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ];
+
+        // Combine the basic filters with booking conflict filters
+        where.AND = kitWhere;
       }
     }
 

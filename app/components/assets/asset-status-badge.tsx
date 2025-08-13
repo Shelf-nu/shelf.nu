@@ -3,6 +3,7 @@ import type { Booking } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
+import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import {
@@ -13,20 +14,27 @@ import {
 import { UnavailableBadge } from "../shared/unavailable-badge";
 import When from "../when/when";
 
-export const userFriendlyAssetStatus = (status: AssetStatus) => {
+/**
+ * We have a special status called CHECKED_IN which is only valid within a booking context
+ * This status indicates that the asset has been checked in by the user within that current booking
+ */
+export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
       return "In custody";
     case AssetStatus.CHECKED_OUT:
       return "Checked out";
+    case "PARTIALLY_CHECKED_IN":
+      return "Already checked in";
     default:
       return "Available";
   }
 };
 
-export const assetStatusColorMap = (status: AssetStatus) => {
+export const assetStatusColorMap = (status: ExtendedAssetStatus) => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
+    case "PARTIALLY_CHECKED_IN":
       return "#2E90FA";
     case AssetStatus.CHECKED_OUT:
       return "#5925DC";
@@ -42,7 +50,7 @@ export function AssetStatusBadge({
   bookings,
 }: {
   id: string;
-  status: AssetStatus;
+  status: ExtendedAssetStatus;
   availableToBook: boolean;
   bookings?: Pick<Booking, "id" | "name" | "status">[];
 }) {
@@ -51,7 +59,7 @@ export function AssetStatusBadge({
       b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
   );
 
-  const { data, isLoading } = useApiQuery<Booking>({
+  const { data } = useApiQuery<Booking>({
     api: `/api/assets/${id}/ongoing-booking`,
     enabled: status === AssetStatus.CHECKED_OUT && !booking,
   });

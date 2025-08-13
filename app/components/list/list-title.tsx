@@ -1,11 +1,14 @@
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { X } from "lucide-react";
 import {
+  clearSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { tw } from "~/utils/tw";
 import type { IndexResponse } from ".";
 import type { ListItemData } from "./list-item";
 import { Button } from "../shared/button";
@@ -34,6 +37,11 @@ type ListTitleProps = {
    * @returns An array of ListItemData to be used in the header
    */
   itemsGetter?: (data: LoaderData) => ListItemData[];
+
+  /**
+   * Optional class name for the title element
+   */
+  titleClassName?: string;
 };
 
 export default function ListTitle({
@@ -41,6 +49,7 @@ export default function ListTitle({
   hasBulkActions,
   disableSelectAllItems = false,
   itemsGetter,
+  titleClassName,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -58,6 +67,7 @@ export default function ListTitle({
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+  const clearSelectedItems = useSetAtom(clearSelectedBulkItemsAtom);
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
   /**
@@ -71,32 +81,18 @@ export default function ListTitle({
 
   return (
     <div>
-      <h5 className="text-left capitalize">{title || plural}</h5>
+      <h5 className={tw("text-left capitalize", titleClassName)}>
+        {title || plural}
+      </h5>
       <div className="h-7">
         {hasBulkActions && hasSelectedItems ? (
           <div className="flex items-start gap-2">
             <Button
-              onClick={() => setSelectedBulkItems([])}
+              onClick={clearSelectedItems}
               variant="secondary"
-              className="p-1 text-[14px]"
+              className="p-[2px] text-[14px]"
             >
-              <span className="block size-2">
-                <svg
-                  width="100%"
-                  height="100%"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M9 1 1 9m0-8 8 8"
-                    stroke="currentColor"
-                    strokeWidth={1.333}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
+              <X size={12} strokeWidth={3} className="text-gray-600" />
             </Button>
             {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
             {!disableSelectAllItems &&

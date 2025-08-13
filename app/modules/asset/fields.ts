@@ -21,7 +21,10 @@ export const KITS_INCLUDE_FIELDS = {
   },
 } satisfies Prisma.KitInclude;
 
-export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
+export const getAssetOverviewFields = (
+  assetId: string,
+  canUseBarcodes: boolean = false
+) => {
   const baseFields = {
     category: true,
     qrCodes: true,
@@ -65,6 +68,14 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
     bookings: {
       where: {
         status: { in: ["ONGOING", "OVERDUE"] },
+        // Exclude bookings where this asset has been partially checked in
+        NOT: {
+          partialCheckins: {
+            some: {
+              assetIds: { has: assetId },
+            },
+          },
+        },
       },
       select: {
         id: true,
@@ -92,9 +103,6 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
 
   return baseFields;
 };
-
-// Keep the original for backward compatibility
-export const ASSET_OVERVIEW_FIELDS = getAssetOverviewFields(true);
 
 /**
  * Generates include fields for asset queries with optimized field selection
@@ -181,7 +189,6 @@ export const assetIndexFields = ({
             },
           ],
         },
-        take: 1,
         select: {
           from: true,
           to: true,

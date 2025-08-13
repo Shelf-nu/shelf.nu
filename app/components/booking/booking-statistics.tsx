@@ -1,7 +1,9 @@
 import type { Tag, User } from "@prisma/client";
+import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { InfoTooltip } from "../shared/info-tooltip";
+import { Progress } from "../shared/progress";
 import { Separator } from "../shared/separator";
 import { UserBadge } from "../shared/user-badge";
 
@@ -14,6 +16,7 @@ export function BookingStatistics({
   allCategories,
   tags,
   creator,
+  partialCheckinProgress,
 }: {
   duration: string;
   totalAssets: number;
@@ -23,6 +26,7 @@ export function BookingStatistics({
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<Tag, "id" | "name">[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  partialCheckinProgress?: ReturnType<typeof calculatePartialCheckinProgress>;
 }) {
   return (
     <div className="m-0">
@@ -39,6 +43,23 @@ export function BookingStatistics({
           <span className="text-sm text-gray-500">Assets</span>
           <span className="text-right font-medium">{assetsCount}</span>
         </div>
+        {partialCheckinProgress?.hasPartialCheckins && (
+          <>
+            <Separator />
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Check-in progress</span>
+                <span className="flex min-w-[150px] items-center gap-2 text-right text-sm font-medium">
+                  <span className="whitespace-nowrap">
+                    {partialCheckinProgress.checkedInCount} /{" "}
+                    {partialCheckinProgress.totalAssets}
+                  </span>
+                  <Progress value={partialCheckinProgress.progressPercentage} />
+                </span>
+              </div>
+            </div>
+          </>
+        )}
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Kits</span>
