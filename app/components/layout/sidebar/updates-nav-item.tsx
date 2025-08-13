@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Popover,
   PopoverContent,
@@ -22,6 +22,7 @@ export default function UpdatesNavItem() {
   const fetcher = useFetcher({ key: "updates-change" });
   const viewsTrackedRef = useRef(false);
   const [readUpdateIds, setReadUpdateIds] = useState<Set<string>>(new Set());
+  const [optimisticMarkAllRead, setOptimisticMarkAllRead] = useState(false);
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
 
   // Fetch updates when popover opens
@@ -32,11 +33,23 @@ export default function UpdatesNavItem() {
 
   // Calculate unread count including optimistic updates
   const unreadCount =
-    updates?.filter(
-      (update) => update.userReads.length === 0 && !readUpdateIds.has(update.id)
-    ).length || unreadUpdatesCount;
+    updates?.length > 0
+      ? updates.filter(
+          (update) =>
+            update.userReads.length === 0 && !readUpdateIds.has(update.id)
+        ).length
+      : optimisticMarkAllRead
+      ? 0
+      : unreadUpdatesCount;
 
   const hasUnread = unreadCount > 0;
+
+  // Reset optimistic flag when fetcher completes successfully
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      setOptimisticMarkAllRead(false);
+    }
+  }, [fetcher.state, fetcher.data]);
 
   const handleOpenChange = (isOpen: boolean) => {
     setOpen(isOpen);
@@ -75,6 +88,9 @@ export default function UpdatesNavItem() {
       unreadUpdateIds.forEach((id) => newSet.add(id));
       return newSet;
     });
+
+    // Set optimistic flag to hide button and dot immediately
+    setOptimisticMarkAllRead(true);
 
     fetcher.submit(
       { intent: "markAllAsRead" },
