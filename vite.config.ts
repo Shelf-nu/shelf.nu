@@ -31,6 +31,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ["./app/routes/**/*"],
+    exclude: ["./app/routes/**/*.test.server.ts"],
   },
   build: {
     target: "ES2022",
@@ -65,7 +66,7 @@ export default defineConfig({
     devServer(),
 
     remix({
-      ignoredRouteFiles: ["**/.*"],
+      ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
       future: {
         // unstable_optimizeDeps: true,
       },
