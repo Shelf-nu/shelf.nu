@@ -226,3 +226,5 @@ Always run `npm run validate` before committing - this runs:
 - Update references to external docs
 - Maintain links between related rules
 - Document breaking changes
+
+- When you write any knowledgebase articles or documentation always provide the content in markdown
