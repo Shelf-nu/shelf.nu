@@ -7,12 +7,14 @@ import { tw } from "~/utils/tw";
 
 export function InnerLabel({
   hideLg,
+  hideMd,
   required,
   children,
   className,
 }: {
   /** Hide on large screens */
   hideLg?: boolean;
+  hideMd?: boolean;
   required?: boolean;
   children: string | React.ReactNode;
   className?: string;
@@ -23,6 +25,7 @@ export function InnerLabel({
         `inner-label`,
         `mb-[6px] text-text-sm font-medium text-gray-700`,
         hideLg && "lg:hidden",
+        hideMd && "md:hidden",
         required && "required-input-label",
         className
       )}

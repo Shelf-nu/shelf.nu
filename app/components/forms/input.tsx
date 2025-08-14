@@ -22,6 +22,9 @@ export interface InputProps
   /** Weather the label is hidden */
   hideLabel?: boolean;
 
+  /** Weather the label is hidden on md */
+  hideMd?: boolean;
+
   /** name of any icon available in icons map */
   icon?: IconType;
 
@@ -61,6 +64,7 @@ const Input = forwardRef(function Input(
     inputType = "input",
     label,
     hideLabel,
+    hideMd,
     hasAttachedButton = false,
     addOn,
     onChange,
@@ -135,7 +139,7 @@ const Input = forwardRef(function Input(
       htmlFor={inputProps.name}
     >
       {/* Label */}
-      <InnerLabel hideLg={hideLabel} required={required}>
+      <InnerLabel hideLg={hideLabel} hideMd={hideMd} required={required}>
         {label}
       </InnerLabel>
 

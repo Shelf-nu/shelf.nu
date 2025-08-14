@@ -28,6 +28,7 @@ export const filterFieldTypeSchema = z.enum([
   "boolean",
   "date",
   "number",
+  "amount",
   "enum",
   "array",
   "customField",
@@ -63,8 +64,11 @@ export const filterSchema = z
   })
   .refine(
     (data) => {
-      // Validation for number between
-      if (data.type === "number" && data.operator === "between") {
+      // Validation for number and amount between
+      if (
+        (data.type === "number" || data.type === "amount") &&
+        data.operator === "between"
+      ) {
         return (
           Array.isArray(data.value) &&
           data.value.length === 2 &&
@@ -115,7 +119,7 @@ filterSchema.refine(
         BOOLEAN: "boolean",
         DATE: "date",
         OPTION: "enum",
-        AMOUNT: "number",
+        AMOUNT: "amount",
         NUMBER: "number",
       };
       const filterType = customFieldTypeToFilterType[data.fieldType];
@@ -139,7 +143,9 @@ export type StringFilterValue = z.infer<typeof stringValueSchema>;
 export type BooleanFilterValue = z.infer<typeof booleanValueSchema>;
 export type ArrayFilterValue = z.infer<typeof arrayValueSchema>;
 
-export type FilterValue<T extends FilterFieldType> = T extends "number"
+export type FilterValue<T extends FilterFieldType> = T extends
+  | "number"
+  | "amount"
   ? NumberFilterValue
   : T extends "string"
   ? StringFilterValue

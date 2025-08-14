@@ -18,6 +18,7 @@ export type UIFieldType =
   | "boolean"
   | "date"
   | "number"
+  | "amount"
   | "enum"
   | "array";
 /**
@@ -29,6 +30,7 @@ const uiFieldTypeNames: Record<UIFieldType, string> = {
   boolean: "Yes/No",
   date: "Date",
   number: "Number",
+  amount: "Amount",
   enum: "Option",
   array: "List",
 };
@@ -98,6 +100,8 @@ export function getUIFieldType({
             fieldType = "enum";
             break;
           case "AMOUNT":
+            fieldType = "amount";
+            break;
           case "NUMBER":
             fieldType = "number";
             break;
