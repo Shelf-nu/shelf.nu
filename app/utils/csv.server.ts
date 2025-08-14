@@ -43,6 +43,7 @@ import type { BookingWithCustodians } from "~/modules/booking/types";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
+import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
@@ -262,7 +263,10 @@ export async function exportAssetsFromIndexToCsv({
   request: Request;
   assetIds: string;
   settings: AssetIndexSettings;
-  currentOrganization: Pick<Organization, "id" | "barcodesEnabled">;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
 }) {
   /** Parse filters */
   const { filters } = await getAdvancedFiltersFromRequest(
@@ -291,6 +295,7 @@ export async function exportAssetsFromIndexToCsv({
       { name: "name", visible: true, position: 0 },
       ...(settings.columns as Column[]),
     ],
+    currentOrganization,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -306,9 +311,14 @@ export async function exportAssetsFromIndexToCsv({
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
+  currentOrganization,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -370,7 +380,13 @@ export const buildCsvExportDataFromAssets = ({
               : "";
             break;
           case "valuation":
-            value = asset.valuation;
+            value = asset.valuation
+              ? formatCurrency({
+                  value: asset.valuation,
+                  locale: "en-US", // Default locale for CSV exports
+                  currency: currentOrganization.currency,
+                })
+              : "";
             break;
           case "availableToBook":
             value = asset.availableToBook ? "Yes" : "No";
@@ -414,7 +430,11 @@ export const buildCsvExportDataFromAssets = ({
         } else {
           const fieldValue =
             customField.value as unknown as ShelfAssetCustomFieldValueType["value"];
-          value = formatCustomFieldForCsv(fieldValue, column.cfType);
+          value = formatCustomFieldForCsv(
+            fieldValue,
+            column.cfType,
+            currentOrganization
+          );
         }
       }
 
@@ -489,7 +509,8 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
  */
 const formatCustomFieldForCsv = (
   fieldValue: ShelfAssetCustomFieldValueType["value"],
-  cfType: CustomFieldType | undefined
+  cfType: CustomFieldType | undefined,
+  currentOrganization: Pick<Organization, "id" | "barcodesEnabled" | "currency">
 ): string => {
   if (!fieldValue || fieldValue.raw === undefined || fieldValue.raw === null) {
     return "";
@@ -513,6 +534,13 @@ const formatCustomFieldForCsv = (
       } catch {
         return String(fieldValue.raw);
       }
+
+    case CustomFieldType.AMOUNT:
+      return formatCurrency({
+        value: fieldValue.raw as number,
+        locale: "en-US", // Default locale for CSV exports
+        currency: currentOrganization.currency,
+      });
 
     default:
       return String(fieldValue.raw || "");

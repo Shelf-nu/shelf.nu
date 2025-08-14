@@ -741,6 +741,7 @@ enum CustomFieldType {
   DATE
   MULTILINE_TEXT
   AMOUNT
+  NUMBER
 }
 
 model AssetCustomFieldValue {

@@ -52,6 +52,7 @@ export const operatorsPerType: FilterDefinition = {
   boolean: ["is"],
   date: ["is", "isNot", "before", "after", "between", "inDates"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
+  amount: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
   enum: ["is", "isNot", "containsAny"],
   array: ["contains", "containsAll", "containsAny", "excludeAny"],
   customField: [], // empty array as customField operators are determined by the actual field type

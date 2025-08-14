@@ -19,11 +19,37 @@ const filterValueSchema = {
       { message: "Start date must be before or equal to end date" }
     ),
   ]),
-  number: z.union([
-    // Single number validation
+  amount: z.union([
+    // Single amount validation (must be positive)
     z.coerce
       .number()
-      .min(0, "Number is required")
+      .min(0, "Amount must be positive")
+      .transform((val) => (Number.isNaN(val) ? undefined : val)),
+
+    // Range (between) validation for amounts
+    z
+      .array(z.coerce.number().min(0, "Amount must be positive"))
+      .length(2, "Range must have two values")
+      .refine(
+        (numbers) => {
+          // Skip validation if any number is NaN
+          if (numbers.some(Number.isNaN)) return true;
+          // Only validate when both numbers are present
+          if (numbers.length === 2) {
+            return numbers[0] <= numbers[1];
+          }
+          return true;
+        },
+        {
+          message: "Start value must be less than or equal to end value",
+        }
+      ),
+  ]),
+  number: z.union([
+    // Single number validation (allows negative numbers)
+    z.coerce
+      .number()
+      .refine((val) => !Number.isNaN(val), "Number is required")
       .transform((val) => (Number.isNaN(val) ? undefined : val)),
 
     // Range (between) validation

@@ -72,16 +72,19 @@ export function ValueField({
               return;
             }
           }
-        } else if (filter.type === "number") {
+        } else if (filter.type === "number" || filter.type === "amount") {
           const startNum = parseFloat(start);
           const endNum = parseFloat(end);
           if (!isNaN(startNum) && !isNaN(endNum)) {
-            if (startNum > endNum) {
+            // For AMOUNT fields, enforce start <= end since amounts are always positive
+            if (filter.type === "amount" && startNum > endNum) {
               setLocalError(
                 "Start value must be less than or equal to end value"
               );
               return;
             }
+            // For NUMBER fields, no validation needed - any numeric range is valid
+            // This allows ranges like "50 to -50" or "-100 to 100"
           }
         }
       }
@@ -136,6 +139,19 @@ export function ValueField({
       newValue[index] = event.target.value;
       setLocalValue(newValue);
       if (newValue[0] !== "" && newValue[1] !== "") {
+        // For number and amount fields, sort the values to ensure backend gets [min, max]
+        if (filter.type === "number" || filter.type === "amount") {
+          const num1 = parseFloat(newValue[0]);
+          const num2 = parseFloat(newValue[1]);
+          if (!isNaN(num1) && !isNaN(num2)) {
+            const sortedValues: [number, number] = [
+              Math.min(num1, num2),
+              Math.max(num1, num2),
+            ];
+            setFilter(sortedValues);
+            return;
+          }
+        }
         setFilter(newValue);
       }
     };
@@ -144,6 +160,7 @@ export function ValueField({
   const commonInputProps = {
     inputClassName: "px-4 py-2 text-[14px] leading-5",
     hideLabel: true,
+    hideMd: true,
     label: filter.name,
     disabled,
   };
@@ -241,14 +258,13 @@ export function ValueField({
         />
       );
 
-    case "number":
+    case "amount":
       if (filter.operator === "between") {
         return (
           <div className="space-y-2">
             <div className="flex max-w-full items-center justify-normal gap-[2px]">
               <Input
                 {...commonInputProps}
-                label="Start Value"
                 type="number"
                 value={localValue[0]}
                 onChange={handleBetweenChange(0)}
@@ -259,7 +275,6 @@ export function ValueField({
               />
               <Input
                 {...commonInputProps}
-                label="End Value"
                 type="number"
                 value={localValue[1]}
                 onChange={handleBetweenChange(1)}
@@ -283,6 +298,50 @@ export function ValueField({
             onChange={handleChange}
             placeholder={placeholder(filter.operator)}
             min={0}
+            onKeyUp={submitOnEnter}
+            error={error}
+            name={fieldName}
+          />
+        );
+      }
+
+    case "number":
+      if (filter.operator === "between") {
+        return (
+          <div className="space-y-2">
+            <div className="flex max-w-full items-center justify-normal gap-[2px]">
+              <Input
+                {...commonInputProps}
+                type="number"
+                value={localValue[0]}
+                onChange={handleBetweenChange(0)}
+                className="w-1/2"
+                name={`${fieldName}_start`}
+                onKeyUp={submitOnEnter}
+              />
+              <Input
+                {...commonInputProps}
+                type="number"
+                value={localValue[1]}
+                onChange={handleBetweenChange(1)}
+                className="w-1/2"
+                name={`${fieldName}_end`}
+                onKeyUp={submitOnEnter}
+              />
+            </div>
+            {error && (
+              <div className="!mt-0 text-[12px] text-red-500">{error}</div>
+            )}
+          </div>
+        );
+      } else {
+        return (
+          <Input
+            {...commonInputProps}
+            type="number"
+            value={filter.value as number}
+            onChange={handleChange}
+            placeholder={placeholder(filter.operator)}
             onKeyUp={submitOnEnter}
             error={error}
             name={fieldName}
