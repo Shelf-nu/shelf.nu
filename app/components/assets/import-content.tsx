@@ -97,6 +97,14 @@ export const ImportContent = () => {
           <li>
             <b>date</b> - must be in <b>YYYY-MM-DD</b> format
           </li>
+          <li>
+            <b>amount</b> - for currency values (e.g., 1234.56 - no currency
+            symbols)
+          </li>
+          <li>
+            <b>number</b> - for numeric values including negatives (e.g.,
+            -123.45)
+          </li>
         </ul>
         If no type is mentioned <b>"text"</b> is used as default type.
       </div>
