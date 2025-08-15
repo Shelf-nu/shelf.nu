@@ -189,6 +189,11 @@ export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
 });
 
+export const GEOCODING_USER_AGENT = getEnv("GEOCODING_USER_AGENT", {
+  isSecret: false,
+  isRequired: false,
+});
+
 export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {
   isSecret: false,
 });

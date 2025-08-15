@@ -127,6 +127,7 @@ fly secrets set INVITE_TOKEN_SECRET=$(openssl rand -hex 32)
 
 # Optional integrations
 fly secrets set MAPTILER_TOKEN="your-maptiler-token"
+fly secrets set GEOCODING_USER_AGENT="Your Company Assets (https://yoursite.com)"
 fly secrets set MICROSOFT_CLARITY_ID="your-clarity-id"
 
 # Premium features (set to true for paid features)

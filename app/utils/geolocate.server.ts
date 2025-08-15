@@ -1,4 +1,6 @@
 /* eslint-disable no-console */
+import { config } from "~/config/shelf.config";
+
 // Geocoding using OpenStreetMap Nominatim (free service)
 export const geolocate = async (
   address: string | null
@@ -13,7 +15,7 @@ export const geolocate = async (
 
     const request = await fetch(url.href, {
       headers: {
-        "User-Agent": "Shelf.nu Asset Management (https://shelf.nu)",
+        "User-Agent": config.geocoding.userAgent,
       },
     });
 

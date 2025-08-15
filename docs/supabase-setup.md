@@ -220,6 +220,7 @@ SMTP_FROM="You from Shelf.nu <you@example.com>"
 
 # Map integration (optional)
 MAPTILER_TOKEN="your-maptiler-token"
+GEOCODING_USER_AGENT="Your App Name (https://yoursite.com)"
 
 # Security
 INVITE_TOKEN_SECRET="your-invite-token-secret"
@@ -279,6 +280,12 @@ MAPTILER_TOKEN="your_token_here"
 ### Geocoding
 
 Shelf.nu uses [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/) for geocoding addresses into map coordinates. This is a free service that requires no API key or registration.
+
+**Configuration:**
+
+- Set `GEOCODING_USER_AGENT` environment variable to identify your deployment
+- Example: `GEOCODING_USER_AGENT="My Company Assets (https://assets.mycompany.com)"`
+- Defaults to "Self-hosted Asset Management System" if not set
 
 **How it works:**
 

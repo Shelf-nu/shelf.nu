@@ -19,6 +19,7 @@ process.env.SMTP_HOST = "mail.example.com";
 process.env.SMTP_PORT = "465";
 process.env.SMTP_USER = "some-email@example.com";
 process.env.MAPTILER_TOKEN = "maptiler-token";
+process.env.GEOCODING_USER_AGENT = "Test Asset Management";
 process.env.MICROSOFT_CLARITY_ID = "microsoft-clarity-id";
 process.env.INVITE_TOKEN_SECRET = "secret-test-invite";
 process.env.SENTRY_ORG = "sentry-org";
