@@ -21,7 +21,6 @@ process.env.SMTP_USER = "some-email@example.com";
 process.env.MAPTILER_TOKEN = "maptiler-token";
 process.env.MICROSOFT_CLARITY_ID = "microsoft-clarity-id";
 process.env.INVITE_TOKEN_SECRET = "secret-test-invite";
-process.env.GEOCODE_API_KEY = "geocode-api-key";
 process.env.SENTRY_ORG = "sentry-org";
 process.env.SENTRY_PROJECT = "sentry-project";
 process.env.SENTRY_DSN = "sentry-dsn";

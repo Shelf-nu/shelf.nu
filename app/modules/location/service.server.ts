@@ -16,6 +16,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -238,11 +239,19 @@ export async function createLocation({
   organizationId: Organization["id"];
 }) {
   try {
+    // Geocode the address if provided
+    let coordinates: { lat: number; lon: number } | null = null;
+    if (address) {
+      coordinates = await geolocate(address);
+    }
+
     return await db.location.create({
       data: {
         name,
         description,
         address,
+        latitude: coordinates?.lat || null,
+        longitude: coordinates?.lon || null,
         user: {
           connect: {
             id: userId,
@@ -299,12 +308,36 @@ export async function updateLocation(payload: {
   const { id, name, address, description, userId, organizationId } = payload;
 
   try {
+    // Get the current location to check if address changed
+    const currentLocation = await db.location.findUniqueOrThrow({
+      where: { id, organizationId },
+      select: { address: true, latitude: true, longitude: true },
+    });
+
+    // Check if address has changed and geocode if necessary
+    let coordinates: { lat: number; lon: number } | null = null;
+    let shouldUpdateCoordinates = false;
+
+    if (address !== undefined) {
+      // address is being updated (could be null or string)
+      if (address !== currentLocation.address) {
+        shouldUpdateCoordinates = true;
+        if (address) {
+          coordinates = await geolocate(address);
+        }
+      }
+    }
+
     return await db.location.update({
       where: { id, organizationId },
       data: {
         name,
         description,
         address,
+        ...(shouldUpdateCoordinates && {
+          latitude: coordinates?.lat || null,
+          longitude: coordinates?.lon || null,
+        }),
       },
     });
   } catch (cause) {

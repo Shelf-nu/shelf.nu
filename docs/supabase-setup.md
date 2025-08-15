@@ -221,9 +221,6 @@ SMTP_FROM="You from Shelf.nu <you@example.com>"
 # Map integration (optional)
 MAPTILER_TOKEN="your-maptiler-token"
 
-# Geocoding (optional)
-GEOCODE_API_KEY="your-geocode-api-key"
-
 # Security
 INVITE_TOKEN_SECRET="your-invite-token-secret"
 
@@ -281,14 +278,24 @@ MAPTILER_TOKEN="your_token_here"
 
 ### Geocoding
 
-Get a free [Geocode Maps](https://geocode.maps.co/) API key:
+Shelf.nu uses [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/) for geocoding addresses into map coordinates. This is a free service that requires no API key or registration.
 
-1. Sign up for geocoding service
-2. Add to your `.env` file:
+**How it works:**
 
-```bash
-GEOCODE_API_KEY="your_key_here"
-```
+- When you add an address to a location, it's automatically geocoded and cached in the database
+- Subsequent page loads use the cached coordinates for instant map display
+- Rate limit: 1 request per second (automatically handled)
+
+**Important limitations:**
+
+- Nominatim has [usage policies](https://operations.osmfoundation.org/policies/nominatim/) you should be aware of
+- For heavy usage, consider running your own Nominatim instance
+- The service runs on donated servers with limited capacity
+
+**For production deployments with high geocoding volume:**
+
+- Consider commercial alternatives like MapBox, Google Maps, or MapTiler geocoding APIs
+- Set up your own Nominatim server following the [installation guide](https://nominatim.org/release-docs/latest/admin/Installation/)
 
 ---
 

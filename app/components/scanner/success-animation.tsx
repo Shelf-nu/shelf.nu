@@ -6,6 +6,7 @@ export default function SuccessAnimation() {
     <Lottie
       animationData={successfullScanAnimation}
       loop={false}
+      renderer="svg"
       style={{ width: 200, height: 200 }}
     />
   );
