@@ -50,7 +50,6 @@ declare global {
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
       DIRECT_URL: string;
-      GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
       ADMIN_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
@@ -186,13 +185,13 @@ export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isRequired: false,
 });
 
-export const GEOCODE_API_KEY = getEnv("GEOCODE_API_KEY", {
-  isSecret: true,
-  isRequired: false,
-});
-
 export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
+});
+
+export const GEOCODING_USER_AGENT = getEnv("GEOCODING_USER_AGENT", {
+  isSecret: false,
+  isRequired: false,
 });
 
 export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {

@@ -51,4 +51,15 @@ export interface Config {
    * This is useful for gathering feedback on how users discover the platform.
    */
   showHowDidYouFindUs: boolean;
+
+  /**
+   * Geocoding configuration
+   */
+  geocoding: {
+    /**
+     * User-Agent string for geocoding requests
+     * Used to identify the application to the geocoding service
+     */
+    userAgent: string;
+  };
 }

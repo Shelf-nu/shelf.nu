@@ -1,7 +1,16 @@
-import { useCallback } from "react";
-import bwipjs from "@bwip-js/browser";
+import { useCallback, useRef, useEffect } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { tw } from "~/utils/tw";
+
+// Cached import - only loads bwip-js once but keeps it in separate chunk
+let bwipjsPromise: Promise<any> | null = null;
+
+const getBwipjs = () => {
+  if (!bwipjsPromise) {
+    bwipjsPromise = import("@bwip-js/browser");
+  }
+  return bwipjsPromise;
+};
 
 interface BarcodeDisplayProps {
   type: BarcodeType;
@@ -24,11 +33,14 @@ export function BarcodeDisplay({
   fontSize = 8,
   maxWidth = "300px",
 }: BarcodeDisplayProps) {
-  const generateBarcode = useCallback(
-    (canvas: HTMLCanvasElement | null) => {
-      if (!canvas) return;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const generateBarcode = useCallback(
+    async (canvas: HTMLCanvasElement) => {
       try {
+        // Load bwip-js dynamically (cached after first load)
+        const bwipjs = await getBwipjs();
+
         // Map barcode types to bwip-js format strings
         const formatMap: Record<BarcodeType, string> = {
           Code128: "code128",
@@ -43,7 +55,7 @@ export function BarcodeDisplay({
         }
 
         // Generate the barcode using bwip-js
-        bwipjs.toCanvas(canvas, {
+        bwipjs.default.toCanvas(canvas, {
           bcid: bcid,
           text: value,
           scale: scale, // Use scale for all barcode types
@@ -73,9 +85,18 @@ export function BarcodeDisplay({
     [type, value, scale, height, displayValue, fontSize]
   );
 
+  useEffect(() => {
+    if (canvasRef.current) {
+      generateBarcode(canvasRef.current).catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error("Failed to generate barcode:", error);
+      });
+    }
+  }, [generateBarcode]);
+
   return (
     <canvas
-      ref={(canvas) => generateBarcode(canvas)}
+      ref={canvasRef}
       className={tw(`my-4`, className)}
       style={{
         maxWidth: maxWidth,

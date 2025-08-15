@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from "react";
+import React, { useRef, useMemo, useState, useEffect } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -122,26 +122,24 @@ export const CodePreview = ({
         (code) => code.id === selectedBarcodeId
       );
       if (selectedBarcode) {
-        // Notify parent of initial selection
-        if (onCodeChange) {
-          onCodeChange(selectedBarcode);
-        }
         return selectedBarcodeId;
       }
     }
 
     // Otherwise default to QR code if available, then first barcode
     const qrCode = availableCodes.find((code) => code.type === "qr");
-    const defaultId = qrCode?.id || availableCodes[0]?.id || "";
-
-    // Notify parent of initial selection
-    const initialCode = availableCodes.find((code) => code.id === defaultId);
-    if (onCodeChange && initialCode) {
-      onCodeChange(initialCode);
-    }
-
-    return defaultId;
+    return qrCode?.id || availableCodes[0]?.id || "";
   });
+
+  // Notify parent of initial selection (moved to useEffect to avoid render-time side effects)
+  useEffect(() => {
+    const selectedBarcode = availableCodes.find(
+      (code) => code.id === selectedCodeId
+    );
+    if (onCodeChange && selectedBarcode) {
+      onCodeChange(selectedBarcode);
+    }
+  }, [selectedCodeId, availableCodes, onCodeChange]);
 
   const selectedCode = availableCodes.find(
     (code) => code.id === selectedCodeId

@@ -8,7 +8,6 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet } from "@remix-run/react";
 import { DateTime } from "luxon";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -315,7 +314,6 @@ export const handle = {
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
-  { rel: "stylesheet", href: mapCss },
 ];
 
 export default function AssetDetailsPage() {

@@ -7,7 +7,6 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -30,6 +29,7 @@ import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -107,7 +107,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    const mapData = await geolocate(location.address);
+    // Use cached coordinates from database, or geocode and cache if not available
+    let mapData: { lat: number; lon: number } | null = null;
+    if (location.latitude !== null && location.longitude !== null) {
+      mapData = { lat: location.latitude, lon: location.longitude };
+    } else if (location.address) {
+      // Fallback: geocode and cache coordinates for existing locations
+      mapData = await geolocate(location.address);
+      if (mapData) {
+        // Update the database with the geocoded coordinates
+        await db.location.update({
+          where: { id: location.id },
+          data: {
+            latitude: mapData.lat,
+            longitude: mapData.lon,
+          },
+        });
+      }
+    }
 
     return json(
       data({
@@ -140,7 +157,6 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: mapCss },
   { rel: "stylesheet", href: assetCss },
 ];
 
@@ -302,6 +318,17 @@ export default function LocationPage() {
                   >
                     See in Google Maps
                   </Button>
+                </p>
+                <p className="mt-2 text-xs">
+                  Geocoding by{" "}
+                  <a
+                    href="https://nominatim.openstreetmap.org/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary-600 underline"
+                  >
+                    OpenStreetMap Nominatim
+                  </a>
                 </p>
               </div>
             </div>

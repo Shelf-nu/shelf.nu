@@ -1,28 +1,44 @@
-import { GEOCODE_API_KEY } from "./env";
+/* eslint-disable no-console */
+import { config } from "~/config/shelf.config";
 
+// Geocoding using OpenStreetMap Nominatim (free service)
 export const geolocate = async (
   address: string | null
 ): Promise<{ lat: number; lon: number } | null> => {
-  if (!address || address === "" || !GEOCODE_API_KEY) return null;
-  // Create URL object and add the address to the url params
-  const url = new URL("https://geocode.maps.co/search");
-  url.searchParams.append("q", address);
-  url.searchParams.append("api_key", GEOCODE_API_KEY);
+  if (!address || address === "") return null;
 
-  const request = await fetch(url.href);
+  try {
+    const url = new URL("https://nominatim.openstreetmap.org/search");
+    url.searchParams.append("q", address);
+    url.searchParams.append("format", "json");
+    url.searchParams.append("limit", "1");
 
-  if (!request.ok) return null;
-  const response = await request.json();
-  /** Here we take the frist entry of the array.
-   * When there are more entries that means the address is not accurate enought so we just take the first option
-   */
+    const request = await fetch(url.href, {
+      headers: {
+        "User-Agent": config.geocoding.userAgent,
+      },
+    });
 
-  if (!response || response.length === 0) return null;
+    if (!request.ok) {
+      console.error("Geocoding request failed:", request.status);
+      return null;
+    }
 
-  const mapData = {
-    lat: response[0].lat,
-    lon: response[0].lon,
-  };
+    const response = await request.json();
 
-  return mapData || null;
+    if (!response || response.length === 0) {
+      console.warn("No geocoding results found for address:", address);
+      return null;
+    }
+
+    const mapData = {
+      lat: parseFloat(response[0].lat),
+      lon: parseFloat(response[0].lon),
+    };
+
+    return mapData;
+  } catch (error) {
+    console.error("Geocoding error:", error);
+    return null;
+  }
 };
