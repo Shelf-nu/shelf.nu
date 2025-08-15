@@ -111,7 +111,7 @@ export default function LocationsIndexPage() {
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
           ItemComponent={ListItemContent}
-          navigate={(itemId) => navigate(itemId)}
+          navigate={(itemId) => navigate(`${itemId}/assets`)}
           headerChildren={
             <>
               <Th>Assets</Th>

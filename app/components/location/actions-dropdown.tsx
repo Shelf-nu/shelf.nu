@@ -21,9 +21,11 @@ interface Props {
 export const ActionsDropdown = ({ location, fullWidth }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger
+      type="button"
       className={tw("asset-actions", fullWidth ? "w-full" : "")}
     >
       <Button
+        type="button"
         variant="secondary"
         to="#"
         width={fullWidth ? "full" : "auto"}

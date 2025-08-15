@@ -1,13 +1,10 @@
-import { KitStatus, Prisma } from "@prisma/client";
-import {
-  ActionFunctionArgs,
-  json,
-  LoaderFunctionArgs,
-  redirect,
-} from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useMemo } from "react";
+import type { Prisma } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { MetaFunction, useLoaderData, useNavigation } from "@remix-run/react";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -42,6 +39,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -113,6 +111,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw json(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header?.title) },
+];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
