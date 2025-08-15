@@ -3,6 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import { Crisp } from "crisp-sdk-web";
 import {
   AlarmClockIcon,
+  BellIcon,
   BoxesIcon,
   BriefcaseConveyorBeltIcon,
   CalendarRangeIcon,
@@ -30,6 +31,10 @@ type BaseNavItem = {
   hidden?: boolean;
   Icon: LucideIcon;
   disabled?: boolean | { reason: React.ReactNode };
+  badge?: {
+    show: boolean;
+    variant?: "unread";
+  };
 };
 
 export type ChildNavItem = BaseNavItem & {
@@ -59,7 +64,7 @@ export type NavItem =
   | ButtonNavItem;
 
 export function useSidebarNavItems() {
-  const { isAdmin, canUseBookings, subscription } =
+  const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
     useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
   const currentOrganization = useCurrentOrganization();
@@ -227,6 +232,18 @@ export function useSidebarNavItems() {
       title: "QR Scanner",
       to: "/scanner",
       Icon: ScanBarcodeIcon,
+    },
+    {
+      type: "button",
+      title: "Updates",
+      Icon: BellIcon,
+      badge: {
+        show: (unreadUpdatesCount || 0) > 0,
+        variant: "unread" as const,
+      },
+      onClick: () => {
+        // This will be handled by the sidebar component with popover
+      },
     },
     {
       type: "button",

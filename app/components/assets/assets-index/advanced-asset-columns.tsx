@@ -1,6 +1,7 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { CustomFieldType, type AssetStatus } from "@prisma/client";
+import type { Booking, AssetStatus } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
@@ -198,7 +199,13 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn status={item.status} />;
+      return (
+        <StatusColumn
+          id={item.id}
+          status={item.status}
+          bookings={item.bookings}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -331,11 +338,23 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ status }: { status: AssetStatus }) {
+function StatusColumn({
+  id,
+  status,
+  bookings,
+}: {
+  id: string;
+  status: AssetStatus;
+  bookings?: Pick<Booking, "id" | "name" | "status">[];
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      {/* Here iwe pass `true` to availableToBook just to make sure its not visible next to status as it has its own column  */}
-      <AssetStatusBadge status={status} availableToBook={true} />
+      <AssetStatusBadge
+        bookings={bookings}
+        id={id}
+        status={status}
+        availableToBook={true}
+      />
     </Td>
   );
 }

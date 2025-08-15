@@ -535,6 +535,7 @@ const RowComponent = ({
                 {item.title}
               </p>
               <AssetStatusBadge
+                id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
               />

@@ -50,7 +50,6 @@ const getSchema = ({
   return {
     text,
     multiline_text: text,
-    number: z.number(params),
     date: text,
     boolean: z
       .string(params)
@@ -67,6 +66,9 @@ const getSchema = ({
       return v;
     }),
     amount: required
+      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
+      : z.coerce.number(params).optional().nullable(),
+    number: required
       ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
       : z.coerce.number(params).optional().nullable(),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
@@ -204,6 +206,9 @@ export const buildCustomFieldValue = (
       case "AMOUNT": {
         return { raw: Number(raw), valueText: String(raw) };
       }
+      case "NUMBER": {
+        return { raw: Number(raw), valueText: String(raw) };
+      }
     }
 
     return { raw, valueText: String(raw) };
@@ -283,4 +288,5 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   BOOLEAN: "Boolean",
   DATE: "Date",
   AMOUNT: "Amount",
+  NUMBER: "Number",
 };

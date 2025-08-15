@@ -1,11 +1,19 @@
+import { useState } from "react";
+import type { BookingStatus } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, PackageCheck } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
+import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkRemoveAssetAndKitDialog from "./bulk-remove-asset-and-kit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
+import type { ListItemData } from "../list/list-item";
 import { Button } from "../shared/button";
 import {
   DropdownMenu,
@@ -36,7 +44,42 @@ export default function ListBulkActionsDropdown() {
 
 function ConditionalDropdown() {
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const { booking, partialCheckinDetails = {} } =
+    useLoaderData<BookingPageLoaderData>();
+  const bookingStatus = useBookingStatusHelpers(
+    booking.status as BookingStatus
+  );
   const actionsButtonDisabled = selectedItems.length === 0;
+
+  // Show partial check-in option only for ONGOING/OVERDUE bookings
+  const showPartialCheckin =
+    bookingStatus?.isOngoing || bookingStatus?.isOverdue;
+
+  // Check if any selected items are already checked in using context-aware status
+  // Filter out kit entries (which have undefined title) since bulk selection includes both kit AND its individual assets
+  // We only need to check the individual assets for validation
+  const assetsToCheck = selectedItems.filter(
+    (item) => item.title !== undefined
+  );
+
+  const hasOnlyAlreadyCheckedInItems = assetsToCheck.every((item) => {
+    // Type assertion since ListItemData includes asset properties via [x: string]: any
+    // and we know these are asset items with status property
+    const asset = item as ListItemData & { status: string };
+    // For individual assets, check if already partially checked in
+    return isAssetPartiallyCheckedIn(
+      asset,
+      partialCheckinDetails,
+      booking.status
+    );
+  });
+
+  const partialCheckinDisabled = hasOnlyAlreadyCheckedInItems
+    ? {
+        reason:
+          "All selected assets are already checked in. Please select assets that are still checked out.",
+      }
+    : false;
 
   const {
     ref: dropdownRef,
@@ -50,6 +93,9 @@ function ConditionalDropdown() {
     setOpen(false);
   }
 
+  const [partialCheckinDialogOpen, setPartialCheckinDialogOpen] =
+    useState(false);
+
   return (
     <>
       {open && (
@@ -61,6 +107,10 @@ function ConditionalDropdown() {
       )}
 
       <BulkRemoveAssetAndKitDialog />
+      <BulkPartialCheckinDialog
+        open={partialCheckinDialogOpen}
+        setOpen={setPartialCheckinDialogOpen}
+      />
 
       <DropdownMenu
         modal={false}
@@ -115,6 +165,29 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            {showPartialCheckin && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <Button
+                  variant="link"
+                  className={tw(
+                    "flex w-full items-center  justify-start gap-2 px-4 py-3 text-gray-700 hover:text-gray-700"
+                  )}
+                  onClick={() => {
+                    setPartialCheckinDialogOpen(true);
+                    closeMenu();
+                  }}
+                  disabled={partialCheckinDisabled}
+                >
+                  <PackageCheck className="mr-2 inline size-5" />
+                  <span>Check in selected items</span>
+                </Button>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

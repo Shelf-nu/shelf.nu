@@ -184,38 +184,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ];
     }
 
-    /**
-     * We need to query all the modified kits so we know their location before the change
-     * That way we can later create notes for all the location changes
-     */
-    const modifiedKits = await db.kit
-      .findMany({
-        where: {
-          id: { in: [...kitIds, ...removedKitIds] },
-          organizationId,
-        },
-        select: {
-          id: true,
-          name: true,
-          location: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          createdBy: { select: { id: true, firstName: true, lastName: true } },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching the kits. Please try again or contact support.",
-          additionalData: { kitIds, removedKitIds, userId, locationId },
-          label: "Kit",
-        });
-      });
-
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
       await db.location

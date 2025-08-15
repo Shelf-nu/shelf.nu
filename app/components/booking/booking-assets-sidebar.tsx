@@ -276,6 +276,7 @@ export function BookingAssetsSidebar({
                                         </span>
                                         <div>
                                           <AssetStatusBadge
+                                            id={asset.id}
                                             status={asset.status}
                                             availableToBook={
                                               asset.availableToBook
@@ -345,6 +346,7 @@ export function BookingAssetsSidebar({
                                 </span>
                                 <div>
                                   <AssetStatusBadge
+                                    id={asset.id}
                                     status={asset.status}
                                     availableToBook={asset.availableToBook}
                                   />
