@@ -1,16 +1,13 @@
-import { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
-import {
-  json,
-  MetaFunction,
-  Outlet,
-  useLoaderData,
-  useMatches,
-} from "@remix-run/react";
-import { LoaderFunctionArgs, redirect } from "react-router";
+import type { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/react";
+import { json, Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import Header from "~/components/layout/header";
-import { HeaderData } from "~/components/layout/header/types";
+import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
@@ -19,13 +16,15 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
-import { RouteHandleWithName } from "~/modules/types";
+import type { RouteHandleWithName } from "~/modules/types";
+import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import {
@@ -40,9 +39,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
-import assetCss from "~/styles/asset.css?url";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
 

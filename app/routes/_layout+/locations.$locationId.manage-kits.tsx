@@ -3,7 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { MetaFunction, useLoaderData, useNavigation } from "@remix-run/react";
+import type { MetaFunction } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -24,6 +25,7 @@ import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { getKitsWhereInput } from "~/modules/kit/utils.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -39,7 +41,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 const paramsSchema = z.object({ locationId: z.string() });
 

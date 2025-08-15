@@ -1,5 +1,6 @@
-import { Asset, Category, Tag } from "@prisma/client";
-import { json, LoaderFunctionArgs } from "@remix-run/node";
+import type { Asset, Category, Tag } from "@prisma/client";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import z from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -8,7 +9,7 @@ import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters"
 import { CategoryBadge } from "~/components/assets/category-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
-import { HeaderData } from "~/components/layout/header/types";
+import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
