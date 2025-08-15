@@ -1,0 +1,390 @@
+import { KitStatus, Prisma } from "@prisma/client";
+import {
+  ActionFunctionArgs,
+  json,
+  LoaderFunctionArgs,
+  redirect,
+} from "@remix-run/node";
+import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { useEffect, useMemo } from "react";
+import { z } from "zod";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+  setSelectedBulkItemAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
+import { CategoryBadge } from "~/components/assets/category-badge";
+import { StatusFilter } from "~/components/booking/status-filter";
+import { Form } from "~/components/custom-form";
+import KitImage from "~/components/kits/kit-image";
+import { KitStatusBadge } from "~/components/kits/kit-status-badge";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { Button } from "~/components/shared/button";
+import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
+import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { getKitsWhereInput } from "~/modules/kit/utils.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+
+const paramsSchema = z.object({ locationId: z.string() });
+
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    });
+
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: {
+          id: locationId,
+          organizationId,
+        },
+        include: {
+          kits: { select: { id: true } },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          title: "Location not found",
+          message:
+            "The location you are trying to access does not exist or you do not have permission to access it.",
+          additionalData: { locationId, userId, organizationId },
+          label: "Location",
+        });
+      });
+
+    const { search, totalKits, perPage, page, kits, totalPages } =
+      await getPaginatedAndFilterableKits({
+        request,
+        organizationId,
+      });
+
+    const modelName = {
+      singular: "kit",
+      plural: "kits",
+    };
+
+    return json(
+      data({
+        header: {
+          title: `Move kits to '${location?.name}' location`,
+          subHeading:
+            "Search your database for kits that you would like to move to this location.",
+        },
+        showSidebar: true,
+        noScroll: true,
+        items: kits,
+        page,
+        search,
+        totalItems: totalKits,
+        perPage,
+        totalPages,
+        modelName,
+        location,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, locationId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    });
+
+    let { kitIds, removedKitIds } = parseData(
+      await request.formData(),
+      z.object({
+        kitIds: z.array(z.string()).optional().default([]),
+        removedKitIds: z.array(z.string()).optional().default([]),
+      }),
+      { additionalData: { userId, organizationId, locationId } }
+    );
+
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: { id: locationId, organizationId },
+        include: { kits: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found",
+          additionalData: { locationId, userId, organizationId },
+          status: 404,
+          label: "Location",
+        });
+      });
+
+    /**
+     * If user has selected all kits, then we have to get ids of all those kits
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = kitIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const kitWhere = getKitsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allKits = await db.kit.findMany({
+        where: kitWhere,
+        select: { id: true },
+      });
+
+      const locationKits = location.kits.map((kit) => kit.id);
+      /**
+       * New kits that needs to be added are
+       * - Previously added kits
+       * - All kits with applied filters
+       */
+      kitIds = [
+        ...new Set([
+          ...allKits.map((kit) => kit.id),
+          ...locationKits.filter((kit) => !removedKitIds.includes(kit)),
+        ]),
+      ];
+    }
+
+    /**
+     * We need to query all the modified kits so we know their location before the change
+     * That way we can later create notes for all the location changes
+     */
+    const modifiedKits = await db.kit
+      .findMany({
+        where: {
+          id: { in: [...kitIds, ...removedKitIds] },
+          organizationId,
+        },
+        select: {
+          id: true,
+          name: true,
+          location: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          createdBy: { select: { id: true, firstName: true, lastName: true } },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching the kits. Please try again or contact support.",
+          additionalData: { kitIds, removedKitIds, userId, locationId },
+          label: "Kit",
+        });
+      });
+
+    /** If some kits were removed, we also need to handle those */
+    if (removedKitIds.length > 0) {
+      await db.location
+        .update({
+          where: {
+            organizationId,
+            id: locationId,
+          },
+          data: {
+            kits: {
+              disconnect: removedKitIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while removing the kits from the location. Please try again or contact support.",
+            additionalData: { removedKitIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    return redirect(`/locations/${locationId}/kits`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, locationId });
+    return json(error(reason), { status: reason.status });
+  }
+}
+
+export default function ManageLocationKits() {
+  const { totalItems, location } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const isSearching = isFormProcessing(navigation.state);
+
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const updateItem = useSetAtom(setSelectedBulkItemAtom);
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+
+  const removedKits = useMemo(
+    () =>
+      location.kits.filter(
+        (kit) =>
+          !selectedBulkItems.some((selectedItem) => selectedItem.id === kit.id)
+      ),
+    [location.kits, selectedBulkItems]
+  );
+
+  /**
+   * Set selected items for kit based on the route data
+   */
+  useEffect(() => {
+    setSelectedBulkItems(location.kits);
+  }, [location.kits, setSelectedBulkItems]);
+
+  return (
+    <div className="flex h-full max-h-full flex-col">
+      {/* Search */}
+      <div className=" border-b px-6 md:pb-3">
+        <Filters
+          className="md:border-0 md:p-0"
+          slots={{ "left-of-search": <StatusFilter statusItems={KitStatus} /> }}
+        />
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-5 md:px-0">
+        <List
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current kit to the atom of selected kits */
+          navigate={(_kitId, item) => {
+            updateItem(item);
+          }}
+          customEmptyStateContent={{
+            title: "You haven't added any kits yet.",
+            text: "What are you waiting for? Create your first kit now!",
+            newButtonRoute: "/kits/new",
+            newButtonContent: "New kit",
+          }}
+          className="-mx-5 flex h-full flex-col justify-start border-0"
+          bulkActions={<> </>}
+          headerChildren={
+            <>
+              <Th>Category</Th>
+            </>
+          }
+        />
+      </div>
+      {/* Footer of the modal */}
+      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
+        <p>
+          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
+        </p>
+
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post">
+            {/* We create inputs for both the removed and selected kits, so we can compare and easily add/remove */}
+            {removedKits.map((kit, i) => (
+              <input
+                key={kit.id}
+                type="hidden"
+                name={`removedKitIds[${i}]`}
+                value={kit.id}
+              />
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
+            {selectedBulkItems.map((kit, i) => (
+              <input
+                key={kit.id}
+                type="hidden"
+                name={`kitIds[${i}]`}
+                value={kit.id}
+              />
+            ))}
+            <Button type="submit" disabled={isSearching}>
+              Confirm
+            </Button>
+          </Form>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+const RowComponent = ({
+  item,
+}: {
+  item: Prisma.KitGetPayload<{ include: { category: true } }>;
+}) => {
+  const { category } = item;
+
+  return (
+    <>
+      {/* Name */}
+      <Td className="w-full min-w-[330px] p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-14 shrink-0 items-center justify-center">
+              <KitImage
+                kit={{
+                  kitId: item.id,
+                  image: item.image,
+                  imageExpiration: item.imageExpiration,
+                  alt: item.name,
+                }}
+                alt={item.name}
+                className="size-full rounded border object-cover"
+              />
+            </div>
+            <div className="flex flex-col gap-y-1">
+              <p className="word-break whitespace-break-spaces font-medium">
+                {item.name}
+              </p>
+              <KitStatusBadge status={item.status} availableToBook />
+            </div>
+          </div>
+        </div>
+      </Td>
+
+      {/* Category*/}
+      <Td>
+        <CategoryBadge category={category} />
+      </Td>
+    </>
+  );
+};
