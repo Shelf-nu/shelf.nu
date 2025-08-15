@@ -329,7 +329,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       location,
     });
 
-    return redirect(`/locations/${locationId}`);
+    return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     return json(error(reason), { status: reason.status });

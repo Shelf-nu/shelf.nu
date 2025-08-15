@@ -120,7 +120,7 @@ export async function getLocation(
       }),
     ]);
 
-    /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
+    /* User is accessing the location in the wrong organization. In that case we need special 404 handling. */
     if (
       userOrganizations?.length &&
       location.organizationId !== organizationId &&
@@ -580,6 +580,69 @@ export async function generateLocationWithImages({
         ? cause.message
         : "Something went wrong while generating locations.",
       additionalData: { organizationId, numberOfLocations },
+      label,
+    });
+  }
+}
+
+export async function getLocationKits(
+  params: Pick<Location, "id"> & {
+    organizationId: Organization["id"];
+    /** Page number. Starts at 1 */
+    page?: number;
+    /** Assets to be loaded per page with the location */
+    perPage?: number;
+    search?: string | null;
+    orderBy?: string;
+    orderDirection?: "asc" | "desc";
+    include?: Prisma.LocationInclude;
+  }
+) {
+  const {
+    organizationId,
+    id,
+    page = 1,
+    perPage = 8,
+    search,
+    orderBy = "createdAt",
+    orderDirection,
+    include,
+  } = params;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+
+    const kitWhere: Prisma.KitWhereInput = {
+      organizationId,
+      locationId: id,
+    };
+
+    if (search) {
+      kitWhere.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [kits, totalKits] = await Promise.all([
+      db.kit.findMany({
+        where: kitWhere,
+        include: { category: true },
+        skip,
+        take,
+        orderBy: { [orderBy]: orderDirection },
+      }),
+      db.kit.count({ where: kitWhere }),
+    ]);
+
+    return { kits, totalKits };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Something went wrong while fetching the location kits",
+      message:
+        "Something went wrong while fetching the location kits. Please try again or contact support.",
       label,
     });
   }

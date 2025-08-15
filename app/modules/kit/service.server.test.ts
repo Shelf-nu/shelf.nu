@@ -106,6 +106,7 @@ const mockCreateParams = {
   createdById: "user-1",
   organizationId: "org-1",
   categoryId: "category-1",
+  locationId: null,
 };
 
 describe("createKit", () => {
@@ -151,6 +152,7 @@ describe("createKit", () => {
     await createKit({
       ...mockCreateParams,
       categoryId: null,
+      locationId: null,
     });
 
     expect(db.kit.create).toHaveBeenCalledWith({
@@ -188,6 +190,7 @@ describe("createKit", () => {
     await createKit({
       ...mockCreateParams,
       barcodes,
+      locationId: null,
     });
 
     expect(db.kit.create).toHaveBeenCalledWith({
@@ -292,6 +295,7 @@ describe("createKit", () => {
       createKit({
         ...mockCreateParams,
         barcodes,
+        locationId: null,
       })
     ).rejects.toThrow();
   });
@@ -316,6 +320,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: "category-2",
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -343,6 +348,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: "uncategorized",
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -369,6 +375,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: null,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -394,6 +401,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: undefined,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -422,6 +430,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       barcodes,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalled();
