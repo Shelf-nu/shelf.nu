@@ -246,7 +246,7 @@ export default function ManageLocationKits() {
   }, [location.kits, setSelectedBulkItems]);
 
   return (
-    <div className="flex h-full max-h-full flex-col">
+    <div className="flex h-full max-h-full flex-col mt-4">
       {/* Search */}
       <div className=" border-b px-6 md:pb-3">
         <Filters
