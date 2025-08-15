@@ -268,21 +268,6 @@ export function AssetRow({
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
-  // Use preset configurations to define the availability labels
-  const availabilityConfigs = [
-    {
-      condition: true, // Always show this label for kits
-      badgeText: "Cannot add to location",
-      tooltipTitle: "Kits cannot be added to locations",
-      tooltipContent: "Only individual assets can be added to locations.",
-      priority: 100,
-    },
-  ];
-
-  // Create the availability labels component with default options
-  const [, KitAvailabilityLabels] =
-    createAvailabilityLabels(availabilityConfigs);
-
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -302,7 +287,6 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
         >
           kit
         </span>
-        <KitAvailabilityLabels />
       </div>
     </div>
   );

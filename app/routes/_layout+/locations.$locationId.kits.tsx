@@ -1,24 +1,20 @@
-import { Prisma } from "@prisma/client";
-import { json, LoaderFunctionArgs } from "@remix-run/node";
+import type { Prisma } from "@prisma/client";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
-import { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  getLocation,
-  getLocationKits,
-} from "~/modules/location/service.server";
+import { getLocationKits } from "~/modules/location/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {

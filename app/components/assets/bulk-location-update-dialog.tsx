@@ -5,7 +5,8 @@ import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared/button";
 
 export const BulkLocationUpdateSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).optional().default([]),
+  kitIds: z.array(z.string()).optional().default([]),
   newLocationId: z.string({ required_error: "Please select a location" }),
 });
 
