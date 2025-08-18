@@ -4,6 +4,8 @@ import type {
   Location,
   Organization,
   UserOrganization,
+  Asset,
+  Kit,
 } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
@@ -17,6 +19,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
@@ -25,6 +28,12 @@ import {
   removePublicFile,
 } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import {
+  getAssetsWhereInput,
+  getLocationUpdateNoteContent,
+} from "../asset/utils.server";
+import { getKitsWhereInput } from "../kit/utils.server";
+import { createNote } from "../note/service.server";
 
 const label: ErrorLabel = "Location";
 
@@ -203,7 +212,7 @@ export async function getLocations(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
-          assets: true,
+          _count: { select: { kits: true, assets: true } },
           image: {
             select: {
               updatedAt: true,
@@ -595,7 +604,6 @@ export async function getLocationKits(
     search?: string | null;
     orderBy?: string;
     orderDirection?: "asc" | "desc";
-    include?: Prisma.LocationInclude;
   }
 ) {
   const {
@@ -606,7 +614,6 @@ export async function getLocationKits(
     search,
     orderBy = "createdAt",
     orderDirection,
-    include,
   } = params;
 
   try {
@@ -643,6 +650,439 @@ export async function getLocationKits(
       title: "Something went wrong while fetching the location kits",
       message:
         "Something went wrong while fetching the location kits. Please try again or contact support.",
+      label,
+    });
+  }
+}
+
+export async function createLocationChangeNote({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isRemoving,
+}: {
+  currentLocation: Pick<Location, "id" | "name"> | null;
+  newLocation: Location | null;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isRemoving: boolean;
+}) {
+  try {
+    const message = getLocationUpdateNoteContent({
+      currentLocation,
+      newLocation,
+      firstName,
+      lastName,
+      assetName,
+      isRemoving,
+    });
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a location change note. Please try again or contact support",
+      additionalData: { userId, assetId },
+      label,
+    });
+  }
+}
+
+async function createBulkLocationChangeNotes({
+  modifiedAssets,
+  assetIds,
+  removedAssetIds,
+  userId,
+  location,
+}: {
+  modifiedAssets: Prisma.AssetGetPayload<{
+    select: {
+      title: true;
+      id: true;
+      location: {
+        select: {
+          name: true;
+          id: true;
+        };
+      };
+      user: {
+        select: {
+          firstName: true;
+          lastName: true;
+          id: true;
+        };
+      };
+    };
+  }>[];
+  assetIds: Asset["id"][];
+  removedAssetIds: Asset["id"][];
+  userId: User["id"];
+  location: Location;
+}) {
+  try {
+    const user = await db.user
+      .findFirstOrThrow({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "User not found",
+          additionalData: { userId },
+          label,
+        });
+      });
+
+    // Iterate over the modified assets
+    for (const asset of modifiedAssets) {
+      const isRemoving = removedAssetIds.includes(asset.id);
+      const isNew = assetIds.includes(asset.id);
+      const newLocation = isRemoving ? null : location;
+      const currentLocation = asset.location
+        ? { name: asset.location.name, id: asset.location.id }
+        : null;
+
+      if (isNew || isRemoving) {
+        await createLocationChangeNote({
+          currentLocation,
+          newLocation,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          assetName: asset.title,
+          assetId: asset.id,
+          userId,
+          isRemoving,
+        });
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating bulk location change notes",
+      additionalData: { userId, assetIds, removedAssetIds },
+      label,
+    });
+  }
+}
+
+export async function updateLocationAssets({
+  assetIds,
+  organizationId,
+  locationId,
+  userId,
+  request,
+  removedAssetIds,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Location["organizationId"];
+  locationId: Location["id"];
+  userId: User["id"];
+  request: Request;
+  removedAssetIds: Asset["id"][];
+}) {
+  try {
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: {
+          id: locationId,
+          organizationId,
+        },
+        include: {
+          assets: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found",
+          additionalData: { locationId, userId, organizationId },
+          status: 404,
+          label: "Location",
+        });
+      });
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+
+      const locationAssets = location.assets.map((asset) => asset.id);
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...locationAssets.filter((asset) => !removedAssetIds.includes(asset)),
+        ]),
+      ];
+    }
+
+    /**
+     * We need to query all the modified assets so we know their location before the change
+     * That way we can later create notes for all the location changes
+     */
+    const modifiedAssets = await db.asset
+      .findMany({
+        where: {
+          id: {
+            in: [...assetIds, ...removedAssetIds],
+          },
+          organizationId,
+        },
+        select: {
+          title: true,
+          id: true,
+          location: {
+            select: {
+              name: true,
+              id: true,
+            },
+          },
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              id: true,
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching the assets. Please try again or contact support.",
+          additionalData: { assetIds, removedAssetIds, userId, locationId },
+          label: "Assets",
+        });
+      });
+
+    if (assetIds.length > 0) {
+      /** We update the location with the new assets */
+      await db.location
+        .update({
+          where: {
+            id: locationId,
+            organizationId,
+          },
+          data: {
+            assets: {
+              connect: assetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while adding the assets to the location. Please try again or contact support.",
+            additionalData: { assetIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    /** If some assets were removed, we also need to handle those */
+    if (removedAssetIds.length > 0) {
+      await db.location
+        .update({
+          where: {
+            organizationId,
+            id: locationId,
+          },
+          data: {
+            assets: {
+              disconnect: removedAssetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while removing the assets from the location. Please try again or contact support.",
+            additionalData: { removedAssetIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    /** Creates the relevant notes for all the changed assets */
+    await createBulkLocationChangeNotes({
+      modifiedAssets,
+      assetIds,
+      removedAssetIds,
+      userId,
+      location,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the location assets.",
+      additionalData: { assetIds, organizationId, locationId },
+      label,
+    });
+  }
+}
+
+export async function updateLocationKits({
+  locationId,
+  kitIds,
+  removedKitIds,
+  organizationId,
+  userId,
+  request,
+}: {
+  locationId: Location["id"];
+  kitIds: Kit["id"][];
+  removedKitIds: Kit["id"][];
+  organizationId: Location["organizationId"];
+  userId: User["id"];
+  request: Request;
+}) {
+  try {
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: { id: locationId, organizationId },
+        include: { kits: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found",
+          additionalData: { locationId, userId, organizationId },
+          status: 404,
+          label: "Location",
+        });
+      });
+
+    /**
+     * If user has selected all kits, then we have to get ids of all those kits
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = kitIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const kitWhere = getKitsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allKits = await db.kit.findMany({
+        where: kitWhere,
+        select: { id: true },
+      });
+
+      const locationKits = location.kits.map((kit) => kit.id);
+      /**
+       * New kits that needs to be added are
+       * - Previously added kits
+       * - All kits with applied filters
+       */
+      kitIds = [
+        ...new Set([
+          ...allKits.map((kit) => kit.id),
+          ...locationKits.filter((kit) => !removedKitIds.includes(kit)),
+        ]),
+      ];
+    }
+
+    if (kitIds.length > 0) {
+      /** We update the location with the new assets */
+      await db.location
+        .update({
+          where: {
+            id: locationId,
+            organizationId,
+          },
+          data: {
+            kits: {
+              connect: kitIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while adding the kits to the location. Please try again or contact support.",
+            additionalData: { kitIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    /** If some kits were removed, we also need to handle those */
+    if (removedKitIds.length > 0) {
+      await db.location
+        .update({
+          where: {
+            organizationId,
+            id: locationId,
+          },
+          data: {
+            kits: {
+              disconnect: removedKitIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while removing the kits from the location. Please try again or contact support.",
+            additionalData: { removedKitIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the location kits.",
+      additionalData: { locationId, kitIds },
       label,
     });
   }

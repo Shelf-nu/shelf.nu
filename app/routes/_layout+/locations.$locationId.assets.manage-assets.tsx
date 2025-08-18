@@ -27,21 +27,12 @@ import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import {
-  createBulkLocationChangeNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { updateLocationAssets } from "~/modules/location/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -175,158 +166,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const location = await db.location
-      .findUniqueOrThrow({
-        where: {
-          id: locationId,
-          organizationId,
-        },
-        include: {
-          assets: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
-      });
-
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      const locationAssets = location.assets.map((asset) => asset.id);
-      /**
-       * New assets that needs to be added are
-       * - Previously added assets
-       * - All assets with applied filters
-       */
-      assetIds = [
-        ...new Set([
-          ...allAssets.map((asset) => asset.id),
-          ...locationAssets.filter((asset) => !removedAssetIds.includes(asset)),
-        ]),
-      ];
-    }
-
-    /**
-     * We need to query all the modified assets so we know their location before the change
-     * That way we can later create notes for all the location changes
-     */
-    const modifiedAssets = await db.asset
-      .findMany({
-        where: {
-          id: {
-            in: [...assetIds, ...removedAssetIds],
-          },
-          organizationId,
-        },
-        select: {
-          title: true,
-          id: true,
-          location: {
-            select: {
-              name: true,
-              id: true,
-            },
-          },
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              id: true,
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching the assets. Please try again or contact support.",
-          additionalData: { assetIds, removedAssetIds, userId, locationId },
-          label: "Assets",
-        });
-      });
-
-    if (assetIds.length > 0) {
-      /** We update the location with the new assets */
-      await db.location
-        .update({
-          where: {
-            id: locationId,
-            organizationId,
-          },
-          data: {
-            assets: {
-              connect: assetIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while adding the assets to the location. Please try again or contact support.",
-            additionalData: { assetIds, userId, locationId },
-            label: "Location",
-          });
-        });
-    }
-
-    /** If some assets were removed, we also need to handle those */
-    if (removedAssetIds.length > 0) {
-      await db.location
-        .update({
-          where: {
-            organizationId,
-            id: locationId,
-          },
-          data: {
-            assets: {
-              disconnect: removedAssetIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while removing the assets from the location. Please try again or contact support.",
-            additionalData: { removedAssetIds, userId, locationId },
-            label: "Location",
-          });
-        });
-    }
-
-    /** Creates the relevant notes for all the changed assets */
-    await createBulkLocationChangeNotes({
-      modifiedAssets,
+    await updateLocationAssets({
       assetIds,
+      organizationId,
+      locationId,
+      userId,
+      request,
       removedAssetIds,
-      userId: authSession.userId,
-      location,
     });
 
     return redirect(`/locations/${locationId}/assets`);

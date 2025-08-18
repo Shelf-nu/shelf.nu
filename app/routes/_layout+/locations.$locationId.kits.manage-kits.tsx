@@ -24,18 +24,12 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
-import { getKitsWhereInput } from "~/modules/kit/utils.server";
+import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -138,78 +132,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, organizationId, locationId } }
     );
 
-    const location = await db.location
-      .findUniqueOrThrow({
-        where: { id: locationId, organizationId },
-        include: { kits: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
-      });
-
-    /**
-     * If user has selected all kits, then we have to get ids of all those kits
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = kitIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const kitWhere = getKitsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allKits = await db.kit.findMany({
-        where: kitWhere,
-        select: { id: true },
-      });
-
-      const locationKits = location.kits.map((kit) => kit.id);
-      /**
-       * New kits that needs to be added are
-       * - Previously added kits
-       * - All kits with applied filters
-       */
-      kitIds = [
-        ...new Set([
-          ...allKits.map((kit) => kit.id),
-          ...locationKits.filter((kit) => !removedKitIds.includes(kit)),
-        ]),
-      ];
-    }
-
-    /** If some kits were removed, we also need to handle those */
-    if (removedKitIds.length > 0) {
-      await db.location
-        .update({
-          where: {
-            organizationId,
-            id: locationId,
-          },
-          data: {
-            kits: {
-              disconnect: removedKitIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while removing the kits from the location. Please try again or contact support.",
-            additionalData: { removedKitIds, userId, locationId },
-            label: "Location",
-          });
-        });
-    }
+    await updateLocationKits({
+      locationId,
+      kitIds,
+      removedKitIds,
+      organizationId,
+      userId,
+      request,
+    });
 
     return redirect(`/locations/${locationId}/kits`);
   } catch (cause) {
@@ -284,7 +214,7 @@ export default function ManageLocationKits() {
           {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
         </p>
 
-        <div className="flex gap-3">
+        <div className="mb-4 flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
           </Button>

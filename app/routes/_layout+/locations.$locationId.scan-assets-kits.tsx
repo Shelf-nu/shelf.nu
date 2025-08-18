@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -12,35 +12,38 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
-import AddAssetsToLocationDrawer from "~/components/scanner/drawer/uses/add-assets-to-location-drawer";
+import AddAssetsKitsToLocationDrawer, {
+  addScannedAssetsOrKitsToLocationSchema,
+} from "~/components/scanner/drawer/uses/add-assets-to-location-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getLocation } from "~/modules/location/service.server";
+import {
+  getLocation,
+  updateLocationAssets,
+  updateLocationKits,
+} from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { action as manageAssetsAction } from "./locations.$locationId.assets.manage-assets";
 
 export type LoaderData = typeof loader;
+
+const paramsSchema = z.object({ locationId: z.string() });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { locationId } = getParams(
-    params,
-    z.object({ locationId: z.string() }),
-    {
-      additionalData: { userId },
-    }
-  );
+  const { locationId } = getParams(params, paramsSchema, {
+    additionalData: { userId },
+  });
 
   try {
     const { organizationId, userOrganizations } = await requirePermission({
@@ -57,6 +60,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       include: {
         assets: { select: { id: true } },
+        kits: { select: { id: true } },
       },
     });
 
@@ -77,14 +81,60 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  name: "location.scan-assets",
+  name: "location.scan-assets-kits",
 };
 
-export async function action(args: ActionFunctionArgs) {
-  return manageAssetsAction(args);
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    });
+
+    const formData = await request.formData();
+    const { kitIds, assetIds } = parseData(
+      formData,
+      addScannedAssetsOrKitsToLocationSchema,
+      {
+        additionalData: { userId, organizationId, locationId },
+      }
+    );
+
+    if (assetIds.length) {
+      await updateLocationAssets({
+        assetIds,
+        organizationId,
+        locationId,
+        userId,
+        request,
+        removedAssetIds: [],
+      });
+    }
+
+    if (kitIds.length) {
+      await updateLocationKits({
+        locationId,
+        kitIds,
+        organizationId,
+        userId,
+        request,
+        removedKitIds: [],
+      });
+    }
+
+    return redirect(`/locations/${locationId}/assets`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, locationId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
-export default function ScanAssetsForLocation() {
+export default function ScanAssetsKitsForLocation() {
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -104,7 +154,7 @@ export default function ScanAssetsForLocation() {
     <>
       <Header hidePageDescription />
 
-      <AddAssetsToLocationDrawer isLoading={isLoading} />
+      <AddAssetsKitsToLocationDrawer isLoading={isLoading} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

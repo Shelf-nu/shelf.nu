@@ -157,7 +157,7 @@ export default function LocationPage() {
   /**
    * When we are on the location.scan-assets route, we render an outlet on the whole layout.
    */
-  if (currentRoute?.handle?.name === "location.scan-assets") {
+  if (currentRoute?.handle?.name === "location.scan-assets-kits") {
     return <Outlet />;
   }
 

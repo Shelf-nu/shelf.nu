@@ -1,4 +1,4 @@
-import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -115,6 +115,7 @@ export default function LocationsIndexPage() {
           headerChildren={
             <>
               <Th>Assets</Th>
+              <Th>Kits</Th>
             </>
           }
         />
@@ -123,12 +124,16 @@ export default function LocationsIndexPage() {
   );
 }
 
-interface LocationWithAssets extends Location {
-  assets: Asset[];
-  image?: ImageDataType;
-}
-
-const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
+const ListItemContent = ({
+  item,
+}: {
+  item: Prisma.LocationGetPayload<{
+    include: {
+      _count: { select: { kits: true; assets: true } };
+      image: { select: { updatedAt: true } };
+    };
+  }>;
+}) => (
   <>
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
@@ -147,6 +152,7 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
         </div>
       </div>
     </Td>
-    <Td>{item.assets.length}</Td>
+    <Td>{item._count.assets}</Td>
+    <Td>{item._count.kits}</Td>
   </>
 );

@@ -42,7 +42,10 @@ import {
   upsertCustomField,
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
-import { createLocationsIfNotExists } from "~/modules/location/service.server";
+import {
+  createLocationChangeNote,
+  createLocationsIfNotExists,
+} from "~/modules/location/service.server";
 import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
@@ -1638,135 +1641,6 @@ export async function getPaginatedAndFilterableAssets({
         paramsValues,
         getAllEntries,
       },
-      label,
-    });
-  }
-}
-
-export async function createLocationChangeNote({
-  currentLocation,
-  newLocation,
-  firstName,
-  lastName,
-  assetName,
-  assetId,
-  userId,
-  isRemoving,
-}: {
-  currentLocation: Pick<Location, "id" | "name"> | null;
-  newLocation: Location | null;
-  firstName: string;
-  lastName: string;
-  assetName: Asset["title"];
-  assetId: Asset["id"];
-  userId: User["id"];
-  isRemoving: boolean;
-}) {
-  try {
-    const message = getLocationUpdateNoteContent({
-      currentLocation,
-      newLocation,
-      firstName,
-      lastName,
-      assetName,
-      isRemoving,
-    });
-
-    await createNote({
-      content: message,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while creating a location change note. Please try again or contact support",
-      additionalData: { userId, assetId },
-      label,
-    });
-  }
-}
-
-export async function createBulkLocationChangeNotes({
-  modifiedAssets,
-  assetIds,
-  removedAssetIds,
-  userId,
-  location,
-}: {
-  modifiedAssets: Prisma.AssetGetPayload<{
-    select: {
-      title: true;
-      id: true;
-      location: {
-        select: {
-          name: true;
-          id: true;
-        };
-      };
-      user: {
-        select: {
-          firstName: true;
-          lastName: true;
-          id: true;
-        };
-      };
-    };
-  }>[];
-  assetIds: Asset["id"][];
-  removedAssetIds: Asset["id"][];
-  userId: User["id"];
-  location: Location;
-}) {
-  try {
-    const user = await db.user
-      .findFirstOrThrow({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "User not found",
-          additionalData: { userId },
-          label,
-        });
-      });
-
-    // Iterate over the modified assets
-    for (const asset of modifiedAssets) {
-      const isRemoving = removedAssetIds.includes(asset.id);
-      const isNew = assetIds.includes(asset.id);
-      const newLocation = isRemoving ? null : location;
-      const currentLocation = asset.location
-        ? { name: asset.location.name, id: asset.location.id }
-        : null;
-
-      if (isNew || isRemoving) {
-        await createLocationChangeNote({
-          currentLocation,
-          newLocation,
-          firstName: user.firstName || "",
-          lastName: user.lastName || "",
-          assetName: asset.title,
-          assetId: asset.id,
-          userId,
-          isRemoving,
-        });
-      }
-    }
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating bulk location change notes",
-      additionalData: { userId, assetIds, removedAssetIds },
       label,
     });
   }

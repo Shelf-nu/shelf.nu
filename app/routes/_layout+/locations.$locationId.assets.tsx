@@ -1,6 +1,7 @@
 import type { Asset, Category, Tag } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import z from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -100,6 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function LocationAssets() {
   const { roles } = useUserRoleHelper();
+  const { location } = useLoaderData<typeof loader>();
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.location,
@@ -129,7 +131,7 @@ export default function LocationAssets() {
               <Button
                 icon="scan"
                 variant="secondary"
-                to="scan-assets"
+                to={`/locations/${location.id}/scan-assets-kits`}
                 width="full"
               >
                 Scan

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useParams } from "@remix-run/react";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import KitImage from "~/components/kits/kit-image";
@@ -38,7 +39,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -86,6 +87,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function LocationKits() {
   const { roles } = useUserRoleHelper();
+  const { locationId } = useParams<z.infer<typeof paramsSchema>>();
   const userRoleCanManageKits = userHasPermission({
     roles,
     entity: PermissionEntity.location,
@@ -102,14 +104,24 @@ export default function LocationKits() {
         <Filters className="responsive-filters mb-2 lg:mb-0">
           <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
             <When truthy={userRoleCanManageKits}>
-              <Button
-                to="manage-kits"
-                variant="primary"
-                width="full"
-                className="whitespace-nowrap"
-              >
-                Manage kits
-              </Button>
+              <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
+                <Button
+                  icon="scan"
+                  variant="secondary"
+                  to={`/locations/${locationId}/scan-assets-kits`}
+                  width="full"
+                >
+                  Scan
+                </Button>
+                <Button
+                  to="manage-kits"
+                  variant="primary"
+                  width="full"
+                  className="whitespace-nowrap"
+                >
+                  Manage kits
+                </Button>
+              </div>
             </When>
           </div>
         </Filters>
