@@ -53,6 +53,8 @@ export default defineConfig({
     alias: {
       ".prisma/client/index-browser":
         "./node_modules/.prisma/client/index-browser.js",
+      // Use lottie_light version to avoid eval warnings
+      "lottie-web": "lottie-web/build/player/lottie_light.js",
     },
   },
   plugins: [
@@ -68,9 +70,7 @@ export default defineConfig({
 
     remix({
       ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
-      future: {
-        // unstable_optimizeDeps: true,
-      },
+      future: {},
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },

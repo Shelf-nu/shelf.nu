@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
 import type { MetaFunction } from "@remix-run/react";
 import { json, Outlet, useLoaderData, useMatches } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { z } from "zod";
@@ -15,6 +14,7 @@ import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
+import { db } from "~/database/db.server";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
@@ -77,7 +77,24 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    const mapData = await geolocate(location.address);
+    // Use cached coordinates from database, or geocode and cache if not available
+    let mapData: { lat: number; lon: number } | null = null;
+    if (location.latitude !== null && location.longitude !== null) {
+      mapData = { lat: location.latitude, lon: location.longitude };
+    } else if (location.address) {
+      // Fallback: geocode and cache coordinates for existing locations
+      mapData = await geolocate(location.address);
+      if (mapData) {
+        // Update the database with the geocoded coordinates
+        await db.location.update({
+          where: { id: location.id },
+          data: {
+            latitude: mapData.lat,
+            longitude: mapData.lon,
+          },
+        });
+      }
+    }
 
     return json(
       data({
@@ -104,7 +121,6 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: mapCss },
   { rel: "stylesheet", href: assetCss },
 ];
 
@@ -215,6 +231,17 @@ export default function LocationPage() {
                   >
                     See in Google Maps
                   </Button>
+                </p>
+                <p className="mt-2 text-xs">
+                  Geocoding by{" "}
+                  <a
+                    href="https://nominatim.openstreetmap.org/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary-600 underline"
+                  >
+                    OpenStreetMap Nominatim
+                  </a>
                 </p>
               </div>
             </div>

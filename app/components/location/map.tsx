@@ -1,7 +1,10 @@
-import maplibregl from "maplibre-gl";
-// https://github.com/visgl/react-map-gl/issues/2272
-import * as Map from "react-map-gl/dist/es5/exports-maplibre.js";
+import { Map, Marker } from "pigeon-maps";
+// @ts-ignore - Using direct CJS import to fix production build ESM issue
+import { maptiler } from "pigeon-maps/lib/providers.cjs.js";
 import { ClientOnly } from "remix-utils/client-only";
+import { MAPTILER_TOKEN } from "~/utils/env";
+
+const mapProvider = maptiler(MAPTILER_TOKEN, "streets");
 
 export const ShelfMap = ({
   latitude,
@@ -12,26 +15,30 @@ export const ShelfMap = ({
 }) => (
   <ClientOnly>
     {() => (
-      <Map.Map
-        mapLib={maplibregl}
-        initialViewState={{
-          latitude: latitude,
-          longitude: longitude,
-          zoom: 15,
-        }}
+      <div
         style={{
           width: "100%",
           height: "240px",
           borderTopLeftRadius: "6px",
           borderTopRightRadius: "6px",
+          overflow: "hidden",
         }}
-        mapStyle={`https://api.maptiler.com/maps/streets-v2/style.json?key=${window.env.MAPTILER_TOKEN}`}
       >
-        <Map.Marker longitude={longitude} latitude={latitude} anchor="bottom">
-          <img src="/static/images/map-marker.png" width={30} alt="img" />
-        </Map.Marker>
-        <Map.ScaleControl />
-      </Map.Map>
+        <Map
+          height={240}
+          center={[latitude, longitude]}
+          zoom={15}
+          provider={mapProvider}
+        >
+          <Marker anchor={[latitude, longitude]} width={30}>
+            <img
+              src="/static/images/map-marker.png"
+              width={30}
+              alt="Map marker"
+            />
+          </Marker>
+        </Map>
+      </div>
     )}
   </ClientOnly>
 );
