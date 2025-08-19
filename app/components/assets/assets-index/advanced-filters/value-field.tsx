@@ -245,6 +245,31 @@ export function ValueField({
           </div>
         );
       }
+      if (
+        filter.name === "sequentialId" &&
+        ["is", "isNot"].includes(filter.operator)
+      ) {
+        return (
+          <div className="relative">
+            <div className="absolute left-2 top-1/2 z-50 -translate-y-1/2 text-gray-500">
+              SAM-
+            </div>
+            <Input
+              {...commonInputProps}
+              type="text"
+              value={(filter.value as string).split("SAM-")[1]}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                setFilter(newValue !== "" ? `SAM-${newValue}` : "");
+              }}
+              placeholder={placeholder(filter.operator)}
+              onKeyUp={submitOnEnter}
+              error={error}
+              inputClassName={tw(commonInputProps.inputClassName, "pl-[44px]")}
+            />
+          </div>
+        );
+      }
       return (
         <Input
           {...commonInputProps}
