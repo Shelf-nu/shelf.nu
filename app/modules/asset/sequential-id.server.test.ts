@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 
+import {
+  formatSequentialId,
+  isValidSequentialIdFormat,
+  extractSequenceNumber,
+} from "./sequential-id.server";
+
 // Mock the database connection to avoid connection errors in unit tests
 vi.mock("~/database/db.server", () => ({
   db: {
@@ -11,12 +17,6 @@ vi.mock("~/database/db.server", () => ({
     },
   },
 }));
-
-import {
-  formatSequentialId,
-  isValidSequentialIdFormat,
-  extractSequenceNumber,
-} from "./sequential-id.server";
 
 // @vitest-environment node
 
