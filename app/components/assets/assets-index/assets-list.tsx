@@ -298,7 +298,7 @@ const ListAssetContent = ({
         <AssetQuickActions
           asset={{
             ...item,
-            qrId: item.qrCodes[0].id,
+            qrId: item.qrCodes?.[0]?.id,
           }}
         />
       </Td>

@@ -78,6 +78,7 @@ type Props = Partial<
   Pick<
     Asset,
     | "id"
+    | "sequentialId"
     | "title"
     | "thumbnailImage"
     | "mainImage"
@@ -95,6 +96,7 @@ type Props = Partial<
 
 export const AssetForm = ({
   id,
+  sequentialId,
   title,
   thumbnailImage,
   mainImage,
@@ -209,6 +211,45 @@ export const AssetForm = ({
             defaultValue={title || ""}
             required={true}
           />
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Asset ID"}
+          className="border-b-0 pb-[10px]"
+          subHeading={
+            id
+              ? "This is the unique identifier for this asset"
+              : "This sequential ID will be assigned when the asset is created"
+          }
+        >
+          <div className="flex items-center gap-2">
+            <div className="shrink-0">
+              <Input
+                label="Prefix"
+                hideLabel
+                name="sequentialIdPrefix"
+                disabled={true}
+                value="SAM"
+                className="w-20 text-center"
+                placeholder="SAM"
+              />
+            </div>
+            <span className="font-medium text-gray-400">-</span>
+            <div className="grow">
+              <Input
+                label="Number"
+                hideLabel
+                name="sequentialIdNumber"
+                disabled={true}
+                value={
+                  sequentialId ? sequentialId.split("-")[1] || "0001" : "0001"
+                }
+                className="w-full text-center font-mono"
+                placeholder="0001"
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-sm text-gray-600"></p>
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">

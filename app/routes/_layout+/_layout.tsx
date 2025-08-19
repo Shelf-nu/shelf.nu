@@ -22,6 +22,7 @@ import {
 } from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { ShelfMobileLogo } from "~/components/marketing/logos";
+import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
@@ -119,6 +120,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (userOrg) => userOrg.organization.id === organizationId
     )?.roles;
 
+    // Check if current user has OWNER or ADMIN role in the organization
+    const isOwner = currentOrganizationUserRoles?.includes("OWNER");
+    const isOrgAdmin = currentOrganizationUserRoles?.includes("ADMIN");
+
+    // Check if sequential ID migration is needed
+    const needsSequentialIdMigration =
+      (isOwner || isOrgAdmin) && !currentOrganization.hasSequentialIdsMigrated;
+
     // Get unread updates count for the current user (using first organization role)
     const unreadUpdatesCount = currentOrganizationUserRoles?.[0]
       ? await getUnreadCountForUser({
@@ -156,6 +165,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         unreadUpdatesCount,
+        needsSequentialIdMigration,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
           ? false
@@ -199,7 +209,8 @@ export const meta: MetaFunction<typeof loader> = ({ error }) => {
 
 export default function App() {
   useCrisp();
-  const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
+  const { disabledTeamOrg, minimizedSidebar, needsSequentialIdMigration } =
+    useLoaderData<typeof loader>();
   const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
   const renderInstallPwaPromptOnMobile = () =>
@@ -250,6 +261,11 @@ export default function App() {
         <ClientOnly fallback={null}>
           {renderInstallPwaPromptOnMobile}
         </ClientOnly>
+
+        {/* Sequential ID Migration Modal */}
+        <SequentialIdMigrationModal
+          isOpen={needsSequentialIdMigration ?? false}
+        />
       </SidebarInset>
     </SidebarProvider>
   );
