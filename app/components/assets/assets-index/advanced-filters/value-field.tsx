@@ -184,7 +184,6 @@ export function ValueField({
   // Add error display for components that don't support error prop
   const ErrorDisplay = ({ error }: { error?: string }) =>
     error ? <div className="mt-1 text-sm text-red-500">{error}</div> : null;
-
   switch (filter.type) {
     case "string":
     case "text":
@@ -247,7 +246,8 @@ export function ValueField({
       }
       if (
         filter.name === "sequentialId" &&
-        ["is", "isNot"].includes(filter.operator)
+        ["is", "isNot"].includes(filter.operator) &&
+        !filter.isNew
       ) {
         return (
           <div className="relative">
