@@ -3,8 +3,10 @@ import { useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
+  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/shared/modal";
@@ -22,7 +24,9 @@ export function SequentialIdMigrationModal({
 }: SequentialIdMigrationModalProps) {
   const fetcher = useFetcher<typeof action>();
   const [state, setState] = useState<MigrationState>("starting");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(
+    "Setting up sequential IDs for your organization..."
+  );
 
   // Auto-start migration when modal opens
   useEffect(() => {
@@ -42,11 +46,7 @@ export function SequentialIdMigrationModal({
       if ("success" in fetcher.data && fetcher.data.success) {
         setState("completed");
         setMessage(fetcher.data.message);
-
-        // Auto-close after 3 seconds
-        setTimeout(() => {
-          window.location.reload(); // Refresh to hide modal and update data
-        }, 3000);
+        // Modal will close automatically when loader revalidates and hasSequentialIdsMigrated becomes true
       } else {
         setState("error");
         setMessage(fetcher.data.message || "Failed to generate sequential IDs");
@@ -75,11 +75,6 @@ export function SequentialIdMigrationModal({
                 This may take a moment depending on the number of assets...
               </div>
             )}
-            {state === "completed" && (
-              <div className="mt-3 text-sm text-gray-500">
-                Redirecting in a moment...
-              </div>
-            )}
             {state === "error" && (
               <div className="mt-3">
                 <Button
@@ -93,6 +88,13 @@ export function SequentialIdMigrationModal({
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel asChild>
+            <Button variant="secondary" disabled={state !== "completed"}>
+              Close
+            </Button>
+          </AlertDialogCancel>
+        </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );
