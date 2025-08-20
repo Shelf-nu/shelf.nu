@@ -805,6 +805,7 @@ enum Currency {
   SAR // Saudi Riyal
   SEK // Swedish Krona
   SGD // Singapore Dollar
+  UGX // Ugandan Shilling
   ZAR // South African Rand
   PKR // Pakistani Rupee  
 }
