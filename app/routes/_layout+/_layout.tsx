@@ -209,8 +209,12 @@ export const meta: MetaFunction<typeof loader> = ({ error }) => {
 
 export default function App() {
   useCrisp();
-  const { disabledTeamOrg, minimizedSidebar, needsSequentialIdMigration } =
-    useLoaderData<typeof loader>();
+  const {
+    disabledTeamOrg,
+    minimizedSidebar,
+    needsSequentialIdMigration,
+    currentOrganizationId,
+  } = useLoaderData<typeof loader>();
   const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
   const renderInstallPwaPromptOnMobile = () =>
@@ -263,9 +267,9 @@ export default function App() {
         </ClientOnly>
 
         {/* Sequential ID Migration Modal */}
-        <SequentialIdMigrationModal
-          isOpen={needsSequentialIdMigration ?? false}
-        />
+        {needsSequentialIdMigration ? (
+          <SequentialIdMigrationModal organizationId={currentOrganizationId} />
+        ) : null}
       </SidebarInset>
     </SidebarProvider>
   );
