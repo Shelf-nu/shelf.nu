@@ -1,11 +1,13 @@
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect, redirectDocument } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 import { useSearchParams } from "~/hooks/search-params";
+import { estimateNextSequentialId } from "~/modules/asset/sequential-id.server";
 import {
   createAsset,
   getAllEntriesForCreateAndEdit,
@@ -76,6 +78,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       category: searchParams.get("category"),
     });
 
+    // Estimate the next sequential ID that will be assigned to the new asset
+    const nextSequentialId = await estimateNextSequentialId(organizationId);
+
     return json(
       data({
         header,
@@ -87,6 +92,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         currency: currentOrganization?.currency,
         customFields,
+        nextSequentialId,
       })
     );
   } catch (cause) {
@@ -233,6 +239,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function NewAssetPage() {
   const title = useAtomValue(dynamicTitleAtom);
+  const { nextSequentialId } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
 
@@ -243,7 +250,11 @@ export default function NewAssetPage() {
     <div className="relative">
       <Header title={title ? title : "Untitled Asset"} />
       <div>
-        <AssetForm qrId={qrId} categoryId={categoryFromUrl} />
+        <AssetForm
+          qrId={qrId}
+          categoryId={categoryFromUrl}
+          sequentialId={nextSequentialId}
+        />
       </div>
     </div>
   );

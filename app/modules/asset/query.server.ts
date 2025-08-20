@@ -41,6 +41,7 @@ export function generateWhereClause(
         (term) => Prisma.sql`(
           a.title ILIKE ${`%${term}%`} OR
           a.description ILIKE ${`%${term}%`} OR
+          a."sequentialId" ILIKE ${`%${term}%`} OR
           c.name ILIKE ${`%${term}%`} OR
           l.name ILIKE ${`%${term}%`} OR
           t.name ILIKE ${`%${term}%`} OR
@@ -999,6 +1000,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
 
   switch (fieldName) {
     case "id":
+    case "sequentialId":
     case "title":
     case "qrId": // relation
       return "string";
@@ -1076,6 +1078,7 @@ function parseFilterValue(
 // 2. Sorting
 type DirectAssetField =
   | "id"
+  | "sequentialId"
   | "name"
   | "valuation"
   | "status"
@@ -1085,6 +1088,7 @@ type DirectAssetField =
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
+  sequentialId: "assetSequentialId",
   name: "assetTitle",
   valuation: "assetValue",
   status: "assetStatus",
@@ -1117,6 +1121,24 @@ function getNormalizedSortExpression(
   `.trim();
 }
 
+function getSequentialIdSortExpression(
+  columnRef: string,
+  direction: string
+): string {
+  return `
+    CASE 
+      WHEN ${columnRef} IS NULL THEN 1
+      ELSE 0
+    END ASC,
+    CASE 
+      WHEN ${columnRef} ~ '^[A-Z]+-[0-9]+$' 
+      THEN LPAD(SPLIT_PART(${columnRef}, '-', 2), 12, '0')
+      ELSE ${columnRef}
+    END ${direction},
+    ${columnRef} ${direction}
+  `.trim();
+}
+
 /**
  * Enhanced sorting options parser with natural sort support
  * Handles case-insensitive sorting with natural number ordering
@@ -1143,8 +1165,13 @@ export function parseSortingOptions(sortBy: string[]): {
     if (field.name in directAssetFields) {
       const columnName = directAssetFields[field.name as DirectAssetField];
 
-      // Apply natural sort for text columns
-      if (isTextColumn(field.name)) {
+      // Special handling for sequential ID sorting
+      if (field.name === "sequentialId") {
+        orderByParts.push(
+          getSequentialIdSortExpression(`"${columnName}"`, field.direction)
+        );
+      } else if (isTextColumn(field.name)) {
+        // Apply natural sort for other text columns
         orderByParts.push(
           getNormalizedSortExpression(`"${columnName}"`, field.direction)
         );
@@ -1222,7 +1249,11 @@ export function parseSortingOptions(sortBy: string[]): {
  * @returns boolean indicating if field should use natural sort
  */
 function isTextColumn(fieldName: string): boolean {
-  const textColumns: DirectAssetField[] = ["name", "description"];
+  const textColumns: DirectAssetField[] = [
+    "sequentialId",
+    "name",
+    "description",
+  ];
   return textColumns.includes(fieldName as DirectAssetField);
 }
 
@@ -1408,6 +1439,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       ) AS "qrId",
       a.title AS "assetTitle",
       a.description AS "assetDescription",
+      a."sequentialId" AS "assetSequentialId",
       a."createdAt" AS "assetCreatedAt",
       a."updatedAt" AS "assetUpdatedAt",
       a."userId" AS "assetUserId",
@@ -1562,6 +1594,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
       json_agg(
         jsonb_build_object(
           'id', aq."assetId",
+          'sequentialId', aq."assetSequentialId",
           'qrId', aq."qrId",
           'title', aq."assetTitle",
           'description', aq."assetDescription",

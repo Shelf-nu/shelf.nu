@@ -184,7 +184,6 @@ export function ValueField({
   // Add error display for components that don't support error prop
   const ErrorDisplay = ({ error }: { error?: string }) =>
     error ? <div className="mt-1 text-sm text-red-500">{error}</div> : null;
-
   switch (filter.type) {
     case "string":
     case "text":
@@ -242,6 +241,32 @@ export function ValueField({
                 </TooltipProvider>
               ) : null}
             </div>
+          </div>
+        );
+      }
+      if (
+        filter.name === "sequentialId" &&
+        ["is", "isNot"].includes(filter.operator) &&
+        !filter.isNew
+      ) {
+        return (
+          <div className="relative">
+            <div className="absolute left-2 top-1/2 z-50 -translate-y-1/2 text-gray-500">
+              SAM-
+            </div>
+            <Input
+              {...commonInputProps}
+              type="text"
+              value={(filter.value as string).split("SAM-")[1]}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                setFilter(newValue !== "" ? `SAM-${newValue}` : "");
+              }}
+              placeholder={placeholder(filter.operator)}
+              onKeyUp={submitOnEnter}
+              error={error}
+              inputClassName={tw(commonInputProps.inputClassName, "pl-[44px]")}
+            />
           </div>
         );
       }

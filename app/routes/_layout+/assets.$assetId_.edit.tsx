@@ -259,6 +259,7 @@ export default function AssetEditPage() {
       <div className=" items-top flex justify-between">
         <AssetForm
           id={asset.id}
+          sequentialId={asset.sequentialId}
           mainImage={asset.mainImage}
           thumbnailImage={asset.thumbnailImage}
           mainImageExpiration={
