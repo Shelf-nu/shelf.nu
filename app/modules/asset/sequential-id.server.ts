@@ -322,7 +322,6 @@ export async function generateBulkSequentialIdsEfficient(
     }
 
     const result = totalUpdated;
-    console.log("result", result);
     // Update the sequence to continue from the right place for new assets
     const totalAssetsWithIds = await db.asset.count({
       where: {
