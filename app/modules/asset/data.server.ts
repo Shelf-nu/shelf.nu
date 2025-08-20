@@ -51,6 +51,7 @@ interface Props {
 
 const searchFieldTooltipText = `
 Search assets based on asset fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
+- Asset ID
 - Name
 - Description
 - Category

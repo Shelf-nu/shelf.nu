@@ -345,6 +345,9 @@ export const buildCsvExportDataFromAssets = ({
           case "id":
             value = asset.id;
             break;
+          case "sequentialId":
+            value = asset.sequentialId ?? "";
+            break;
           case "qrId":
             value = asset.qrId;
             break;

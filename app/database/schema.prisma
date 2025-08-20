@@ -135,6 +135,7 @@ model Asset {
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
+  sequentialId        String?     // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Datetime
   createdAt DateTime @default(now())
@@ -172,8 +173,11 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
+  @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
   @@index([userId])
+  // Unique constraint for organization-scoped sequential IDs
+  @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
 }
 
 enum AssetStatus {
@@ -606,6 +610,9 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  
+  // Migration flag to track if sequential IDs have been generated for this organization's existing assets
+  hasSequentialIdsMigrated Boolean @default(false)
 
   // Indexes for foreign keys
   @@index([userId])
