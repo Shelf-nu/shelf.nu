@@ -2441,6 +2441,14 @@ export async function getBookingsForCalendar(params: {
       extraInclude: {
         custodianTeamMember: true,
         custodianUser: true,
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            profilePicture: true,
+          },
+        },
         tags: { select: { id: true, name: true } },
       },
       takeAll: true,
@@ -2486,6 +2494,19 @@ export async function getBookingsForCalendar(params: {
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
+            },
+            creator: {
+              name: booking.creator
+                ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                : "Unknown",
+              user: booking.creator
+                ? {
+                    id: booking.creator.id,
+                    firstName: booking.creator.firstName,
+                    lastName: booking.creator.lastName,
+                    profilePicture: booking.creator.profilePicture,
+                  }
+                : null,
             },
             tags: booking.tags,
           },

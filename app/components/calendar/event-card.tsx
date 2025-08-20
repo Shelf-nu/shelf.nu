@@ -250,6 +250,10 @@ export function EventCardContent({
       <div className="mb-3 flex items-center gap-2">
         <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
       </div>
+      <p className="mb-1 text-sm font-normal">Created by:</p>
+      <div className="mb-3 flex items-center gap-2">
+        <TeamMemberBadge teamMember={booking.creator} hidePrivate />
+      </div>
       {booking.tags && booking.tags.length ? (
         <>
           <p className="mb-1 text-sm font-normal">Tags:</p>

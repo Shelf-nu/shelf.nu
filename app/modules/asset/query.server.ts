@@ -1328,6 +1328,16 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'profilePicture', cu."profilePicture"
                 )
               ELSE NULL
+            END,
+            'creator', CASE 
+              WHEN bk."creatorId" IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', cr.id,
+                  'firstName', cr."firstName",
+                  'lastName', cr."lastName",
+                  'profilePicture', cr."profilePicture"
+                )
+              ELSE NULL
             END
           )
         ),
@@ -1338,6 +1348,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       LEFT JOIN public."TeamMember" ctm ON bk."custodianTeamMemberId" = ctm.id
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
+      LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
       WHERE 
         atb."A" = a.id 
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')

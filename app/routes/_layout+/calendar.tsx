@@ -67,6 +67,7 @@ export type CalendarExtendedProps = {
   start: string;
   end: string;
   custodian: TeamMemberForBadge;
+  creator: TeamMemberForBadge;
   tags: Pick<Tag, "id" | "name">[];
 };
 

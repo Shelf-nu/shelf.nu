@@ -620,6 +620,19 @@ function UpcomingBookingsColumn({
                                 }
                               : null,
                           },
+                          creator: {
+                            name: booking.creator
+                              ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                              : "Unknown",
+                            user: booking.creator
+                              ? {
+                                  id: booking.creator.id,
+                                  firstName: booking.creator.firstName,
+                                  lastName: booking.creator.lastName,
+                                  profilePicture: booking.creator.profilePicture,
+                                }
+                              : null,
+                          },
                         }}
                       />
                     </HoverCardContent>
