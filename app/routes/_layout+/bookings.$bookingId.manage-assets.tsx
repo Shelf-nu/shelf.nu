@@ -31,7 +31,6 @@ import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
-import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -49,6 +48,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
+import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
@@ -660,7 +660,6 @@ export default function AddAssetsToNewBooking() {
       </footer>
 
       <UnsavedChangesAlert
-        type="assets"
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
@@ -669,7 +668,10 @@ export default function AddAssetsToNewBooking() {
         onYes={() => {
           submit(formRef.current);
         }}
-      />
+      >
+        You have added some assets to the booking but haven't saved it yet. Do
+        you want to confirm adding those assets?
+      </UnsavedChangesAlert>
     </Tabs>
   );
 }

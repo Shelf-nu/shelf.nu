@@ -20,7 +20,6 @@ import {
 } from "~/atoms/list";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
-import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
@@ -35,6 +34,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
+import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { updateLocationKits } from "~/modules/location/service.server";
@@ -121,9 +121,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data?.header?.title) },
-];
+// export const meta: MetaFunction<typeof loader> = ({ data }) => [
+//   { title: appendToMetaTitle(data?.header?.title) },
+// ];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -137,11 +137,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { kitIds, removedKitIds } = parseData(
+    let { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         kitIds: z.array(z.string()).optional().default([]),
         removedKitIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional(),
       }),
       { additionalData: { userId, organizationId, locationId } }
     );
@@ -154,6 +155,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       request,
     });
+
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert,
+     * so we have to redirect to manage-kits url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
 
     return redirect(`/locations/${locationId}/kits`);
   } catch (cause) {
@@ -237,7 +246,6 @@ export default function ManageLocationKits() {
       <Filters
         className="justify-between !border-t-0 border-b px-6 md:flex"
         slots={{ "left-of-search": <StatusFilter statusItems={KitStatus} /> }}
-        innerWrapperClassName="justify-between"
       />
 
       <TabsContent value="kits" asChild>
@@ -291,6 +299,10 @@ export default function ManageLocationKits() {
                 value={kit.id}
               />
             ))}
+            {hasUnsavedChanges && isAlertOpen ? (
+              <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
+            ) : null}
+
             <Button type="submit" disabled={isSearching}>
               Confirm
             </Button>
@@ -299,7 +311,6 @@ export default function ManageLocationKits() {
       </footer>
 
       <UnsavedChangesAlert
-        type="kits"
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
@@ -308,7 +319,10 @@ export default function ManageLocationKits() {
         onYes={() => {
           submit(formRef.current);
         }}
-      />
+      >
+        You have added some kits to the booking but haven't saved it yet. Do you
+        want to confirm adding those kits?
+      </UnsavedChangesAlert>
     </Tabs>
   );
 }

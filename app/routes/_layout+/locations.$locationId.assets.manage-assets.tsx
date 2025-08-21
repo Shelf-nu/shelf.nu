@@ -22,7 +22,6 @@ import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
-import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -39,6 +38,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
+import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { updateLocationAssets } from "~/modules/location/service.server";
@@ -169,11 +169,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds } = parseData(
+    let { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
         removedAssetIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional(),
       }),
       {
         additionalData: { userId, organizationId, locationId },
@@ -188,6 +189,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       removedAssetIds,
     });
+
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert,
+     * so we have to redirect to manage-kits url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
 
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
@@ -214,8 +223,8 @@ export default function AddAssetsToLocation() {
 
   const locationKitIds = location.kits.map((k) => k.id);
   const locationAssetsCount = location.assets.length;
-
   const hasUnsavedChanges = selectedBulkItemsCount !== locationAssetsCount;
+
   const manageKitsUrl = `/locations/${location.id}/kits/manage-kits`;
 
   const removedAssets = useMemo(
@@ -383,6 +392,9 @@ export default function AddAssetsToLocation() {
                 value={asset.id}
               />
             ))}
+            {hasUnsavedChanges && isAlertOpen ? (
+              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+            ) : null}
             <Button
               type="submit"
               name="intent"
@@ -396,7 +408,6 @@ export default function AddAssetsToLocation() {
       </footer>
 
       <UnsavedChangesAlert
-        type="assets"
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
@@ -405,7 +416,10 @@ export default function AddAssetsToLocation() {
         onYes={() => {
           submit(formRef.current);
         }}
-      />
+      >
+        You have added some assets to the booking but haven't saved it yet. Do
+        you want to confirm adding those assets?
+      </UnsavedChangesAlert>
     </Tabs>
   );
 }

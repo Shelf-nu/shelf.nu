@@ -1,6 +1,6 @@
 import { AlertDialog } from "@radix-ui/react-alert-dialog";
 import { useDisabled } from "~/hooks/use-disabled";
-import { Button } from "../shared/button";
+import { Button } from "./shared/button";
 import {
   AlertDialogCancel,
   AlertDialogContent,
@@ -8,26 +8,26 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "../shared/modal";
+} from "./shared/modal";
 
 type UnsavedChangesAlertProps = {
   className?: string;
   style?: React.CSSProperties;
   open: boolean;
-  type: "assets" | "kits";
   onOpenChange: (open: boolean) => void;
   onCancel: () => void;
   onYes?: () => void;
+  children: React.ReactNode;
 };
 
 export default function UnsavedChangesAlert({
   className,
   style,
-  type,
   open,
   onOpenChange,
   onCancel,
   onYes,
+  children,
 }: UnsavedChangesAlertProps) {
   const disabled = useDisabled();
   return (
@@ -35,10 +35,7 @@ export default function UnsavedChangesAlert({
       <AlertDialogContent className={className} style={style}>
         <AlertDialogHeader>
           <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-          <AlertDialogDescription>
-            You have added some {type} to the booking but haven’t saved it yet.
-            Do you want to confirm adding those {type}?
-          </AlertDialogDescription>
+          <AlertDialogDescription>{children}</AlertDialogDescription>
         </AlertDialogHeader>
 
         <AlertDialogFooter>
