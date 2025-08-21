@@ -100,13 +100,7 @@ export function useAssetAvailabilityData(items: Items) {
                             lastName: booking.creator.lastName,
                             profilePicture: booking.creator.profilePicture,
                           }
-                      name: `${booking.creator.firstName} ${booking.creator.lastName}`.trim(),
-                      user: {
-                        id: booking.creator.id,
-                        firstName: booking.creator.firstName,
-                        lastName: booking.creator.lastName,
-                        profilePicture: booking.creator.profilePicture,
-                      },
+                        : null,
                     }
                   : undefined,
                 tags: booking.tags,
