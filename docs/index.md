@@ -11,7 +11,7 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /local-development
+      link: /supabase-setup
     - theme: alt
       text: View on GitHub
       link: https://github.com/Shelf-nu/shelf.nu

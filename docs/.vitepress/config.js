@@ -80,8 +80,8 @@ export default {
         text: "🚀 Getting Started",
         collapsed: false,
         items: [
-          { text: "Local Development", link: "/local-development" },
           { text: "Supabase Setup", link: "/supabase-setup" },
+          { text: "Local Development", link: "/local-development" },
           { text: "Deployment", link: "/deployment" },
           { text: "Docker Setup", link: "/docker" },
         ],

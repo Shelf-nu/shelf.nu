@@ -14,13 +14,13 @@ import { Spinner } from "~/components/shared/spinner";
 import type { action } from "~/routes/api+/generate-sequential-ids";
 
 interface SequentialIdMigrationModalProps {
-  isOpen: boolean;
+  organizationId: string;
 }
 
 type MigrationState = "starting" | "running" | "completed" | "error";
 
 export function SequentialIdMigrationModal({
-  isOpen,
+  organizationId,
 }: SequentialIdMigrationModalProps) {
   const fetcher = useFetcher<typeof action>();
   const [state, setState] = useState<MigrationState>("starting");
@@ -28,9 +28,15 @@ export function SequentialIdMigrationModal({
     "Setting up sequential IDs for your organization..."
   );
 
+  // Reset state when organization changes
+  useEffect(() => {
+    setState("starting");
+    setMessage("Setting up sequential IDs for your organization...");
+  }, [organizationId]);
+
   // Auto-start migration when modal opens
   useEffect(() => {
-    if (isOpen && state === "starting") {
+    if (state === "starting") {
       setState("running");
       setMessage("Setting up sequential IDs for your organization...");
       fetcher.submit(
@@ -38,7 +44,7 @@ export function SequentialIdMigrationModal({
         { action: "/api/generate-sequential-ids", method: "post" }
       );
     }
-  }, [isOpen, state, fetcher]);
+  }, [state, fetcher]);
 
   // Handle fetcher response
   useEffect(() => {
@@ -54,10 +60,8 @@ export function SequentialIdMigrationModal({
     }
   }, [fetcher.data]);
 
-  if (!isOpen) return null;
-
   return (
-    <AlertDialog open={isOpen}>
+    <AlertDialog open={true}>
       <AlertDialogContent className="sm:max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-3">
