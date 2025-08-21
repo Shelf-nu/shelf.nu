@@ -121,9 +121,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-// export const meta: MetaFunction<typeof loader> = ({ data }) => [
-//   { title: appendToMetaTitle(data?.header?.title) },
-// ];
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header?.title) },
+];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();

@@ -161,25 +161,6 @@ export const removeScannedItemsByAssetIdAtom = atom(
   }
 );
 
-// Remove kits based on kit id
-export const removeScannedItemsByKitIdAtom = atom(
-  null,
-  (get, set, ids: string[]) => {
-    const currentItems = get(scannedItemsAtom);
-    const updatedItems = { ...currentItems };
-    Object.entries(currentItems).forEach(([qrId, item]) => {
-      if (
-        item?.data?.id &&
-        ids.includes(item?.data?.id) &&
-        item.type === "kit"
-      ) {
-        delete updatedItems[qrId];
-      }
-    });
-    set(scannedItemsAtom, updatedItems);
-  }
-);
-
 // Clear all items
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object

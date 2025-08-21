@@ -8,7 +8,6 @@ import {
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
-  removeScannedItemsByKitIdAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import type { LoaderData } from "~/routes/_layout+/locations.$locationId.scan-assets-kits";
@@ -57,7 +56,6 @@ export default function AddAssetsKitsToLocationDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
-  const removeKitsFromList = useSetAtom(removeScannedItemsByKitIdAtom);
 
   // Filter and prepare data
   const assets = Object.values(items)
@@ -87,6 +85,13 @@ export default function AddAssetsKitsToLocationDrawer({
     .filter((kit) => location.kits.some((k) => k?.id === kit.id))
     .map((k) => !!k && k.id);
 
+  const qrIdsOfAlreadyAddedKits = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item || item.type !== "kit") return false;
+      return kitsAlreadyAddedIds.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+
   // Create blockers configuration
   const blockerConfigs = [
     {
@@ -109,7 +114,7 @@ export default function AddAssetsKitsToLocationDrawer({
           already added to this location.
         </>
       ),
-      onResolve: () => removeKitsFromList([...kitsAlreadyAddedIds]),
+      onResolve: () => removeItemsFromList([...qrIdsOfAlreadyAddedKits]),
     },
     {
       condition: errors.length > 0,
@@ -129,8 +134,10 @@ export default function AddAssetsKitsToLocationDrawer({
     blockerConfigs,
     onResolveAll: () => {
       removeAssetsFromList([...assetsAlreadyAddedIds]);
-      removeItemsFromList([...errors.map(([qrId]) => qrId)]);
-      removeKitsFromList([...kitsAlreadyAddedIds]);
+      removeItemsFromList([
+        ...errors.map(([qrId]) => qrId),
+        ...qrIdsOfAlreadyAddedKits,
+      ]);
     },
   });
 
