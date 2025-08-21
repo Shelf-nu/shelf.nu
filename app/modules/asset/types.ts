@@ -127,6 +127,7 @@ export type AdvancedAssetBooking = Pick<
 export type AdvancedIndexAsset = Pick<
   Asset,
   | "id"
+  | "sequentialId"
   | "title"
   | "description"
   | "createdAt"

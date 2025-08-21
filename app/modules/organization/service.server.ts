@@ -138,6 +138,7 @@ export async function createOrganization({
       name,
       currency,
       type: OrganizationType.TEAM,
+      hasSequentialIdsMigrated: true, // New organizations don't need migration
       categories: {
         create: defaultUserCategories.map((c) => ({ ...c, userId })),
       },
@@ -233,6 +234,7 @@ export async function updateOrganization({
   userId,
   currency,
   ssoDetails,
+  hasSequentialIdsMigrated,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -243,11 +245,15 @@ export async function updateOrganization({
     adminGroupId: string;
     baseUserGroupId: string;
   };
+  hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
 }) {
   try {
     const data = {
       name,
       ...(currency && { currency }),
+      ...(hasSequentialIdsMigrated !== undefined && {
+        hasSequentialIdsMigrated,
+      }),
       ...(ssoDetails && {
         ssoDetails: {
           update: ssoDetails,
@@ -318,6 +324,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
+  hasSequentialIdsMigrated: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{

@@ -10,6 +10,7 @@ export type Column = {
 // Define the fixed fields
 export const fixedFields = [
   "id",
+  "sequentialId",
   "qrId",
   "status",
   "description",
@@ -50,6 +51,7 @@ export type ColumnLabelKey =
 
 export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
+  sequentialId: "Asset ID",
   qrId: "QR ID",
   name: "Name",
   status: "Status",
@@ -72,21 +74,22 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
 };
 
 export const defaultFields: Column[] = [
-  { name: "id", visible: true, position: 0 },
-  { name: "qrId", visible: true, position: 1 },
-  { name: "status", visible: true, position: 2 },
-  { name: "description", visible: true, position: 3 },
-  { name: "valuation", visible: true, position: 4 },
-  { name: "availableToBook", visible: true, position: 5 },
-  { name: "createdAt", visible: true, position: 6 },
-  { name: "category", visible: true, position: 7 },
-  { name: "tags", visible: true, position: 8 },
-  { name: "location", visible: true, position: 9 },
-  { name: "kit", visible: true, position: 10 },
-  { name: "custody", visible: true, position: 11 },
-  { name: "upcomingReminder", visible: true, position: 12 },
-  { name: "actions", visible: true, position: 13 },
-  { name: "upcomingBookings", visible: true, position: 14 },
+  { name: "id", visible: false, position: 0 },
+  { name: "sequentialId", visible: true, position: 1 },
+  { name: "qrId", visible: true, position: 2 },
+  { name: "status", visible: true, position: 3 },
+  { name: "description", visible: true, position: 4 },
+  { name: "valuation", visible: true, position: 5 },
+  { name: "availableToBook", visible: true, position: 6 },
+  { name: "createdAt", visible: true, position: 7 },
+  { name: "category", visible: true, position: 8 },
+  { name: "tags", visible: true, position: 9 },
+  { name: "location", visible: true, position: 10 },
+  { name: "kit", visible: true, position: 11 },
+  { name: "custody", visible: true, position: 12 },
+  { name: "upcomingReminder", visible: true, position: 13 },
+  { name: "actions", visible: true, position: 14 },
+  { name: "upcomingBookings", visible: true, position: 15 },
 ];
 
 // Generate barcode columns when barcodes are enabled

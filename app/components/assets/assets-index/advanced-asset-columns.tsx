@@ -181,6 +181,9 @@ export function AdvancedIndexColumn({
     case "id":
       return <TextColumn value={item[column]} />;
 
+    case "sequentialId":
+      return <TextColumn value={item[column] || ""} />;
+
     case "qrId":
       return (
         <CodePreviewDialog

@@ -101,6 +101,7 @@ import {
   parseFilters,
   parseSortingOptions,
 } from "./query.server";
+import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,
@@ -284,6 +285,9 @@ async function getAssets(params: {
         OR: [
           // Search in asset fields
           { title: { contains: term, mode: "insensitive" } },
+          // Search in asset sequential id
+          { sequentialId: { contains: term, mode: "insensitive" } },
+          // Search in asset description
           { description: { contains: term, mode: "insensitive" } },
           // Search in related category
           { category: { name: { contains: term, mode: "insensitive" } } },
@@ -684,213 +688,245 @@ export async function createAsset({
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
 }) {
-  try {
-    /** User connection data */
-    const user = {
-      connect: {
-        id: userId,
-      },
-    };
+  let attempts = 0;
+  const maxAttempts = 3;
 
-    const organization = {
-      connect: {
-        id: organizationId as string,
-      },
-    };
+  while (attempts < maxAttempts) {
+    try {
+      // Generate sequential ID
+      const sequentialId = await getNextSequentialId(organizationId);
 
-    /**
-     * If a qr code is passed, link to that QR
-     * Otherwise, create a new one
-     * Here we also need to double check:
-     * 1. If the qr code exists
-     * 2. If the qr code belongs to the current organization
-     * 3. If the qr code is not linked to an asset or a kit
-     */
+      /** User connection data */
+      const user = {
+        connect: {
+          id: userId,
+        },
+      };
 
-    const qr = qrId ? await getQr({ id: qrId }) : null;
-    const qrCodes =
-      qr &&
-      (qr.organizationId === organizationId || !qr.organizationId) &&
-      qr.assetId === null &&
-      qr.kitId === null
-        ? { connect: { id: qrId } }
-        : {
-            create: [
-              {
-                id: id(),
-                version: 0,
-                errorCorrection: ErrorCorrection["L"],
-                user,
-                organization,
-              },
-            ],
-          };
+      const organization = {
+        connect: {
+          id: organizationId as string,
+        },
+      };
 
-    /** Data object we send via prisma to create Asset */
-    const data: Prisma.AssetCreateInput = {
-      id: assetId, // Use provided ID if available
-      title,
-      description,
-      user,
-      qrCodes,
-      valuation,
-      organization,
-      availableToBook,
-      mainImage,
-      mainImageExpiration,
-    };
+      /**
+       * If a qr code is passed, link to that QR
+       * Otherwise, create a new one
+       * Here we also need to double check:
+       * 1. If the qr code exists
+       * 2. If the qr code belongs to the current organization
+       * 3. If the qr code is not linked to an asset or a kit
+       */
 
-    /** If a kitId is passed, link the kit to the asset. */
-    if (kitId && kitId !== "uncategorized") {
-      Object.assign(data, {
-        kit: {
-          connect: {
-            id: kitId,
+      const qr = qrId ? await getQr({ id: qrId }) : null;
+      const qrCodes =
+        qr &&
+        (qr.organizationId === organizationId || !qr.organizationId) &&
+        qr.assetId === null &&
+        qr.kitId === null
+          ? { connect: { id: qrId } }
+          : {
+              create: [
+                {
+                  id: id(),
+                  version: 0,
+                  errorCorrection: ErrorCorrection["L"],
+                  user,
+                  organization,
+                },
+              ],
+            };
+
+      /** Data object we send via prisma to create Asset */
+      const data: Prisma.AssetCreateInput = {
+        id: assetId, // Use provided ID if available
+        title,
+        description,
+        sequentialId, // Add the generated sequential ID
+        user,
+        qrCodes,
+        valuation,
+        organization,
+        availableToBook,
+        mainImage,
+        mainImageExpiration,
+      };
+
+      /** If a kitId is passed, link the kit to the asset. */
+      if (kitId && kitId !== "uncategorized") {
+        Object.assign(data, {
+          kit: {
+            connect: {
+              id: kitId,
+            },
           },
-        },
-      });
-    }
+        });
+      }
 
-    /** If a categoryId is passed, link the category to the asset. */
-    if (categoryId && categoryId !== "uncategorized") {
-      Object.assign(data, {
-        category: {
-          connect: {
-            id: categoryId,
+      /** If a categoryId is passed, link the category to the asset. */
+      if (categoryId && categoryId !== "uncategorized") {
+        Object.assign(data, {
+          category: {
+            connect: {
+              id: categoryId,
+            },
           },
-        },
-      });
-    }
+        });
+      }
 
-    /** If a locationId is passed, link the location to the asset. */
-    if (locationId) {
-      Object.assign(data, {
-        location: {
-          connect: {
-            id: locationId,
+      /** If a locationId is passed, link the location to the asset. */
+      if (locationId) {
+        Object.assign(data, {
+          location: {
+            connect: {
+              id: locationId,
+            },
           },
-        },
-      });
-    }
+        });
+      }
 
-    /** If a tags is passed, link the category to the asset. */
-    if (tags && tags?.set?.length > 0) {
-      Object.assign(data, {
-        tags: {
-          connect: tags?.set,
-        },
-      });
-    }
+      /** If a tags is passed, link the category to the asset. */
+      if (tags && tags?.set?.length > 0) {
+        Object.assign(data, {
+          tags: {
+            connect: tags?.set,
+          },
+        });
+      }
 
-    /** If a custodian is passed, create a Custody relation with that asset
-     * `custodian` represents the id of a {@link TeamMember}. */
-    if (custodian) {
-      Object.assign(data, {
-        custody: {
-          create: {
-            custodian: {
-              connect: {
-                id: custodian,
+      /** If a custodian is passed, create a Custody relation with that asset
+       * `custodian` represents the id of a {@link TeamMember}. */
+      if (custodian) {
+        Object.assign(data, {
+          custody: {
+            create: {
+              custodian: {
+                connect: {
+                  id: custodian,
+                },
               },
             },
           },
-        },
-        status: AssetStatus.IN_CUSTODY,
-      });
-    }
-
-    /** If custom fields are passed, create them */
-    if (customFieldsValues && customFieldsValues.length > 0) {
-      const customFieldValuesToAdd = customFieldsValues.filter(
-        (cf) => !!cf.value
-      );
-
-      Object.assign(data, {
-        /** Custom fields here refers to the values, check the Schema for more info */
-        customFields: {
-          create: customFieldValuesToAdd?.map(
-            ({ id, value }) =>
-              id &&
-              value && {
-                value,
-                customFieldId: id,
-              }
-          ),
-        },
-      });
-    }
-
-    /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
-    if (barcodes && barcodes.length > 0) {
-      const barcodesToAdd = barcodes.filter(
-        (barcode) => !!barcode.value && !!barcode.type
-      );
-
-      if (barcodesToAdd.length > 0) {
-        const barcodesToConnect = barcodesToAdd
-          .filter((b) => b.existingId)
-          .map((b) => ({ id: b.existingId! }));
-
-        const barcodesToCreate = barcodesToAdd
-          .filter((b) => !b.existingId)
-          .map(({ type, value }) => ({
-            type,
-            value: normalizeBarcodeValue(type, value),
-            organizationId,
-          }));
-
-        // Build barcodes relation data
-        const barcodeRelationData: any = {};
-
-        if (barcodesToConnect.length > 0) {
-          barcodeRelationData.connect = barcodesToConnect;
-        }
-
-        if (barcodesToCreate.length > 0) {
-          barcodeRelationData.create = barcodesToCreate;
-        }
-
-        if (Object.keys(barcodeRelationData).length > 0) {
-          Object.assign(data, { barcodes: barcodeRelationData });
-        }
+          status: AssetStatus.IN_CUSTODY,
+        });
       }
-    }
 
-    return await db.asset.create({
-      data,
-      include: {
-        location: true,
-        user: true,
-        custody: true,
-      },
-    });
-  } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
-    // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
+      /** If custom fields are passed, create them */
+      if (customFieldsValues && customFieldsValues.length > 0) {
+        const customFieldValuesToAdd = customFieldsValues.filter(
+          (cf) => !!cf.value
+        );
 
-      if (
-        target &&
-        target.includes("value") &&
-        barcodes &&
-        barcodes.length > 0
-      ) {
+        Object.assign(data, {
+          /** Custom fields here refers to the values, check the Schema for more info */
+          customFields: {
+            create: customFieldValuesToAdd?.map(
+              ({ id, value }) =>
+                id &&
+                value && {
+                  value,
+                  customFieldId: id,
+                }
+            ),
+          },
+        });
+      }
+
+      /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
+      if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
           (barcode) => !!barcode.value && !!barcode.type
         );
+
         if (barcodesToAdd.length > 0) {
-          // Use existing validation function for detailed error messages
-          await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+          const barcodesToConnect = barcodesToAdd
+            .filter((b) => b.existingId)
+            .map((b) => ({ id: b.existingId! }));
+
+          const barcodesToCreate = barcodesToAdd
+            .filter((b) => !b.existingId)
+            .map(({ type, value }) => ({
+              type,
+              value: normalizeBarcodeValue(type, value),
+              organizationId,
+            }));
+
+          // Build barcodes relation data
+          const barcodeRelationData: any = {};
+
+          if (barcodesToConnect.length > 0) {
+            barcodeRelationData.connect = barcodesToConnect;
+          }
+
+          if (barcodesToCreate.length > 0) {
+            barcodeRelationData.create = barcodesToCreate;
+          }
+
+          if (Object.keys(barcodeRelationData).length > 0) {
+            Object.assign(data, { barcodes: barcodeRelationData });
+          }
         }
       }
-    }
 
-    throw maybeUniqueConstraintViolation(cause, "Asset", {
-      additionalData: { userId, organizationId },
-    });
+      const asset = await db.asset.create({
+        data,
+        include: {
+          location: true,
+          user: true,
+          custody: true,
+        },
+      });
+
+      // Successfully created asset, exit the retry loop
+      return asset;
+    } catch (cause) {
+      // Check for sequential ID unique constraint violation and retry
+      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+        const prismaError = cause as any;
+        const target = prismaError.meta?.target;
+
+        // Handle sequential ID conflicts with retry
+        if (
+          target &&
+          target.includes("sequentialId") &&
+          attempts < maxAttempts - 1
+        ) {
+          attempts++;
+          continue; // Retry with next sequential ID
+        }
+
+        // If it's a Prisma unique constraint violation on barcode values,
+        // use our detailed validation to provide specific field errors
+        if (
+          target &&
+          target.includes("value") &&
+          barcodes &&
+          barcodes.length > 0
+        ) {
+          const barcodesToAdd = barcodes.filter(
+            (barcode) => !!barcode.value && !!barcode.type
+          );
+          if (barcodesToAdd.length > 0) {
+            // Use existing validation function for detailed error messages
+            await validateBarcodeUniqueness(barcodesToAdd, organizationId);
+          }
+        }
+      }
+
+      throw maybeUniqueConstraintViolation(cause, "Asset", {
+        additionalData: { userId, organizationId },
+      });
+    }
   }
+
+  // If we reach here, all retry attempts failed
+  throw new ShelfError({
+    cause: null,
+    message:
+      "Failed to create asset after maximum retry attempts for sequential ID generation",
+    label: "Assets",
+    additionalData: { userId, organizationId, maxAttempts },
+  });
 }
 
 export async function updateAsset({
