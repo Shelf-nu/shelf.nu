@@ -140,6 +140,14 @@ export async function simpleModeLoader({
                   custodianTeamMember: true,
                   custodianUser: true,
                   tags: { select: { id: true, name: true } },
+                  creator: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             }
