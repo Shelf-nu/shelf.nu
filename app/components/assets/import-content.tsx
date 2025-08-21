@@ -169,6 +169,10 @@ export const ImportContent = () => {
               <b>barcode_ExternalQR</b> - For external QR codes (1-2048
               characters, URLs, text, or any external QR content)
             </li>
+            <li>
+              <b>barcode_EAN13</b> - For EAN-13 barcodes (exactly 13 numeric
+              digits with check digit validation)
+            </li>
           </ul>
           <br />
           <b>Important rules:</b>

@@ -735,6 +735,7 @@ export async function parseBarcodesFromImportData({
         { column: "barcode_Code39", type: "Code39" },
         { column: "barcode_DataMatrix", type: "DataMatrix" },
         { column: "barcode_ExternalQR", type: "ExternalQR" },
+        { column: "barcode_EAN13", type: "EAN13" },
       ];
 
       barcodeTypes.forEach(({ column, type }) => {

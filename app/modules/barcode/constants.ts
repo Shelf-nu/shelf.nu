@@ -24,4 +24,10 @@ export const BARCODE_TYPE_OPTIONS = [
     description:
       "1-2048 characters, URLs, text, or any external QR content (e.g., https://example.com)",
   },
+  {
+    value: BarcodeType.EAN13,
+    label: "EAN-13",
+    description:
+      "Exactly 13 numeric digits with check digit validation (e.g., 1234567890123)",
+  },
 ];

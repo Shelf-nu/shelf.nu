@@ -1414,7 +1414,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'ExternalQR'
       LIMIT 1
-    ) AS barcode_ExternalQR`
+    ) AS barcode_ExternalQR,
+    (
+      SELECT b.value
+      FROM public."Barcode" b
+      WHERE b."assetId" = a.id AND b.type = 'EAN13'
+      LIMIT 1
+    ) AS barcode_EAN13`
     : Prisma.sql``;
 
   return Prisma.sql`
