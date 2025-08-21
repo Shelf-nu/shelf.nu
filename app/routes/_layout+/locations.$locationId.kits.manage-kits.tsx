@@ -1,10 +1,15 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction } from "@remix-run/react";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+  useSubmit,
+} from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -15,12 +20,20 @@ import {
 } from "~/atoms/list";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
+import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
@@ -57,6 +70,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
         },
         include: {
+          assets: { select: { id: true } },
           kits: { select: { id: true } },
         },
       })
@@ -152,12 +166,23 @@ export default function ManageLocationKits() {
   const { totalItems, location } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const navigate = useNavigate();
+  const submit = useSubmit();
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+
+  const totalAssetsSelected = location.assets.length;
+  const locationKitsCount = location.kits.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== locationKitsCount;
+
+  const manageAssetsUrl = `/locations/${location.id}/assets/manage-assets`;
 
   const removedKits = useMemo(
     () =>
@@ -176,17 +201,46 @@ export default function ManageLocationKits() {
   }, [location.kits, setSelectedBulkItems]);
 
   return (
-    <div className="mt-4 flex h-full max-h-full flex-col">
-      {/* Search */}
-      <div className=" border-b px-6 md:pb-3">
-        <Filters
-          className="md:border-0 md:p-0"
-          slots={{ "left-of-search": <StatusFilter statusItems={KitStatus} /> }}
-        />
+    <Tabs
+      className="flex h-full max-h-full flex-col"
+      value="kits"
+      onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
+        navigate(manageAssetsUrl);
+      }}
+    >
+      <div className="border-b px-6 py-2">
+        <TabsList className="w-full">
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+            Assets{" "}
+            {totalAssetsSelected > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {totalAssetsSelected}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+            Kits
+            {selectedBulkItemsCount > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {selectedBulkItemsCount}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto px-5 md:px-0">
+      <Filters
+        className="justify-between !border-t-0 border-b px-6 md:flex"
+        slots={{ "left-of-search": <StatusFilter statusItems={KitStatus} /> }}
+        innerWrapperClassName="justify-between"
+      />
+
+      <TabsContent value="kits" asChild>
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current kit to the atom of selected kits */
@@ -207,18 +261,18 @@ export default function ManageLocationKits() {
             </>
           }
         />
-      </div>
-      {/* Footer of the modal */}
+      </TabsContent>
+
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
         </p>
 
-        <div className="mb-4 flex gap-3">
+        <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected kits, so we can compare and easily add/remove */}
             {removedKits.map((kit, i) => (
               <input
@@ -243,7 +297,19 @@ export default function ManageLocationKits() {
           </Form>
         </div>
       </footer>
-    </div>
+
+      <UnsavedChangesAlert
+        type="kits"
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageAssetsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      />
+    </Tabs>
   );
 }
 

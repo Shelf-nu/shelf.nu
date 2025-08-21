@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import React from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useMatches } from "@remix-run/react";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
 import { tw } from "~/utils/tw";
-import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
 
 type SlotKeys = "left-of-title" | "right-of-title" | "append-to-title";
@@ -31,10 +30,14 @@ export default function Header({
     [key in SlotKeys]?: ReactNode;
   };
 }) {
-  const data = useLoaderData<{
-    header?: HeaderData;
-  }>();
-  const header = data?.header;
+  const matches = useMatches();
+  const currentRoute = matches[matches.length - 1];
+  const { header } = currentRoute?.data as {
+    header: {
+      title: string;
+      subHeading?: string;
+    };
+  };
 
   return header ? (
     <header className={tw("-mx-4 bg-white", classNames)}>

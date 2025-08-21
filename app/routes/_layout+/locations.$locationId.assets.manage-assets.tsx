@@ -1,8 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+  useSubmit,
+} from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -17,6 +22,7 @@ import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
+import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -25,6 +31,13 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
@@ -65,6 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
         },
         include: {
+          kits: { select: { id: true } },
           assets: {
             select: { id: true },
           },
@@ -186,12 +200,23 @@ export default function AddAssetsToLocation() {
   const { location, totalItems } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const navigate = useNavigate();
+  const submit = useSubmit();
+
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+
+  const locationKitIds = location.kits.map((k) => k.id);
+  const locationAssetsCount = location.assets.length;
+
+  const hasUnsavedChanges = selectedBulkItemsCount !== locationAssetsCount;
+  const manageKitsUrl = `/locations/${location.id}/kits/manage-kits`;
 
   const removedAssets = useMemo(
     () =>
@@ -212,24 +237,53 @@ export default function AddAssetsToLocation() {
   }, [location.assets, setSelectedBulkItems]);
 
   return (
-    <div className="flex h-full max-h-full flex-col">
-      {/* Search */}
-      <div className=" border-b px-6 md:pb-3">
-        <Filters
-          className="md:border-0 md:p-0"
-          slots={{
-            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-            "right-of-search": (
-              <SortBy
-                sortingOptions={ASSET_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-              />
-            ),
-          }}
-        ></Filters>
+    <Tabs
+      className="flex h-full max-h-full flex-col"
+      value="assets"
+      onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
+        navigate(manageKitsUrl);
+      }}
+    >
+      <div className="border-b px-6 py-2">
+        <TabsList className="w-full">
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+            Assets{" "}
+            {selectedBulkItemsCount > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {hasSelectedAllItems ? totalItems : selectedBulkItemsCount}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+            Kits
+            {locationKitIds.length > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {locationKitIds.length}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
       </div>
-      {/* Filters */}
-      <div className=" flex  justify-around gap-2 border-b p-3 lg:gap-4">
+
+      <Filters
+        className="justify-between !border-t-0 border-b px-6 md:flex"
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": (
+            <SortBy
+              sortingOptions={ASSET_SORTING_OPTIONS}
+              defaultSortingBy="createdAt"
+            />
+          ),
+        }}
+      />
+
+      <div className=" flex justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -276,8 +330,7 @@ export default function AddAssetsToLocation() {
         />
       </div>
 
-      {/* List */}
-      <div className="  flex-1 overflow-y-auto px-5 md:px-0">
+      <TabsContent value="assets" asChild>
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -300,8 +353,8 @@ export default function AddAssetsToLocation() {
             </>
           }
         />
-      </div>
-      {/* Footer of the modal */}
+      </TabsContent>
+
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
@@ -311,7 +364,7 @@ export default function AddAssetsToLocation() {
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {removedAssets.map((asset, i) => (
               <input
@@ -341,7 +394,19 @@ export default function AddAssetsToLocation() {
           </Form>
         </div>
       </footer>
-    </div>
+
+      <UnsavedChangesAlert
+        type="assets"
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageKitsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      />
+    </Tabs>
   );
 }
 
