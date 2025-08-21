@@ -46,7 +46,6 @@ export function useAssetAvailabilityData(items: Items) {
         return [
           ...asset.bookings.map((b) => {
             const booking = b as AdvancedAssetBooking;
-
             const custodianName = booking?.custodianUser
               ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
               : booking.custodianTeamMember?.name;
@@ -71,13 +70,13 @@ export function useAssetAvailabilityData(items: Items) {
                 ),
               ],
               extendedProps: {
-                id: b.id,
-                name: b.name,
-                status: b.status,
-                title: b.name,
-                description: b.description,
-                start: b.from,
-                end: b.to,
+                id: booking.id,
+                name: booking.name,
+                status: booking.status,
+                title: booking.name,
+                description: booking.description,
+                start: booking.from,
+                end: booking.to,
                 custodian: {
                   name: custodianName,
                   user: booking.custodianUser
@@ -89,6 +88,21 @@ export function useAssetAvailabilityData(items: Items) {
                       }
                     : undefined,
                 },
+                creator: booking.creator
+                  ? {
+                      name: booking.creator
+                        ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                        : "Unknown",
+                      user: booking.creator
+                        ? {
+                            id: booking.creator.id,
+                            firstName: booking.creator.firstName,
+                            lastName: booking.creator.lastName,
+                            profilePicture: booking.creator.profilePicture,
+                          }
+                        : null,
+                    }
+                  : undefined,
                 tags: booking.tags,
               },
             };

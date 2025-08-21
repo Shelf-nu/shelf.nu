@@ -121,6 +121,7 @@ export type AdvancedAssetBooking = Pick<
     User,
     "id" | "firstName" | "lastName" | "profilePicture"
   >;
+  creator?: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
 };
 
 /** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
