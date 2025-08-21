@@ -246,13 +246,19 @@ export function EventCardContent({
         <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
       </div>
 
-      <p className="mb-1 text-sm font-normal">Custodian:</p>
-      <div className="mb-3 flex items-center gap-2">
-        <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
-      </div>
-      <p className="mb-1 text-sm font-normal">Created by:</p>
-      <div className="mb-3 flex items-center gap-2">
-        <TeamMemberBadge teamMember={booking.creator} hidePrivate />
+      <div className="flex items-center gap-5">
+        <div>
+          <p className="mb-1 text-sm font-normal">Custodian:</p>
+          <div className="mb-3 flex items-center gap-2">
+            <TeamMemberBadge teamMember={booking.custodian} hidePrivate />
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-sm font-normal">Created by:</p>
+          <div className="mb-3 flex items-center gap-2">
+            <TeamMemberBadge teamMember={booking.creator} />
+          </div>
+        </div>
       </div>
       {booking.tags && booking.tags.length ? (
         <>

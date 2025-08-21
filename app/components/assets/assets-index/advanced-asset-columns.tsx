@@ -569,7 +569,7 @@ function UpcomingBookingsColumn({
         <PopoverPortal>
           <PopoverContent
             align="start"
-            className="flex max-h-64 w-auto max-w-full flex-col gap-1 divide-y overflow-auto rounded-md border bg-white p-4"
+            className="flex max-h-64 w-auto max-w-full flex-col gap-1 overflow-auto rounded-md border bg-white p-4"
           >
             <h5 className="mb-1 border-b pb-2 text-sm">Upcoming Bookings</h5>
             {bookings.map((booking) => {
@@ -590,7 +590,7 @@ function UpcomingBookingsColumn({
                         booking.status,
                         isOneDayEvent(booking.from, booking.to)
                       ),
-                      "min-w-48 px-2 py-1 text-left"
+                      "min-w-48 border px-2 py-1 text-left"
                     )}
                   >
                     <DateS
@@ -632,7 +632,8 @@ function UpcomingBookingsColumn({
                                   id: booking.creator.id,
                                   firstName: booking.creator.firstName,
                                   lastName: booking.creator.lastName,
-                                  profilePicture: booking.creator.profilePicture,
+                                  profilePicture:
+                                    booking.creator.profilePicture,
                                 }
                               : null,
                           },

@@ -64,7 +64,6 @@ export const AssetsList = ({
   const { isBase } = useUserRoleHelper();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
-
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
