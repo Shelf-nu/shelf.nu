@@ -212,8 +212,8 @@ export const auditResultsAtom = atom((get) => {
   }
 
   // Create a map of expected asset IDs for quick lookup
-  const expectedAssetIds = new Set(expectedAssets.map(asset => asset.id));
-  
+  const expectedAssetIds = new Set(expectedAssets.map((asset) => asset.id));
+
   // Process scanned items
   const scannedAssets: AuditScannedItem[] = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
@@ -223,15 +223,19 @@ export const auditResultsAtom = atom((get) => {
         id: assetData.id,
         name: assetData.title,
         type: "asset" as const,
-        auditStatus: expectedAssetIds.has(assetData.id) ? "found" as const : "unexpected" as const,
+        auditStatus: expectedAssetIds.has(assetData.id)
+          ? ("found" as const)
+          : ("unexpected" as const),
       };
     });
 
   // Categorize assets
-  const found = scannedAssets.filter(asset => asset.auditStatus === "found");
-  const unexpected = scannedAssets.filter(asset => asset.auditStatus === "unexpected");
-  const foundIds = new Set(found.map(asset => asset.id));
-  const missing = expectedAssets.filter(asset => !foundIds.has(asset.id));
+  const found = scannedAssets.filter((asset) => asset.auditStatus === "found");
+  const unexpected = scannedAssets.filter(
+    (asset) => asset.auditStatus === "unexpected"
+  );
+  const foundIds = new Set(found.map((asset) => asset.id));
+  const missing = expectedAssets.filter((asset) => !foundIds.has(asset.id));
 
   return {
     found,
@@ -259,13 +263,8 @@ export const startAuditSessionAtom = atom(
 );
 
 // Action atom to end an audit session
-export const endAuditSessionAtom = atom(
-  null,
-  (_get, set) => {
-    set(auditSessionAtom, null);
-    set(auditExpectedAssetsAtom, []);
-    set(scannedItemsAtom, {});
-  }
-);
-
-/*******************************/
+export const endAuditSessionAtom = atom(null, (_get, set) => {
+  set(auditSessionAtom, null);
+  set(auditExpectedAssetsAtom, []);
+  set(scannedItemsAtom, {});
+});

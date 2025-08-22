@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -7,21 +8,25 @@ import type {
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
-import { addScannedItemAtom, startAuditSessionAtom, setAuditExpectedAssetsAtom } from "~/atoms/qr-scanner";
+import {
+  addScannedItemAtom,
+  startAuditSessionAtom,
+  setAuditExpectedAssetsAtom,
+} from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import AuditLocationDrawer from "~/components/scanner/drawer/uses/audit-location-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getLocation } from "~/modules/location/service.server";
-import { 
-  createAuditSession, 
+import {
+  createAuditSession,
   getActiveAuditSession,
   completeAuditSession,
   cancelAuditSession,
-  updateAuditSession
+  updateAuditSession,
 } from "~/modules/audit/service.server";
+import { getLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -32,7 +37,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { useEffect } from "react";
 
 export type LoaderData = typeof loader;
 
@@ -80,7 +84,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       location,
       activeAuditSession,
-      expectedAssets: location.assets.map(asset => ({
+      expectedAssets: location.assets.map((asset) => ({
         id: asset.id,
         name: asset.title,
         type: "asset" as const,
@@ -127,7 +131,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     switch (intent) {
       case "start-audit": {
         const expectedAssetCount = Number(formData.get("expectedAssetCount"));
-        
+
         const auditSession = await createAuditSession({
           type: "LOCATION",
           targetId: locationId,
@@ -141,7 +145,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       case "complete-audit": {
         const auditSessionId = formData.get("auditSessionId") as string;
-        
+
         await completeAuditSession({
           id: auditSessionId,
           organizationId,
@@ -152,7 +156,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       case "cancel-audit": {
         const auditSessionId = formData.get("auditSessionId") as string;
-        
+
         await cancelAuditSession({
           id: auditSessionId,
           organizationId,
@@ -165,7 +169,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const auditSessionId = formData.get("auditSessionId") as string;
         const foundAssetCount = Number(formData.get("foundAssetCount"));
         const missingAssetCount = Number(formData.get("missingAssetCount"));
-        const unexpectedAssetCount = Number(formData.get("unexpectedAssetCount"));
+        const unexpectedAssetCount = Number(
+          formData.get("unexpectedAssetCount")
+        );
 
         await updateAuditSession({
           id: auditSessionId,
@@ -188,7 +194,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditLocation() {
-  const { location, activeAuditSession, expectedAssets } = useLoaderData<typeof loader>();
+  const { location, activeAuditSession, expectedAssets } =
+    useLoaderData<typeof loader>();
   const addItem = useSetAtom(addScannedItemAtom);
   const startAuditSession = useSetAtom(startAuditSessionAtom);
   const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
@@ -212,7 +219,13 @@ export default function AuditLocation() {
       });
     }
     setExpectedAssets(expectedAssets);
-  }, [activeAuditSession, expectedAssets, startAuditSession, setExpectedAssets, location.id]);
+  }, [
+    activeAuditSession,
+    expectedAssets,
+    startAuditSession,
+    setExpectedAssets,
+    location.id,
+  ]);
 
   function handleCodeDetectionSuccess({
     value,

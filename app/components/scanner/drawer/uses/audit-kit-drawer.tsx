@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { 
-  auditResultsAtom, 
+import {
+  auditResultsAtom,
   auditSessionAtom,
   clearScannedItemsAtom,
   removeScannedItemAtom,
@@ -56,7 +56,7 @@ export default function AuditKitDrawer({
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
-  
+
   const [auditState, setAuditState] = useState<AuditState>({
     status: "processing",
   });
@@ -64,7 +64,8 @@ export default function AuditKitDrawer({
   const disabled = useDisabled();
 
   const { found, missing, unexpected } = auditResults;
-  const hasResults = found.length > 0 || missing.length > 0 || unexpected.length > 0;
+  const hasResults =
+    found.length > 0 || missing.length > 0 || unexpected.length > 0;
 
   // Create blockers configuration (none needed for audit, but following pattern)
   const blockerConfigs: never[] = [];
@@ -99,10 +100,10 @@ export default function AuditKitDrawer({
         actionButtons={
           <Form method="post">
             <input type="hidden" name="intent" value="start-audit" />
-            <input 
-              type="hidden" 
-              name="expectedAssetCount" 
-              value={missing.length} 
+            <input
+              type="hidden"
+              name="expectedAssetCount"
+              value={missing.length}
             />
             <Button
               type="submit"
@@ -116,13 +117,14 @@ export default function AuditKitDrawer({
       >
         <div className="space-y-4">
           <p className="text-gray-700">
-            This will start an audit session for kit <strong>{kit.name}</strong>.
+            This will start an audit session for kit <strong>{kit.name}</strong>
+            .
           </p>
-          <div className="bg-gray-50 p-3 rounded-lg">
+          <div className="rounded-lg bg-gray-50 p-3">
             <p className="text-sm">
               Expected assets: <strong>{missing.length}</strong>
             </p>
-            <p className="text-xs text-gray-600 mt-1">
+            <p className="mt-1 text-xs text-gray-600">
               Scan assets to verify their presence in this kit.
             </p>
           </div>
@@ -143,7 +145,11 @@ export default function AuditKitDrawer({
           <div className="flex gap-2">
             <Form method="post">
               <input type="hidden" name="intent" value="cancel-audit" />
-              <input type="hidden" name="auditSessionId" value={auditSession.id} />
+              <input
+                type="hidden"
+                name="auditSessionId"
+                value={auditSession.id}
+              />
               <Button
                 variant="secondary"
                 type="submit"
@@ -164,16 +170,18 @@ export default function AuditKitDrawer({
       >
         <div className="space-y-6">
           {/* Audit Session Header */}
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
             <h3 className="font-medium text-blue-900">Audit Session</h3>
-            <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
+            <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-blue-700">Expected:</span> 
-                <span className="font-medium ml-1">{auditSession.expectedAssetCount}</span>
+                <span className="text-blue-700">Expected:</span>
+                <span className="ml-1 font-medium">
+                  {auditSession.expectedAssetCount}
+                </span>
               </div>
               <div>
-                <span className="text-blue-700">Found:</span> 
-                <span className="font-medium ml-1">{found.length}</span>
+                <span className="text-blue-700">Found:</span>
+                <span className="ml-1 font-medium">{found.length}</span>
               </div>
             </div>
           </div>
@@ -184,8 +192,8 @@ export default function AuditKitDrawer({
           {/* Found Assets */}
           {found.length > 0 && (
             <section>
-              <h3 className="flex items-center gap-2 text-green-800 font-medium mb-3">
-                <CheckmarkIcon className="w-4 h-4" />
+              <h3 className="mb-3 flex items-center gap-2 font-medium text-green-800">
+                <CheckmarkIcon className="size-4" />
                 Found ({found.length})
               </h3>
               <div className="space-y-2">
@@ -204,8 +212,10 @@ export default function AuditKitDrawer({
           {/* Missing Assets */}
           {missing.length > 0 && (
             <section>
-              <h3 className="flex items-center gap-2 text-yellow-800 font-medium mb-3">
-                <span className="w-4 h-4 rounded-full bg-yellow-500 flex items-center justify-center text-white text-xs">!</span>
+              <h3 className="mb-3 flex items-center gap-2 font-medium text-yellow-800">
+                <span className="flex size-4 items-center justify-center rounded-full bg-yellow-500 text-xs text-white">
+                  !
+                </span>
                 Missing ({missing.length})
               </h3>
               <div className="space-y-2">
@@ -219,9 +229,10 @@ export default function AuditKitDrawer({
                 ))}
               </div>
               {missing.length > 0 && (
-                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
                   <p className="text-sm text-yellow-800">
-                    These assets were expected but not scanned. They may have been removed from the kit.
+                    These assets were expected but not scanned. They may have
+                    been removed from the kit.
                   </p>
                 </div>
               )}
@@ -231,8 +242,10 @@ export default function AuditKitDrawer({
           {/* Unexpected Assets */}
           {unexpected.length > 0 && (
             <section>
-              <h3 className="flex items-center gap-2 text-red-800 font-medium mb-3">
-                <span className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center text-white text-xs">×</span>
+              <h3 className="mb-3 flex items-center gap-2 font-medium text-red-800">
+                <span className="flex size-4 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                  ×
+                </span>
                 Unexpected ({unexpected.length})
               </h3>
               <div className="space-y-2">
@@ -246,9 +259,10 @@ export default function AuditKitDrawer({
                 ))}
               </div>
               {unexpected.length > 0 && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
                   <p className="text-sm text-red-800">
-                    These assets were scanned but don't belong in this kit according to records.
+                    These assets were scanned but don't belong in this kit
+                    according to records.
                   </p>
                 </div>
               )}
@@ -257,9 +271,11 @@ export default function AuditKitDrawer({
 
           {/* No Results State */}
           {!hasResults && (
-            <div className="text-center py-8 text-gray-500">
+            <div className="py-8 text-center text-gray-500">
               <p>No assets scanned yet.</p>
-              <p className="text-sm mt-1">Start scanning to see results here.</p>
+              <p className="mt-1 text-sm">
+                Start scanning to see results here.
+              </p>
             </div>
           )}
         </div>
@@ -271,11 +287,18 @@ export default function AuditKitDrawer({
           <AlertDialogHeader>
             <AlertDialogTitle>Complete Audit</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to complete this audit? This will finalize the audit session.
+              Are you sure you want to complete this audit? This will finalize
+              the audit session.
               <div className="mt-3 space-y-1 text-sm">
-                <div>Found: <strong>{found.length}</strong> assets</div>
-                <div>Missing: <strong>{missing.length}</strong> assets</div>
-                <div>Unexpected: <strong>{unexpected.length}</strong> assets</div>
+                <div>
+                  Found: <strong>{found.length}</strong> assets
+                </div>
+                <div>
+                  Missing: <strong>{missing.length}</strong> assets
+                </div>
+                <div>
+                  Unexpected: <strong>{unexpected.length}</strong> assets
+                </div>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -283,13 +306,27 @@ export default function AuditKitDrawer({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Form method="post">
               <input type="hidden" name="intent" value="complete-audit" />
-              <input type="hidden" name="auditSessionId" value={auditSession?.id} />
-              <input type="hidden" name="foundAssetCount" value={found.length} />
-              <input type="hidden" name="missingAssetCount" value={missing.length} />
-              <input type="hidden" name="unexpectedAssetCount" value={unexpected.length} />
-              <Button type="submit">
-                Complete Audit
-              </Button>
+              <input
+                type="hidden"
+                name="auditSessionId"
+                value={auditSession?.id}
+              />
+              <input
+                type="hidden"
+                name="foundAssetCount"
+                value={found.length}
+              />
+              <input
+                type="hidden"
+                name="missingAssetCount"
+                value={missing.length}
+              />
+              <input
+                type="hidden"
+                name="unexpectedAssetCount"
+                value={unexpected.length}
+              />
+              <Button type="submit">Complete Audit</Button>
             </Form>
           </AlertDialogFooter>
         </AlertDialogContent>

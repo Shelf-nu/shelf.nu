@@ -36,7 +36,8 @@ export type CompleteAuditSessionPayload = {
  * Creates a new audit session
  */
 export async function createAuditSession(payload: CreateAuditSessionPayload) {
-  const { type, targetId, userId, organizationId, expectedAssetCount } = payload;
+  const { type, targetId, userId, organizationId, expectedAssetCount } =
+    payload;
 
   try {
     // Check if there's already an active audit session for this target
@@ -105,7 +106,9 @@ export async function updateAuditSession(payload: UpdateAuditSessionPayload) {
 /**
  * Completes an audit session
  */
-export async function completeAuditSession(payload: CompleteAuditSessionPayload) {
+export async function completeAuditSession(
+  payload: CompleteAuditSessionPayload
+) {
   const { id, organizationId } = payload;
 
   try {
