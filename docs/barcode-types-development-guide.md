@@ -305,6 +305,25 @@ const typeMap: Record<string, BarcodeType> = {
 };
 ```
 
+#### 7.2 Add Barcode Display Support
+
+**File:** `app/components/barcode/barcode-display.tsx`
+
+⚠️ **CRITICAL**: The BarcodeDisplay component handles visual rendering of barcodes using bwip-js. Missing this update will prevent barcode visualization.
+
+```typescript
+// Map barcode types to bwip-js format strings
+const formatMap: Record<BarcodeType, string> = {
+  Code128: "code128",
+  Code39: "code39",
+  DataMatrix: "datamatrix",
+  ExternalQR: "qrcode",
+  YourNewType: "yournewtype", // Add your bwip-js format name
+};
+```
+
+**Important:** Ensure the bwip-js format name matches the exact format supported by the bwip-js library.
+
 ### 8. Scanner Integration
 
 #### 8.1 Add Scanner Detection
@@ -404,6 +423,7 @@ Use this checklist to ensure all necessary changes are made:
 - [ ] **Import Mapping** - Added to columnToTypeMap
 - [ ] **CSV Template** - Updated example file
 - [ ] **Column Rendering** - Added to switch statement
+- [ ] **Barcode Display** - Added to formatMap in BarcodeDisplay component ⚠️ **CRITICAL**
 - [ ] **Scanner Detection** - Added to orderedTypes
 - [ ] **Search Logic** - Added to searchable fields
 - [ ] **Documentation** - Updated import documentation
@@ -449,12 +469,13 @@ Use this checklist to ensure all necessary changes are made:
 ## Common Pitfalls
 
 1. **Missing Normalization Function Update** - Values won't be processed correctly, causing validation and database issues ⚠️ **CRITICAL**
-2. **Missing CSV Template Update** - Users won't be able to import the new type
-3. **Incorrect SQL Subquery** - Sorting/filtering won't work
-4. **Missing Scanner Detection** - Camera scanning won't recognize the type
-5. **Incomplete Test Coverage** - Edge cases may break production
-6. **Missing Column Rendering** - UI will show empty cells
-7. **Incorrect Validation Regex** - Users can't enter valid barcodes
+2. **Missing BarcodeDisplay formatMap Update** - Barcodes won't render visually, showing error messages instead ⚠️ **CRITICAL**
+3. **Missing CSV Template Update** - Users won't be able to import the new type
+4. **Incorrect SQL Subquery** - Sorting/filtering won't work
+5. **Missing Scanner Detection** - Camera scanning won't recognize the type
+6. **Incomplete Test Coverage** - Edge cases may break production
+7. **Missing Column Rendering** - UI will show empty cells
+8. **Incorrect Validation Regex** - Users can't enter valid barcodes
 
 ## Troubleshooting
 

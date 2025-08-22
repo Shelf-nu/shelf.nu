@@ -28,6 +28,6 @@ export const BARCODE_TYPE_OPTIONS = [
     value: BarcodeType.EAN13,
     label: "EAN-13",
     description:
-      "Exactly 13 numeric digits with check digit validation (e.g., 1234567890123)",
+      "Exactly 13 numeric digits. For retail barcodes (13-digit product identification codes)",
   },
 ];
