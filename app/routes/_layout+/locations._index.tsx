@@ -10,6 +10,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
+import { LocationDescriptionColumn } from "~/components/location/location-description-column";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -114,6 +115,7 @@ export default function LocationsIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
+              <Th>Description</Th>
               <Th>Assets</Th>
             </>
           }
@@ -147,6 +149,11 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
         </div>
       </div>
     </Td>
+    {item.description ? (
+      <LocationDescriptionColumn value={item.description} />
+    ) : (
+      <Td>-</Td>
+    )}
     <Td>{item.assets.length}</Td>
   </>
 );
