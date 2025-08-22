@@ -189,7 +189,7 @@ export default function KitsForm({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link to="/locations/new" className="text-gray-600 underline">
+              <Link to="/locations/new" className="text-gray-600 underline" target="_blank">
                 Create locations
               </Link>
             </p>
