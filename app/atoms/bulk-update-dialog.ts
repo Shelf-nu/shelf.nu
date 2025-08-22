@@ -23,7 +23,7 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   "booking-exist": false,
   "download-qr": false,
   "partial-checkin": false,
-  "add-to-kit": false,s
+  "add-to-kit": false,
 };
 
 export const bulkDialogAtom =
