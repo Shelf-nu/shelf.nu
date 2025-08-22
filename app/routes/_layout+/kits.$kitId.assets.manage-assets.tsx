@@ -49,26 +49,17 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
-import { createBulkKitChangeNotes } from "~/modules/note/service.server";
-import { getUserByID } from "~/modules/user/service.server";
+import { updateKitAssets } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 
 type LoaderData = typeof loader;
 
@@ -201,244 +192,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, organizationId, kitId } }
     );
 
-    const user = await getUserByID(userId);
-
-    const kit = await db.kit
-      .findUniqueOrThrow({
-        where: { id: kitId, organizationId },
-        include: {
-          assets: {
-            select: {
-              id: true,
-              title: true,
-              kit: true,
-              bookings: { select: { id: true, status: true } },
-            },
-          },
-          custody: {
-            select: {
-              custodian: {
-                select: {
-                  id: true,
-                  name: true,
-                  user: {
-                    select: {
-                      email: true,
-                      firstName: true,
-                      lastName: true,
-                      profilePicture: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Kit not found",
-          additionalData: { kitId, userId, organizationId },
-          status: 404,
-          label: "Kit",
-        });
-      });
-
-    const removedAssets = kit.assets.filter(
-      (asset) => !assetIds.includes(asset.id)
-    );
-
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-      const kitAssets = kit.assets.map((asset) => asset.id);
-      const removedAssetsIds = removedAssets.map((asset) => asset.id);
-
-      /**
-       * New assets that needs to be added are
-       * - Previously added assets
-       * - All assets with applied filters
-       */
-      assetIds = [
-        ...new Set([
-          ...allAssets.map((asset) => asset.id),
-          ...kitAssets.filter((asset) => !removedAssetsIds.includes(asset)),
-        ]),
-      ];
-    }
-
-    const newlyAddedAssets = await db.asset
-      .findMany({
-        where: { id: { in: assetIds } },
-        select: { id: true, title: true, kit: true, custody: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching the assets. Please try again or contact support.",
-          additionalData: { assetIds, userId, kitId },
-          label: "Assets",
-        });
-      });
-
-    /** An asset already in custody cannot be added to a kit */
-    const isSomeAssetInCustody = newlyAddedAssets.some(
-      (asset) => asset.custody && asset.kit?.id !== kit.id
-    );
-    if (isSomeAssetInCustody) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add unavailable asset in a kit.",
-        additionalData: { userId, kitId },
-        label: "Kit",
-        shouldBeCaptured: false,
-      });
-    }
-
-    const kitBookings =
-      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
-
-    await db.kit.update({
-      where: { id: kit.id, organizationId },
-      data: {
-        assets: {
-          /**
-           * set: [] will make sure that if any previously selected asset is removed,
-           * then it is also disconnected from the kit
-           */
-          set: [],
-          /**
-           * Then this will update the assets to be whatever user has selected now
-           */
-          connect: newlyAddedAssets.map(({ id }) => ({ id })),
-        },
-      },
-    });
-
-    await createBulkKitChangeNotes({
-      kit,
-      newlyAddedAssets,
-      removedAssets,
+    await updateKitAssets({
+      kitId,
+      assetIds,
       userId,
+      organizationId,
+      request,
     });
-
-    /**
-     * If a kit is in custody then the assets added to kit will also inherit the status
-     */
-    const assetsToInheritStatus = newlyAddedAssets.filter(
-      (asset) => !asset.custody
-    );
-    if (
-      kit.custody &&
-      kit.custody.custodian.id &&
-      assetsToInheritStatus.length > 0
-    ) {
-      await Promise.all([
-        ...assetsToInheritStatus.map((asset) =>
-          db.asset.update({
-            where: { id: asset.id },
-            data: {
-              status: AssetStatus.IN_CUSTODY,
-              custody: {
-                create: {
-                  custodian: { connect: { id: kit.custody?.custodian.id } },
-                },
-              },
-            },
-          })
-        ),
-        db.note.createMany({
-          data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
-        }),
-      ]);
-    }
-
-    /**
-     * If a kit is in custody and some assets are removed,
-     * then we have to make the removed assets Available
-     */
-    if (removedAssets.length && kit.custody?.custodian.id) {
-      await Promise.all([
-        db.custody.deleteMany({
-          where: { assetId: { in: removedAssets.map((a) => a.id) } },
-        }),
-        db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) } },
-          data: { status: AssetStatus.AVAILABLE },
-        }),
-        db.note.createMany({
-          data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}'s** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
-        }),
-      ]);
-    }
-
-    /**
-     * If user is adding/removing an asset to a kit which is a part of DRAFT, RESERVED, ONGOING or OVERDUE booking,
-     * then we have to add or remove these assets to booking also
-     */
-    const bookingsToUpdate = kitBookings.filter(
-      (b) =>
-        b.status === "DRAFT" ||
-        b.status === "RESERVED" ||
-        b.status === "ONGOING" ||
-        b.status === "OVERDUE"
-    );
-
-    if (bookingsToUpdate?.length) {
-      await Promise.all(
-        bookingsToUpdate.map((booking) =>
-          db.booking.update({
-            where: { id: booking.id },
-            data: {
-              assets: {
-                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
-                disconnect: removedAssets.map((a) => ({ id: a.id })),
-              },
-            },
-          })
-        )
-      );
-    }
-
-    /**
-     * If the kit is part of an ONGOING booking, then we have to make all
-     * the assets CHECKED_OUT
-     */
-    if (kit.status === KitStatus.CHECKED_OUT) {
-      await db.asset.updateMany({
-        where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
-    }
 
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {

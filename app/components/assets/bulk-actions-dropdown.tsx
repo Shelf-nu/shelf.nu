@@ -14,6 +14,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
@@ -131,6 +132,7 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
+        <BulkAddToKitDialog />
       </When>
 
       <BulkDownloadQrDialog
@@ -329,6 +331,21 @@ function ConditionalDropdown() {
                   type="unavailable"
                   onClick={closeMenu}
                   disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  label="Add to kit"
+                  type="add-to-kit"
+                  onClick={closeMenu}
+                  disabled={
+                    someAssetCheckedOut
+                      ? {
+                          reason:
+                            "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
+                        }
+                      : isLoading
+                  }
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
