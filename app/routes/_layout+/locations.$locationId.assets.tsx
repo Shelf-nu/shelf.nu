@@ -1,4 +1,4 @@
-import type { Asset, Category, Tag } from "@prisma/client";
+import type { Asset, Category, Tag, Location } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
