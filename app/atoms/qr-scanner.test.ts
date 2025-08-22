@@ -141,21 +141,21 @@ describe("Audit Scanner Atoms", () => {
       ];
       store.set(setAuditExpectedAssetsAtom, expectedAssets);
 
-      // Add scanned items
+      // Add scanned items - using type assertion for test data
       const scannedItems = {
         "qr-1": {
           type: "asset" as const,
           data: {
             id: "asset-1",
             title: "Expected Asset 1",
-          },
+          } as any,
         },
         "qr-2": {
           type: "asset" as const,
           data: {
             id: "asset-3",
             title: "Unexpected Asset",
-          },
+          } as any,
         },
       };
       store.set(scannedItemsAtom, scannedItems);

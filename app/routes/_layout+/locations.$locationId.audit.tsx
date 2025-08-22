@@ -20,8 +20,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import AuditLocationDrawer from "~/components/scanner/drawer/uses/audit-location-drawer";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
-  createAuditSession,
-  getActiveAuditSession,
+  getOrCreateAuditSession,
   completeAuditSession,
   cancelAuditSession,
   updateAuditSession,
@@ -30,7 +29,7 @@ import { getLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import { error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -69,11 +68,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // Check for active audit session
-    const activeAuditSession = await getActiveAuditSession({
+    // Get or create audit session
+    const activeAuditSession = await getOrCreateAuditSession({
       type: "LOCATION",
       targetId: locationId,
+      userId,
       organizationId,
+      expectedAssetCount: location.assets.length,
     });
 
     const header: HeaderData = {
@@ -129,20 +130,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
 
     switch (intent) {
-      case "start-audit": {
-        const expectedAssetCount = Number(formData.get("expectedAssetCount"));
-
-        const auditSession = await createAuditSession({
-          type: "LOCATION",
-          targetId: locationId,
-          userId,
-          organizationId,
-          expectedAssetCount,
-        });
-
-        return json({ success: true, auditSession });
-      }
-
       case "complete-audit": {
         const auditSessionId = formData.get("auditSessionId") as string;
 
@@ -239,7 +226,11 @@ export default function AuditLocation() {
     <>
       <Header hidePageDescription />
 
-      <AuditLocationDrawer isLoading={isLoading} location={location} />
+      <AuditLocationDrawer
+        isLoading={isLoading}
+        location={location}
+        expectedAssets={expectedAssets}
+      />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

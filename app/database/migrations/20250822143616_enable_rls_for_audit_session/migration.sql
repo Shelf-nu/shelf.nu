@@ -1,1 +1,2 @@
--- This is an empty migration.
+-- Enable RLS
+ALTER TABLE "AuditSession" ENABLE row level security;

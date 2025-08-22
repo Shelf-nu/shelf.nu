@@ -3,7 +3,6 @@ import type {
   Organization,
   AuditSession,
   AuditType,
-  AuditStatus,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -59,7 +58,7 @@ export async function createAuditSession(payload: CreateAuditSessionPayload) {
       });
     }
 
-    return await db.auditSession.create({
+    return db.auditSession.create({
       data: {
         type,
         targetId,
@@ -81,11 +80,11 @@ export async function createAuditSession(payload: CreateAuditSessionPayload) {
 /**
  * Updates an audit session with current counts
  */
-export async function updateAuditSession(payload: UpdateAuditSessionPayload) {
+export function updateAuditSession(payload: UpdateAuditSessionPayload) {
   const { id, organizationId, ...updates } = payload;
 
   try {
-    return await db.auditSession.update({
+    return db.auditSession.update({
       where: {
         id,
         organizationId,
@@ -106,13 +105,11 @@ export async function updateAuditSession(payload: UpdateAuditSessionPayload) {
 /**
  * Completes an audit session
  */
-export async function completeAuditSession(
-  payload: CompleteAuditSessionPayload
-) {
+export function completeAuditSession(payload: CompleteAuditSessionPayload) {
   const { id, organizationId } = payload;
 
   try {
-    return await db.auditSession.update({
+    return db.auditSession.update({
       where: {
         id,
         organizationId,
@@ -136,11 +133,11 @@ export async function completeAuditSession(
 /**
  * Cancels an audit session
  */
-export async function cancelAuditSession(payload: CompleteAuditSessionPayload) {
+export function cancelAuditSession(payload: CompleteAuditSessionPayload) {
   const { id, organizationId } = payload;
 
   try {
-    return await db.auditSession.update({
+    return db.auditSession.update({
       where: {
         id,
         organizationId,
@@ -164,7 +161,7 @@ export async function cancelAuditSession(payload: CompleteAuditSessionPayload) {
 /**
  * Gets an active audit session for a target
  */
-export async function getActiveAuditSession({
+export function getActiveAuditSession({
   type,
   targetId,
   organizationId,
@@ -174,7 +171,7 @@ export async function getActiveAuditSession({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.auditSession.findFirst({
+    return db.auditSession.findFirst({
       where: {
         type,
         targetId,
@@ -203,9 +200,61 @@ export async function getActiveAuditSession({
 }
 
 /**
+ * Gets an active audit session or creates one if it doesn't exist
+ */
+export async function getOrCreateAuditSession({
+  type,
+  targetId,
+  userId,
+  organizationId,
+  expectedAssetCount,
+}: {
+  type: AuditType;
+  targetId: string;
+  userId: User["id"];
+  organizationId: Organization["id"];
+  expectedAssetCount: number;
+}) {
+  try {
+    // First try to get existing active session
+    const existingSession = await getActiveAuditSession({
+      type,
+      targetId,
+      organizationId,
+    });
+
+    if (existingSession) {
+      return existingSession;
+    }
+
+    // If no active session exists, create a new one
+    return await createAuditSession({
+      type,
+      targetId,
+      userId,
+      organizationId,
+      expectedAssetCount,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get or create audit session",
+      additionalData: {
+        type,
+        targetId,
+        userId,
+        organizationId,
+        expectedAssetCount,
+      },
+      label,
+    });
+  }
+}
+
+/**
  * Gets audit session by ID
  */
-export async function getAuditSession({
+export function getAuditSession({
   id,
   organizationId,
 }: {
@@ -213,7 +262,7 @@ export async function getAuditSession({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.auditSession.findFirst({
+    return db.auditSession.findFirst({
       where: {
         id,
         organizationId,

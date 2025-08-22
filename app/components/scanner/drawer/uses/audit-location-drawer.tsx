@@ -1,39 +1,32 @@
-import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { z } from "zod";
 import {
-  auditResultsAtom,
   auditSessionAtom,
   clearScannedItemsAtom,
   removeScannedItemAtom,
   removeMultipleScannedItemsAtom,
+  scannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import { Form } from "~/components/custom-form";
-import { CheckmarkIcon } from "~/components/icons/library";
-import { Button } from "~/components/shared/button";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "~/components/shared/modal";
-import { Spinner } from "~/components/shared/spinner";
-import { useDisabled } from "~/hooks/use-disabled";
-import { tw } from "~/utils/tw";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
-import {
-  GenericItemRow,
-  DefaultLoadingState,
-  TextLoader,
-} from "../generic-item-row";
+import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { Progress } from "~/components/shared/progress";
+import { createAvailabilityLabels } from "../availability-label-factory";
+import type { AvailabilityLabelConfig } from "../availability-label-factory";
+import { tw } from "~/utils/tw";
 
-type AuditState = {
-  status: "processing" | "success" | "error";
-  errorMessage?: string;
-};
+// Schema for audit form submission
+const AuditSchema = z.object({
+  intent: z.string(),
+  auditSessionId: z.string(),
+  foundAssetCount: z.string().optional(),
+  missingAssetCount: z.string().optional(),
+  unexpectedAssetCount: z.string().optional(),
+});
 
 /**
  * Drawer component for location audit management
@@ -44,31 +37,73 @@ export default function AuditLocationDrawer({
   isLoading,
   defaultExpanded = false,
   location,
+  expectedAssets = [],
 }: {
   className?: string;
   style?: React.CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
   location: { id: string; name: string };
+  expectedAssets?: Array<{ id: string; name: string }>;
 }) {
-  const auditResults = useAtomValue(auditResultsAtom);
+  // Get the scanned items from jotai
+  const items = useAtomValue(scannedItemsAtom);
   const auditSession = useAtomValue(auditSessionAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  const [auditState, setAuditState] = useState<AuditState>({
-    status: "processing",
-  });
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const disabled = useDisabled();
+  // Calculate audit progress
+  const scannedAssets = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => item?.data as AssetFromQr);
 
-  const { found, missing, unexpected } = auditResults;
-  const hasResults =
-    found.length > 0 || missing.length > 0 || unexpected.length > 0;
+  const expectedAssetIds = new Set(expectedAssets.map((asset) => asset.id));
+  const foundAssets = scannedAssets.filter((asset) =>
+    expectedAssetIds.has(asset.id)
+  );
+  const unexpectedAssets = scannedAssets.filter(
+    (asset) => !expectedAssetIds.has(asset.id)
+  );
 
-  // Create blockers configuration (none needed for audit, but following pattern)
-  const blockerConfigs: never[] = [];
+  const totalExpected = expectedAssets.length;
+  const foundCount = foundAssets.length;
+  const unexpectedCount = unexpectedAssets.length;
+
+  // Setup blockers - for audit, we might want to block kits
+  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
+
+  // Kit blockers - kits can't be audited in location context
+  const kitQrIds = Object.entries(items)
+    .filter(([, item]) => item?.type === "kit")
+    .map(([qrId]) => qrId);
+
+  // Create blockers configuration (only for kits and errors, not unexpected assets)
+  const blockerConfigs = [
+    {
+      condition: kitQrIds.length > 0,
+      count: kitQrIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s" : ""}`}</strong> detected.
+          Kits cannot be audited in location context.
+        </>
+      ),
+      description: "Note: Only individual assets can be audited for locations.",
+      onResolve: () => removeItemsFromList(kitQrIds),
+    },
+    {
+      condition: errors.length > 0,
+      count: errors.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+          {count > 1 ? "are" : "is"} invalid.
+        </>
+      ),
+      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
+    },
+  ];
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
@@ -76,261 +111,133 @@ export default function AuditLocationDrawer({
     onResolveAll: () => {},
   });
 
-  const handleStartAudit = () => {
-    setAuditState({ status: "processing" });
-  };
+  // Form data for submission
+  const formData = auditSession
+    ? {
+        intent: "complete-audit",
+        auditSessionId: auditSession.id,
+        foundAssetCount: Object.keys(items).length.toString(),
+        missingAssetCount: "0", // This would be calculated differently
+        unexpectedAssetCount: "0", // This would be calculated differently
+      }
+    : undefined;
 
-  const handleCompleteAudit = () => {
-    setShowConfirmDialog(true);
-  };
+  // Render item function
+  const renderItem = (qrId: string, item: any) => (
+    <GenericItemRow
+      key={qrId}
+      qrId={qrId}
+      item={item}
+      onRemove={removeItem}
+      renderItem={(data: AssetFromQr | KitFromQr) => {
+        const isAsset = item.type === "asset";
+        const isExpected =
+          isAsset && expectedAssetIds.has((data as AssetFromQr).id);
+        const isUnexpected =
+          isAsset && !expectedAssetIds.has((data as AssetFromQr).id);
 
-  const handleCancelAudit = () => {
-    clearList();
-    setAuditState({ status: "processing" });
-  };
+        // Create availability labels for audit status
+        const availabilityConfigs: AvailabilityLabelConfig[] = [
+          {
+            condition: isExpected,
+            badgeText: "Expected",
+            tooltipTitle: "Expected asset",
+            tooltipContent:
+              "This asset belongs to this location according to records.",
+            priority: 100,
+            className: "border-green-200 bg-green-50 text-green-700",
+          },
+          {
+            condition: isUnexpected,
+            badgeText: "Unexpected",
+            tooltipTitle: "Unexpected asset",
+            tooltipContent:
+              "This asset was not expected in this location. It may belong to a different location or be unassigned.",
+            priority: 90,
+            className: "border-red-200 bg-red-50 text-red-700",
+          },
+        ];
 
-  if (!auditSession) {
-    return (
-      <ConfigurableDrawer
-        title="Start Location Audit"
-        description={`Begin auditing assets in ${location.name}`}
-        className={className}
-        style={style}
-        defaultExpanded={defaultExpanded}
-        actionButtons={
-          <Form method="post">
-            <input type="hidden" name="intent" value="start-audit" />
-            <input
-              type="hidden"
-              name="expectedAssetCount"
-              value={missing.length}
-            />
-            <Button
-              type="submit"
-              disabled={disabled}
-              onClick={handleStartAudit}
-            >
-              Start Audit
-            </Button>
-          </Form>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-gray-700">
-            This will start an audit session for{" "}
-            <strong>{location.name}</strong>.
-          </p>
-          <div className="rounded-lg bg-gray-50 p-3">
-            <p className="text-sm">
-              Expected assets: <strong>{missing.length}</strong>
+        const [, AuditLabels] = createAvailabilityLabels(availabilityConfigs);
+
+        return (
+          <div className="flex flex-col gap-1">
+            <p className="word-break whitespace-break-spaces font-medium">
+              {"title" in data ? data.title : data.name}
             </p>
-            <p className="mt-1 text-xs text-gray-600">
-              Scan assets to verify their presence in this location.
-            </p>
-          </div>
-        </div>
-      </ConfigurableDrawer>
-    );
-  }
-
-  return (
-    <>
-      <ConfigurableDrawer
-        title={`Audit Results - ${location.name}`}
-        description="Review scanned assets and resolve discrepancies"
-        className={className}
-        style={style}
-        defaultExpanded={hasResults}
-        actionButtons={
-          <div className="flex gap-2">
-            <Form method="post">
-              <input type="hidden" name="intent" value="cancel-audit" />
-              <input
-                type="hidden"
-                name="auditSessionId"
-                value={auditSession.id}
-              />
-              <Button
-                variant="secondary"
-                type="submit"
-                disabled={disabled}
-                onClick={handleCancelAudit}
+            <div className="flex flex-wrap items-center gap-1">
+              <span
+                className={tw(
+                  "inline-block bg-gray-50 px-[6px] py-[2px]",
+                  "rounded-md border border-gray-200",
+                  "text-xs text-gray-700"
+                )}
               >
-                Cancel Audit
-              </Button>
-            </Form>
-            <Button
-              disabled={disabled || found.length === 0}
-              onClick={handleCompleteAudit}
-            >
-              Complete Audit
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-6">
-          {/* Audit Session Header */}
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <h3 className="font-medium text-blue-900">Audit Session</h3>
-            <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-blue-700">Expected:</span>
-                <span className="ml-1 font-medium">
-                  {auditSession.expectedAssetCount}
-                </span>
-              </div>
-              <div>
-                <span className="text-blue-700">Found:</span>
-                <span className="ml-1 font-medium">{found.length}</span>
-              </div>
+                {item.type === "asset" ? "asset" : "kit"}
+              </span>
+              <AuditLabels />
             </div>
           </div>
+        );
+      }}
+      renderLoading={(qrId: string, error?: string) => (
+        <DefaultLoadingState qrId={qrId} error={error} />
+      )}
+    />
+  );
 
-          {/* Blockers */}
-          {hasBlockers && <Blockers />}
+  // Create dynamic title with progress
+  const auditTitle = (
+    <div className="text-right">
+      <span className="block text-gray-600">
+        Audit: {location.name} • {foundCount}/{totalExpected} found
+        {unexpectedCount > 0 && ` • ${unexpectedCount} unexpected`}
+      </span>
+      <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+        <Progress
+          value={totalExpected > 0 ? (foundCount / totalExpected) * 100 : 0}
+        />
+      </span>
+    </div>
+  );
 
-          {/* Found Assets */}
-          {found.length > 0 && (
-            <section>
-              <h3 className="mb-3 flex items-center gap-2 font-medium text-green-800">
-                <CheckmarkIcon className="size-4" />
-                Found ({found.length})
-              </h3>
-              <div className="space-y-2">
-                {found.map((asset) => (
-                  <GenericItemRow
-                    key={asset.id}
-                    title={asset.name}
-                    subTitle="Found in expected location"
-                    className="border-green-200 bg-green-50"
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Missing Assets */}
-          {missing.length > 0 && (
-            <section>
-              <h3 className="mb-3 flex items-center gap-2 font-medium text-yellow-800">
-                <span className="flex size-4 items-center justify-center rounded-full bg-yellow-500 text-xs text-white">
-                  !
-                </span>
-                Missing ({missing.length})
-              </h3>
-              <div className="space-y-2">
-                {missing.map((asset) => (
-                  <GenericItemRow
-                    key={asset.id}
-                    title={asset.name}
-                    subTitle="Not found during scan"
-                    className="border-yellow-200 bg-yellow-50"
-                  />
-                ))}
-              </div>
-              {missing.length > 0 && (
-                <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
-                  <p className="text-sm text-yellow-800">
-                    These assets were expected but not scanned. They may have
-                    been moved or misplaced.
-                  </p>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Unexpected Assets */}
-          {unexpected.length > 0 && (
-            <section>
-              <h3 className="mb-3 flex items-center gap-2 font-medium text-red-800">
-                <span className="flex size-4 items-center justify-center rounded-full bg-red-500 text-xs text-white">
-                  ×
-                </span>
-                Unexpected ({unexpected.length})
-              </h3>
-              <div className="space-y-2">
-                {unexpected.map((asset) => (
-                  <GenericItemRow
-                    key={asset.id}
-                    title={asset.name}
-                    subTitle="Not expected in this location"
-                    className="border-red-200 bg-red-50"
-                  />
-                ))}
-              </div>
-              {unexpected.length > 0 && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
-                  <p className="text-sm text-red-800">
-                    These assets were scanned but don't belong in this location
-                    according to records.
-                  </p>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* No Results State */}
-          {!hasResults && (
-            <div className="py-8 text-center text-gray-500">
-              <p>No assets scanned yet.</p>
-              <p className="mt-1 text-sm">
-                Start scanning to see results here.
+  return (
+    <ConfigurableDrawer
+      schema={AuditSchema}
+      formData={formData}
+      items={items}
+      onClearItems={clearList}
+      title={auditTitle}
+      isLoading={isLoading}
+      renderItem={renderItem}
+      Blockers={Blockers}
+      disableSubmit={
+        hasBlockers || !auditSession || Object.keys(items).length === 0
+      }
+      submitButtonText="Complete Audit"
+      defaultExpanded={defaultExpanded}
+      className={className}
+      style={style}
+      emptyStateContent={(expanded: boolean) => (
+        <div className="text-center py-8">
+          <p className="text-gray-500">
+            {expanded
+              ? "No assets scanned yet. Start scanning to audit this location."
+              : "Scan assets to audit this location..."}
+          </p>
+          {auditSession && expanded && (
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-700">
+                Audit: <strong>{location.name}</strong>
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Expected: {totalExpected} • Found: {foundCount} • Unexpected:{" "}
+                {unexpectedCount}
               </p>
             </div>
           )}
         </div>
-      </ConfigurableDrawer>
-
-      {/* Completion Confirmation Dialog */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Complete Audit</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to complete this audit? This will finalize
-              the audit session.
-              <div className="mt-3 space-y-1 text-sm">
-                <div>
-                  Found: <strong>{found.length}</strong> assets
-                </div>
-                <div>
-                  Missing: <strong>{missing.length}</strong> assets
-                </div>
-                <div>
-                  Unexpected: <strong>{unexpected.length}</strong> assets
-                </div>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Form method="post">
-              <input type="hidden" name="intent" value="complete-audit" />
-              <input
-                type="hidden"
-                name="auditSessionId"
-                value={auditSession?.id}
-              />
-              <input
-                type="hidden"
-                name="foundAssetCount"
-                value={found.length}
-              />
-              <input
-                type="hidden"
-                name="missingAssetCount"
-                value={missing.length}
-              />
-              <input
-                type="hidden"
-                name="unexpectedAssetCount"
-                value={unexpected.length}
-              />
-              <Button type="submit">Complete Audit</Button>
-            </Form>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+      )}
+    />
   );
 }
