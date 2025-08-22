@@ -11,7 +11,9 @@ interface LocationDescriptionColumnProps {
   value: string;
 }
 
-export function LocationDescriptionColumn({ value }: LocationDescriptionColumnProps) {
+export function LocationDescriptionColumn({
+  value,
+}: LocationDescriptionColumnProps) {
   return (
     <Td className="max-w-62 whitespace-pre-wrap">
       {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
