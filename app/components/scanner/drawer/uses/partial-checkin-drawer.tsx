@@ -7,6 +7,7 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
+  scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
@@ -60,7 +61,10 @@ export default function PartialCheckinDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
+  // Get asset and kit IDs efficiently using the atom
+  const { assetIds: _assetIds, kitIds: _kitIds } = useAtomValue(scannedItemIdsAtom);
+
+  // Filter and prepare data for component rendering
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetFromQr);
