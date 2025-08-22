@@ -9,6 +9,7 @@ Shelf.nu is an open-source asset management platform built with Remix, React, Ty
 ## Working Effectively
 
 ### Prerequisites
+
 - **Node.js** v22+ (officially required, v20 works with warnings)
 - **npm** package manager
 - **Git** version control
@@ -68,7 +69,7 @@ npm run test:e2e:install
 npm run test:e2e:dev
 # Timeout: Set 60+ minutes. Requires app running on localhost:3000.
 
-# E2E tests headless (requires running app, NEVER CANCEL)  
+# E2E tests headless (requires running app, NEVER CANCEL)
 npm run test:e2e:run
 # Timeout: Set 60+ minutes. Includes pre-build step.
 ```
@@ -87,7 +88,7 @@ npm run lint:fix
 # Timeout: Set 10+ minutes.
 
 # TypeScript checking (fails without Prisma types)
-npm run typecheck  
+npm run typecheck
 # Timeout: Set 10+ minutes. Requires npm run db:generate-type first.
 
 # Format code with Prettier (10+ seconds)
@@ -104,6 +105,7 @@ npm run validate
 ### Critical Setup Requirements
 
 1. **Supabase Setup** (REQUIRED):
+
    - Follow `docs/supabase-setup.md` for complete instructions
    - Create Supabase project and get connection strings
    - Configure authentication and storage buckets
@@ -112,7 +114,7 @@ npm run validate
 2. **Environment Variables** (REQUIRED):
    ```bash
    DATABASE_URL="postgres://..." # Supabase connection pooling URL
-   DIRECT_URL="postgres://..."   # Supabase direct connection URL  
+   DIRECT_URL="postgres://..."   # Supabase direct connection URL
    SUPABASE_URL="https://..."    # Supabase project URL
    SUPABASE_ANON_PUBLIC="..."    # Supabase anon key
    SUPABASE_SERVICE_ROLE="..."   # Supabase service role key
@@ -123,15 +125,17 @@ npm run validate
 ### Network Dependencies and Limitations
 
 These operations require network access and will fail in restricted environments:
+
 - `npm run db:generate-type` (Prisma engine download) - **CRITICAL** for TypeScript and tests
 - `npm run test:e2e:install` (Playwright browser download) - Required for E2E testing
 - `npm install` (package downloads) - Required for initial setup
 - `npm run setup` (database migrations) - Requires valid database connection
-- `npm run dev` (development server) - Requires database connection  
+- `npm run dev` (development server) - Requires database connection
 - `npm run precommit` (includes db:generate-type) - Will fail without network
 - `npm run validate` (includes tests requiring database) - Will fail without proper setup
 
 **Commands that work WITHOUT network/database:**
+
 - `npm run build` ✅ (takes ~30 seconds)
 - `npm run lint` ✅ (shows existing issues)
 - `npm run lint:fix` ✅ (shows existing issues, doesn't fix automatically due to existing errors)
@@ -149,23 +153,27 @@ These operations require network access and will fail in restricted environments
 Execute these workflows to validate functionality:
 
 1. **Asset Creation Flow**:
+
    - Navigate to asset creation page
    - Fill in asset name and description
    - Save asset and verify creation
    - Verify QR code generation
 
 2. **Category Management**:
+
    - Create new category with name and description
    - Verify category appears in listings
    - Assign category to assets
 
 3. **Team Collaboration**:
+
    - Add team member to organization
    - Assign asset custody to team member
    - Release custody and verify status changes
    - Verify custody change notifications
 
 4. **Booking System**:
+
    - Create booking for available assets
    - Verify conflict detection for double bookings
    - Check in/out assets from bookings
@@ -179,19 +187,21 @@ Execute these workflows to validate functionality:
 ### Pre-commit Validation
 
 ALWAYS run before committing changes:
+
 ```bash
 # Complete pre-commit check
 npm run precommit
 # Includes: db:generate-type, lint:fix, format, typecheck
 
 # Full validation (NEVER CANCEL - takes 120+ minutes)
-npm run validate  
+npm run validate
 # Includes: tests, linting, typecheck, E2E tests
 ```
 
 ## Architecture and Key Files
 
 ### Core Technologies
+
 - **Remix** - Full-stack React framework with file-based routing
 - **TypeScript** - Type safety throughout
 - **Prisma** - Database ORM with PostgreSQL
@@ -201,10 +211,11 @@ npm run validate
 - **Playwright** - E2E testing
 
 ### Key Directory Structure
+
 ```
 app/
 ├── routes/          # Remix file-based routes (using remix-flat-routes)
-├── modules/         # Business logic services  
+├── modules/         # Business logic services
 ├── components/      # Reusable React components
 ├── database/        # Prisma schema and migrations
 ├── atoms/           # Jotai state atoms
@@ -219,6 +230,7 @@ docs/               # Comprehensive documentation
 ```
 
 ### Critical Files to Understand
+
 1. **`app/database/schema.prisma`** - Complete database schema and relationships
 2. **`package.json`** - All available scripts and dependencies
 3. **`vite.config.ts`** - Build configuration with Remix settings
@@ -228,8 +240,9 @@ docs/               # Comprehensive documentation
 7. **`.env.example`** - Template for required environment variables
 
 ### Route Organization
+
 - `_layout+/` - Main authenticated application routes
-- `_auth+/` - Authentication and login routes  
+- `_auth+/` - Authentication and login routes
 - `_welcome+/` - User onboarding flow
 - `api+/` - API endpoints
 - `qr+/` - QR code handling for assets
@@ -237,16 +250,19 @@ docs/               # Comprehensive documentation
 ## Common Issues and Solutions
 
 ### Build Issues
+
 - **Node version warnings**: Expected with Node 20, upgrade to 22+ recommended
 - **Chunk size warnings**: Normal for large application, not errors
 - **TypeScript errors**: Run `npm run db:generate-type` first
 
-### Test Issues  
+### Test Issues
+
 - **Prisma errors in tests**: Run `npm run db:generate-type` before testing
 - **E2E test failures**: Ensure app is running on localhost:3000
 - **Network-dependent failures**: Some tests require valid database connection
 
 ### Development Issues
+
 - **App won't start**: Verify .env configuration and Supabase setup
 - **Database errors**: Check DATABASE_URL and DIRECT_URL in .env
 - **Type errors**: Ensure Prisma types are generated
