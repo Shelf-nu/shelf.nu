@@ -154,7 +154,7 @@ const ListItemContent = ({
         </div>
       </div>
     </Td>
-        {item.description ? (
+    {item.description ? (
       <LocationDescriptionColumn value={item.description} />
     ) : (
       <Td>-</Td>
