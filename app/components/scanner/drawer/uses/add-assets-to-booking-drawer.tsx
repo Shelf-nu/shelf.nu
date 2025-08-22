@@ -6,6 +6,7 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
+  scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
@@ -52,7 +53,10 @@ export default function AddAssetsToBookingDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
+  // Get asset and kit IDs efficiently using the atom
+  const { assetIds, kitIds: _kitIds } = useAtomValue(scannedItemIdsAtom);
+
+  // Filter and prepare data for component rendering
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetFromQr);
@@ -63,10 +67,7 @@ export default function AddAssetsToBookingDrawer({
 
   // List of asset IDs for the form
   const assetIdsForBooking = Array.from(
-    new Set([
-      ...assets.map((a) => a.id),
-      ...kits.flatMap((k) => k.assets.map((a) => a.id)),
-    ])
+    new Set([...assetIds, ...kits.flatMap((k) => k.assets.map((a) => a.id))])
   );
 
   // Setup blockers
