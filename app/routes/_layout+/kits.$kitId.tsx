@@ -430,7 +430,8 @@ export default function KitDetails() {
    * On the .assets and .bookings routes, we render the outlet only on the left column
    */
   const shouldRenderFullOutlet =
-    currentRoute?.handle?.name === "kit.scan-assets";
+    currentRoute?.handle?.name === "kit.scan-assets" ||
+    currentRoute?.handle?.name === "kit.audit";
 
   return shouldRenderFullOutlet ? (
     <Outlet />

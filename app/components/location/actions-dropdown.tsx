@@ -13,6 +13,7 @@ import { Button } from "../shared/button";
 
 interface Props {
   location: {
+    id: Location["id"];
     name: Location["name"];
   };
   fullWidth?: boolean;
@@ -48,6 +49,19 @@ export const ActionsDropdown = ({ location, fullWidth }: Props) => (
           width="full"
         >
           Edit
+        </Button>
+      </DropdownMenuItem>
+
+      <DropdownMenuItem>
+        <Button
+          to="audit"
+          icon="search"
+          role="link"
+          variant="link"
+          className="justify-start text-gray-700 hover:text-gray-700"
+          width="full"
+        >
+          Start Audit
         </Button>
       </DropdownMenuItem>
 

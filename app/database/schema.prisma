@@ -89,6 +89,9 @@ model User {
   createdUpdates Update[]
   updateReads    UserUpdateRead[]
 
+  // Audit sessions created by this user
+  auditSessions AuditSession[]
+
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
@@ -610,6 +613,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  auditSessions      AuditSession[]
   
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1156,4 +1160,40 @@ model UserUpdateRead {
   @@index([userId])
   @@index([updateId])
   @@index([readAt])
+}
+
+model AuditSession {
+  id String @id @default(cuid())
+  
+  type AuditType // LOCATION or KIT
+  targetId String // locationId or kitId
+  status AuditStatus @default(ACTIVE) // ACTIVE, COMPLETED, CANCELLED
+  
+  expectedAssetCount Int @default(0)
+  foundAssetCount Int @default(0)
+  missingAssetCount Int @default(0)
+  unexpectedAssetCount Int @default(0)
+  
+  createdBy User @relation(fields: [createdById], references: [id])
+  createdById String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  
+  @@index([organizationId, type, targetId])
+  @@index([createdById])
+  @@index([status, createdAt])
+}
+
+enum AuditType {
+  LOCATION
+  KIT
+}
+
+enum AuditStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
 }

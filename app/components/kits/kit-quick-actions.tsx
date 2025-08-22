@@ -1,5 +1,5 @@
 import type { Kit } from "@prisma/client";
-import { PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, QrCodeIcon, Trash2Icon, SearchIcon } from "lucide-react";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,
@@ -79,6 +79,31 @@ export default function KitQuickActions({
 
           <TooltipContent align="center" side="top">
             Show kit codes
+          </TooltipContent>
+        </Tooltip>
+      </When>
+
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.update,
+        })}
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              to={`/kits/${kit.id}/audit`}
+            >
+              <SearchIcon className="size-4" />
+            </Button>
+          </TooltipTrigger>
+
+          <TooltipContent align="center" side="top">
+            Start audit
           </TooltipContent>
         </Tooltip>
       </When>
