@@ -22,6 +22,7 @@ import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
+import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -133,6 +134,7 @@ function ConditionalDropdown() {
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
         <BulkAddToKitDialog />
+        <BulkRemoveFromKits />
       </When>
 
       <BulkDownloadQrDialog
@@ -333,7 +335,7 @@ function ConditionalDropdown() {
                   disabled={isLoading}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="border-b py-1 lg:p-0">
+              <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   label="Add to kit"
                   type="add-to-kit"
@@ -346,6 +348,14 @@ function ConditionalDropdown() {
                         }
                       : isLoading
                   }
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  label="Remove from kit"
+                  type="remove-from-kit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">

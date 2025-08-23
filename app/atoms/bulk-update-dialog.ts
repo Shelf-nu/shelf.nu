@@ -24,6 +24,7 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   "download-qr": false,
   "partial-checkin": false,
   "add-to-kit": false,
+  "remove-from-kit": false,
 };
 
 export const bulkDialogAtom =

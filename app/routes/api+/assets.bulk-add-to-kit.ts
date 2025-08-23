@@ -4,8 +4,9 @@ import { json } from "@remix-run/node";
 import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -48,6 +49,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
+    assertIsPost(request);
+
     const { organizationId } = await requirePermission({
       request,
       userId,
@@ -63,12 +66,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     );
 
-    await updateKitAssets({
+    const updatedKit = await updateKitAssets({
       kitId: kit,
       assetIds,
       organizationId,
       userId,
       request,
+    });
+
+    sendNotification({
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+      title: "Bulk assets added to kit",
+      message: `Successfully added ${assetIds.length} assets to kit "${updatedKit.name}".`,
     });
 
     return json(data({ success: true }));

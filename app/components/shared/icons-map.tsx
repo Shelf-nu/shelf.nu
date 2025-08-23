@@ -128,7 +128,8 @@ export type IconType =
   | "download-qr"
   | "qr-code"
   | "mouse-pointer-click"
-  | "add-to-kit";
+  | "add-to-kit"
+  | "remove-from-kit";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -199,6 +200,7 @@ export const iconsMap: IconsMap = {
   "qr-code": <QrCode />,
   "mouse-pointer-click": <MousePointerClick />,
   "add-to-kit": <KitIcon />,
+  "remove-from-kit": <KitIcon />,
 };
 
 export default iconsMap;
