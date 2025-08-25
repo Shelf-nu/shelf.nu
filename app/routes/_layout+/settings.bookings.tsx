@@ -38,7 +38,6 @@ import {
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { adjustDateToUTC } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -263,25 +262,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return json(data({ success: true }), { status: 200 });
       }
       case "createOverride": {
-        // Extract timezone from form data first
-        const timeZone = formData.get("timeZone") as string;
-        if (!timeZone) {
-          throw new ShelfError({
-            cause: null,
-            message: "Timezone is required",
-            label: "Working hours",
-          });
-        }
-
         // Use parseData function following your standard pattern
         const validatedData = parseData(formData, CreateOverrideFormSchema);
 
-        // Convert date from user timezone to UTC
-        const utcDate = adjustDateToUTC(validatedData.date, timeZone);
-
+        // Store the date as-is without timezone conversion
+        // Working hours overrides should use absolute dates since they represent
+        // real-world location-specific dates that don't change based on user timezone
         await createWorkingHoursOverride({
           organizationId,
-          date: utcDate,
+          date: validatedData.date, // Store date directly without timezone adjustment
           isOpen: validatedData.isOpen,
           openTime: validatedData.openTime || undefined,
           closeTime: validatedData.closeTime || undefined,

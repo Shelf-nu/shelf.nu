@@ -70,7 +70,7 @@ describe("normalizeWorkingHoursForValidation", () => {
       overrides: [
         {
           id: "override-1",
-          date: new Date("2025-07-25T00:00:00Z"),
+          date: "2025-07-25",
           isOpen: false,
           openTime: null,
           closeTime: null,
@@ -81,7 +81,7 @@ describe("normalizeWorkingHoursForValidation", () => {
 
     const result = normalizeWorkingHoursForValidation(rawWorkingHours);
 
-    expect(result?.overrides[0].date).toBe("2025-07-25T00:00:00.000Z");
+    expect(result?.overrides[0].date).toBe("2025-07-25");
   });
 
   it("should return undefined for invalid data", () => {
@@ -197,7 +197,7 @@ describe("calculateEffectiveEndDate", () => {
       overrides: [
         {
           id: "holiday",
-          date: "2025-07-28T00:00:00Z", // Monday is now closed (holiday)
+          date: "2025-07-28", // Monday is now closed (holiday) - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
@@ -232,7 +232,7 @@ describe("calculateEffectiveEndDate", () => {
       overrides: [
         {
           id: "special",
-          date: "2025-07-26T00:00:00Z", // Saturday is now open (special day)
+          date: "2025-07-26", // Saturday is now open (special day) - absolute date
           isOpen: true,
           openTime: "10:00",
           closeTime: "16:00",
@@ -364,7 +364,7 @@ describe("calculateBusinessHoursDuration", () => {
       overrides: [
         {
           id: "holiday",
-          date: "2025-07-28T00:00:00Z", // Monday is closed (holiday)
+          date: "2025-07-28", // Monday is closed (holiday) - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
@@ -521,7 +521,7 @@ describe("getBookingDefaultStartEndTimes", () => {
       overrides: [
         {
           id: "today-closed",
-          date: "2025-07-25T00:00:00Z", // Today (Friday) is closed
+          date: "2025-07-25", // Today (Friday) is closed - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
