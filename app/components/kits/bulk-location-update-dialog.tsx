@@ -4,23 +4,25 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
 import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared/button";
 
-export const BulkLocationUpdateSchema = z.object({
-  assetIds: z.array(z.string()).optional().default([]),
-  kitIds: z.array(z.string()).optional().default([]),
+export const KitBulkLocationUpdateSchema = z.object({
+  kitIds: z.array(z.string()).min(1),
   newLocationId: z.string({ required_error: "Please select a location" }),
 });
 
-export default function BulkLocationUpdateDialog() {
-  const zo = useZorm("BulkLocationUpdate", BulkLocationUpdateSchema);
+export default function KitBulkLocationUpdateDialog() {
+  const zo = useZorm("KitBulkLocationUpdate", KitBulkLocationUpdateSchema);
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="location"
-      arrayFieldId="assetIds"
+      arrayFieldId="kitIds"
+      actionUrl="/api/kits/bulk-actions"
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div>
+          <input type="hidden" name="intent" value="bulk-update-location" />
+
           <div className="relative z-50 mb-8">
             <LocationSelect isBulk hideClearButton />
             {zo.errors.newLocationId()?.message ? (

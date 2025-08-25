@@ -1,8 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+  useSubmit,
+} from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
@@ -25,23 +30,22 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
-import { Td, Th } from "~/components/table";
-import { db } from "~/database/db.server";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import {
-  createBulkLocationChangeNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
+import { Td, Th } from "~/components/table";
+import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
+import { db } from "~/database/db.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { updateLocationAssets } from "~/modules/location/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -74,6 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
         },
         include: {
+          kits: { select: { id: true } },
           assets: {
             select: { id: true },
           },
@@ -164,172 +169,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds } = parseData(
+    let { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
         removedAssetIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional(),
       }),
       {
         additionalData: { userId, organizationId, locationId },
       }
     );
 
-    const location = await db.location
-      .findUniqueOrThrow({
-        where: {
-          id: locationId,
-          organizationId,
-        },
-        include: {
-          assets: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
-      });
-
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      const locationAssets = location.assets.map((asset) => asset.id);
-      /**
-       * New assets that needs to be added are
-       * - Previously added assets
-       * - All assets with applied filters
-       */
-      assetIds = [
-        ...new Set([
-          ...allAssets.map((asset) => asset.id),
-          ...locationAssets.filter((asset) => !removedAssetIds.includes(asset)),
-        ]),
-      ];
-    }
-
-    /**
-     * We need to query all the modified assets so we know their location before the change
-     * That way we can later create notes for all the location changes
-     */
-    const modifiedAssets = await db.asset
-      .findMany({
-        where: {
-          id: {
-            in: [...assetIds, ...removedAssetIds],
-          },
-          organizationId,
-        },
-        select: {
-          title: true,
-          id: true,
-          location: {
-            select: {
-              name: true,
-              id: true,
-            },
-          },
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              id: true,
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching the assets. Please try again or contact support.",
-          additionalData: { assetIds, removedAssetIds, userId, locationId },
-          label: "Assets",
-        });
-      });
-
-    if (assetIds.length > 0) {
-      /** We update the location with the new assets */
-      await db.location
-        .update({
-          where: {
-            id: locationId,
-            organizationId,
-          },
-          data: {
-            assets: {
-              connect: assetIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while adding the assets to the location. Please try again or contact support.",
-            additionalData: { assetIds, userId, locationId },
-            label: "Location",
-          });
-        });
-    }
-
-    /** If some assets were removed, we also need to handle those */
-    if (removedAssetIds.length > 0) {
-      await db.location
-        .update({
-          where: {
-            organizationId,
-            id: locationId,
-          },
-          data: {
-            assets: {
-              disconnect: removedAssetIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while removing the assets from the location. Please try again or contact support.",
-            additionalData: { removedAssetIds, userId, locationId },
-            label: "Location",
-          });
-        });
-    }
-
-    /** Creates the relevant notes for all the changed assets */
-    await createBulkLocationChangeNotes({
-      modifiedAssets,
+    await updateLocationAssets({
       assetIds,
+      organizationId,
+      locationId,
+      userId,
+      request,
       removedAssetIds,
-      userId: authSession.userId,
-      location,
     });
 
-    return redirect(`/locations/${locationId}`);
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert,
+     * so we have to redirect to manage-kits url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
+
+    return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     return json(error(reason), { status: reason.status });
@@ -340,12 +209,23 @@ export default function AddAssetsToLocation() {
   const { location, totalItems } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const navigate = useNavigate();
+  const submit = useSubmit();
+
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+
+  const locationKitIds = location.kits.map((k) => k.id);
+  const locationAssetsCount = location.assets.length;
+  const hasUnsavedChanges = selectedBulkItemsCount !== locationAssetsCount;
+
+  const manageKitsUrl = `/locations/${location.id}/kits/manage-kits`;
 
   const removedAssets = useMemo(
     () =>
@@ -366,24 +246,53 @@ export default function AddAssetsToLocation() {
   }, [location.assets, setSelectedBulkItems]);
 
   return (
-    <div className="flex h-full max-h-full flex-col">
-      {/* Search */}
-      <div className=" border-b px-6 md:pb-3">
-        <Filters
-          className="md:border-0 md:p-0"
-          slots={{
-            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-            "right-of-search": (
-              <SortBy
-                sortingOptions={ASSET_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-              />
-            ),
-          }}
-        ></Filters>
+    <Tabs
+      className="flex h-full max-h-full flex-col"
+      value="assets"
+      onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
+        navigate(manageKitsUrl);
+      }}
+    >
+      <div className="border-b px-6 py-2">
+        <TabsList className="w-full">
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+            Assets{" "}
+            {selectedBulkItemsCount > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {hasSelectedAllItems ? totalItems : selectedBulkItemsCount}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+            Kits
+            {locationKitIds.length > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {locationKitIds.length}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
       </div>
-      {/* Filters */}
-      <div className=" flex  justify-around gap-2 border-b p-3 lg:gap-4">
+
+      <Filters
+        className="justify-between !border-t-0 border-b px-6 md:flex"
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": (
+            <SortBy
+              sortingOptions={ASSET_SORTING_OPTIONS}
+              defaultSortingBy="createdAt"
+            />
+          ),
+        }}
+      />
+
+      <div className=" flex justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -430,8 +339,7 @@ export default function AddAssetsToLocation() {
         />
       </div>
 
-      {/* List */}
-      <div className="  flex-1 overflow-y-auto px-5 md:px-0">
+      <TabsContent value="assets" asChild>
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -444,7 +352,7 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 flex h-full flex-col justify-start border-0"
+          className="mx-1 flex h-full flex-col justify-start border-0"
           bulkActions={<> </>}
           headerChildren={
             <>
@@ -454,8 +362,8 @@ export default function AddAssetsToLocation() {
             </>
           }
         />
-      </div>
-      {/* Footer of the modal */}
+      </TabsContent>
+
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
         <p>
           {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
@@ -465,7 +373,7 @@ export default function AddAssetsToLocation() {
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {removedAssets.map((asset, i) => (
               <input
@@ -484,6 +392,9 @@ export default function AddAssetsToLocation() {
                 value={asset.id}
               />
             ))}
+            {hasUnsavedChanges && isAlertOpen ? (
+              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+            ) : null}
             <Button
               type="submit"
               name="intent"
@@ -495,7 +406,21 @@ export default function AddAssetsToLocation() {
           </Form>
         </div>
       </footer>
-    </div>
+
+      <UnsavedChangesAlert
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageKitsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      >
+        You have added some assets to the booking but haven't saved it yet. Do
+        you want to confirm adding those assets?
+      </UnsavedChangesAlert>
+    </Tabs>
   );
 }
 

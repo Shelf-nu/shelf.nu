@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
+import { MapPinIcon } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
@@ -192,6 +193,21 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                 action: PermissionAction.update,
               })}
             >
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  to="assets/update-location"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={() => setOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    <MapPinIcon className="size-4" /> Update location
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
                   to="edit"

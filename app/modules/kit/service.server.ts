@@ -68,10 +68,16 @@ export async function createKit({
   organizationId,
   qrId,
   categoryId,
+  locationId,
   barcodes,
 }: Pick<
   Kit,
-  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+  | "name"
+  | "description"
+  | "createdById"
+  | "organizationId"
+  | "categoryId"
+  | "locationId"
 > & {
   qrId?: Qr["id"];
   barcodes?: Pick<Barcode, "type" | "value">[];
@@ -143,9 +149,11 @@ export async function createKit({
       });
     }
 
-    return await db.kit.create({
-      data,
-    });
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
+    }
+
+    return await db.kit.create({ data });
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -186,9 +194,10 @@ export async function updateKit({
   organizationId,
   categoryId,
   barcodes,
+  locationId,
 }: UpdateKitPayload) {
   try {
-    const data = {
+    const data: Prisma.KitUpdateInput = {
       name,
       description,
       image,
@@ -214,6 +223,10 @@ export async function updateKit({
           },
         },
       });
+    }
+
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
     }
 
     const kit = await db.kit.update({
@@ -1376,6 +1389,72 @@ export async function getAvailableKitAssetForBooking(
         cause?.message ||
         "Something went wrong while getting available assets.",
       label: "Assets",
+    });
+  }
+}
+
+export async function updateKitLocation({
+  id,
+  organizationId,
+  currentLocationId,
+  newLocationId,
+}: {
+  id: Kit["id"];
+  organizationId: Kit["organizationId"];
+  currentLocationId: Kit["locationId"];
+  newLocationId: Kit["locationId"];
+}) {
+  try {
+    const data: Prisma.KitUpdateInput = {};
+
+    if (newLocationId) {
+      data.location = { connect: { id: newLocationId } };
+    }
+
+    if (currentLocationId && !newLocationId) {
+      data.location = { disconnect: true };
+    }
+
+    return await db.kit.update({
+      where: { id, organizationId },
+      data,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateKitLocation({
+  kitIds,
+  organizationId,
+  newLocationId,
+  currentSearchParams,
+}: {
+  kitIds: Array<Kit["id"]>;
+  organizationId: Kit["organizationId"];
+  newLocationId: Kit["locationId"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    return await db.kit.updateMany({
+      where,
+      data: {
+        locationId: newLocationId,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
     });
   }
 }
