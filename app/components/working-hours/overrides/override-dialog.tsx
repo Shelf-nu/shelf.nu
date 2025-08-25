@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import { format } from "date-fns";
 import { useZorm } from "react-zorm";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
@@ -12,8 +13,6 @@ import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { CreateOverrideFormSchema } from "~/modules/working-hours/zod-utils";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
-import { useHints } from "~/utils/client-hints";
-import { getTodayInUserTimezone } from "~/utils/date-fns";
 
 export function NewOverrideDialog() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -81,12 +80,10 @@ export const WorkingHoursOverrideForm = ({
   });
   const disabled = useDisabled(fetcher);
   const zo = useZorm("WorkingHoursOverrideForm", CreateOverrideFormSchema);
-  const { timeZone } = useHints();
-
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
-  // Get today's date in user timezone for minimum date validation
-  const todayInUserTimezone = getTodayInUserTimezone(timeZone);
+  // Get today's date as absolute date for minimum date validation
+  const todayAbsolute = format(new Date(), "yyyy-MM-dd");
 
   const handleIsOpenChange = (checked: boolean) => {
     setIsOpen(checked);
@@ -109,9 +106,6 @@ export const WorkingHoursOverrideForm = ({
     <div className="">
       <fetcher.Form ref={zo.ref} method="post" className="">
         <input type="hidden" name="intent" value="createOverride" />
-
-        {/* Hidden timezone field for server-side conversion */}
-        <input type="hidden" name="timeZone" value={timeZone} />
 
         {/* Override Open/Closed Toggle */}
         <FormRow
@@ -153,7 +147,7 @@ export const WorkingHoursOverrideForm = ({
             name={zo.fields.date()}
             disabled={disabled}
             required
-            min={todayInUserTimezone}
+            min={todayAbsolute}
             error={zo.errors.date()?.message}
             className="w-full"
           />
