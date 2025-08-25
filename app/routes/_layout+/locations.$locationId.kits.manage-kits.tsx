@@ -261,7 +261,7 @@ export default function ManageLocationKits() {
             newButtonRoute: "/kits/new",
             newButtonContent: "New kit",
           }}
-          className="-mx-5 flex h-full flex-col justify-start border-0"
+          className="mx-1 flex h-full flex-col justify-start border-0"
           bulkActions={<> </>}
           headerChildren={
             <>

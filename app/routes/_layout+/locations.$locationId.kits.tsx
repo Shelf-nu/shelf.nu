@@ -179,9 +179,17 @@ const Row = ({
               />
             </div>
             <div className="flex flex-col gap-y-1">
-              <p className="word-break whitespace-break-spaces font-medium">
-                {item.name}
-              </p>
+              <span className="word-break whitespace-break-spaces font-medium">
+                <Button
+                  to={`/kits/${item.id}`}
+                  variant="link"
+                  className="text-left text-gray-900 hover:text-gray-700"
+                  target="_blank"
+                  onlyNewTabIconOnHover={true}
+                >
+                  {item.name}
+                </Button>
+              </span>
               <KitStatusBadge status={item.status} availableToBook />
             </div>
           </div>

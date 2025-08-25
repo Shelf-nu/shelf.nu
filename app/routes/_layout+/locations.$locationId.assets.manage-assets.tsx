@@ -352,7 +352,7 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 flex h-full flex-col justify-start border-0"
+          className="mx-1 flex h-full flex-col justify-start border-0"
           bulkActions={<> </>}
           headerChildren={
             <>
