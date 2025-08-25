@@ -386,6 +386,7 @@ enum BarcodeType {
   Code39
   DataMatrix
   ExternalQR
+  EAN13
 }
 
 model PrintBatch {

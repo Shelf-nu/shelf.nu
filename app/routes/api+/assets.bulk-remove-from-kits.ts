@@ -1,0 +1,54 @@
+import type { ActionFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
+import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+
+  try {
+    assertIsPost(request);
+
+    const { organizationId } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const { assetIds } = parseData(
+      await request.formData(),
+      BulkRemoveFromKitsSchema,
+      {
+        additionalData: { userId, organizationId },
+      }
+    );
+
+    await bulkRemoveAssetsFromKits({
+      assetIds,
+      userId,
+      organizationId,
+      request,
+    });
+
+    sendNotification({
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+      title: "Bulk assets removed from kits",
+      message: `Successfully removed ${assetIds.length} assets from kits.`,
+    });
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}

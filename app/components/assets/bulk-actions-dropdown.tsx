@@ -14,6 +14,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
@@ -21,6 +22,7 @@ import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
+import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -131,6 +133,8 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
+        <BulkAddToKitDialog />
+        <BulkRemoveFromKits />
       </When>
 
       <BulkDownloadQrDialog
@@ -317,6 +321,29 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
+                  label="Add to kit"
+                  type="add-to-kit"
+                  onClick={closeMenu}
+                  disabled={
+                    someAssetCheckedOut
+                      ? {
+                          reason:
+                            "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
+                        }
+                      : isLoading
+                  }
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className=" py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  label="Remove from kit"
+                  type="remove-from-kit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-t py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
                   label="Mark as available"
                   type="available"
                   onClick={closeMenu}
@@ -331,6 +358,7 @@ function ConditionalDropdown() {
                   disabled={isLoading}
                 />
               </DropdownMenuItem>
+
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="trash"
