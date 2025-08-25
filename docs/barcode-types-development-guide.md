@@ -326,7 +326,13 @@ const formatMap: Record<BarcodeType, string> = {
 
 ### 8. Scanner Integration
 
-#### 8.1 Add Scanner Detection
+#### 8.1 Check zxing Format Name
+
+**⚠️ IMPORTANT**: Before adding your new barcode type, check what format name zxing-wasm uses for your barcode type. This can be found in the zxing-wasm documentation or by testing the scanner.
+
+**Enum Naming Rule**: PostgreSQL enum values cannot contain dashes. If zxing uses a format name with dashes (e.g., "EAN-13"), you must use an alternative in your enum (e.g., "EAN13") and add format mapping.
+
+#### 8.2 Add Scanner Detection
 
 **File:** `app/components/scanner/utils.tsx`
 
@@ -338,6 +344,26 @@ const orderedTypes = [
   BarcodeType.DataMatrix,
   BarcodeType.YourNewType, // Add your new type
 ];
+```
+
+#### 8.3 Add Format Mapping (if needed)
+
+**File:** `app/components/scanner/utils.tsx`
+
+If zxing format name doesn't match your enum value (e.g., "EAN-13" vs "EAN13"), add mapping:
+
+```typescript
+} else if (
+  SUPPORTED_BARCODE_FORMATS.includes(detectedFormat) ||
+  detectedFormat === 'Your-Zxing-Format' // Add your zxing format name if different
+) {
+  // Note: zxing returns "Your-Zxing-Format" but PostgreSQL enums can't contain dashes,
+  // so our enum uses "YourZxingFormat". Map the scanner format to our enum value.
+
+  // Map zxing format names to our BarcodeType enum values
+  const barcodeType = detectedFormat === 'Your-Zxing-Format'
+    ? 'YourZxingFormat'
+    : detectedFormat as BarcodeType;
 ```
 
 ### 9. Search and Filter Logic
@@ -424,6 +450,7 @@ Use this checklist to ensure all necessary changes are made:
 - [ ] **CSV Template** - Updated example file
 - [ ] **Column Rendering** - Added to switch statement
 - [ ] **Barcode Display** - Added to formatMap in BarcodeDisplay component ⚠️ **CRITICAL**
+- [ ] **Scanner Format Check** - Verified zxing format name matches enum or added mapping ⚠️ **CRITICAL**
 - [ ] **Scanner Detection** - Added to orderedTypes
 - [ ] **Search Logic** - Added to searchable fields
 - [ ] **Documentation** - Updated import documentation
@@ -470,12 +497,13 @@ Use this checklist to ensure all necessary changes are made:
 
 1. **Missing Normalization Function Update** - Values won't be processed correctly, causing validation and database issues ⚠️ **CRITICAL**
 2. **Missing BarcodeDisplay formatMap Update** - Barcodes won't render visually, showing error messages instead ⚠️ **CRITICAL**
-3. **Missing CSV Template Update** - Users won't be able to import the new type
-4. **Incorrect SQL Subquery** - Sorting/filtering won't work
-5. **Missing Scanner Detection** - Camera scanning won't recognize the type
-6. **Incomplete Test Coverage** - Edge cases may break production
-7. **Missing Column Rendering** - UI will show empty cells
-8. **Incorrect Validation Regex** - Users can't enter valid barcodes
+3. **Scanner Format Mismatch** - Scanner shows "unsupported barcode" error when zxing format name doesn't match enum ⚠️ **CRITICAL**
+4. **Missing CSV Template Update** - Users won't be able to import the new type
+5. **Incorrect SQL Subquery** - Sorting/filtering won't work
+6. **Missing Scanner Detection** - Camera scanning won't recognize the type
+7. **Incomplete Test Coverage** - Edge cases may break production
+8. **Missing Column Rendering** - UI will show empty cells
+9. **Incorrect Validation Regex** - Users can't enter valid barcodes
 
 ## Troubleshooting
 
