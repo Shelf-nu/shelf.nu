@@ -132,6 +132,7 @@ function detectBarcodeType(value: string): BarcodeType | null {
   // Order by specificity: URLs and flexible content first, then structured barcodes
   const orderedTypes: BarcodeType[] = [
     BarcodeType.ExternalQR, // 1-2048 characters, URLs and flexible content (check first for URLs)
+    BarcodeType.EAN13, // Exactly 13 numeric digits with check digit validation
     BarcodeType.Code39, // 4-43 characters, alphanumeric only
     BarcodeType.DataMatrix, // 4-100 characters
     BarcodeType.Code128, // 4-40 characters, most permissive (check last)
