@@ -2,7 +2,10 @@ import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
   CalendarCheck,
   MousePointerClick,
+  Package,
   PackageCheck,
+  PackageMinus,
+  PackagePlus,
   QrCode,
 } from "lucide-react";
 import { Spinner } from "./spinner";
@@ -39,7 +42,6 @@ import {
   GraphIcon,
   ScanQRIcon,
   SwitchIcon,
-  KitIcon,
   BookingsIcon,
   CheckOutIcon,
   CheckInIcon,
@@ -175,7 +177,7 @@ export const iconsMap: IconsMap = {
   graph: <GraphIcon />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
-  kit: <KitIcon />,
+  kit: <Package />,
   "assign-custody": <CheckOutIcon />,
   "release-custody": <CheckInIcon />,
   "partial-checkin": <PackageCheck />,
@@ -199,8 +201,8 @@ export const iconsMap: IconsMap = {
   "download-qr": <DownloadIcon />,
   "qr-code": <QrCode />,
   "mouse-pointer-click": <MousePointerClick />,
-  "add-to-kit": <KitIcon />,
-  "remove-from-kit": <KitIcon />,
+  "add-to-kit": <PackagePlus />,
+  "remove-from-kit": <PackageMinus />,
 };
 
 export default iconsMap;

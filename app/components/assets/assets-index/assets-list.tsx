@@ -2,7 +2,7 @@ import type { Tag } from "@prisma/client";
 
 import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
-import { KitIcon } from "~/components/icons/library";
+import { Package } from "lucide-react";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
@@ -239,7 +239,7 @@ const ListAssetContent = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-gray-200">
-                        <KitIcon className="size-2" />
+                        <Package className="size-2" />
                       </div>
                     </TooltipTrigger>
 

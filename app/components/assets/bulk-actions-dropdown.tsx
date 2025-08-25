@@ -321,6 +321,29 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
+                  label="Add to kit"
+                  type="add-to-kit"
+                  onClick={closeMenu}
+                  disabled={
+                    someAssetCheckedOut
+                      ? {
+                          reason:
+                            "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
+                        }
+                      : isLoading
+                  }
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className=" py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  label="Remove from kit"
+                  type="remove-from-kit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-t py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
                   label="Mark as available"
                   type="available"
                   onClick={closeMenu}
@@ -335,29 +358,7 @@ function ConditionalDropdown() {
                   disabled={isLoading}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem className="py-1 lg:p-0">
-                <BulkUpdateDialogTrigger
-                  label="Add to kit"
-                  type="add-to-kit"
-                  onClick={closeMenu}
-                  disabled={
-                    someAssetCheckedOut
-                      ? {
-                          reason:
-                            "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
-                        }
-                      : isLoading
-                  }
-                />
-              </DropdownMenuItem>
-              <DropdownMenuItem className="border-b py-1 lg:p-0">
-                <BulkUpdateDialogTrigger
-                  label="Remove from kit"
-                  type="remove-from-kit"
-                  onClick={closeMenu}
-                  disabled={isLoading}
-                />
-              </DropdownMenuItem>
+
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="trash"
