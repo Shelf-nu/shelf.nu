@@ -173,6 +173,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           newLocationId,
           currentSearchParams,
+          userId,
         });
 
         sendNotification({

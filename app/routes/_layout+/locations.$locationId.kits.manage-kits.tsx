@@ -11,6 +11,7 @@ import {
   useSubmit,
 } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { MapPin } from "lucide-react";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -27,6 +28,15 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/shared/modal";
 import {
   Tabs,
   TabsContent,
@@ -89,6 +99,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableKits({
         request,
         organizationId,
+        extraInclude: {
+          location: { select: { id: true, name: true } },
+        },
       });
 
     const modelName = {
@@ -180,6 +193,7 @@ export default function ManageLocationKits() {
 
   const formRef = useRef<HTMLFormElement>(null);
   const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const [isCascadeAlertOpen, setIsCascadeAlertOpen] = useState(false);
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
@@ -265,6 +279,7 @@ export default function ManageLocationKits() {
           bulkActions={<> </>}
           headerChildren={
             <>
+              <Th>Location</Th>
               <Th>Category</Th>
             </>
           }
@@ -303,7 +318,17 @@ export default function ManageLocationKits() {
               <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
             ) : null}
 
-            <Button type="submit" disabled={isSearching}>
+            <Button
+              type="button"
+              disabled={isSearching}
+              onClick={() => {
+                if (hasUnsavedChanges) {
+                  setIsCascadeAlertOpen(true);
+                } else {
+                  submit(formRef.current);
+                }
+              }}
+            >
               Confirm
             </Button>
           </Form>
@@ -323,6 +348,55 @@ export default function ManageLocationKits() {
         You have added some kits to the booking but haven't saved it yet. Do you
         want to confirm adding those kits?
       </UnsavedChangesAlert>
+
+      <AlertDialog
+        open={isCascadeAlertOpen}
+        onOpenChange={setIsCascadeAlertOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mx-auto md:m-0">
+              <span className="flex size-12 items-center justify-center rounded-full bg-primary-50 p-2 text-primary-600">
+                <MapPin />
+              </span>
+            </div>
+            <AlertDialogTitle>Location Update notice</AlertDialogTitle>
+            <AlertDialogDescription>
+              Changing kit locations will also automatically update the location
+              of all assets within those kits.
+              {selectedBulkItemsCount !== locationKitsCount && (
+                <div>
+                  <strong>This action will affect:</strong>
+                  <ul className="mt-2 list-inside list-disc">
+                    <li>All assets in kits being added to this location</li>
+                    <li>All assets in kits being removed from this location</li>
+                  </ul>
+                </div>
+              )}
+              <div className="mt-2">Do you want to continue?</div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <div className="flex justify-center gap-2">
+              <AlertDialogCancel asChild>
+                <Button variant="secondary" disabled={isSearching}>
+                  Cancel
+                </Button>
+              </AlertDialogCancel>
+
+              <Button
+                onClick={() => {
+                  setIsCascadeAlertOpen(false);
+                  submit(formRef.current);
+                }}
+                disabled={isSearching}
+              >
+                Yes, update locations
+              </Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Tabs>
   );
 }
@@ -330,7 +404,9 @@ export default function ManageLocationKits() {
 const RowComponent = ({
   item,
 }: {
-  item: Prisma.KitGetPayload<{ include: { category: true } }>;
+  item: Prisma.KitGetPayload<{
+    include: { category: true; location: { select: { id: true; name: true } } };
+  }>;
 }) => {
   const { category } = item;
 
@@ -360,6 +436,18 @@ const RowComponent = ({
             </div>
           </div>
         </div>
+      </Td>
+      {/* Location */}
+      <Td>
+        {item.location ? (
+          <div
+            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
+            title={`Current location: ${item.location.name}`}
+          >
+            <div className="size-2 rounded-full bg-gray-500"></div>
+            <span>{item.location.name}</span>
+          </div>
+        ) : null}
       </Td>
 
       {/* Category*/}

@@ -40,6 +40,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       userOrganizations,
+      extraInclude: {
+        _count: { select: { assets: true } },
+      },
     });
 
     const { locations, totalLocations } = await getLocationsForCreateAndEdit({
@@ -82,6 +85,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
       organizationId,
       currentLocationId: payload.currentLocationId ?? null,
       newLocationId: payload.newLocationId,
+      userId,
     });
 
     sendNotification({
@@ -114,6 +118,17 @@ export default function UpdateKitLocation() {
             Adjust the location of{" "}
             <span className="font-medium">{kit.name}</span>.
           </p>
+          {kit._count && kit._count.assets > 0 && (
+            <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> This will also update the location of all{" "}
+                <span className="font-medium">
+                  {kit._count.assets} asset{kit._count.assets > 1 ? "s" : ""}
+                </span>{" "}
+                within this kit.
+              </p>
+            </div>
+          )}
         </div>
         <div className=" relative z-50 mb-8">
           <LocationSelect isBulk={false} locationId={kit?.locationId} />

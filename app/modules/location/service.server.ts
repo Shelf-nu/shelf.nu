@@ -32,9 +32,11 @@ import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
+  getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
-import { createNote } from "../note/service.server";
+import { createNote, createNotes } from "../note/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
 
@@ -1015,7 +1017,14 @@ export async function updateLocationKits({
     const location = await db.location
       .findUniqueOrThrow({
         where: { id: locationId, organizationId },
-        include: { kits: true },
+        include: {
+          kits: {
+            select: {
+              id: true,
+              assets: { select: { id: true } },
+            },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1041,7 +1050,10 @@ export async function updateLocationKits({
 
       const allKits = await db.kit.findMany({
         where: kitWhere,
-        select: { id: true },
+        select: {
+          id: true,
+          assets: { select: { id: true } },
+        },
       });
 
       const locationKits = location.kits.map((kit) => kit.id);
@@ -1059,7 +1071,26 @@ export async function updateLocationKits({
     }
 
     if (kitIds.length > 0) {
-      /** We update the location with the new assets */
+      // Get all asset IDs from the kits that are being added to this location
+      const kitsToAdd = await db.kit.findMany({
+        where: { id: { in: kitIds }, organizationId },
+        select: {
+          id: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              location: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+
+      const assetIds = kitsToAdd.flatMap((kit) =>
+        kit.assets.map((asset) => asset.id)
+      );
+
+      /** We update the location with the new kits and their assets */
       await db.location
         .update({
           where: {
@@ -1069,6 +1100,11 @@ export async function updateLocationKits({
           data: {
             kits: {
               connect: kitIds.map((id) => ({
+                id,
+              })),
+            },
+            assets: {
+              connect: assetIds.map((id) => ({
                 id,
               })),
             },
@@ -1083,10 +1119,45 @@ export async function updateLocationKits({
             label: "Location",
           });
         });
+
+      // Add notes to the assets that their location was updated via their parent kit
+      if (assetIds.length > 0) {
+        const user = await getUserByID(userId);
+        const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location, // Use the asset's current location
+                newLocation: location,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
     }
 
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
+      // Get asset IDs from the kits being removed
+      const kitsBeingRemoved = await db.kit.findMany({
+        where: { id: { in: removedKitIds }, organizationId },
+        select: { id: true, assets: { select: { id: true, title: true } } },
+      });
+
+      const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
+        kit.assets.map((asset) => asset.id)
+      );
+
       await db.location
         .update({
           where: {
@@ -1096,6 +1167,11 @@ export async function updateLocationKits({
           data: {
             kits: {
               disconnect: removedKitIds.map((id) => ({
+                id,
+              })),
+            },
+            assets: {
+              disconnect: removedAssetIds.map((id) => ({
                 id,
               })),
             },
@@ -1110,6 +1186,31 @@ export async function updateLocationKits({
             label: "Location",
           });
         });
+
+      // Add notes to the assets that their location was removed via their parent kit
+      if (removedAssetIds.length > 0) {
+        const user = await getUserByID(userId);
+        const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allRemovedAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: location,
+                newLocation: null,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
     }
   } catch (cause) {
     throw new ShelfError({
