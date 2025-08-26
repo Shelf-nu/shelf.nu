@@ -82,38 +82,23 @@ export async function estimateNextSequentialId(
     return formatSequentialId(nextValue, prefix);
   } catch (error) {
     // If currval fails, sequence might not have been used yet
-    // Check if there are any existing assets with sequential IDs
-    const existingCount = await db.asset.count({
-      where: {
-        organizationId,
-        sequentialId: { not: null },
-      },
-    });
+    // Find the highest existing sequential ID using proper numeric extraction
+    // This avoids string sorting issues when IDs go beyond 9999
+    const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
+      SELECT COALESCE(MAX(
+        CASE 
+          WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
+          THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
+          ELSE 0 
+        END
+      ), 0) as max_num
+      FROM "Asset"
+      WHERE "organizationId" = ${organizationId} 
+      AND "sequentialId" IS NOT NULL
+    `;
 
-    // If no assets have sequential IDs yet, estimate starting from 1
-    if (existingCount === 0) {
-      return formatSequentialId(1, prefix);
-    }
-
-    // Otherwise, get the highest existing sequential ID and estimate next
-    const highestAsset = await db.asset.findFirst({
-      where: {
-        organizationId,
-        sequentialId: { not: null },
-      },
-      select: { sequentialId: true },
-      orderBy: { sequentialId: "desc" },
-    });
-
-    if (highestAsset?.sequentialId) {
-      const currentNumber = extractSequenceNumber(highestAsset.sequentialId);
-      if (currentNumber !== null) {
-        return formatSequentialId(currentNumber + 1, prefix);
-      }
-    }
-
-    // Fallback to 1 if we can't determine the next value
-    return formatSequentialId(1, prefix);
+    const highestNumber = maxExisting[0]?.max_num || 0;
+    return formatSequentialId(highestNumber + 1, prefix);
   }
 }
 
@@ -188,11 +173,11 @@ export async function organizationHasSequentialIds(
  * @param organizationId - The organization ID
  * @returns Promise<number> - Number of assets without sequential IDs
  */
-export async function getAssetsWithoutSequentialIdCount(
+export function getAssetsWithoutSequentialIdCount(
   organizationId: string
 ): Promise<number> {
   try {
-    return await db.asset.count({
+    return db.asset.count({
       where: {
         organizationId,
         sequentialId: null,
