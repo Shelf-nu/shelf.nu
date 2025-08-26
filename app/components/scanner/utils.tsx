@@ -132,6 +132,7 @@ function detectBarcodeType(value: string): BarcodeType | null {
   // Order by specificity: URLs and flexible content first, then structured barcodes
   const orderedTypes: BarcodeType[] = [
     BarcodeType.ExternalQR, // 1-2048 characters, URLs and flexible content (check first for URLs)
+    BarcodeType.EAN13, // Exactly 13 numeric digits with check digit validation
     BarcodeType.Code39, // 4-43 characters, alphanumeric only
     BarcodeType.DataMatrix, // 4-100 characters
     BarcodeType.Code128, // 4-40 characters, most permissive (check last)
@@ -288,7 +289,12 @@ export const processFrame = async ({
             barcodeType: "ExternalQR",
           });
         }
-      } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
+      } else if (
+        SUPPORTED_BARCODE_FORMATS.includes(detectedFormat) ||
+        detectedFormat === "EAN-13"
+      ) {
+        // Note: zxing returns "EAN-13" but PostgreSQL enums can't contain dashes,
+        // so our enum uses "EAN13". Map the scanner format to our enum value.
         // It's a supported barcode type
         // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
         let normalizedValue = result.text;
@@ -298,12 +304,18 @@ export const processFrame = async ({
           normalizedValue = result.text.replace(/[()]/g, "");
         }
 
+        // Map zxing format names to our BarcodeType enum values
+        const barcodeType =
+          detectedFormat === "EAN-13"
+            ? "EAN13"
+            : (detectedFormat as BarcodeType);
+
         await handleDetection({
           result: normalizedValue,
           onCodeDetectionSuccess,
           allowNonShelfCodes,
           paused,
-          barcodeType: detectedFormat as BarcodeType,
+          barcodeType,
         });
       } else {
         // Unsupported barcode type - pause scanner and show error

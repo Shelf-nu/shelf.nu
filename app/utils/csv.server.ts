@@ -407,7 +407,8 @@ export const buildCsvExportDataFromAssets = ({
           case "barcode_Code128":
           case "barcode_Code39":
           case "barcode_DataMatrix":
-          case "barcode_ExternalQR": {
+          case "barcode_ExternalQR":
+          case "barcode_EAN13": {
             value =
               asset.barcodes?.find(
                 (b) => b.type === columnsLabelsMap[fieldName].replace(/ /g, "")
