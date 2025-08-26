@@ -61,9 +61,6 @@ export default function PartialCheckinDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Get asset and kit IDs efficiently using the atom
-  const { assetIds: _assetIds, kitIds: _kitIds } = useAtomValue(scannedItemIdsAtom);
-
   // Filter and prepare data for component rendering
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")

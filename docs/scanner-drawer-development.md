@@ -21,11 +21,46 @@ All scanner drawers should use the centralized atoms in `app/atoms/qr-scanner.ts
 #### Core Atoms
 
 - **`scannedItemsAtom`**: Main state containing all scanned items keyed by QR ID
-- **`scannedItemIdsAtom`**: Derived atom that efficiently extracts asset and kit IDs
+- **`scannedItemIdsAtom`**: ⭐ **Derived atom** that efficiently extracts asset and kit IDs from scanned items
+- **`addScannedItemAtom`**: Adds a new scanned item to the state
+- **`updateScannedItemAtom`**: Updates an existing scanned item with data
 - **`clearScannedItemsAtom`**: Clears all scanned items
 - **`removeScannedItemAtom`**: Removes a single item by QR ID
 - **`removeMultipleScannedItemsAtom`**: Removes multiple items by QR IDs
 - **`removeScannedItemsByAssetIdAtom`**: Removes items by asset/kit IDs
+
+#### Data Structure
+
+```typescript
+type ScanListItems = {
+  [qrId: string]: ScanListItem;
+};
+
+type ScanListItem =
+  | {
+      data?: KitFromQr | AssetFromQr;
+      error?: string;
+      type?: "asset" | "kit";
+      codeType?: "qr" | "barcode";
+    }
+  | undefined;
+```
+
+The `scannedItemIdsAtom` returns:
+
+```typescript
+{
+  assetIds: string[];    // Array of asset IDs
+  kitIds: string[];      // Array of kit IDs
+  idsTotalCount: number; // Total count of both assets and kits
+}
+```
+
+#### When to Use Each Atom
+
+- **`scannedItemIdsAtom`**: For form submissions, counts, and any logic needing just the IDs
+- **`scannedItemsAtom`**: When you need full objects for complex business logic or rendering
+- **Remove atoms**: For handling blockers and invalid items in scanner drawers
 
 #### ⚠️ **Always Use scannedItemIdsAtom for ID Extraction**
 

@@ -53,8 +53,8 @@ export default function AddAssetsToBookingDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Get asset and kit IDs efficiently using the atom
-  const { assetIds, kitIds: _kitIds } = useAtomValue(scannedItemIdsAtom);
+  // Get asset IDs efficiently using the atom
+  const { assetIds } = useAtomValue(scannedItemIdsAtom);
 
   // Filter and prepare data for component rendering
   const assets = Object.values(items)
