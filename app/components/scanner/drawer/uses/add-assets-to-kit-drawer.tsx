@@ -82,9 +82,9 @@ export default function AddAssetsToKitDrawer({
     .filter((asset) => kit.assets.some((a) => a?.id === asset.id))
     .map((a) => !!a && a.id);
 
-  // Asset is in custody
-  const assetsInCustodyIds = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.IN_CUSTODY)
+  // Asset has custody (unavailable for kit assignment) - matches server logic
+  const assetsWithCustodyIds = assets
+    .filter((asset) => !!asset && asset.custody && asset.kitId !== kit.id)
     .map((asset) => asset.id);
 
   // Asset is checked out
@@ -111,17 +111,17 @@ export default function AddAssetsToKitDrawer({
       onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
     },
     {
-      condition: assetsInCustodyIds.length > 0,
-      count: assetsInCustodyIds.length,
+      condition: assetsWithCustodyIds.length > 0,
+      count: assetsWithCustodyIds.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> in
-          custody.
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          unavailable for kit assignment.
         </>
       ),
       description:
-        "Assets in custody cannot be added to kits. Please release custody first.",
-      onResolve: () => removeAssetsFromList(assetsInCustodyIds),
+        "Assets with custody cannot be added to kits. Please release custody first.",
+      onResolve: () => removeAssetsFromList(assetsWithCustodyIds),
     },
     {
       condition: assetsCheckedOutIds.length > 0,
@@ -167,7 +167,7 @@ export default function AddAssetsToKitDrawer({
     onResolveAll: () => {
       removeAssetsFromList([
         ...assetsAlreadyAddedIds,
-        ...assetsInCustodyIds,
+        ...assetsWithCustodyIds,
         ...assetsCheckedOutIds,
       ]);
       removeItemsFromList([...errors.map(([qrId]) => qrId), ...kitQrIds]);
@@ -237,6 +237,15 @@ export function AssetRow({
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    // Custom preset for assets with custody (unavailable for kits)
+    {
+      condition: !!asset.custody && asset.kitId !== kit.id,
+      badgeText: "Has custody",
+      tooltipTitle: "Asset has custody",
+      tooltipContent:
+        "Assets with custody cannot be added to kits. Please release custody first.",
+      priority: 80,
+    },
     // Custom preset for "already in this kit"
     {
       condition: kit.assets.some((a: any) => a?.id === asset.id),
