@@ -144,6 +144,20 @@ describe("Sequential ID Service - Pure Functions", () => {
         expect(formatted).toBe(`${prefix}-1234`);
       }
     });
+
+    it("should handle the transition beyond 9999 correctly", () => {
+      // Test the critical transition from 4-digit to 5-digit numbers
+      const criticalNumbers = [9998, 9999, 10000, 10001, 99999, 100000];
+
+      for (const num of criticalNumbers) {
+        const formatted = formatSequentialId(num);
+        expect(isValidSequentialIdFormat(formatted)).toBe(true);
+        expect(extractSequenceNumber(formatted)).toBe(num);
+
+        // Verify the expected format - implementation always uses padStart(4, "0")
+        expect(formatted).toBe(`SAM-${num.toString().padStart(4, "0")}`);
+      }
+    });
   });
 });
 
