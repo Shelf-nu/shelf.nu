@@ -162,8 +162,18 @@ export async function getStripePricesAndProducts() {
       active: true,
       type: "recurring",
       expand: ["data.product"],
+      limit: 100, // Increase limit to see more results
     });
-    return groupPricesByInterval(pricesResponse.data as PriceWithProduct[]);
+
+    // Filter prices to only include those that should be shown on table and are not legacy
+    const filteredPrices = pricesResponse.data.filter(
+      (p) =>
+        p.metadata.show_on_table &&
+        p.metadata.show_on_table === "true" &&
+        p.metadata.legacy !== "true"
+    ) as PriceWithProduct[];
+
+    return groupPricesByInterval(filteredPrices);
   } catch (cause) {
     throw new ShelfError({
       cause,
