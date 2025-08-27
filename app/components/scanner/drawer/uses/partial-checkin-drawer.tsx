@@ -7,7 +7,6 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
-  scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
