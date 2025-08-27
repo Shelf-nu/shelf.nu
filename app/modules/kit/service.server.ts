@@ -1712,29 +1712,32 @@ export async function bulkRemoveAssetsFromKits({
        * If there are assets whose kits were in custody, then we have to remove the custody
        */
       const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && asset.custody
+        (asset) => !!asset.kit?.custody
       );
 
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a) => {
-        invariant(a.custody, "Custody not found over asset");
-        return a.custody.id;
-      });
-
-      await tx.custody.deleteMany({
-        where: { id: { in: custodyIdsToDelete } },
-      });
+      if (assetsWhoseKitsInCustody.length > 0) {
+        await tx.custody.deleteMany({
+          where: { assetId: { in: assetsWhoseKitsInCustody.map((a) => a.id) } },
+        });
+      }
 
       /** Create notes for assets released from custody */
-      await tx.note.createMany({
-        data: assetsWhoseKitsInCustody.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-            (asset.custody as NonNullable<typeof asset.custody>).custodian
-          )}'s** custody over **${asset.title.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+      const assetsWithCustodyReleased = assetsWhoseKitsInCustody.filter(
+        (asset) => asset.custody
+      );
+
+      if (assetsWithCustodyReleased.length > 0) {
+        await tx.note.createMany({
+          data: assetsWithCustodyReleased.map((asset) => ({
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
+              (asset.custody as NonNullable<typeof asset.custody>).custodian
+            )}'s** custody over **${asset.title.trim()}**`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          })),
+        });
+      }
 
       /** Create notes for assets removed from kit */
       await tx.note.createMany({

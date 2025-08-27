@@ -16,6 +16,7 @@ import {
   bulkDeleteKits,
   bulkAssignKitCustody,
   bulkReleaseKitCustody,
+  bulkRemoveAssetsFromKits,
   releaseCustody,
   createKitsIfNotExists,
   updateKitQrCode,
@@ -820,5 +821,150 @@ describe("getAvailableKitAssetForBooking", () => {
       select: { assets: { select: { id: true, status: true } } },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
+  });
+});
+
+describe("bulkRemoveAssetsFromKits", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should remove assets from kits and delete custody for assets from kits in custody", async () => {
+    expect.assertions(4);
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: { id: "kit-1", name: "Kit 1", custody: { id: "kit-custody-1" } },
+        custody: {
+          id: "asset-custody-1",
+          custodian: { name: "John Doe", user: { firstName: "John", lastName: "Doe" } },
+        },
+      },
+      {
+        id: "asset-2",
+        title: "Asset 2",
+        kit: { id: "kit-1", name: "Kit 1", custody: { id: "kit-custody-1" } },
+        custody: null, // Asset without individual custody
+      },
+      {
+        id: "asset-3",
+        title: "Asset 3",
+        kit: { id: "kit-2", name: "Kit 2", custody: null }, // Kit not in custody
+        custody: null,
+      },
+    ];
+    
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assets);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation(async (callback) => callback(db));
+
+    await bulkRemoveAssetsFromKits({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://localhost"),
+    });
+
+    expect(db.asset.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2", "asset-3"] }, organizationId: "org-1" },
+      select: expect.any(Object),
+    });
+
+    // Verify assets are removed from kits and made available
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2", "asset-3"] } },
+      data: { kitId: null, status: AssetStatus.AVAILABLE },
+    });
+
+    // Verify custody is deleted for assets from kits in custody (asset-1 and asset-2)
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: { in: ["asset-1", "asset-2"] } },
+    });
+
+    // Verify notes are created appropriately
+    expect(db.note.createMany).toHaveBeenCalledTimes(2); // Once for custody release, once for kit removal
+  });
+
+  it("should handle assets from kits not in custody", async () => {
+    expect.assertions(3);
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: { id: "kit-1", name: "Kit 1", custody: null }, // Kit not in custody
+        custody: null,
+      },
+    ];
+    
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assets);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation(async (callback) => callback(db));
+
+    await bulkRemoveAssetsFromKits({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://localhost"),
+    });
+
+    // Verify assets are removed from kits
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] } },
+      data: { kitId: null, status: AssetStatus.AVAILABLE },
+    });
+
+    // Verify no custody deletion happens since kit is not in custody
+    expect(db.custody.deleteMany).not.toHaveBeenCalled();
+
+    // Verify only kit removal notes are created (not custody release notes)
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("should create custody release notes only for assets that had custody", async () => {
+    expect.assertions(3);
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: { id: "kit-1", name: "Kit 1", custody: { id: "kit-custody-1" } },
+        custody: {
+          id: "asset-custody-1",
+          custodian: { name: "John Doe", user: { firstName: "John", lastName: "Doe" } },
+        },
+      },
+      {
+        id: "asset-2",
+        title: "Asset 2",
+        kit: { id: "kit-1", name: "Kit 1", custody: { id: "kit-custody-1" } },
+        custody: null, // Asset without individual custody
+      },
+    ];
+    
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assets);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation(async (callback) => callback(db));
+
+    await bulkRemoveAssetsFromKits({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://localhost"),
+    });
+
+    // Verify custody is deleted for both assets
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: { in: ["asset-1", "asset-2"] } },
+    });
+
+    // Verify custody release note is created only for asset-1 (which had custody)
+    const custodyNoteCall = (db.note.createMany as any).mock.calls.find((call: any) => 
+      call[0].data.some((note: any) => note.content.includes("released"))
+    );
+    expect(custodyNoteCall[0].data).toHaveLength(1);
+    expect(custodyNoteCall[0].data[0].assetId).toBe("asset-1");
   });
 });
