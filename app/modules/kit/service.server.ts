@@ -1688,6 +1688,7 @@ export async function updateKitAssets({
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
+          location: { select: { id: true, name: true } },
           assets: {
             select: {
               id: true,
@@ -1765,7 +1766,13 @@ export async function updateKitAssets({
     const newlyAddedAssets = await db.asset
       .findMany({
         where: { id: { in: assetIds } },
-        select: { id: true, title: true, kit: true, custody: true },
+        select: {
+          id: true,
+          title: true,
+          kit: true,
+          custody: true,
+          location: { select: { id: true, name: true } },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1817,6 +1824,69 @@ export async function updateKitAssets({
       removedAssets,
       userId,
     });
+
+    // Handle location cascade for newly added assets (after kit assignment notes)
+    if (newlyAddedAssets.length > 0) {
+      if (kit.location) {
+        // Kit has a location, update all newly added assets to that location
+        await db.asset.updateMany({
+          where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
+          data: { locationId: kit.location.id },
+        });
+
+        // Create notes for assets that had their location changed
+        const user = await getUserByID(userId);
+        await Promise.all(
+          newlyAddedAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: kit.location,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      } else {
+        // Kit has no location, remove location from newly added assets
+        const assetsWithLocation = newlyAddedAssets.filter(
+          (asset) => asset.location
+        );
+
+        if (assetsWithLocation.length > 0) {
+          await db.asset.updateMany({
+            where: { id: { in: assetsWithLocation.map((asset) => asset.id) } },
+            data: { locationId: null },
+          });
+
+          // Create notes for assets that had their location removed
+          const user = await getUserByID(userId);
+          await Promise.all(
+            assetsWithLocation.map((asset) =>
+              createNote({
+                content: getKitLocationUpdateNoteContent({
+                  currentLocation: asset.location,
+                  newLocation: null,
+                  firstName: user?.firstName ?? "",
+                  lastName: user?.lastName ?? "",
+                  assetName: asset.title,
+                  isRemoving: true,
+                }),
+                type: "UPDATE",
+                userId,
+                assetId: asset.id,
+              })
+            )
+          );
+        }
+      }
+    }
 
     /**
      * If a kit is in custody then the assets added to kit will also inherit the status

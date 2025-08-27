@@ -35,7 +35,7 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
-import { createNote, createNotes } from "../note/service.server";
+import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
