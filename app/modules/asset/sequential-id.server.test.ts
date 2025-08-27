@@ -154,12 +154,8 @@ describe("Sequential ID Service - Pure Functions", () => {
         expect(isValidSequentialIdFormat(formatted)).toBe(true);
         expect(extractSequenceNumber(formatted)).toBe(num);
 
-        // Verify the expected format
-        if (num <= 9999) {
-          expect(formatted).toBe(`SAM-${num.toString().padStart(4, "0")}`);
-        } else {
-          expect(formatted).toBe(`SAM-${num}`);
-        }
+        // Verify the expected format - implementation always uses padStart(4, "0")
+        expect(formatted).toBe(`SAM-${num.toString().padStart(4, "0")}`);
       }
     });
   });
