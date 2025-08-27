@@ -153,7 +153,7 @@ describe("Sequential ID Service - Pure Functions", () => {
         const formatted = formatSequentialId(num);
         expect(isValidSequentialIdFormat(formatted)).toBe(true);
         expect(extractSequenceNumber(formatted)).toBe(num);
-        
+
         // Verify the expected format
         if (num <= 9999) {
           expect(formatted).toBe(`SAM-${num.toString().padStart(4, "0")}`);

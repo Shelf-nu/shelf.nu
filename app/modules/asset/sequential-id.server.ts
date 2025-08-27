@@ -173,11 +173,11 @@ export async function organizationHasSequentialIds(
  * @param organizationId - The organization ID
  * @returns Promise<number> - Number of assets without sequential IDs
  */
-export function getAssetsWithoutSequentialIdCount(
+export async function getAssetsWithoutSequentialIdCount(
   organizationId: string
 ): Promise<number> {
   try {
-    return db.asset.count({
+    return await db.asset.count({
       where: {
         organizationId,
         sequentialId: null,
