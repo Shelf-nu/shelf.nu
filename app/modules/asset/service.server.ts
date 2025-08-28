@@ -121,6 +121,127 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
+/**
+ * Validates that assets with custody are not being imported into kits that exist but are not in custody
+ */
+async function validateKitCustodyConflicts({
+  data,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  organizationId: Organization["id"];
+}) {
+  // Extract assets that have both a kit and a custodian
+  const conflictCandidates = data.filter(
+    (asset) => asset.kit && asset.custodian
+  );
+
+  if (conflictCandidates.length === 0) {
+    return; // No conflicts possible
+  }
+
+  // Get unique kit names that might have conflicts
+  const kitNames = [
+    ...new Set(conflictCandidates.map((asset) => asset.kit)),
+  ].filter(Boolean) as string[];
+
+  // Fetch existing kits and their custody status in one query
+  const existingKits = await db.kit.findMany({
+    where: {
+      name: { in: kitNames },
+      organizationId,
+    },
+    select: {
+      id: true,
+      name: true,
+      custody: {
+        select: {
+          id: true,
+          custodian: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Find conflicts: existing kits without custody that would receive assets with custody
+  const conflicts: Array<{
+    asset: string;
+    custodian: string;
+    kit: string;
+    issue: string;
+  }> = [];
+  const existingKitsMap = new Map(existingKits.map((kit) => [kit.name, kit]));
+
+  // Check for conflicts within the import data itself - assets going to same kit with different custodians
+  const kitToCustodiansMap = new Map<string, Set<string>>();
+  for (const asset of conflictCandidates) {
+    if (!kitToCustodiansMap.has(asset.kit!)) {
+      kitToCustodiansMap.set(asset.kit!, new Set());
+    }
+    kitToCustodiansMap.get(asset.kit!)!.add(asset.custodian!);
+  }
+
+  // Add conflicts for kits with multiple custodians in the same import
+  for (const [kitName, custodians] of kitToCustodiansMap) {
+    if (custodians.size > 1) {
+      const custodiansArray = Array.from(custodians);
+      const assetsForThisKit = conflictCandidates.filter(
+        (asset) => asset.kit === kitName
+      );
+
+      for (const asset of assetsForThisKit) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: `Kit has assets with multiple custodians: ${custodiansArray.join(
+            ", "
+          )}`,
+        });
+      }
+    }
+  }
+
+  for (const asset of conflictCandidates) {
+    const existingKit = existingKitsMap.get(asset.kit!);
+
+    if (existingKit) {
+      if (!existingKit.custody) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: "Kit exists without custody",
+        });
+      } else if (existingKit.custody.custodian.name !== asset.custodian) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: `Kit already in custody with ${existingKit.custody.custodian.name}`,
+        });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    throw new ShelfError({
+      cause: null,
+      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      additionalData: {
+        kitCustodyConflicts: conflicts,
+      },
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
   T extends Prisma.AssetInclude
     ? Prisma.AssetGetPayload<{ include: T }>
@@ -1906,6 +2027,12 @@ export async function createAssetsFromContentImport({
           userId,
         })
       : [];
+
+    // Validate kit-custody conflicts before any database operations
+    await validateKitCustodyConflicts({
+      data,
+      organizationId,
+    });
 
     // Create all required related entities
     const [kits, categories, locations, teamMembers, tags, { customFields }] =
