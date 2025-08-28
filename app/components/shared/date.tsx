@@ -22,27 +22,42 @@ function formatAbsoluteDate(
   }
 
   // Convert Intl.DateTimeFormatOptions to date-fns format string
-  let formatString = "yyyy-MM-dd"; // default format
+  let formatString: string;
+
   if (options) {
     let parts = [];
+
+    // Build format parts in logical order
     if (options.weekday === "long") parts.push("EEEE");
     else if (options.weekday === "short") parts.push("EEE");
     else if (options.weekday === "narrow") parts.push("EEEEE");
 
-    if (options.month === "long") parts.push("MMMM");
-    else if (options.month === "short") parts.push("MMM");
-    else if (options.month === "numeric") parts.push("M");
-    else if (options.month === "2-digit") parts.push("MM");
+    // Month and day should be together without comma
+    let datePartFormat = "";
+    if (options.month === "long") datePartFormat += "MMMM";
+    else if (options.month === "short") datePartFormat += "MMM";
+    else if (options.month === "numeric") datePartFormat += "M";
+    else if (options.month === "2-digit") datePartFormat += "MM";
 
-    if (options.day === "numeric") parts.push("d");
-    else if (options.day === "2-digit") parts.push("dd");
+    if (options.day === "numeric") datePartFormat += " d";
+    else if (options.day === "2-digit") datePartFormat += " dd";
+
+    if (datePartFormat) parts.push(datePartFormat);
 
     if (options.year === "numeric") parts.push("yyyy");
     else if (options.year === "2-digit") parts.push("yy");
 
     if (parts.length > 0) {
       formatString = parts.join(", ");
+    } else {
+      // Fallback if no valid parts found
+      formatString = "PPP"; // date-fns long localized date format
     }
+  } else {
+    // Default locale-aware format when no options provided
+    // Use date-fns localized format that adapts to locale
+    // PPP = long localized date format (e.g., "April 29th, 2023" in en-US, "29 avril 2023" in fr-FR)
+    formatString = "PPP";
   }
 
   return format(dateToFormat, formatString);
