@@ -60,7 +60,7 @@ export default function PartialCheckinDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
+  // Filter and prepare data for component rendering
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetFromQr);
