@@ -1,14 +1,14 @@
+import { useEffect, useMemo } from "react";
 import { useZorm } from "react-zorm";
 import z from "zod";
-import Input from "../forms/input";
-import { zodFieldIsRequired } from "~/utils/zod";
-import { ColorInput } from "../forms/color-input";
-import { Button } from "../shared/button";
-import { getRandomColor } from "~/utils/get-random-color";
-import { useEffect, useMemo } from "react";
-import { tw } from "~/utils/tw";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { getRandomColor } from "~/utils/get-random-color";
+import { tw } from "~/utils/tw";
+import { zodFieldIsRequired } from "~/utils/zod";
+import { ColorInput } from "../forms/color-input";
+import Input from "../forms/input";
+import { Button } from "../shared/button";
 
 export const NewCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -58,13 +58,13 @@ export default function NewCategoryForm({
     <fetcher.Form
       method="post"
       className={tw(
-        "rounded border border-gray-200 bg-white px-6 py-5 md:flex md:items-center w-full md:justify-between",
+        "w-full rounded border border-gray-200 bg-white px-6 py-5 md:flex md:items-center md:justify-between",
         formClassName
       )}
       ref={zo.ref}
       action={apiUrl}
     >
-      <div className={tw("md:flex md:items-center gap-4", className)}>
+      <div className={tw("gap-4 md:flex md:items-center", className)}>
         <Input
           label="Name"
           placeholder="Category name"
@@ -102,7 +102,7 @@ export default function NewCategoryForm({
       </div>
 
       <div className={buttonsClassName}>
-        <div className="flex gap-1 items-center">
+        <div className="flex items-center gap-1">
           <Button
             variant="secondary"
             to="/categories"
@@ -116,7 +116,7 @@ export default function NewCategoryForm({
           </Button>
         </div>
 
-        <div className="mt-3 text-sm text-error-500 self-end">
+        <div className="mt-3 self-end text-sm text-error-500">
           {fetcher?.data?.error ? fetcher.data.error.message : " "}
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { useState } from "react";
+import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-import NewCategoryForm from "../category/new-category-form";
 
 type InlineEntityCreationDialogProps = {
   title: string;
@@ -50,7 +50,7 @@ export default function InlineEntityCreationDialog({
                   <NewCategoryForm
                     apiUrl="/categories/new"
                     formClassName="flex-col w-full"
-                    className="flex-col w-full"
+                    className="w-full flex-col"
                     inputClassName="w-full lg:max-w-full"
                     buttonsClassName="w-full mt-4"
                     onSuccess={() => {

@@ -29,6 +29,7 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -46,7 +47,6 @@ import {
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 import When from "../when/when";
-import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 
 export const NewAssetFormSchema = z.object({
   title: z
