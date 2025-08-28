@@ -46,6 +46,7 @@ import {
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 import When from "../when/when";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 
 export const NewAssetFormSchema = z.object({
   title: z
@@ -352,15 +353,11 @@ export const AssetForm = ({
             selectionMode="set"
             allowClear={true}
             extraContent={
-              <Button
-                to="/categories/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new category
-              </Button>
+              <InlineEntityCreationDialog
+                title="Create new category"
+                type="category"
+                buttonLabel="Create new category"
+              />
             }
           />
         </FormRow>

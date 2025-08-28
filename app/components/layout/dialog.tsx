@@ -11,6 +11,7 @@ export const Dialog = ({
   onClose,
   className,
   headerClassName,
+  wrapperClassName,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -18,10 +19,11 @@ export const Dialog = ({
   onClose: Function;
   className?: string;
   headerClassName?: string;
+  wrapperClassName?: string;
 }) =>
   open ? (
     <div
-      className="dialog-backdrop"
+      className={tw("dialog-backdrop", wrapperClassName)}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();

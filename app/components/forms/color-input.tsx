@@ -28,23 +28,23 @@ export const ColorInput = ({
 
   return (
     <div className="flex items-end gap-1">
-      <Button
-        icon="refresh"
-        variant="secondary"
-        size="sm"
-        as="a"
-        onClick={handleRefresh}
-        className="cursor-pointer p-2"
-        style={{ backgroundColor: `${color}33` }}
-        title="Generate random color"
-        data-test-id="generateRandomColor"
-      />
       <Input
         label="Hex Color"
         value={color}
         onChange={handleColorChange}
         className="w-full lg:max-w-[100px]"
         {...rest}
+      />
+      <Button
+        icon="refresh"
+        variant="secondary"
+        size="sm"
+        as="a"
+        onClick={handleRefresh}
+        className="cursor-pointer p-2.5"
+        style={{ backgroundColor: `${color}33` }}
+        title="Generate random color"
+        data-test-id="generateRandomColor"
       />
     </div>
   );
