@@ -6,6 +6,7 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
+  scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
@@ -57,7 +58,10 @@ export default function AddAssetsKitsToLocationDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
+  // Get asset IDs efficiently using the atom
+  const { assetIds } = useAtomValue(scannedItemIdsAtom);
+
+  // Filter and prepare data for component rendering
   const assets = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "asset")
     .map((item) => item?.data as AssetFromQr);
@@ -67,7 +71,7 @@ export default function AddAssetsKitsToLocationDrawer({
     .map((item) => item?.data as KitFromQr);
 
   // List of asset IDs for the form
-  const assetIdsForLocation = Array.from(new Set([...assets.map((a) => a.id)]));
+  const assetIdsForLocation = Array.from(new Set([...assetIds]));
   const kitIdsForLocation = Array.from(new Set([...kits.map((k) => k.id)]));
 
   // Setup blockers

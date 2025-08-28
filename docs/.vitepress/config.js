@@ -110,6 +110,10 @@ export default {
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Utility Hooks", link: "/hooks" },
           {
+            text: "Scanner Drawer Development",
+            link: "/scanner-drawer-development",
+          },
+          {
             text: "Barcode Types Guide",
             link: "/barcode-types-development-guide",
           },
