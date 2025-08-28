@@ -5,7 +5,10 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import { useSearchParams } from "~/hooks/search-params";
-import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import {
+  getCategoriesForCreateAndEdit,
+  getLocationsForCreateAndEdit,
+} from "~/modules/asset/service.server";
 import { createKit, updateKitImage } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
@@ -34,18 +37,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
-        request,
-        organizationId,
-      }
-    );
+    const [{ categories, totalCategories }, { locations, totalLocations }] =
+      await Promise.all([
+        getCategoriesForCreateAndEdit({
+          request,
+          organizationId,
+        }),
+        getLocationsForCreateAndEdit({
+          request,
+          organizationId,
+        }),
+      ]);
 
     return json(
       data({
         header,
         categories,
         totalCategories,
+        locations,
+        totalLocations,
       })
     );
   } catch (cause) {
@@ -99,6 +109,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       organizationId,
       categoryId: payload.category ?? null,
       barcodes,
+      locationId: payload.locationId ?? null,
     });
 
     await updateKitImage({

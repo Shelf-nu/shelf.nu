@@ -53,7 +53,10 @@ import {
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
-import { getAssetsWhereInput } from "../asset/utils.server";
+import {
+  getAssetsWhereInput,
+  getKitLocationUpdateNoteContent,
+} from "../asset/utils.server";
 import { createBulkKitChangeNotes, createNote } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
@@ -68,10 +71,16 @@ export async function createKit({
   organizationId,
   qrId,
   categoryId,
+  locationId,
   barcodes,
 }: Pick<
   Kit,
-  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+  | "name"
+  | "description"
+  | "createdById"
+  | "organizationId"
+  | "categoryId"
+  | "locationId"
 > & {
   qrId?: Qr["id"];
   barcodes?: Pick<Barcode, "type" | "value">[];
@@ -143,9 +152,11 @@ export async function createKit({
       });
     }
 
-    return await db.kit.create({
-      data,
-    });
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
+    }
+
+    return await db.kit.create({ data });
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -186,9 +197,10 @@ export async function updateKit({
   organizationId,
   categoryId,
   barcodes,
+  locationId,
 }: UpdateKitPayload) {
   try {
-    const data = {
+    const data: Prisma.KitUpdateInput = {
       name,
       description,
       image,
@@ -214,6 +226,10 @@ export async function updateKit({
           },
         },
       });
+    }
+
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
     }
 
     const kit = await db.kit.update({
@@ -1380,6 +1396,278 @@ export async function getAvailableKitAssetForBooking(
   }
 }
 
+export async function updateKitLocation({
+  id,
+  organizationId,
+  currentLocationId,
+  newLocationId,
+  userId,
+}: {
+  id: Kit["id"];
+  organizationId: Kit["organizationId"];
+  currentLocationId: Kit["locationId"];
+  newLocationId: Kit["locationId"];
+  userId?: User["id"];
+}) {
+  try {
+    // Get kit with its assets first
+    const kit = await db.kit.findUnique({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        name: true,
+        assets: {
+          select: {
+            id: true,
+            title: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!kit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Kit not found",
+        label,
+      });
+    }
+
+    const assetIds = kit.assets.map((asset) => asset.id);
+
+    if (newLocationId) {
+      // Connect both kit and its assets to the new location in one update
+      await db.location.update({
+        where: { id: newLocationId },
+        data: {
+          kits: {
+            connect: { id },
+          },
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+
+      // Add notes to assets about location update via parent kit
+      if (userId && assetIds.length > 0) {
+        const user = await getUserByID(userId);
+        const location = await db.location.findUnique({
+          where: { id: newLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          kit.assets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location, // Use the asset's current location
+                newLocation: location,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    } else if (!newLocationId && currentLocationId) {
+      // Disconnect both kit and its assets from the current location
+      await db.location.update({
+        where: { id: currentLocationId },
+        data: {
+          kits: {
+            disconnect: { id },
+          },
+          assets: {
+            disconnect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+
+      // Add notes to assets about location removal via parent kit
+      if (userId && assetIds.length > 0) {
+        const user = await getUserByID(userId);
+        const currentLocation = await db.location.findUnique({
+          where: { id: currentLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          kit.assets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: currentLocation,
+                newLocation: null,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+
+    // Return the updated kit
+    return await db.kit.findUnique({
+      where: { id, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateKitLocation({
+  kitIds,
+  organizationId,
+  newLocationId,
+  currentSearchParams,
+  userId,
+}: {
+  kitIds: Array<Kit["id"]>;
+  organizationId: Kit["organizationId"];
+  newLocationId: Kit["locationId"];
+  currentSearchParams?: string | null;
+  userId: User["id"];
+}) {
+  try {
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    // Get kits with their assets before updating
+    const kitsWithAssets = await db.kit.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        assets: {
+          select: {
+            id: true,
+            title: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    const actualKitIds = kitsWithAssets.map((kit) => kit.id);
+    const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
+
+    if (
+      newLocationId &&
+      newLocationId.trim() !== "" &&
+      actualKitIds.length > 0
+    ) {
+      // Update location to connect both kits and their assets
+      await db.location.update({
+        where: { id: newLocationId },
+        data: {
+          kits: {
+            connect: actualKitIds.map((id) => ({ id })),
+          },
+          assets: {
+            connect: allAssets.map((asset) => ({ id: asset.id })),
+          },
+        },
+      });
+
+      // Create notes for affected assets
+      if (allAssets.length > 0) {
+        const user = await getUserByID(userId);
+        const location = await db.location.findUnique({
+          where: { id: newLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: location,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    } else {
+      // Removing location - set to null and handle cascade
+      await db.kit.updateMany({
+        where,
+        data: {
+          locationId: null,
+        },
+      });
+
+      // Also remove location from assets and create notes
+      if (allAssets.length > 0) {
+        const user = await getUserByID(userId);
+
+        await db.asset.updateMany({
+          where: {
+            id: { in: allAssets.map((asset) => asset.id) },
+          },
+          data: {
+            locationId: null,
+          },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: null,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+
+    return { count: actualKitIds.length };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
+
 export async function updateKitAssets({
   kitId,
   organizationId,
@@ -1400,6 +1688,7 @@ export async function updateKitAssets({
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
+          location: { select: { id: true, name: true } },
           assets: {
             select: {
               id: true,
@@ -1477,7 +1766,13 @@ export async function updateKitAssets({
     const newlyAddedAssets = await db.asset
       .findMany({
         where: { id: { in: assetIds } },
-        select: { id: true, title: true, kit: true, custody: true },
+        select: {
+          id: true,
+          title: true,
+          kit: true,
+          custody: true,
+          location: { select: { id: true, name: true } },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1529,6 +1824,69 @@ export async function updateKitAssets({
       removedAssets,
       userId,
     });
+
+    // Handle location cascade for newly added assets (after kit assignment notes)
+    if (newlyAddedAssets.length > 0) {
+      if (kit.location) {
+        // Kit has a location, update all newly added assets to that location
+        await db.asset.updateMany({
+          where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
+          data: { locationId: kit.location.id },
+        });
+
+        // Create notes for assets that had their location changed
+        const user = await getUserByID(userId);
+        await Promise.all(
+          newlyAddedAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: kit.location,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                assetName: asset.title,
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      } else {
+        // Kit has no location, remove location from newly added assets
+        const assetsWithLocation = newlyAddedAssets.filter(
+          (asset) => asset.location
+        );
+
+        if (assetsWithLocation.length > 0) {
+          await db.asset.updateMany({
+            where: { id: { in: assetsWithLocation.map((asset) => asset.id) } },
+            data: { locationId: null },
+          });
+
+          // Create notes for assets that had their location removed
+          const user = await getUserByID(userId);
+          await Promise.all(
+            assetsWithLocation.map((asset) =>
+              createNote({
+                content: getKitLocationUpdateNoteContent({
+                  currentLocation: asset.location,
+                  newLocation: null,
+                  firstName: user?.firstName ?? "",
+                  lastName: user?.lastName ?? "",
+                  assetName: asset.title,
+                  isRemoving: true,
+                }),
+                type: "UPDATE",
+                userId,
+                assetId: asset.id,
+              })
+            )
+          );
+        }
+      }
+    }
 
     /**
      * If a kit is in custody then the assets added to kit will also inherit the status

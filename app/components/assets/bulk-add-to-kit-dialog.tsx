@@ -82,6 +82,14 @@ export default function BulkAddToKitDialog() {
             ) : null}
           </div>
 
+          <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 p-3">
+            <p className="text-sm text-blue-800">
+              <strong>Location Update Notice:</strong> Adding assets to a kit
+              will automatically update the asset locations to match the kit's
+              location (if the kit has one).
+            </p>
+          </div>
+
           <div className="flex gap-3">
             <Button
               variant="secondary"
