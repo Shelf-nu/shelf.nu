@@ -65,7 +65,7 @@ export async function createTeamMemberIfNotExists({
 }: {
   data: CreateAssetFromContentImportPayload[];
   organizationId: Organization["id"];
-}): Promise<Record<string, TeamMember["id"]>> {
+}): Promise<Record<string, TeamMember>> {
   try {
     // first we get all the teamMembers from the assets and make then into an object where the category is the key and the value is an empty string
     /**
@@ -75,7 +75,7 @@ export async function createTeamMemberIfNotExists({
     const teamMembers = new Map(
       data
         .filter((asset) => asset.custodian !== "")
-        .map((asset) => [asset.custodian, ""])
+        .map((asset) => [asset.custodian, {}])
     );
 
     // Handle the case where there are no teamMembers
@@ -103,10 +103,10 @@ export async function createTeamMemberIfNotExists({
           name: teamMember as string,
           organizationId,
         });
-        teamMembers.set(teamMember, newTeamMember.id);
+        teamMembers.set(teamMember, newTeamMember);
       } else {
         // if the teamMember exists, we just update the id
-        teamMembers.set(teamMember, existingTeamMember.id);
+        teamMembers.set(teamMember, existingTeamMember);
       }
     }
 
