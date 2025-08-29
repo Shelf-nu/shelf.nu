@@ -172,8 +172,11 @@ async function setKitCustodyAfterAssetImport({
   }
 }
 
-/**
- * Validates that assets with custody are not being imported into kits that exist but are not in custody
+ * Validates custody conflicts for kits during import.
+ * This includes:
+ * - Assets with custody being imported into kits that exist but are not in custody,
+ * - Existing kits with different custodians,
+ * - Multiple custodians assigned to the same kit within the same import.
  */
 async function validateKitCustodyConflicts({
   data,
