@@ -18,6 +18,7 @@ import {
   AssetStatus,
   BookingStatus,
   ErrorCorrection,
+  KitStatus,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -122,6 +123,56 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Assets";
 
 /**
+ * Sets kit custody for imported assets after all assets have been created
+ */
+async function setKitCustodyAfterAssetImport({
+  data,
+  kits,
+  teamMembers,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  kits: Record<string, Kit>;
+  teamMembers: Record<string, TeamMember>;
+}) {
+  // Find assets that have both kit and custodian
+  const assetsWithKitAndCustodian = data.filter(
+    (asset) => asset.kit && asset.custodian
+  );
+
+  if (assetsWithKitAndCustodian.length === 0) {
+    return; // Nothing to do
+  }
+
+  // Group by kit name and get the custodian for each kit
+  const kitToCustodianMap = new Map<string, string>();
+  for (const asset of assetsWithKitAndCustodian) {
+    if (!kitToCustodianMap.has(asset.kit!)) {
+      kitToCustodianMap.set(asset.kit!, asset.custodian!);
+    }
+  }
+
+  // Update kit custody - one update per kit instead of per asset for performance
+  for (const [kitName, custodianName] of kitToCustodianMap) {
+    const kit = kits[kitName];
+    const teamMember = teamMembers[custodianName];
+
+    if (kit && teamMember) {
+      await db.kit.update({
+        where: { id: kit.id },
+        data: {
+          status: KitStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: teamMember.id } },
+            },
+          },
+        },
+      });
+    }
+  }
+}
+
+/**
  * Validates that assets with custody are not being imported into kits that exist but are not in custody
  */
 async function validateKitCustodyConflicts({
@@ -162,6 +213,11 @@ async function validateKitCustodyConflicts({
               name: true,
             },
           },
+        },
+      },
+      assets: {
+        select: {
+          id: true,
         },
       },
     },
@@ -210,14 +266,19 @@ async function validateKitCustodyConflicts({
     const existingKit = existingKitsMap.get(asset.kit!);
 
     if (existingKit) {
-      if (!existingKit.custody) {
+      if (!existingKit.custody && existingKit.assets.length > 0) {
         conflicts.push({
           asset: asset.title,
           custodian: asset.custodian!,
           kit: asset.kit!,
-          issue: "Kit exists without custody",
+          issue: `Kit exists without custody but has ${
+            existingKit.assets.length
+          } existing asset${existingKit.assets.length === 1 ? "" : "s"}`,
         });
-      } else if (existingKit.custody.custodian.name !== asset.custodian) {
+      } else if (
+        existingKit.custody &&
+        existingKit.custody.custodian.name !== asset.custodian
+      ) {
         conflicts.push({
           asset: asset.title,
           custodian: asset.custodian!,
@@ -2160,10 +2221,12 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
-        kitId: asset.kit ? kits?.[asset.kit] : undefined,
+        kitId: asset.kit ? kits?.[asset.kit].id : undefined,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
+        custodian: asset.custodian
+          ? teamMembers?.[asset.custodian].id
+          : undefined,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
@@ -2181,6 +2244,15 @@ export async function createAssetsFromContentImport({
         barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
       });
     }
+
+    // Set kit custody for imported assets after all assets have been created
+    await setKitCustodyAfterAssetImport({
+      data,
+      kits,
+      teamMembers,
+    });
+
+    return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({

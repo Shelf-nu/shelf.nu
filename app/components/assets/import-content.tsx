@@ -278,7 +278,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             Confirm asset import
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-[600px]">
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
             {!isSuccessful ? (
