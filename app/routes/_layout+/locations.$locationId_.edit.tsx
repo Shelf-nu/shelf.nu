@@ -15,6 +15,7 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
 import {
   getLocation,
   updateLocation,
@@ -156,13 +157,13 @@ export default function LocationEditPage() {
           </Button>
         }
       />
-      <div className="items-top flex justify-between">
+      <Card className="items-top flex w-full justify-between md:w-min">
         <LocationForm
           name={location.name}
           description={location.description}
           address={location.address}
         />
-      </div>
+      </Card>
     </div>
   );
 }

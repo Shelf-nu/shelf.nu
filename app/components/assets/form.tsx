@@ -416,15 +416,11 @@ export const AssetForm = ({
             closeOnSelect
             allowClear
             extraContent={
-              <Button
-                to="/locations/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new location
-              </Button>
+              <InlineEntityCreationDialog
+                type="location"
+                title="Create new location"
+                buttonLabel="Create new location"
+              />
             }
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import { LocationForm } from "../location/form";
 import { Button } from "../shared/button";
 
 type InlineEntityCreationDialogProps = {
@@ -41,29 +42,38 @@ export default function InlineEntityCreationDialog({
           open={open}
           onClose={handleClose}
           title={title}
-          className="z-[9999]"
+          className="md:!w-full md:!max-w-lg"
         >
-          {(() => {
-            switch (type) {
-              case "category": {
-                return (
-                  <NewCategoryForm
-                    apiUrl="/categories/new"
-                    formClassName="flex-col w-full"
-                    className="w-full flex-col"
-                    inputClassName="w-full lg:max-w-full"
-                    buttonsClassName="w-full mt-4"
-                    onSuccess={() => {
-                      handleClose();
-                    }}
-                  />
-                );
-              }
+          <div className="border-t px-6 py-5">
+            {(() => {
+              switch (type) {
+                case "category": {
+                  return (
+                    <NewCategoryForm
+                      apiUrl="/categories/new"
+                      formClassName="flex-col w-full border-none px-0 py-0"
+                      className="w-full flex-col"
+                      inputClassName="w-full lg:max-w-full"
+                      buttonsClassName="w-full mt-4"
+                      onSuccess={handleClose}
+                    />
+                  );
+                }
 
-              default:
-                return null;
-            }
-          })()}
+                case "location": {
+                  return (
+                    <LocationForm
+                      apiUrl="/locations/new"
+                      onSuccess={handleClose}
+                    />
+                  );
+                }
+
+                default:
+                  return null;
+              }
+            })()}
+          </div>
         </Dialog>
       </DialogPortal>
     </>

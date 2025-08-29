@@ -11,6 +11,7 @@ import {
   LocationForm,
   NewLocationFormSchema,
 } from "~/components/location/form";
+import { Card } from "~/components/shared/card";
 
 import {
   createLocation,
@@ -86,7 +87,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address, addAnother } = payload;
+    const { name, description, address, addAnother, preventRedirect } = payload;
 
     const location = await createLocation({
       name,
@@ -109,6 +110,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    if (preventRedirect === "true") {
+      return json(data({ success: true }));
+    }
+
     /** If the user clicked add-another, reload the document to clear the form */
     if (addAnother) {
       return redirectDocument("/locations/new");
@@ -127,9 +132,9 @@ export default function NewLocationPage() {
   return (
     <div className="relative">
       <Header title={title ? title : "Untitled location"} />
-      <div>
+      <Card className="w-full md:w-min">
         <LocationForm />
-      </div>
+      </Card>
     </div>
   );
 }
