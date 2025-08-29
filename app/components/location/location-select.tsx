@@ -7,6 +7,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 
 import { XIcon } from "../icons/library";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 
 export const LocationSelect = ({
   isBulk = false,
@@ -45,15 +46,11 @@ export const LocationSelect = ({
           closeOnSelect
           allowClear
           extraContent={
-            <Button
-              to="/locations/new"
-              variant="link"
-              icon="plus"
-              className="w-full justify-start pt-4"
-              target="_blank"
-            >
-              Create new location
-            </Button>
+            <InlineEntityCreationDialog
+              type="location"
+              title="Create new location"
+              buttonLabel="Create new location"
+            />
           }
           renderItem={({ name, metadata }) => (
             <div className="flex items-center gap-2">

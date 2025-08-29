@@ -29,6 +29,7 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -352,15 +353,11 @@ export const AssetForm = ({
             selectionMode="set"
             allowClear={true}
             extraContent={
-              <Button
-                to="/categories/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new category
-              </Button>
+              <InlineEntityCreationDialog
+                title="Create new category"
+                type="category"
+                buttonLabel="Create new category"
+              />
             }
           />
         </FormRow>
@@ -419,15 +416,11 @@ export const AssetForm = ({
             closeOnSelect
             allowClear
             extraContent={
-              <Button
-                to="/locations/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new location
-              </Button>
+              <InlineEntityCreationDialog
+                type="location"
+                title="Create new location"
+                buttonLabel="Create new location"
+              />
             }
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
