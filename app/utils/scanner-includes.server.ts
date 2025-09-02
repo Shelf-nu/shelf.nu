@@ -30,6 +30,12 @@ export const ASSET_INCLUDE = {
 };
 
 export const KIT_INCLUDE = {
+  location: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
   _count: { select: { assets: true } },
   assets: {
     select: {

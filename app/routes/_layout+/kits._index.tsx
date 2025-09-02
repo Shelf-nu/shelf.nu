@@ -28,12 +28,14 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import { Tag } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -95,6 +97,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
+      { locations, totalLocations },
     ] = await Promise.all([
       getPaginatedAndFilterableKits({
         request,
@@ -126,6 +129,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
           category: true,
+          location: true,
         },
       }),
       db.teamMember
@@ -149,6 +153,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           });
         }),
       db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+      }),
     ]);
 
     if (totalPages !== 0 && page > totalPages) {
@@ -183,6 +191,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
         },
+        locations,
+        totalLocations,
       }),
       {
         headers: [...(filtersCookie ? [setCookie(filtersCookie)] : [])],
@@ -321,6 +331,7 @@ export default function KitsIndexPage() {
             headerChildren={
               <>
                 <Th>Category</Th>
+                <Th>Location</Th>
                 <Th>Description</Th>
                 <Th>Assets</Th>
                 <Th className="flex items-center gap-1 whitespace-nowrap">
@@ -364,6 +375,7 @@ function ListContent({
           select: { id: true; availableToBook: true; status: true };
         };
         category: true;
+        location: true;
       }
     >;
   }>;
@@ -408,6 +420,12 @@ function ListContent({
 
       <Td>
         <CategoryBadge category={item.category} />
+      </Td>
+
+      <Td>
+        {item.location ? (
+          <Tag className="mb-0">{item.location.name}</Tag>
+        ) : null}
       </Td>
 
       <Td className="max-w-62 md:max-w-96">
