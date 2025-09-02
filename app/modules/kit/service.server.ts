@@ -1256,11 +1256,11 @@ export async function createKitsIfNotExists({
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<Record<string, Kit["id"]>> {
+}): Promise<Record<string, Kit>> {
   try {
     // first we get all the kits from the assets and make then into an object where the category is the key and the value is an empty string
     const kits = new Map(
-      data.filter((asset) => asset.kit !== "").map((asset) => [asset.kit, ""])
+      data.filter((asset) => asset.kit !== "").map((asset) => [asset.kit, {}])
     );
 
     // Handle the case where there are no teamMembers
@@ -1294,10 +1294,10 @@ export async function createKitsIfNotExists({
             },
           },
         });
-        kits.set(kit, newKit.id);
+        kits.set(kit, newKit);
       } else {
         // if the location exists, we just update the id
-        kits.set(kit, existingKit.id);
+        kits.set(kit, existingKit);
       }
     }
 

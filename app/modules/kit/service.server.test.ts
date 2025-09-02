@@ -760,8 +760,8 @@ describe("createKitsIfNotExists", () => {
       },
     });
     expect(result).toEqual({
-      "New Kit": "new-kit-id",
-      "Existing Kit": "existing-kit-id",
+      "New Kit": { id: "new-kit-id", name: "New Kit" },
+      "Existing Kit": { id: "existing-kit-id", name: "Existing Kit" },
     });
   });
 

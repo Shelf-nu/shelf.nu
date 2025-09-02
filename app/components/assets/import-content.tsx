@@ -278,7 +278,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             Confirm asset import
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-[600px]">
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
             {!isSuccessful ? (
@@ -354,6 +354,44 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                       .connectedToOtherOrgs as QRCodePerImportedAsset[]
                   }
                 />
+              ) : null}
+
+              {data?.error?.additionalData?.kitCustodyConflicts ? (
+                <table className="mt-4 w-full rounded-md border text-left text-sm">
+                  <thead className="bg-error-100 text-xs">
+                    <tr>
+                      <th scope="col" className="px-2 py-1">
+                        Asset
+                      </th>
+                      <th scope="col" className="px-2 py-1">
+                        Custodian
+                      </th>
+                      <th scope="col" className="px-2 py-1">
+                        Kit
+                      </th>
+                      <th scope="col" className="px-2 py-1">
+                        Issue
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      data.error.additionalData.kitCustodyConflicts as Array<{
+                        asset: string;
+                        custodian: string;
+                        kit: string;
+                        issue: string;
+                      }>
+                    ).map((conflict, index: number) => (
+                      <tr key={index} className="border-b">
+                        <td className="px-2 py-1">{conflict.asset}</td>
+                        <td className="px-2 py-1">{conflict.custodian}</td>
+                        <td className="px-2 py-1">{conflict.kit}</td>
+                        <td className="px-2 py-1">{conflict.issue}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               ) : null}
 
               {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (

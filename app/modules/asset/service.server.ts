@@ -18,6 +18,7 @@ import {
   AssetStatus,
   BookingStatus,
   ErrorCorrection,
+  KitStatus,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -123,6 +124,191 @@ import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
+
+/**
+ * Sets kit custody for imported assets after all assets have been created
+ */
+async function setKitCustodyAfterAssetImport({
+  data,
+  kits,
+  teamMembers,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  kits: Record<string, Kit>;
+  teamMembers: Record<string, TeamMember>;
+}) {
+  // Find assets that have both kit and custodian
+  const assetsWithKitAndCustodian = data.filter(
+    (asset) => asset.kit && asset.custodian
+  );
+
+  if (assetsWithKitAndCustodian.length === 0) {
+    return; // Nothing to do
+  }
+
+  // Group by kit name and get the custodian for each kit
+  const kitToCustodianMap = new Map<string, string>();
+  for (const asset of assetsWithKitAndCustodian) {
+    if (!kitToCustodianMap.has(asset.kit!)) {
+      kitToCustodianMap.set(asset.kit!, asset.custodian!);
+    }
+  }
+
+  // Update kit custody - one update per kit instead of per asset for performance
+  for (const [kitName, custodianName] of kitToCustodianMap) {
+    const kit = kits[kitName];
+    const teamMember = teamMembers[custodianName];
+
+    if (kit && teamMember) {
+      await db.kit.update({
+        where: { id: kit.id },
+        data: {
+          status: KitStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: teamMember.id } },
+            },
+          },
+        },
+      });
+    }
+  }
+}
+
+/**
+ * Validates custody conflicts for kits during import.
+ * This includes:
+ * - Assets with custody being imported into kits that exist but are not in custody,
+ * - Existing kits with different custodians,
+ * - Multiple custodians assigned to the same kit within the same import.
+ */
+async function validateKitCustodyConflicts({
+  data,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  organizationId: Organization["id"];
+}) {
+  // Extract assets that have both a kit and a custodian
+  const conflictCandidates = data.filter(
+    (asset) => asset.kit && asset.custodian
+  );
+
+  if (conflictCandidates.length === 0) {
+    return; // No conflicts possible
+  }
+
+  // Get unique kit names that might have conflicts
+  const kitNames = [
+    ...new Set(conflictCandidates.map((asset) => asset.kit)),
+  ].filter(Boolean) as string[];
+
+  // Fetch existing kits and their custody status in one query
+  const existingKits = await db.kit.findMany({
+    where: {
+      name: { in: kitNames },
+      organizationId,
+    },
+    select: {
+      id: true,
+      name: true,
+      custody: {
+        select: {
+          id: true,
+          custodian: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      assets: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  // Find conflicts: existing kits without custody that would receive assets with custody
+  const conflicts: Array<{
+    asset: string;
+    custodian: string;
+    kit: string;
+    issue: string;
+  }> = [];
+  const existingKitsMap = new Map(existingKits.map((kit) => [kit.name, kit]));
+
+  // Check for conflicts within the import data itself - assets going to same kit with different custodians
+  const kitToCustodiansMap = new Map<string, Set<string>>();
+  for (const asset of conflictCandidates) {
+    if (!kitToCustodiansMap.has(asset.kit!)) {
+      kitToCustodiansMap.set(asset.kit!, new Set());
+    }
+    kitToCustodiansMap.get(asset.kit!)!.add(asset.custodian!);
+  }
+
+  // Add conflicts for kits with multiple custodians in the same import
+  for (const [kitName, custodians] of kitToCustodiansMap) {
+    if (custodians.size > 1) {
+      const custodiansArray = Array.from(custodians);
+      const assetsForThisKit = conflictCandidates.filter(
+        (asset) => asset.kit === kitName
+      );
+
+      for (const asset of assetsForThisKit) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: `Kit has assets with multiple custodians: ${custodiansArray.join(
+            ", "
+          )}`,
+        });
+      }
+    }
+  }
+
+  for (const asset of conflictCandidates) {
+    const existingKit = existingKitsMap.get(asset.kit!);
+
+    if (existingKit) {
+      if (!existingKit.custody && existingKit.assets.length > 0) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: `Kit exists without custody but has ${
+            existingKit.assets.length
+          } existing asset${existingKit.assets.length === 1 ? "" : "s"}`,
+        });
+      } else if (
+        existingKit.custody &&
+        existingKit.custody.custodian.name !== asset.custodian
+      ) {
+        conflicts.push({
+          asset: asset.title,
+          custodian: asset.custodian!,
+          kit: asset.kit!,
+          issue: `Kit already in custody with ${existingKit.custody.custodian.name}`,
+        });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    throw new ShelfError({
+      cause: null,
+      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      additionalData: {
+        kitCustodyConflicts: conflicts,
+      },
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
 
 type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
   T extends Prisma.AssetInclude
@@ -1781,6 +1967,12 @@ export async function createAssetsFromContentImport({
         })
       : [];
 
+    // Validate kit-custody conflicts before any database operations
+    await validateKitCustodyConflicts({
+      data,
+      organizationId,
+    });
+
     // Create all required related entities
     const [kits, categories, locations, teamMembers, tags, { customFields }] =
       await Promise.all([
@@ -1907,10 +2099,12 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
-        kitId: asset.kit ? kits?.[asset.kit] : undefined,
+        kitId: asset.kit ? kits?.[asset.kit].id : undefined,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
+        custodian: asset.custodian
+          ? teamMembers?.[asset.custodian].id
+          : undefined,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
@@ -1928,6 +2122,15 @@ export async function createAssetsFromContentImport({
         barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
       });
     }
+
+    // Set kit custody for imported assets after all assets have been created
+    await setKitCustodyAfterAssetImport({
+      data,
+      kits,
+      teamMembers,
+    });
+
+    return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
