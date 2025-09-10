@@ -14,6 +14,7 @@ import {
   createUserFromSSO,
   updateUserFromSSO,
 } from "~/modules/user/service.server";
+import { DISABLE_SSO } from "./env";
 import { ShelfError } from "./error";
 import { isValidDomain } from "./misc";
 
@@ -254,6 +255,8 @@ export async function doesSSOUserExist(email: string): Promise<boolean> {
  * @throws ShelfError if signup is not allowed due to SSO configuration
  */
 export async function validateNonSSOSignup(email: string): Promise<void> {
+  /** Quick return if SSO is disabled as this check is then unnecessary */
+  if (DISABLE_SSO) return;
   const domainStatus = await checkDomainSSOStatus(email);
 
   if (domainStatus.isConfiguredForSSO) {
