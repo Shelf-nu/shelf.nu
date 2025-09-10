@@ -63,6 +63,7 @@ import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
   getDefinitionFromCsvHeader,
+  getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -112,6 +113,7 @@ import {
   formatAssetsRemindersDates,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
+  getCustomFieldUpdateNoteContent,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -1188,9 +1190,16 @@ export async function updateAsset({
     }
 
     /** If custom fields are passed, create/update them */
+    let currentCustomFieldsValuesWithFields: {
+      id: string;
+      customFieldId: string;
+      value: any;
+      customField: { id: string; name: string; type: any };
+    }[] = [];
+
     if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
-      /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
-      const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany(
+      /** We get the current values with field information for comparison. We need this to detect changes for notes */
+      currentCustomFieldsValuesWithFields = await db.assetCustomFieldValue.findMany(
         {
           where: {
             assetId: id,
@@ -1198,6 +1207,14 @@ export async function updateAsset({
           select: {
             id: true,
             customFieldId: true,
+            value: true,
+            customField: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+              },
+            },
           },
         }
       );
@@ -1215,7 +1232,7 @@ export async function updateAsset({
           upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
             where: {
               id:
-                currentCustomFieldsValues.find(
+                currentCustomFieldsValuesWithFields.find(
                   (ccfv) => ccfv.customFieldId === id
                 )?.id || "",
             },
@@ -1291,6 +1308,96 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+    }
+
+    /** If custom fields were processed, create notes for any changes */
+    if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+      // Get user information for notes
+      const user = await db.user.findFirst({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      // Get the custom field definitions to format the notes properly
+      const customFieldsFromForm = await db.customField.findMany({
+        where: {
+          id: {
+            in: customFieldsValuesFromForm.map(cf => cf.id),
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+        },
+      });
+
+      // Create a map for easy lookup
+      const customFieldLookup = new Map(
+        customFieldsFromForm.map(cf => [cf.id, cf])
+      );
+
+      // Check each field from the form for changes
+      for (const formField of customFieldsValuesFromForm) {
+        const customField = customFieldLookup.get(formField.id);
+        if (!customField) continue;
+
+        const existingValue = currentCustomFieldsValuesWithFields.find(
+          cf => cf.customFieldId === formField.id
+        );
+
+        // Format values for display using the same function as the UI
+        const formatValue = (value: any) => {
+          if (!value) return null;
+          try {
+            return getCustomFieldDisplayValue(value);
+          } catch {
+            return String(value.raw || value);
+          }
+        };
+
+        const newValueDisplay = formField.value ? formatValue(formField.value) : null;
+        const oldValueDisplay = existingValue?.value ? formatValue(existingValue.value) : null;
+
+        // Determine if this is a change worth noting
+        let shouldCreateNote = false;
+        let isFirstTimeSet = false;
+
+        if (!existingValue && newValueDisplay) {
+          // First time setting a value
+          shouldCreateNote = true;
+          isFirstTimeSet = true;
+        } else if (existingValue && !newValueDisplay) {
+          // Removing a value
+          shouldCreateNote = true;
+        } else if (existingValue && newValueDisplay) {
+          // Check if the value actually changed
+          const oldRaw = existingValue.value?.raw;
+          const newRaw = formField.value?.raw;
+          if (oldRaw !== newRaw) {
+            shouldCreateNote = true;
+          }
+        }
+
+        if (shouldCreateNote) {
+          await createCustomFieldChangeNote({
+            customFieldName: customField.name,
+            previousValue: oldValueDisplay ? String(oldValueDisplay) : null,
+            newValue: newValueDisplay ? String(newValueDisplay) : null,
+            firstName: user?.firstName || "",
+            lastName: user?.lastName || "",
+            assetName: asset.title,
+            assetId: asset.id,
+            userId,
+            isFirstTimeSet,
+          });
+        }
+      }
     }
 
     return asset;
@@ -1906,6 +2013,59 @@ export async function createLocationChangeNote({
       message:
         "Something went wrong while creating a location change note. Please try again or contact support",
       additionalData: { userId, assetId },
+      label,
+    });
+  }
+}
+
+export async function createCustomFieldChangeNote({
+  customFieldName,
+  previousValue,
+  newValue,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isFirstTimeSet,
+}: {
+  customFieldName: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isFirstTimeSet: boolean;
+}) {
+  try {
+    const message = getCustomFieldUpdateNoteContent({
+      customFieldName,
+      previousValue,
+      newValue,
+      firstName,
+      lastName,
+      assetName,
+      isFirstTimeSet,
+    });
+
+    if (!message) {
+      return; // No note to create if message is empty
+    }
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a custom field change note. Please try again or contact support",
+      additionalData: { userId, assetId, customFieldName },
       label,
     });
   }

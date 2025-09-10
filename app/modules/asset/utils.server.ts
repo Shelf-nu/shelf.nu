@@ -43,6 +43,40 @@ export function getLocationUpdateNoteContent({
   return message;
 }
 
+export function getCustomFieldUpdateNoteContent({
+  customFieldName,
+  previousValue,
+  newValue,
+  firstName,
+  lastName,
+  assetName,
+  isFirstTimeSet,
+}: {
+  customFieldName: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  firstName: string;
+  lastName: string;
+  assetName: string;
+  isFirstTimeSet: boolean;
+}) {
+  const fullName = `${firstName.trim()} ${lastName.trim()}`;
+  let message = "";
+
+  if (isFirstTimeSet && newValue) {
+    // First time setting a value
+    message = `**${fullName}** set **${customFieldName}** of **${assetName.trim()}** to **${newValue}**`;
+  } else if (previousValue && newValue) {
+    // Changing from one value to another
+    message = `**${fullName}** updated **${customFieldName}** of **${assetName.trim()}** from **${previousValue}** to **${newValue}**`;
+  } else if (previousValue && !newValue) {
+    // Removing a value
+    message = `**${fullName}** removed **${customFieldName}** value **${previousValue}** from **${assetName.trim()}**`;
+  }
+
+  return message;
+}
+
 export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
