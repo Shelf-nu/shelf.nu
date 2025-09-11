@@ -298,7 +298,7 @@ export default function KitsIndexPage() {
                   <div className="flex flex-col gap-1">
                     <div className="min-w-0 flex-1 truncate">
                       <Button
-                        to={`/kit/${resource.id}`}
+                        to={`/kits/${resource.id}/assets`}
                         variant="link"
                         className="text-left font-medium text-gray-900 hover:text-gray-700"
                         target={"_blank"}
