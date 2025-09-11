@@ -68,7 +68,6 @@ Need help? Our support team is ready to assist you. Check out our Knowledge Base
 
 Remember, your trial gives you full access to all our premium features. Make the most of it!
 
-Happy asset tracking,
 Carlos Virreira
 Co-founder, Shelf Asset Management, Inc.
 P.S. Have questions or feedback? I'd love to hear from you. Reply directly to this email, and let's chat!
@@ -152,7 +151,6 @@ function WelcomeToTrialEmailTemplate() {
             features. Make the most of it!
             <br />
             <br />
-            Happy asset tracking, <br />
             Carlos Virreira <br />
             Co-founder, Shelf Asset Management, Inc.
             <br />
