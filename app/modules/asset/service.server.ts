@@ -1134,6 +1134,34 @@ export async function updateAsset({
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
+
+    // Check if asset belongs to a kit and prevent location updates
+    if (isChangingLocation) {
+      const assetWithKit = await db.asset.findUnique({
+        where: { id, organizationId },
+        select: {
+          kit: {
+            select: { id: true, name: true },
+          },
+        },
+      });
+
+      if (assetWithKit?.kit) {
+        throw new ShelfError({
+          cause: null,
+          message: `This asset's location is managed by its parent kit "${assetWithKit.kit.name}". Please update the kit's location instead.`,
+          additionalData: {
+            assetId: id,
+            kitId: assetWithKit.kit.id,
+            kitName: assetWithKit.kit.name,
+          },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const data: Prisma.AssetUpdateInput = {
       title,
       description,
@@ -2886,10 +2914,36 @@ export async function bulkUpdateAssetLocation({
     const [assets, user] = await Promise.all([
       db.asset.findMany({
         where,
-        select: { id: true, title: true, location: true },
+        select: {
+          id: true,
+          title: true,
+          location: true,
+          kit: { select: { id: true, name: true } },
+        },
       }),
       getUserByID(userId),
     ]);
+
+    // Check if any assets belong to kits and prevent bulk location updates
+    const assetsInKits = assets.filter((asset) => asset.kit);
+    if (assetsInKits.length > 0) {
+      const kitNames = Array.from(
+        new Set(assetsInKits.map((asset) => asset.kit?.name))
+      ).join(", ");
+      throw new ShelfError({
+        cause: null,
+        message: `Cannot update location for assets that belong to kits: ${kitNames}. Update the kit locations instead.`,
+        additionalData: {
+          assetIds: assetsInKits.map((asset) => asset.id),
+          kitNames,
+          userId,
+          organizationId,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const newLocation = newLocationId
       ? await db.location.findFirst({
@@ -2930,9 +2984,13 @@ export async function bulkUpdateAssetLocation({
 
     return true;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk updating location.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while bulk updating location.",
       additionalData: { userId, assetIds, newLocationId },
       label,
     });
