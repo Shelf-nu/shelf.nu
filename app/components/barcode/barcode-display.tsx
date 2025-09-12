@@ -47,6 +47,7 @@ export function BarcodeDisplay({
           Code39: "code39",
           DataMatrix: "datamatrix",
           ExternalQR: "qrcode",
+          EAN13: "ean13",
         };
 
         const bcid = formatMap[type];

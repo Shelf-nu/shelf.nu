@@ -237,6 +237,7 @@ describe(createUserAccountForTesting.name, () => {
           create: [
             {
               name: "Personal",
+              hasSequentialIdsMigrated: true, // New personal organizations don't need migration
               categories: {
                 create: defaultUserCategories.map((c) => ({
                   ...c,

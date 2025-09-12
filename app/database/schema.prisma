@@ -389,6 +389,7 @@ enum BarcodeType {
   Code39
   DataMatrix
   ExternalQR
+  EAN13
 }
 
 model PrintBatch {
@@ -787,6 +788,7 @@ enum Currency {
 
   AED // United Arab Emirates Dirham
   AUD // Australian Dollar
+  BGN // Bulgarian Lev
   BRL // Brazilian Real
   CAD // Canadian Dollar
   CHF // Swiss Franc

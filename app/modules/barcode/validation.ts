@@ -12,6 +12,7 @@ export const BARCODE_LENGTHS = {
   DATAMATRIX_MAX: 100,
   EXTERNAL_QR_MIN: 1,
   EXTERNAL_QR_MAX: 2048,
+  EAN13_LENGTH: 13,
 } as const;
 
 /**
@@ -115,6 +116,56 @@ const validateExternalQR = (value: string) => {
 };
 
 /**
+ * Validation rules for EAN-13 barcodes
+ * International product identification: exactly 13 numeric digits with check digit validation
+ */
+const validateEAN13 = (value: string) => {
+  if (!value || value.length === 0) {
+    return "EAN-13 barcode value is required";
+  }
+
+  if (value.length !== BARCODE_LENGTHS.EAN13_LENGTH) {
+    return `EAN-13 barcode must be exactly ${BARCODE_LENGTHS.EAN13_LENGTH} digits`;
+  }
+
+  // Check if all characters are numeric
+  const numericRegex = /^[0-9]*$/;
+  if (!numericRegex.test(value)) {
+    return "EAN-13 barcode must contain only numeric digits (0-9)";
+  }
+
+  // Validate EAN-13 check digit
+  const digits = value.split("").map(Number);
+  const checkDigit = digits[12];
+  const calculatedCheckDigit = calculateEAN13CheckDigit(value.substring(0, 12));
+
+  if (checkDigit !== calculatedCheckDigit) {
+    return "EAN-13 barcode has an invalid check digit";
+  }
+
+  return null;
+};
+
+/**
+ * Calculate EAN-13 check digit using the standard algorithm
+ */
+function calculateEAN13CheckDigit(first12Digits: string): number {
+  const digits = first12Digits.split("").map(Number);
+  let sum = 0;
+
+  for (let i = 0; i < 12; i++) {
+    // Multiply odd positioned digits (1st, 3rd, 5th, etc.) by 1
+    // Multiply even positioned digits (2nd, 4th, 6th, etc.) by 3
+    const multiplier = i % 2 === 0 ? 1 : 3;
+    sum += digits[i] * multiplier;
+  }
+
+  // Check digit is the amount needed to reach the next multiple of 10
+  const remainder = sum % 10;
+  return remainder === 0 ? 0 : 10 - remainder;
+}
+
+/**
  * Normalizes a barcode value based on its type
  * ExternalQR preserves original case, others are converted to uppercase
  */
@@ -122,7 +173,17 @@ export function normalizeBarcodeValue(
   type: BarcodeType,
   value: string
 ): string {
-  return type === BarcodeType.ExternalQR ? value : value.toUpperCase();
+  switch (type) {
+    case BarcodeType.ExternalQR:
+      return value; // Preserve original case for URLs and flexible content
+    case BarcodeType.Code128:
+    case BarcodeType.Code39:
+    case BarcodeType.DataMatrix:
+    case BarcodeType.EAN13:
+      return value.toUpperCase(); // Convert to uppercase for consistency
+    default:
+      return value.toUpperCase(); // Default to uppercase
+  }
 }
 
 /**
@@ -154,6 +215,8 @@ export function validateBarcodeValue(
       return validateDataMatrix(value);
     case BarcodeType.ExternalQR:
       return validateExternalQR(value);
+    case BarcodeType.EAN13:
+      return validateEAN13(value);
     default:
       return "Unknown barcode type";
   }

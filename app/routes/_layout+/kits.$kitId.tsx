@@ -124,23 +124,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               availableToBook: true,
             },
           },
-          custody: {
-            select: {
-              custodian: {
-                include: {
-                  user: {
-                    select: {
-                      id: true,
-                      firstName: true,
-                      lastName: true,
-                      profilePicture: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
           qrCodes: true,
           ...(canUseBarcodes && {
             barcodes: {
@@ -168,7 +151,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         dateStyle: "short",
         timeStyle: "short",
       }).format(kit.custody.createdAt);
-
       custody = {
         ...kit.custody,
         dateDisplay,

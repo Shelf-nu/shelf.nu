@@ -38,6 +38,7 @@ export function OverridePreview({ override }: OverridePreviewProps) {
           <span className="font-semibold text-gray-900">
             <DateS
               date={override.date}
+              localeOnly
               options={{
                 weekday: "long",
                 year: "numeric",

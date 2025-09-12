@@ -10,6 +10,7 @@ import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissio
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
+import { Ean13LookupLink } from "../barcode/barcode-card";
 import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
@@ -433,7 +434,15 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
                 lineHeight: "1.2",
               }}
             >
-              {data.value}
+              {data.type === "EAN13" ? (
+                <Ean13LookupLink
+                  value={data.value}
+                  content={data.value}
+                  className="text-[12px]"
+                />
+              ) : (
+                data.value
+              )}
             </div>
           </div>
           <div>
