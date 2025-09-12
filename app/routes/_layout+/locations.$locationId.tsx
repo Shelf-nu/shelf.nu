@@ -208,10 +208,11 @@ export default function LocationPage() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**
-   * When we are on the location.scan-assets route, we render an outlet on the whole layout.
+   * When we are on the location.scan-assets or location.audit route, we render an outlet on the whole layout.
    */
   const shouldRenderFullOutlet =
-    currentRoute?.handle?.name === "location.scan-assets";
+    currentRoute?.handle?.name === "location.scan-assets" ||
+    currentRoute?.handle?.name === "location.audit";
 
   return shouldRenderFullOutlet ? (
     <Outlet />
