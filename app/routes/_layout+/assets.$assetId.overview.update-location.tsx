@@ -116,7 +116,6 @@ export default function Custody() {
   const disabled = isFormProcessing(transition.state);
 
   const { asset } = useLoaderData<typeof loader>();
-
   return (
     <>
       <Form method="post">

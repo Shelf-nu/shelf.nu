@@ -6,13 +6,7 @@ import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import useApiQuery from "~/hooks/use-api-query";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
+import KitSelector from "../kits/kit-selector";
 import { Button } from "../shared/button";
 
 export const BulkAddToKitSchema = z.object({
@@ -49,37 +43,13 @@ export default function BulkAddToKitDialog() {
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <Select name={zo.fields.kit()}>
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={isLoading ? "Loading..." : "Select a kit"}
-                />
-              </SelectTrigger>
-
-              <SelectContent className="p-1">
-                {data?.kits?.map((kit) => (
-                  <SelectItem
-                    value={kit.id}
-                    key={kit.id}
-                    className="border-gray-200 px-4 py-3"
-                  >
-                    {kit.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {zo.errors.kit()?.message ? (
-              <p className="text-sm text-error-500">
-                {zo.errors.kit()?.message}
-              </p>
-            ) : null}
-
-            {error ? <p className="text-sm text-error-500">{error}</p> : null}
-
-            {fetcherError ? (
-              <p className="text-sm text-error-500">{fetcherError}</p>
-            ) : null}
+            <KitSelector
+              name={zo.fields.kit()}
+              kits={data?.kits || []}
+              placeholder={isLoading ? "Loading..." : "Select a kit"}
+              isLoading={isLoading}
+              error={zo.errors.kit()?.message || error || fetcherError}
+            />
           </div>
 
           <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 p-3">

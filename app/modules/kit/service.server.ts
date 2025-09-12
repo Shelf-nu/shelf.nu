@@ -1674,12 +1674,14 @@ export async function updateKitAssets({
   userId,
   assetIds,
   request,
+  addOnly = false,
 }: {
   kitId: Kit["id"];
   organizationId: Organization["id"];
   userId: User["id"];
   assetIds: Asset["id"][];
   request: Request;
+  addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
   try {
     const user = await getUserByID(userId);
@@ -1763,7 +1765,8 @@ export async function updateKitAssets({
       ];
     }
 
-    const newlyAddedAssets = await db.asset
+    // Get all assets that should be in the kit (based on assetIds)
+    const allAssetsForKit = await db.asset
       .findMany({
         where: { id: { in: assetIds } },
         select: {
@@ -1783,6 +1786,12 @@ export async function updateKitAssets({
           label: "Kit",
         });
       });
+
+    // Identify which assets are actually new (not already in this kit)
+    const newlyAddedAssets = allAssetsForKit.filter(
+      (asset) =>
+        !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
+    );
 
     /** An asset already in custody cannot be added to a kit */
     const isSomeAssetInCustody = newlyAddedAssets.some(
@@ -1806,12 +1815,14 @@ export async function updateKitAssets({
       data: {
         assets: {
           /**
-           * set: [] will make sure that if any previously selected asset is removed,
-           * then it is also disconnected from the kit
+           * Only disconnect assets if not in addOnly mode
+           * In addOnly mode (bulk-add), we preserve all existing assets
            */
-          set: [],
+          ...(addOnly
+            ? {}
+            : { disconnect: removedAssets.map(({ id }) => ({ id })) }),
           /**
-           * Then this will update the assets to be whatever user has selected now
+           * Connect assets that should be added (only the new ones)
            */
           connect: newlyAddedAssets.map(({ id }) => ({ id })),
         },
@@ -1821,7 +1832,7 @@ export async function updateKitAssets({
     await createBulkKitChangeNotes({
       kit,
       newlyAddedAssets,
-      removedAssets,
+      removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
       userId,
     });
 
@@ -1930,8 +1941,9 @@ export async function updateKitAssets({
     /**
      * If a kit is in custody and some assets are removed,
      * then we have to make the removed assets Available
+     * Only apply this when not in addOnly mode
      */
-    if (removedAssets.length && kit.custody?.custodian.id) {
+    if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       await Promise.all([
         db.custody.deleteMany({
           where: { assetId: { in: removedAssets.map((a) => a.id) } },

@@ -45,7 +45,7 @@ const ConditionalActionsDropdown = () => {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
-  const assetIsPartOfKitWithLocation = Boolean(asset.kit?.locationId);
+  const assetIsPartOfKit = Boolean(asset.kit);
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
@@ -185,7 +185,7 @@ const ConditionalActionsDropdown = () => {
                   width="full"
                   onClick={handleMenuClose}
                   disabled={
-                    assetIsPartOfKitWithLocation
+                    assetIsPartOfKit
                       ? {
                           reason: (
                             <>

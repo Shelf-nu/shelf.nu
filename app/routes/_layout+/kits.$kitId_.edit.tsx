@@ -20,6 +20,7 @@ import {
   getKit,
   updateKit,
   updateKitImage,
+  updateKitLocation,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
@@ -145,6 +146,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ? extractBarcodesFromFormData(formData)
       : [];
 
+    // Get current kit to compare location changes
+    const currentKit = await getKit({
+      id: kitId,
+      organizationId,
+      userOrganizations: [],
+      request,
+    });
+
     await Promise.all([
       updateKit({
         id: kitId,
@@ -154,7 +163,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         categoryId: payload.category ? payload.category : "uncategorized",
         barcodes,
-        locationId: payload.locationId,
+        // Don't set locationId here - will be handled by updateKitLocation if changed
       }),
       updateKitImage({
         request,
@@ -163,6 +172,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
       }),
     ]);
+
+    // Handle location update separately to cascade to assets
+    if (payload.locationId !== currentKit.locationId) {
+      await updateKitLocation({
+        id: kitId,
+        organizationId,
+        currentLocationId: currentKit.locationId,
+        newLocationId: payload.locationId || "", // Handle undefined case
+        userId,
+      });
+    }
 
     sendNotification({
       title: "Kit updated",
