@@ -33,7 +33,6 @@ import {
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
-import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import LineBreakText from "~/components/layout/line-break-text";
@@ -49,6 +48,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
+import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
@@ -611,7 +611,6 @@ export default function AddKitsToBooking() {
       </footer>
 
       <UnsavedChangesAlert
-        type="kits"
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
@@ -620,7 +619,10 @@ export default function AddKitsToBooking() {
         onYes={() => {
           submit(formRef.current);
         }}
-      />
+      >
+        You have added some kits to the booking but haven't saved it yet. Do you
+        want to confirm adding those kits?
+      </UnsavedChangesAlert>
     </Tabs>
   );
 }

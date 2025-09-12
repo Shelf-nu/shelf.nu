@@ -45,7 +45,7 @@ const ConditionalActionsDropdown = () => {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
-
+  const assetIsPartOfKit = Boolean(asset.kit);
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
@@ -184,6 +184,19 @@ const ConditionalActionsDropdown = () => {
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={handleMenuClose}
+                  disabled={
+                    assetIsPartOfKit
+                      ? {
+                          reason: (
+                            <>
+                              This asset's location is managed by its parent kit{" "}
+                              <strong>"{asset.kit?.name}"</strong>. Update the
+                              kit's location instead.
+                            </>
+                          ),
+                        }
+                      : undefined
+                  } // to show tooltip only when disabled
                 >
                   <span className="flex items-center gap-2">
                     <Icon icon="location" /> Update location

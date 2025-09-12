@@ -13,7 +13,10 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
-import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import type {
+  AssetEditLoaderData,
+  loader,
+} from "~/routes/_layout+/assets.$assetId_.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
@@ -137,7 +140,9 @@ export const AssetForm = ({
   const [, validateFile] = useAtom(assetImageValidateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
-  const { currency } = useLoaderData<typeof loader>();
+  const { currency, asset } = useLoaderData<AssetEditLoaderData>();
+  const isKitAsset = Boolean(asset.kit);
+  const locationDisabled = disabled || isKitAsset;
   const actionData = useActionData<{
     errors?: {
       title?: {
@@ -404,44 +409,74 @@ export const AssetForm = ({
             name="currentLocationId"
             value={locationId || ""}
           />
-          <DynamicSelect
-            disabled={disabled}
-            selectionMode="set"
-            fieldName="newLocationId"
-            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            defaultValue={locationId || undefined}
-            model={{ name: "location", queryKey: "name" }}
-            contentLabel="Locations"
-            label="Location"
-            hideLabel
-            initialDataKey="locations"
-            countKey="totalLocations"
-            closeOnSelect
-            allowClear
-            extraContent={
-              <Button
-                to="/locations/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new location
-              </Button>
-            }
-            renderItem={({ name, metadata }) => (
-              <div className="flex items-center gap-2">
-                {metadata?.thumbnailUrl ? (
-                  <ImageWithPreview
-                    thumbnailUrl={metadata.thumbnailUrl}
-                    alt={metadata.name}
-                    className="size-6 rounded-[2px]"
-                  />
-                ) : null}
-                <div>{name}</div>
-              </div>
-            )}
-          />
+          {isKitAsset ? (
+            <HoverCard openDelay={50} closeDelay={50}>
+              <HoverCardTrigger className="disabled w-full cursor-not-allowed">
+                <DynamicSelect
+                  disabled={locationDisabled}
+                  selectionMode="set"
+                  fieldName="newLocationId"
+                  triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+                  defaultValue={locationId || undefined}
+                  model={{ name: "location", queryKey: "name" }}
+                  contentLabel="Locations"
+                  label="Location"
+                  hideLabel
+                  initialDataKey="locations"
+                  countKey="totalLocations"
+                  closeOnSelect
+                  allowClear
+                />
+              </HoverCardTrigger>
+              <HoverCardContent side="left">
+                <h5 className="text-left text-[14px]">Action disabled</h5>
+                <p className="text-left text-[14px]">
+                  This asset's location is managed by its parent kit{" "}
+                  <strong>"{asset.kit?.name}"</strong>. Update the kit's
+                  location instead.
+                </p>
+              </HoverCardContent>
+            </HoverCard>
+          ) : (
+            <DynamicSelect
+              disabled={disabled}
+              selectionMode="set"
+              fieldName="newLocationId"
+              triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+              defaultValue={locationId || undefined}
+              model={{ name: "location", queryKey: "name" }}
+              contentLabel="Locations"
+              label="Location"
+              hideLabel
+              initialDataKey="locations"
+              countKey="totalLocations"
+              closeOnSelect
+              allowClear
+              extraContent={
+                <Button
+                  to="/locations/new"
+                  variant="link"
+                  icon="plus"
+                  className="w-full justify-start pt-4"
+                  target="_blank"
+                >
+                  Create new location
+                </Button>
+              }
+              renderItem={({ name, metadata }) => (
+                <div className="flex items-center gap-2">
+                  {metadata?.thumbnailUrl ? (
+                    <ImageWithPreview
+                      thumbnailUrl={metadata.thumbnailUrl}
+                      alt={metadata.name}
+                      className="size-6 rounded-[2px]"
+                    />
+                  ) : null}
+                  <div>{name}</div>
+                </div>
+              )}
+            />
+          )}
         </FormRow>
 
         <FormRow

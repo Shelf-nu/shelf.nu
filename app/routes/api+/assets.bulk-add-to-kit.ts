@@ -72,6 +72,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       organizationId,
       userId,
       request,
+      addOnly: true, // Only add assets, don't remove existing ones
     });
 
     sendNotification({

@@ -13,6 +13,7 @@ export enum PermissionAction {
   cancel = "cancel",
   manageAssets = "manage-assets",
   custody = "custody",
+  manageKits = "manage-kits",
 }
 export enum PermissionEntity {
   asset = "asset",
@@ -52,6 +53,7 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
       PermissionAction.manageAssets,
+      PermissionAction.manageKits,
       PermissionAction.export,
     ],
     [PermissionEntity.qr]: [PermissionAction.read],
@@ -89,6 +91,7 @@ export const Role2PermissionMap: {
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
       PermissionAction.archive,
       PermissionAction.manageAssets,
+      PermissionAction.manageKits,
       PermissionAction.cancel,
       PermissionAction.export,
     ],
