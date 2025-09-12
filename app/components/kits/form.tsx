@@ -17,6 +17,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -167,15 +168,11 @@ export default function KitsForm({
             selectionMode="none"
             allowClear={true}
             extraContent={
-              <Button
-                to="/categories/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new category
-              </Button>
+              <InlineEntityCreationDialog
+                type="category"
+                title="Create new category"
+                buttonLabel="Create new category"
+              />
             }
           />
         </FormRow>

@@ -1,22 +1,20 @@
+import { useEffect } from "react";
 import type { Location } from "@prisma/client";
-import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
-import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
-import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
+import { useDisabled } from "~/hooks/use-disabled";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
-import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
-import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 import {
   Tooltip,
@@ -24,6 +22,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
+import When from "../when/when";
 
 export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -33,106 +32,184 @@ export const NewLocationFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  preventRedirect: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
+  className?: string;
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  apiUrl?: string;
+  onSuccess?: () => void;
 }
 
-export const LocationForm = ({ name, address, description }: Props) => {
-  const navigation = useNavigation();
+export const LocationForm = ({
+  className,
+  name,
+  address,
+  description,
+  apiUrl,
+  onSuccess,
+}: Props) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
-  const disabled = isFormProcessing(navigation.state);
+  const fetcher = useFetcherWithReset<{
+    success: boolean;
+    error?: { message: string };
+  }>();
+  const fetcherData = fetcher.data;
+  const disabled = useDisabled(fetcher);
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
-  const actionData = useActionData<
-    typeof newLocationAction | typeof editLocationAction
-  >();
+
+  useEffect(() => {
+    if (!onSuccess) return;
+
+    if (fetcherData && fetcherData?.success) {
+      onSuccess();
+    }
+  }, [fetcherData, onSuccess]);
+
+  const hasOnSuccessFunc = typeof onSuccess === "function";
 
   return (
-    <Card className="w-full md:w-min">
-      <Form
-        ref={zo.ref}
-        method="post"
-        className="flex w-full flex-col gap-2"
-        encType="multipart/form-data"
-      >
+    <fetcher.Form
+      ref={zo.ref}
+      method="post"
+      className={tw("flex w-full flex-col gap-2", className)}
+      encType="multipart/form-data"
+      action={apiUrl}
+    >
+      {typeof onSuccess === "function" ? null : (
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
         </AbsolutePositionedHeaderActions>
-        <FormRow
-          rowLabel={"Name"}
-          className="border-b-0 pb-[10px] pt-0"
-          required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
-        >
-          <Input
-            label="Name"
-            hideLabel
-            name={zo.fields.name()}
-            disabled={disabled}
-            error={actionData?.error?.message || zo.errors.name()?.message}
-            autoFocus
-            onChange={updateName}
-            className="w-full"
-            defaultValue={name || undefined}
-            placeholder="Storage room"
+      )}
+
+      <When
+        truthy={hasOnSuccessFunc}
+        fallback={
+          <FormRow
+            rowLabel={"Name"}
+            className="border-b-0 pb-[10px] pt-0"
             required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
-          />
-        </FormRow>
-
-        <FormRow rowLabel={"Main image"}>
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
+          >
             <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
+              label="Name"
               hideLabel
-              error={fileError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
+              name={zo.fields.name()}
+              disabled={disabled}
+              error={fetcherData?.error?.message || zo.errors.name()?.message}
+              autoFocus
+              onChange={updateName}
+              className="w-full"
+              defaultValue={name || undefined}
+              placeholder="Storage room"
+              required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
             />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
-          </div>
-        </FormRow>
+          </FormRow>
+        }
+      >
+        <Input
+          label="Name"
+          name={zo.fields.name()}
+          disabled={disabled}
+          error={fetcherData?.error?.message || zo.errors.name()?.message}
+          autoFocus
+          onChange={updateName}
+          className="w-full"
+          defaultValue={name || undefined}
+          placeholder="Storage room"
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
+        />
+      </When>
 
-        <FormRow
-          rowLabel={"Address"}
-          subHeading={
-            <p>
-              Will set location’s geo position to address. Make sure to add an
-              accurate address, to ensure the map location is as accurate as
-              possible
-            </p>
-          }
-          className="pt-[10px]"
-          required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
-        >
-          <Input
-            label="Address"
-            hideLabel
-            name={zo.fields.address()}
-            disabled={disabled}
-            error={zo.errors.address()?.message}
-            className="w-full"
-            defaultValue={address || undefined}
+      <When
+        truthy={hasOnSuccessFunc}
+        fallback={
+          <FormRow rowLabel={"Main image"}>
+            <div>
+              <p className="hidden lg:block">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+              <Input
+                disabled={disabled}
+                accept={ACCEPT_SUPPORTED_IMAGES}
+                name="image"
+                type="file"
+                onChange={validateFile}
+                label={"Main image"}
+                hideLabel
+                error={fileError}
+                className="mt-2"
+                inputClassName="border-0 shadow-none p-0 rounded-none"
+              />
+              <p className="mt-2 lg:hidden">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+            </div>
+          </FormRow>
+        }
+      >
+        <Input
+          disabled={disabled}
+          accept={ACCEPT_SUPPORTED_IMAGES}
+          name="image"
+          type="file"
+          onChange={validateFile}
+          label={"Main image"}
+          error={fileError}
+          className="mt-2"
+          inputClassName="border-0 shadow-none p-0 rounded-none"
+        />
+        <p className="hidden lg:block">Accepts PNG, JPG or JPEG (max.4 MB)</p>
+      </When>
+
+      <When
+        truthy={hasOnSuccessFunc}
+        fallback={
+          <FormRow
+            rowLabel={"Address"}
+            subHeading={
+              <p>
+                Will set location’s geo position to address. Make sure to add an
+                accurate address, to ensure the map location is as accurate as
+                possible
+              </p>
+            }
+            className="pt-[10px]"
             required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
-          />
-        </FormRow>
+          >
+            <Input
+              label="Address"
+              hideLabel
+              name={zo.fields.address()}
+              disabled={disabled}
+              error={zo.errors.address()?.message}
+              className="w-full"
+              defaultValue={address || undefined}
+              required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
+            />
+          </FormRow>
+        }
+      >
+        <Input
+          label="Address"
+          name={zo.fields.address()}
+          disabled={disabled}
+          error={zo.errors.address()?.message}
+          className="w-full"
+          defaultValue={address || undefined}
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
+        />
+      </When>
 
-        <div>
+      <When
+        truthy={hasOnSuccessFunc}
+        fallback={
           <FormRow
             rowLabel="Description"
             subHeading={
@@ -160,17 +237,31 @@ export const LocationForm = ({ name, address, description }: Props) => {
               )}
             />
           </FormRow>
-        </div>
+        }
+      >
+        <Input
+          inputType="textarea"
+          label="Description"
+          name={zo.fields.description()}
+          defaultValue={description || ""}
+          placeholder="Add a description for your location."
+          disabled={disabled}
+          data-test-id="locationDescription"
+          className="w-full"
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.description)}
+        />
+      </When>
 
-        <FormRow className="border-y-0" rowLabel="">
-          <div className="ml-auto">
-            <Button type="submit" disabled={disabled}>
-              {disabled ? <Spinner /> : "Save"}
-            </Button>
-          </div>
-        </FormRow>
-      </Form>
-    </Card>
+      {typeof onSuccess === "function" ? (
+        <input type="hidden" name="preventRedirect" value="true" />
+      ) : null}
+
+      <div className="ml-auto">
+        <Button type="submit" disabled={disabled}>
+          {disabled ? <Spinner /> : "Save"}
+        </Button>
+      </div>
+    </fetcher.Form>
   );
 };
 
