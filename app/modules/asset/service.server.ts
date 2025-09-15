@@ -1350,49 +1350,46 @@ export async function updateAsset({
         customFieldsValuesFromForm
       );
 
-      if (potentialChanges.length === 0) {
-        // No changes detected, skip note creation entirely
-        return asset;
-      }
+      if (potentialChanges.length > 0) {
+        // Fetch required data in parallel only if we have potential changes
+        const [user, customFieldsFromForm] = await Promise.all([
+          db.user.findFirst({
+            where: { id: userId },
+            select: { firstName: true, lastName: true },
+          }),
+          db.customField.findMany({
+            where: {
+              id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+            },
+            select: { id: true, name: true, type: true },
+          }),
+        ]);
 
-      // Fetch required data in parallel only if we have potential changes
-      const [user, customFieldsFromForm] = await Promise.all([
-        db.user.findFirst({
-          where: { id: userId },
-          select: { firstName: true, lastName: true },
-        }),
-        db.customField.findMany({
-          where: {
-            id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
-          },
-          select: { id: true, name: true, type: true },
-        }),
-      ]);
-
-      // Detect actual changes with robust comparison
-      const changes = detectCustomFieldChanges(
-        currentCustomFieldsValuesWithFields,
-        customFieldsValuesFromForm,
-        customFieldsFromForm
-      );
-
-      // Batch create all notes in parallel if we have changes
-      if (changes.length > 0) {
-        const notePromises = changes.map((change: CustomFieldChangeInfo) =>
-          createCustomFieldChangeNote({
-            customFieldName: change.customFieldName,
-            previousValue: change.previousValue,
-            newValue: change.newValue,
-            firstName: user?.firstName || "",
-            lastName: user?.lastName || "",
-            assetName: asset.title,
-            assetId: asset.id,
-            userId,
-            isFirstTimeSet: change.isFirstTimeSet,
-          })
+        // Detect actual changes with robust comparison
+        const changes = detectCustomFieldChanges(
+          currentCustomFieldsValuesWithFields,
+          customFieldsValuesFromForm,
+          customFieldsFromForm
         );
 
-        await Promise.all(notePromises);
+        // Batch create all notes in parallel if we have changes
+        if (changes.length > 0) {
+          const notePromises = changes.map((change: CustomFieldChangeInfo) =>
+            createCustomFieldChangeNote({
+              customFieldName: change.customFieldName,
+              previousValue: change.previousValue,
+              newValue: change.newValue,
+              firstName: user?.firstName || "",
+              lastName: user?.lastName || "",
+              assetName: asset.title,
+              assetId: asset.id,
+              userId,
+              isFirstTimeSet: change.isFirstTimeSet,
+            })
+          );
+
+          await Promise.all(notePromises);
+        }
       }
     }
 

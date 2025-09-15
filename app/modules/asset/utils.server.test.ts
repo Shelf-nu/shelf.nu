@@ -1,3 +1,4 @@
+import type { CustomFieldType } from "@prisma/client";
 import {
   compareCustomFieldValues,
   detectPotentialChanges,
@@ -278,9 +279,9 @@ describe("detectPotentialChanges", () => {
 
 describe("detectCustomFieldChanges", () => {
   const mockCustomFields = [
-    { id: "field1", name: "Serial Number", type: "TEXT" },
-    { id: "field2", name: "Purchase Date", type: "DATE" },
-    { id: "field3", name: "Is Active", type: "BOOLEAN" },
+    { id: "field1", name: "Serial Number", type: "TEXT" as CustomFieldType },
+    { id: "field2", name: "Purchase Date", type: "DATE" as CustomFieldType },
+    { id: "field3", name: "Is Active", type: "BOOLEAN" as CustomFieldType },
   ];
 
   it("should detect first time field setting", () => {
@@ -309,7 +310,11 @@ describe("detectCustomFieldChanges", () => {
         id: "value1",
         customFieldId: "field1",
         value: { raw: "SN123456" },
-        customField: { id: "field1", name: "Serial Number", type: "TEXT" },
+        customField: {
+          id: "field1",
+          name: "Serial Number",
+          type: "TEXT" as CustomFieldType,
+        },
       },
     ];
     const formValues = [{ id: "field1", value: null }];
@@ -336,7 +341,11 @@ describe("detectCustomFieldChanges", () => {
         id: "value1",
         customFieldId: "field1",
         value: { raw: "SN123456" },
-        customField: { id: "field1", name: "Serial Number", type: "TEXT" },
+        customField: {
+          id: "field1",
+          name: "Serial Number",
+          type: "TEXT" as CustomFieldType,
+        },
       },
     ];
     const formValues = [{ id: "field1", value: { raw: "SN789012" } }];
@@ -363,7 +372,11 @@ describe("detectCustomFieldChanges", () => {
         id: "value1",
         customFieldId: "field1",
         value: { raw: "SN123456" },
-        customField: { id: "field1", name: "Serial Number", type: "TEXT" },
+        customField: {
+          id: "field1",
+          name: "Serial Number",
+          type: "TEXT" as CustomFieldType,
+        },
       },
     ];
     const formValues = [{ id: "field1", value: { raw: "SN123456" } }];
@@ -396,13 +409,21 @@ describe("detectCustomFieldChanges", () => {
         id: "value1",
         customFieldId: "field1",
         value: { raw: "SN123456" },
-        customField: { id: "field1", name: "Serial Number", type: "TEXT" },
+        customField: {
+          id: "field1",
+          name: "Serial Number",
+          type: "TEXT" as CustomFieldType,
+        },
       },
       {
         id: "value2",
         customFieldId: "field2",
         value: { raw: "2024-01-15" },
-        customField: { id: "field2", name: "Purchase Date", type: "DATE" },
+        customField: {
+          id: "field2",
+          name: "Purchase Date",
+          type: "DATE" as CustomFieldType,
+        },
       },
     ];
     const formValues = [
@@ -530,8 +551,12 @@ describe("getCustomFieldUpdateNoteContent", () => {
 
 describe("detectCustomFieldChanges - Display Value Formatting", () => {
   const mockCustomFields = [
-    { id: "field1", name: "Is Active", type: "BOOLEAN" },
-    { id: "field2", name: "Description", type: "MULTILINE_TEXT" },
+    { id: "field1", name: "Is Active", type: "BOOLEAN" as CustomFieldType },
+    {
+      id: "field2",
+      name: "Description",
+      type: "MULTILINE_TEXT" as CustomFieldType,
+    },
   ];
 
   it("should properly format boolean values in notes", () => {
@@ -540,7 +565,11 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
         id: "value1",
         customFieldId: "field1",
         value: { valueBoolean: true, raw: true },
-        customField: { id: "field1", name: "Is Active", type: "BOOLEAN" },
+        customField: {
+          id: "field1",
+          name: "Is Active",
+          type: "BOOLEAN" as CustomFieldType,
+        },
       },
     ];
     const formValues = [
@@ -572,7 +601,7 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
         customField: {
           id: "field2",
           name: "Description",
-          type: "MULTILINE_TEXT",
+          type: "MULTILINE_TEXT" as CustomFieldType,
         },
       },
     ];

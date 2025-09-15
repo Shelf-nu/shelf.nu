@@ -1,4 +1,10 @@
-import type { Asset, AssetStatus, Location, Prisma } from "@prisma/client";
+import type {
+  Asset,
+  AssetStatus,
+  Location,
+  Prisma,
+  CustomFieldType,
+} from "@prisma/client";
 import _ from "lodash";
 import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
@@ -6,7 +12,11 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { parseFilters } from "./query.server";
-import type { AdvancedIndexAsset } from "./types";
+import type {
+  AdvancedIndexAsset,
+  ICustomFieldValueJson,
+  AssetCustomFieldsValuesWithFields,
+} from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 export function getLocationUpdateNoteContent({
@@ -44,6 +54,44 @@ export function getLocationUpdateNoteContent({
   return message;
 }
 
+/**
+ * Generates a markdown-formatted note content for custom field changes.
+ *
+ * @param params - The parameters for generating the note content
+ * @param params.customFieldName - Name of the custom field that was changed
+ * @param params.previousValue - Previous value of the field (null if first time set)
+ * @param params.newValue - New value of the field (null if value was removed)
+ * @param params.firstName - First name of the user making the change
+ * @param params.lastName - Last name of the user making the change
+ * @param params.assetName - Name of the asset being updated
+ * @param params.isFirstTimeSet - Whether this is the first time a value is being set
+ * @returns Markdown-formatted note content string, or empty string if invalid scenario
+ *
+ * @example
+ * // First time setting a value
+ * getCustomFieldUpdateNoteContent({
+ *   customFieldName: "Serial Number",
+ *   previousValue: null,
+ *   newValue: "SN123456",
+ *   firstName: "John",
+ *   lastName: "Doe",
+ *   assetName: "Laptop",
+ *   isFirstTimeSet: true
+ * })
+ * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
+ *
+ * // Updating existing value
+ * getCustomFieldUpdateNoteContent({
+ *   customFieldName: "Status",
+ *   previousValue: "Active",
+ *   newValue: "Inactive",
+ *   firstName: "Jane",
+ *   lastName: "Smith",
+ *   assetName: "Camera",
+ *   isFirstTimeSet: false
+ * })
+ * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
+ */
 export function getCustomFieldUpdateNoteContent({
   customFieldName,
   previousValue,
@@ -78,10 +126,41 @@ export function getCustomFieldUpdateNoteContent({
   return message;
 }
 
+/**
+ * Compares two custom field values to determine if they represent a meaningful change.
+ * Uses type-specific comparison logic to handle different custom field types appropriately.
+ *
+ * @param oldValue - The previous custom field value
+ * @param newValue - The new custom field value
+ * @param fieldType - The type of the custom field (TEXT, DATE, BOOLEAN, etc.)
+ * @returns true if the values represent a change, false if they are equivalent
+ *
+ * @example
+ * // Date comparison
+ * compareCustomFieldValues(
+ *   { raw: "2024-01-15" },
+ *   { raw: "2024-01-16" },
+ *   "DATE"
+ * ) // Returns: true
+ *
+ * // Boolean comparison with string normalization
+ * compareCustomFieldValues(
+ *   { raw: "true" },
+ *   { raw: "false" },
+ *   "BOOLEAN"
+ * ) // Returns: true
+ *
+ * // Text comparison
+ * compareCustomFieldValues(
+ *   { raw: "old text" },
+ *   { raw: "old text" },
+ *   "TEXT"
+ * ) // Returns: false
+ */
 export function compareCustomFieldValues(
-  oldValue: any,
-  newValue: any,
-  fieldType: string
+  oldValue: ICustomFieldValueJson | null | undefined,
+  newValue: ICustomFieldValueJson | null | undefined,
+  fieldType: CustomFieldType
 ): boolean {
   // Handle null/undefined cases
   if (!oldValue && !newValue) return false; // No change
@@ -91,8 +170,8 @@ export function compareCustomFieldValues(
   switch (fieldType) {
     case "DATE":
       try {
-        const oldTime = new Date(oldValue.raw).getTime();
-        const newTime = new Date(newValue.raw).getTime();
+        const oldTime = new Date(String(oldValue.raw)).getTime();
+        const newTime = new Date(String(newValue.raw)).getTime();
 
         // Handle invalid dates (NaN values)
         if (isNaN(oldTime) || isNaN(newTime)) {
@@ -127,15 +206,31 @@ export function compareCustomFieldValues(
   }
 }
 
+/**
+ * Performs a quick scan to detect potential changes in custom field values.
+ * This is an optimization function that uses basic comparison to avoid expensive
+ * operations when no changes are detected.
+ *
+ * @param existingValues - Array of current custom field values with metadata
+ * @param formValues - Array of new custom field values from form submission
+ * @returns Array of field IDs that potentially have changes
+ *
+ * @example
+ * const potentialChanges = detectPotentialChanges(
+ *   [{ id: "1", customFieldId: "field1", value: { raw: "old" } }],
+ *   [{ id: "field1", value: { raw: "new" } }]
+ * )
+ * // Returns: [{ fieldId: "field1", hasChange: true }]
+ */
 export function detectPotentialChanges(
   existingValues: Array<{
     id: string;
     customFieldId: string;
-    value: any;
+    value: ICustomFieldValueJson | null;
   }>,
   formValues: Array<{
     id: string;
-    value: any;
+    value: ICustomFieldValueJson | null;
   }>
 ): Array<{ fieldId: string; hasChange: boolean }> {
   const changes: Array<{ fieldId: string; hasChange: boolean }> = [];
@@ -176,21 +271,49 @@ export interface CustomFieldChangeInfo {
   isFirstTimeSet: boolean;
 }
 
+/**
+ * Detects and analyzes changes in custom field values, returning detailed change information.
+ * This function performs robust comparison using type-specific logic and formats values
+ * for display using the same logic as the UI.
+ *
+ * @param existingValues - Current custom field values with field metadata
+ * @param formValues - New custom field values from form submission
+ * @param customFields - Custom field definitions for type information
+ * @returns Array of change information objects with formatted display values
+ *
+ * @example
+ * const changes = detectCustomFieldChanges(
+ *   [{
+ *     id: "1",
+ *     customFieldId: "field1",
+ *     value: { raw: "old" },
+ *     customField: { id: "field1", name: "Status", type: "TEXT" }
+ *   }],
+ *   [{ id: "field1", value: { raw: "new" } }],
+ *   [{ id: "field1", name: "Status", type: "TEXT" }]
+ * )
+ * // Returns: [{
+ * //   customFieldName: "Status",
+ * //   previousValue: "old",
+ * //   newValue: "new",
+ * //   isFirstTimeSet: false
+ * // }]
+ */
 export function detectCustomFieldChanges(
   existingValues: Array<{
     id: string;
     customFieldId: string;
-    value: any;
-    customField: { id: string; name: string; type: any };
+    value: ICustomFieldValueJson | null;
+    customField: { id: string; name: string; type: CustomFieldType };
   }>,
   formValues: Array<{
     id: string;
-    value: any;
+    value: ICustomFieldValueJson | null;
   }>,
   customFields: Array<{
     id: string;
     name: string;
-    type: any;
+    type: CustomFieldType;
   }>
 ): CustomFieldChangeInfo[] {
   const changes: CustomFieldChangeInfo[] = [];
