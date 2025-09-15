@@ -148,7 +148,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
       if (assetIds.length === 0 && kitIds.length === 0) {
         setLocationState({
           status: "error",
-          errorMessage: "No assets or kits selected to add to location",
+          errorMessage: "No assets or kits selected to update location",
         });
         return;
       }
