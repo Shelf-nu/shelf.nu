@@ -884,7 +884,6 @@ describe("updateKitAssets - Location Cascade", () => {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         assets: {
-          set: [],
           connect: [{ id: "asset-1" }],
         },
       },
@@ -937,7 +936,6 @@ describe("updateKitAssets - Location Cascade", () => {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         assets: {
-          set: [],
           connect: [{ id: "asset-1" }],
         },
       },

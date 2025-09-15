@@ -1815,10 +1815,10 @@ export async function updateKitAssets({
       data: {
         assets: {
           /**
-           * Only disconnect assets if not in addOnly mode
+           * Only disconnect assets if not in addOnly mode and there are assets to remove
            * In addOnly mode (bulk-add), we preserve all existing assets
            */
-          ...(addOnly
+          ...(addOnly || removedAssets.length === 0
             ? {}
             : { disconnect: removedAssets.map(({ id }) => ({ id })) }),
           /**
