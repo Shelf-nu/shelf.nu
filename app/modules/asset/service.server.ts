@@ -66,7 +66,6 @@ import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
   getDefinitionFromCsvHeader,
-  getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -117,6 +116,9 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
+  detectPotentialChanges,
+  detectCustomFieldChanges,
+  type CustomFieldChangeInfo,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -1230,8 +1232,8 @@ export async function updateAsset({
 
     if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
       /** We get the current values with field information for comparison. We need this to detect changes for notes */
-      currentCustomFieldsValuesWithFields = await db.assetCustomFieldValue.findMany(
-        {
+      currentCustomFieldsValuesWithFields =
+        await db.assetCustomFieldValue.findMany({
           where: {
             assetId: id,
           },
@@ -1247,8 +1249,7 @@ export async function updateAsset({
               },
             },
           },
-        }
-      );
+        });
 
       const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
         (cf) => !!cf.value
@@ -1343,91 +1344,55 @@ export async function updateAsset({
 
     /** If custom fields were processed, create notes for any changes */
     if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
-      // Get user information for notes
-      const user = await db.user.findFirst({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      });
-
-      // Get the custom field definitions to format the notes properly
-      const customFieldsFromForm = await db.customField.findMany({
-        where: {
-          id: {
-            in: customFieldsValuesFromForm.map(cf => cf.id),
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          type: true,
-        },
-      });
-
-      // Create a map for easy lookup
-      const customFieldLookup = new Map(
-        customFieldsFromForm.map(cf => [cf.id, cf])
+      // Early detection of potential changes to avoid unnecessary DB queries
+      const potentialChanges = detectPotentialChanges(
+        currentCustomFieldsValuesWithFields,
+        customFieldsValuesFromForm
       );
 
-      // Check each field from the form for changes
-      for (const formField of customFieldsValuesFromForm) {
-        const customField = customFieldLookup.get(formField.id);
-        if (!customField) continue;
+      if (potentialChanges.length === 0) {
+        // No changes detected, skip note creation entirely
+        return asset;
+      }
 
-        const existingValue = currentCustomFieldsValuesWithFields.find(
-          cf => cf.customFieldId === formField.id
-        );
+      // Fetch required data in parallel only if we have potential changes
+      const [user, customFieldsFromForm] = await Promise.all([
+        db.user.findFirst({
+          where: { id: userId },
+          select: { firstName: true, lastName: true },
+        }),
+        db.customField.findMany({
+          where: {
+            id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+          },
+          select: { id: true, name: true, type: true },
+        }),
+      ]);
 
-        // Format values for display using the same function as the UI
-        const formatValue = (value: any) => {
-          if (!value) return null;
-          try {
-            return getCustomFieldDisplayValue(value);
-          } catch {
-            return String(value.raw || value);
-          }
-        };
+      // Detect actual changes with robust comparison
+      const changes = detectCustomFieldChanges(
+        currentCustomFieldsValuesWithFields,
+        customFieldsValuesFromForm,
+        customFieldsFromForm
+      );
 
-        const newValueDisplay = formField.value ? formatValue(formField.value) : null;
-        const oldValueDisplay = existingValue?.value ? formatValue(existingValue.value) : null;
-
-        // Determine if this is a change worth noting
-        let shouldCreateNote = false;
-        let isFirstTimeSet = false;
-
-        if (!existingValue && newValueDisplay) {
-          // First time setting a value
-          shouldCreateNote = true;
-          isFirstTimeSet = true;
-        } else if (existingValue && !newValueDisplay) {
-          // Removing a value
-          shouldCreateNote = true;
-        } else if (existingValue && newValueDisplay) {
-          // Check if the value actually changed
-          const oldRaw = existingValue.value?.raw;
-          const newRaw = formField.value?.raw;
-          if (oldRaw !== newRaw) {
-            shouldCreateNote = true;
-          }
-        }
-
-        if (shouldCreateNote) {
-          await createCustomFieldChangeNote({
-            customFieldName: customField.name,
-            previousValue: oldValueDisplay ? String(oldValueDisplay) : null,
-            newValue: newValueDisplay ? String(newValueDisplay) : null,
+      // Batch create all notes in parallel if we have changes
+      if (changes.length > 0) {
+        const notePromises = changes.map((change: CustomFieldChangeInfo) =>
+          createCustomFieldChangeNote({
+            customFieldName: change.customFieldName,
+            previousValue: change.previousValue,
+            newValue: change.newValue,
             firstName: user?.firstName || "",
             lastName: user?.lastName || "",
             assetName: asset.title,
             assetId: asset.id,
             userId,
-            isFirstTimeSet,
-          });
-        }
+            isFirstTimeSet: change.isFirstTimeSet,
+          })
+        );
+
+        await Promise.all(notePromises);
       }
     }
 
@@ -2003,52 +1968,6 @@ export async function getPaginatedAndFilterableAssets({
   }
 }
 
-export async function createLocationChangeNote({
-  currentLocation,
-  newLocation,
-  firstName,
-  lastName,
-  assetName,
-  assetId,
-  userId,
-  isRemoving,
-}: {
-  currentLocation: Pick<Location, "id" | "name"> | null;
-  newLocation: Location | null;
-  firstName: string;
-  lastName: string;
-  assetName: Asset["title"];
-  assetId: Asset["id"];
-  userId: User["id"];
-  isRemoving: boolean;
-}) {
-  try {
-    const message = getLocationUpdateNoteContent({
-      currentLocation,
-      newLocation,
-      firstName,
-      lastName,
-      assetName,
-      isRemoving,
-    });
-
-    await createNote({
-      content: message,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while creating a location change note. Please try again or contact support",
-      additionalData: { userId, assetId },
-      label,
-    });
-  }
-}
-
 export async function createCustomFieldChangeNote({
   customFieldName,
   previousValue,
@@ -2101,90 +2020,6 @@ export async function createCustomFieldChangeNote({
     });
   }
 }
-
-export async function createBulkLocationChangeNotes({
-  modifiedAssets,
-  assetIds,
-  removedAssetIds,
-  userId,
-  location,
-}: {
-  modifiedAssets: Prisma.AssetGetPayload<{
-    select: {
-      title: true;
-      id: true;
-      location: {
-        select: {
-          name: true;
-          id: true;
-        };
-      };
-      user: {
-        select: {
-          firstName: true;
-          lastName: true;
-          id: true;
-        };
-      };
-    };
-  }>[];
-  assetIds: Asset["id"][];
-  removedAssetIds: Asset["id"][];
-  userId: User["id"];
-  location: Location;
-}) {
-  try {
-    const user = await db.user
-      .findFirstOrThrow({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "User not found",
-          additionalData: { userId },
-          label,
-        });
-      });
-
-    // Iterate over the modified assets
-    for (const asset of modifiedAssets) {
-      const isRemoving = removedAssetIds.includes(asset.id);
-      const isNew = assetIds.includes(asset.id);
-      const newLocation = isRemoving ? null : location;
-      const currentLocation = asset.location
-        ? { name: asset.location.name, id: asset.location.id }
-        : null;
-
-      if (isNew || isRemoving) {
-        await createLocationChangeNote({
-          currentLocation,
-          newLocation,
-          firstName: user.firstName || "",
-          lastName: user.lastName || "",
-          assetName: asset.title,
-          assetId: asset.id,
-          userId,
-          isRemoving,
-        });
-      }
-    }
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating bulk location change notes",
-      additionalData: { userId, assetIds, removedAssetIds },
-      label,
-    });
-  }
-}
-
 
 /** Fetches assets with the data needed for exporting to CSV */
 export async function fetchAssetsForExport({

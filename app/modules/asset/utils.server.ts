@@ -77,6 +77,167 @@ export function getCustomFieldUpdateNoteContent({
   return message;
 }
 
+export function compareCustomFieldValues(
+  oldValue: any,
+  newValue: any,
+  fieldType: string
+): boolean {
+  // Handle null/undefined cases
+  if (!oldValue && !newValue) return false; // No change
+  if (!oldValue || !newValue) return true; // One is empty = change
+
+  // Type-specific comparison
+  switch (fieldType) {
+    case "DATE":
+      try {
+        return (
+          new Date(oldValue.raw).getTime() !== new Date(newValue.raw).getTime()
+        );
+      } catch {
+        // Fallback to string comparison if date parsing fails
+        return String(oldValue.raw) !== String(newValue.raw);
+      }
+    case "BOOLEAN":
+      return Boolean(oldValue.raw) !== Boolean(newValue.raw);
+    case "NUMBER":
+      return Number(oldValue.raw) !== Number(newValue.raw);
+    default:
+      // For text and other types, do deep comparison
+      return JSON.stringify(oldValue) !== JSON.stringify(newValue);
+  }
+}
+
+export function detectPotentialChanges(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: any;
+  }>,
+  formValues: Array<{
+    id: string;
+    value: any;
+  }>
+): Array<{ fieldId: string; hasChange: boolean }> {
+  const changes: Array<{ fieldId: string; hasChange: boolean }> = [];
+
+  for (const formField of formValues) {
+    const existingValue = existingValues.find(
+      (cf) => cf.customFieldId === formField.id
+    );
+
+    // Quick check for potential changes
+    let hasChange = false;
+
+    if (!existingValue && formField.value) {
+      // First time setting a value
+      hasChange = true;
+    } else if (existingValue && !formField.value) {
+      // Removing a value
+      hasChange = true;
+    } else if (existingValue && formField.value) {
+      // Basic comparison - if this suggests change, we'll do detailed comparison later
+      const oldRaw = existingValue.value?.raw;
+      const newRaw = formField.value?.raw;
+      hasChange = oldRaw !== newRaw;
+    }
+
+    if (hasChange) {
+      changes.push({ fieldId: formField.id, hasChange });
+    }
+  }
+
+  return changes;
+}
+
+export interface CustomFieldChangeInfo {
+  customFieldName: string;
+  previousValue: string | null;
+  newValue: string | null;
+  isFirstTimeSet: boolean;
+}
+
+export function detectCustomFieldChanges(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: any;
+    customField: { id: string; name: string; type: any };
+  }>,
+  formValues: Array<{
+    id: string;
+    value: any;
+  }>,
+  customFields: Array<{
+    id: string;
+    name: string;
+    type: any;
+  }>
+): CustomFieldChangeInfo[] {
+  const changes: CustomFieldChangeInfo[] = [];
+
+  // Create lookup map for performance
+  const customFieldLookup = new Map(customFields.map((cf) => [cf.id, cf]));
+
+  for (const formField of formValues) {
+    const customField = customFieldLookup.get(formField.id);
+    if (!customField) continue;
+
+    const existingValue = existingValues.find(
+      (cf) => cf.customFieldId === formField.id
+    );
+
+    // Format values for display using the same function as the UI
+    const formatValue = (value: any) => {
+      if (!value) return null;
+      try {
+        // Import getCustomFieldDisplayValue dynamically to avoid circular imports
+        const { getCustomFieldDisplayValue } = require("~/utils/custom-fields");
+        return getCustomFieldDisplayValue(value);
+      } catch {
+        return String(value.raw || value);
+      }
+    };
+
+    const newValueDisplay = formField.value
+      ? formatValue(formField.value)
+      : null;
+    const oldValueDisplay = existingValue?.value
+      ? formatValue(existingValue.value)
+      : null;
+
+    // Determine if this is a change worth noting using robust comparison
+    let shouldCreateNote = false;
+    let isFirstTimeSet = false;
+
+    if (!existingValue && newValueDisplay) {
+      // First time setting a value
+      shouldCreateNote = true;
+      isFirstTimeSet = true;
+    } else if (existingValue && !newValueDisplay) {
+      // Removing a value
+      shouldCreateNote = true;
+    } else if (existingValue && newValueDisplay) {
+      // Use robust comparison
+      shouldCreateNote = compareCustomFieldValues(
+        existingValue.value,
+        formField.value,
+        customField.type
+      );
+    }
+
+    if (shouldCreateNote) {
+      changes.push({
+        customFieldName: customField.name,
+        previousValue: oldValueDisplay ? String(oldValueDisplay) : null,
+        newValue: newValueDisplay ? String(newValueDisplay) : null,
+        isFirstTimeSet,
+      });
+    }
+  }
+
+  return changes;
+}
+
 export function getKitLocationUpdateNoteContent({
   currentLocation,
   newLocation,
