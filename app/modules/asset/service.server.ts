@@ -115,6 +115,10 @@ import {
   formatAssetsRemindersDates,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
+  getCustomFieldUpdateNoteContent,
+  detectPotentialChanges,
+  detectCustomFieldChanges,
+  type CustomFieldChangeInfo,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -1219,19 +1223,33 @@ export async function updateAsset({
     }
 
     /** If custom fields are passed, create/update them */
+    let currentCustomFieldsValuesWithFields: {
+      id: string;
+      customFieldId: string;
+      value: any;
+      customField: { id: string; name: string; type: any };
+    }[] = [];
+
     if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
-      /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
-      const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany(
-        {
+      /** We get the current values with field information for comparison. We need this to detect changes for notes */
+      currentCustomFieldsValuesWithFields =
+        await db.assetCustomFieldValue.findMany({
           where: {
             assetId: id,
           },
           select: {
             id: true,
             customFieldId: true,
+            value: true,
+            customField: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+              },
+            },
           },
-        }
-      );
+        });
 
       const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
         (cf) => !!cf.value
@@ -1246,7 +1264,7 @@ export async function updateAsset({
           upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
             where: {
               id:
-                currentCustomFieldsValues.find(
+                currentCustomFieldsValuesWithFields.find(
                   (ccfv) => ccfv.customFieldId === id
                 )?.id || "",
             },
@@ -1322,6 +1340,57 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+    }
+
+    /** If custom fields were processed, create notes for any changes */
+    if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+      // Early detection of potential changes to avoid unnecessary DB queries
+      const potentialChanges = detectPotentialChanges(
+        currentCustomFieldsValuesWithFields,
+        customFieldsValuesFromForm
+      );
+
+      if (potentialChanges.length > 0) {
+        // Fetch required data in parallel only if we have potential changes
+        const [user, customFieldsFromForm] = await Promise.all([
+          db.user.findFirst({
+            where: { id: userId },
+            select: { firstName: true, lastName: true },
+          }),
+          db.customField.findMany({
+            where: {
+              id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+            },
+            select: { id: true, name: true, type: true },
+          }),
+        ]);
+
+        // Detect actual changes with robust comparison
+        const changes = detectCustomFieldChanges(
+          currentCustomFieldsValuesWithFields,
+          customFieldsValuesFromForm,
+          customFieldsFromForm
+        );
+
+        // Batch create all notes in parallel if we have changes
+        if (changes.length > 0) {
+          const notePromises = changes.map((change: CustomFieldChangeInfo) =>
+            createCustomFieldChangeNote({
+              customFieldName: change.customFieldName,
+              previousValue: change.previousValue,
+              newValue: change.newValue,
+              firstName: user?.firstName || "",
+              lastName: user?.lastName || "",
+              assetName: asset.title,
+              assetId: asset.id,
+              userId,
+              isFirstTimeSet: change.isFirstTimeSet,
+            })
+          );
+
+          await Promise.all(notePromises);
+        }
+      }
     }
 
     return asset;
@@ -1891,6 +1960,59 @@ export async function getPaginatedAndFilterableAssets({
         paramsValues,
         getAllEntries,
       },
+      label,
+    });
+  }
+}
+
+export async function createCustomFieldChangeNote({
+  customFieldName,
+  previousValue,
+  newValue,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isFirstTimeSet,
+}: {
+  customFieldName: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isFirstTimeSet: boolean;
+}) {
+  try {
+    const message = getCustomFieldUpdateNoteContent({
+      customFieldName,
+      previousValue,
+      newValue,
+      firstName,
+      lastName,
+      assetName,
+      isFirstTimeSet,
+    });
+
+    if (!message) {
+      return; // No note to create if message is empty
+    }
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a custom field change note. Please try again or contact support",
+      additionalData: { userId, assetId, customFieldName },
       label,
     });
   }
