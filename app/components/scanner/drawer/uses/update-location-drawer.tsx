@@ -69,25 +69,8 @@ export default function UpdateLocationDrawer({
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Kit blockers - kits can't be added to locations
-  const kitQrIds = Object.entries(items)
-    .filter(([, item]) => item?.type === "kit")
-    .map(([qrId]) => qrId);
-
   // Create blockers configuration
   const blockerConfigs = [
-    {
-      condition: kitQrIds.length > 0,
-      count: kitQrIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s" : ""}`}</strong> detected.
-          Kits cannot be added to locations.
-        </>
-      ),
-      description: "Note: Only individual assets can be added to locations.",
-      onResolve: () => removeItemsFromList(kitQrIds),
-    },
     {
       condition: errors.length > 0,
       count: errors.length,
@@ -105,7 +88,7 @@ export default function UpdateLocationDrawer({
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
     onResolveAll: () => {
-      removeItemsFromList([...errors.map(([qrId]) => qrId), ...kitQrIds]);
+      removeItemsFromList([...errors.map(([qrId]) => qrId)]);
     },
   });
 
@@ -148,7 +131,7 @@ export default function UpdateLocationDrawer({
 }
 
 function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
-  const { assetIds, idsTotalCount } = useAtomValue(scannedItemIdsAtom);
+  const { assetIds, idsTotalCount, kitIds } = useAtomValue(scannedItemIdsAtom);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [locationState, setLocationState] = useState<LocationState>({
     status: "processing",
@@ -156,50 +139,70 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   const disabled = useDisabled();
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
-    onValidSubmit: (e) => {
+    onValidSubmit: async (e) => {
       e.preventDefault();
       setDialogOpen(true);
-      const { assetIds, newLocationId } = e.data;
+      const { assetIds, newLocationId, kitIds } = e.data;
 
-      // Skip if no assets to process
-      if (!assetIds || assetIds.length === 0) {
+      // Skip if no assets or no kitIds to process
+      if (assetIds.length === 0 && kitIds.length === 0) {
         setLocationState({
           status: "error",
-          errorMessage: "No assets selected to add to location",
+          errorMessage: "No assets or kits selected to update location",
         });
         return;
       }
 
-      // Create object data structure for assets
-      const data = {
-        assetIds,
-        newLocationId,
-      };
+      try {
+        let locationState: LocationState = { status: "processing" };
 
-      // Convert to FormData
-      const formData = objectToFormData(data);
+        if (assetIds.length) {
+          const formData = objectToFormData({
+            assetIds,
+            newLocationId,
+          });
+          const assetsResponse = await fetch(
+            "/api/assets/bulk-update-location",
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+          const assetsData = await assetsResponse.json();
+          locationState = {
+            status: assetsData.error ? "error" : "success",
+            ...(assetsData.error && { errorMessage: assetsData.error.message }),
+          };
+        }
 
-      // Send request
-      fetch("/api/assets/bulk-update-location", {
-        method: "POST",
-        body: formData,
-      })
-        .then((response) => response.json())
-        .then((data) => {
-          setLocationState({
-            status: data.error ? "error" : "success",
-            ...(data.error && { errorMessage: data.error.message }),
+        if (kitIds.length) {
+          const kitFormData = objectToFormData({
+            kitIds,
+            newLocationId,
+            intent: "bulk-update-location",
           });
-        })
-        .catch((error) => {
-          setLocationState({
-            status: "error",
-            errorMessage:
-              error instanceof ShelfError
-                ? error.message
-                : "Something went wrong while adding assets to location. Please try again.",
+
+          const kitsResponse = await fetch("/api/kits/bulk-actions", {
+            method: "POST",
+            body: kitFormData,
           });
+          const kitsData = await kitsResponse.json();
+          locationState = {
+            status: kitsData.error ? "error" : "success",
+            ...(kitsData.error && { errorMessage: kitsData.error.message }),
+          };
+        }
+
+        setLocationState(locationState);
+      } catch (error) {
+        setLocationState({
+          status: "error",
+          errorMessage:
+            error instanceof ShelfError
+              ? error.message
+              : "Something went wrong while adding assets/kit to location. Please try again.",
         });
+      }
     },
   });
 
@@ -226,6 +229,14 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             key={`asset-${id}`}
             type="hidden"
             name={`assetIds[${index}]`}
+            value={id}
+          />
+        ))}
+        {kitIds.map((id, index) => (
+          <input
+            key={`kit-${id}`}
+            type="hidden"
+            name={`kitIds[${index}]`}
             value={id}
           />
         ))}
@@ -309,25 +320,6 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
-  // Use predefined presets
-  const availabilityConfigs = [
-    {
-      condition: true, // Always show this label for kits
-      badgeText: "Cannot add to location",
-      tooltipTitle: "Kits cannot be added to locations",
-      tooltipContent: "Only individual assets can be added to locations.",
-      priority: 100,
-    },
-  ];
-
-  // Create the availability labels component
-  const [, KitAvailabilityLabels] = createAvailabilityLabels(
-    availabilityConfigs,
-    {
-      maxLabels: 3,
-    }
-  );
-
   return (
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
@@ -347,7 +339,6 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
         >
           kit
         </span>
-        <KitAvailabilityLabels />
       </div>
     </div>
   );
@@ -408,7 +399,7 @@ function SubmissionState({
     return (
       <div className="flex flex-row gap-2">
         <Spinner />
-        <TextLoader text="Adding assets to location" />
+        <TextLoader text="Adding assets/kit to location" />
       </div>
     );
   } else if (status === "success") {
@@ -417,7 +408,9 @@ function SubmissionState({
         <span className="text-green-700">
           <CheckmarkIcon />
         </span>
-        <div className="font-mono">Assets successfully added to location</div>
+        <div className="font-mono">
+          Assets/kit successfully added to location
+        </div>
       </div>
     );
   } else if (status === "error") {
@@ -425,7 +418,7 @@ function SubmissionState({
       <div>
         <div className="flex flex-row items-center gap-2 text-left">
           <CircleX className="size-[18px] text-error-500" />
-          <div className="font-mono">Failed to add assets to location</div>
+          <div className="font-mono">Failed to add assets/kit to location</div>
         </div>
         {errorMessage && (
           <span className="text-[12px] text-error-500">

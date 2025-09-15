@@ -83,7 +83,14 @@ vitest.mock("~/modules/user/service.server", () => ({
 }));
 
 vitest.mock("~/modules/note/service.server", () => ({
-  createNote: vitest.fn(),
+  createNote: vitest.fn().mockResolvedValue({}),
+  createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
+}));
+
+vitest.mock("~/modules/asset/utils.server", () => ({
+  getKitLocationUpdateNoteContent: vitest
+    .fn()
+    .mockReturnValue("Mock note content"),
 }));
 
 const mockKitData = {
@@ -106,6 +113,7 @@ const mockCreateParams = {
   createdById: "user-1",
   organizationId: "org-1",
   categoryId: "category-1",
+  locationId: null,
 };
 
 describe("createKit", () => {
@@ -151,6 +159,7 @@ describe("createKit", () => {
     await createKit({
       ...mockCreateParams,
       categoryId: null,
+      locationId: null,
     });
 
     expect(db.kit.create).toHaveBeenCalledWith({
@@ -188,6 +197,7 @@ describe("createKit", () => {
     await createKit({
       ...mockCreateParams,
       barcodes,
+      locationId: null,
     });
 
     expect(db.kit.create).toHaveBeenCalledWith({
@@ -292,6 +302,7 @@ describe("createKit", () => {
       createKit({
         ...mockCreateParams,
         barcodes,
+        locationId: null,
       })
     ).rejects.toThrow();
   });
@@ -316,6 +327,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: "category-2",
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -343,6 +355,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: "uncategorized",
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -369,6 +382,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: null,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -394,6 +408,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       categoryId: undefined,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalledWith({
@@ -422,6 +437,7 @@ describe("updateKit", () => {
       createdById: "user-1",
       organizationId: "org-1",
       barcodes,
+      locationId: null,
     });
 
     expect(db.kit.update).toHaveBeenCalled();
@@ -820,5 +836,115 @@ describe("getAvailableKitAssetForBooking", () => {
       select: { assets: { select: { id: true, status: true } } },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
+  });
+});
+
+describe("updateKitAssets - Location Cascade", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should call asset updateMany when kit has location and assets are added", async () => {
+    expect.assertions(2);
+
+    const mockKit = {
+      id: "kit-1",
+      location: { id: "location-1", name: "Warehouse A" },
+      assets: [],
+      custody: null,
+    };
+
+    const mockNewAssets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: null,
+        custody: null,
+        location: null,
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(mockNewAssets);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    // Should update kit assets
+    expect(db.kit.update).toHaveBeenCalledWith({
+      where: { id: "kit-1", organizationId: "org-1" },
+      data: {
+        assets: {
+          connect: [{ id: "asset-1" }],
+        },
+      },
+    });
+
+    // Should update asset locations (cascade behavior)
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] } },
+      data: { locationId: "location-1" },
+    });
+  });
+
+  it("should set asset location to null when kit has no location", async () => {
+    expect.assertions(2);
+
+    const mockKit = {
+      id: "kit-1",
+      location: null,
+      assets: [],
+      custody: null,
+    };
+
+    const mockNewAssets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: null,
+        custody: null,
+        location: { id: "location-1", name: "Current Location" },
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(mockNewAssets);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    // Should update kit assets
+    expect(db.kit.update).toHaveBeenCalledWith({
+      where: { id: "kit-1", organizationId: "org-1" },
+      data: {
+        assets: {
+          connect: [{ id: "asset-1" }],
+        },
+      },
+    });
+
+    // Should remove location from assets (set to null)
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] } },
+      data: { locationId: null },
+    });
   });
 });

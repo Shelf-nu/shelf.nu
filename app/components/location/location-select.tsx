@@ -1,36 +1,48 @@
 import { useState } from "react";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
-import type { loader } from "~/routes/_layout+/assets.$assetId.overview.update-location";
 import { isFormProcessing } from "~/utils/form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 
 import { XIcon } from "../icons/library";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 
-export const LocationSelect = ({
-  isBulk = false,
-  hideClearButton = false,
-  placeholder,
-}: {
-  isBulk?: boolean;
+type IsBulk = {
+  isBulk: true;
+  locationId?: undefined;
+};
+
+type IsNotBulk = {
+  isBulk: false;
+  locationId?: string | null;
+};
+
+type BulkProps = IsBulk | IsNotBulk;
+
+type LocationSelectProps = BulkProps & {
   hideClearButton?: boolean;
   placeholder?: string;
-}) => {
+};
+
+export const LocationSelect = ({
+  hideClearButton = false,
+  placeholder,
+  ...restProps
+}: LocationSelectProps) => {
   const navigation = useNavigation();
 
-  const data = useLoaderData<typeof loader>();
-  const assetLocationId = isBulk
-    ? undefined
-    : data?.asset?.locationId ?? undefined;
-
-  const [locationId, setLocationId] = useState(assetLocationId ?? undefined);
+  const locationIdToUse = !restProps.isBulk ? restProps.locationId : undefined;
+  const [locationId, setLocationId] = useState(locationIdToUse ?? undefined);
   const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="relative w-full">
-      {!isBulk && (
-        <input type="hidden" name="currentLocationId" value={assetLocationId} />
+      {!restProps.isBulk && (
+        <input
+          type="hidden"
+          name="currentLocationId"
+          value={locationIdToUse ?? undefined}
+        />
       )}
       <div className="flex items-center gap-2">
         <DynamicSelect

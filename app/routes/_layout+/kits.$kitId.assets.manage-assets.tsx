@@ -109,6 +109,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             id: true,
             name: true,
             status: true,
+            location: { select: { id: true, name: true } },
             assets: { select: { id: true } },
           },
         })
@@ -136,7 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header: {
-          title: `Manage assets for ${kit.name}`,
+          title: `Add assets for ${kit.name}`,
           subHeading: "Fill up the kit with the assets of your choice.",
         },
         searchFieldLabel: "Search assets",
@@ -382,54 +383,61 @@ export default function ManageAssetsInKit() {
               />
             ))}
 
-            {kit.status === KitStatus.IN_CUSTODY ||
-            kit.status === KitStatus.CHECKED_OUT ? (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button disabled={isSearching}>Confirm</Button>
-                </AlertDialogTrigger>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button disabled={isSearching}>Confirm</Button>
+              </AlertDialogTrigger>
 
-                <AlertDialogContent>
-                  <div className="flex items-center gap-4">
-                    <div className="flex size-12 items-center justify-center rounded-full bg-red-200/20">
-                      <div className="flex size-10 items-center justify-center rounded-full bg-red-200/50">
-                        <AlertCircleIcon className="size-4 text-error-500" />
-                      </div>
+              <AlertDialogContent>
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-blue-200/20">
+                    <div className="flex size-10 items-center justify-center rounded-full bg-blue-200/50">
+                      <AlertCircleIcon className="size-4 text-blue-600" />
                     </div>
-
-                    <h3>Add Assets to kit?</h3>
                   </div>
 
-                  <p>
-                    This kit is currently{" "}
-                    {kit.status === KitStatus.IN_CUSTODY
-                      ? "in custody"
-                      : "checked out"}
-                    . Any assets you add will automatically inherit the kit's
-                    status. Are you sure you want to continue?
-                  </p>
+                  <h3>Add Assets to kit?</h3>
+                </div>
 
-                  <AlertDialogFooter>
-                    <AlertDialogCancel asChild>
-                      <Button variant="secondary">Cancel</Button>
-                    </AlertDialogCancel>
+                <div>
+                  {(kit.status === KitStatus.IN_CUSTODY ||
+                    kit.status === KitStatus.CHECKED_OUT) && (
+                    <p className="mb-3">
+                      This kit is currently{" "}
+                      {kit.status === KitStatus.IN_CUSTODY
+                        ? "in custody"
+                        : "checked out"}
+                      . Any assets you add will automatically inherit the kit's
+                      status.
+                    </p>
+                  )}
+                  {kit.location ? (
+                    <p className="mb-3">
+                      <strong>Location Update Notice:</strong> Adding assets to
+                      this kit will automatically update their location to{" "}
+                      <strong>{kit.location.name}</strong>.
+                    </p>
+                  ) : (
+                    <p className="mb-3">
+                      <strong>Location Update Notice:</strong> Adding assets to
+                      this kit will remove their current location since this kit
+                      has no location assigned.
+                    </p>
+                  )}
+                  <p>Are you sure you want to continue?</p>
+                </div>
 
-                    <AlertDialogAction asChild>
-                      <Button onClick={handleSubmit}>Continue</Button>
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            ) : (
-              <Button
-                type="submit"
-                name="intent"
-                value="addAssets"
-                disabled={isSearching}
-              >
-                Confirm
-              </Button>
-            )}
+                <AlertDialogFooter>
+                  <AlertDialogCancel asChild>
+                    <Button variant="secondary">Cancel</Button>
+                  </AlertDialogCancel>
+
+                  <AlertDialogAction asChild>
+                    <Button onClick={handleSubmit}>Continue</Button>
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </Form>
         </div>
       </footer>
