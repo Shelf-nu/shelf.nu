@@ -90,15 +90,34 @@ export function compareCustomFieldValues(
   switch (fieldType) {
     case "DATE":
       try {
-        return (
-          new Date(oldValue.raw).getTime() !== new Date(newValue.raw).getTime()
-        );
+        const oldTime = new Date(oldValue.raw).getTime();
+        const newTime = new Date(newValue.raw).getTime();
+
+        // Handle invalid dates (NaN values)
+        if (isNaN(oldTime) || isNaN(newTime)) {
+          // Fallback to string comparison if either date is invalid
+          return String(oldValue.raw) !== String(newValue.raw);
+        }
+
+        return oldTime !== newTime;
       } catch {
         // Fallback to string comparison if date parsing fails
         return String(oldValue.raw) !== String(newValue.raw);
       }
     case "BOOLEAN":
-      return Boolean(oldValue.raw) !== Boolean(newValue.raw);
+      // Handle string boolean values more intelligently
+      const normalizeBoolean = (value: any) => {
+        if (typeof value === "boolean") return value;
+        if (typeof value === "string") {
+          const lowerValue = value.toLowerCase().trim();
+          if (lowerValue === "true" || lowerValue === "1") return true;
+          if (lowerValue === "false" || lowerValue === "0" || lowerValue === "")
+            return false;
+        }
+        return Boolean(value);
+      };
+
+      return normalizeBoolean(oldValue.raw) !== normalizeBoolean(newValue.raw);
     case "NUMBER":
       return Number(oldValue.raw) !== Number(newValue.raw);
     default:
