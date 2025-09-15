@@ -141,7 +141,7 @@ export const AssetForm = ({
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
-  const isKitAsset = Boolean(asset.kit);
+  const isKitAsset = Boolean(asset?.kit);
   const locationDisabled = disabled || isKitAsset;
   const actionData = useActionData<{
     errors?: {
@@ -432,7 +432,7 @@ export const AssetForm = ({
                 <h5 className="text-left text-[14px]">Action disabled</h5>
                 <p className="text-left text-[14px]">
                   This asset's location is managed by its parent kit{" "}
-                  <strong>"{asset.kit?.name}"</strong>. Update the kit's
+                  <strong>"{asset?.kit?.name}"</strong>. Update the kit's
                   location instead.
                 </p>
               </HoverCardContent>
