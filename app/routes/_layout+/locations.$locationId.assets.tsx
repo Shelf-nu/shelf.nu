@@ -142,7 +142,7 @@ export default function LocationAssets() {
                 width="full"
                 className="whitespace-nowrap"
               >
-                Manage assets
+                Add assets
               </Button>
             </When>
           </div>

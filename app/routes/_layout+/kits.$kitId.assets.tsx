@@ -111,7 +111,7 @@ export default function KitAssets() {
                 width="full"
                 className="whitespace-nowrap"
               >
-                Manage assets
+                Add assets
               </Button>
             </div>
           </When>
@@ -125,7 +125,7 @@ export default function KitAssets() {
               ? "Start by adding your first asset."
               : "",
             newButtonContent: userRoleCanManageAssets
-              ? "Manage assets"
+              ? "Add assets"
               : undefined,
             newButtonRoute: userRoleCanManageAssets
               ? "manage-assets?status=AVAILABLE"

@@ -137,7 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header: {
-          title: `Manage assets for ${kit.name}`,
+          title: `Add assets for ${kit.name}`,
           subHeading: "Fill up the kit with the assets of your choice.",
         },
         searchFieldLabel: "Search assets",

@@ -79,7 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message:
-          "You are not allowed to manage assets for this booking at the moment.",
+          "You are not allowed to add assets for this booking at the moment.",
         label: "Booking",
         shouldBeCaptured: false,
       });
