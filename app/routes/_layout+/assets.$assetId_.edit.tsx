@@ -47,6 +47,8 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { slugify } from "~/utils/slugify";
 
+export type AssetEditLoaderData = typeof loader;
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -69,6 +71,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {
         tags: true,
         customFields: true,
+        kit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         barcodes: {
           select: {
             id: true,

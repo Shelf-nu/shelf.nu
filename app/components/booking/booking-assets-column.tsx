@@ -109,7 +109,7 @@ export function BookingAssetsColumn() {
               : isCancelled
               ? "Booking is cancelled. You cannot change the assets anymore"
               : cantManageAssetsAsBase
-              ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+              ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
               : "You need to select a start and end date and save your booking before you can add assets to your booking",
           }
         : false,
@@ -346,7 +346,7 @@ function BookingAssetsHeader({
             className="flex-1 whitespace-nowrap"
             disabled={manageAssetsButtonDisabled}
           >
-            Manage assets
+            Add assets
           </Button>
         </div>
       </When>

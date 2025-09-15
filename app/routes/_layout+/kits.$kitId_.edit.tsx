@@ -12,11 +12,15 @@ import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
-import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import {
+  getCategoriesForCreateAndEdit,
+  getLocationsForCreateAndEdit,
+} from "~/modules/asset/service.server";
 import {
   getKit,
   updateKit,
   updateKitImage,
+  updateKitLocation,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
@@ -69,13 +73,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
-        organizationId,
-        request,
-        defaultCategory: kit?.categoryId,
-      }
-    );
+    const [{ categories, totalCategories }, { locations, totalLocations }] =
+      await Promise.all([
+        getCategoriesForCreateAndEdit({
+          organizationId,
+          request,
+          defaultCategory: kit?.categoryId,
+        }),
+        getLocationsForCreateAndEdit({
+          request,
+          organizationId,
+          defaultLocation: kit?.locationId,
+        }),
+      ]);
 
     const header: HeaderData = {
       title: `Edit | ${kit.name}`,
@@ -88,6 +98,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         categories,
         totalCategories,
+        locations,
+        totalLocations,
       })
     );
   } catch (cause) {
@@ -134,6 +146,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ? extractBarcodesFromFormData(formData)
       : [];
 
+    // Get current kit to compare location changes
+    const currentKit = await getKit({
+      id: kitId,
+      organizationId,
+      userOrganizations: [],
+      request,
+    });
+
     await Promise.all([
       updateKit({
         id: kitId,
@@ -143,6 +163,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         categoryId: payload.category ? payload.category : "uncategorized",
         barcodes,
+        // Don't set locationId here - will be handled by updateKitLocation if changed
       }),
       updateKitImage({
         request,
@@ -151,6 +172,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
       }),
     ]);
+
+    // Handle location update separately to cascade to assets
+    if (payload.locationId !== currentKit.locationId) {
+      await updateKitLocation({
+        id: kitId,
+        organizationId,
+        currentLocationId: currentKit.locationId,
+        newLocationId: payload.locationId || "", // Handle undefined case
+        userId,
+      });
+    }
 
     sendNotification({
       title: "Kit updated",
@@ -171,7 +203,7 @@ export default function KitEdit() {
   const { kit } = useLoaderData<typeof loader>();
 
   return (
-    <>
+    <div className="relative">
       <Header
         title={
           <Button to={`/kits/${kit.id}`} variant={"inherit"}>
@@ -187,8 +219,9 @@ export default function KitEdit() {
           categoryId={kit.categoryId}
           saveButtonLabel="Save"
           barcodes={kit.barcodes}
+          locationId={kit?.locationId}
         />
       </div>
-    </>
+    </div>
   );
 }

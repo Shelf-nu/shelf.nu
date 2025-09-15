@@ -16,6 +16,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
+import KitBulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -121,6 +122,7 @@ function ConditionalDropdown() {
         })}
       >
         <BulkDeleteDialog />
+        <KitBulkLocationUpdateDialog />
       </When>
 
       <When
@@ -236,6 +238,14 @@ function ConditionalDropdown() {
                 action: PermissionAction.update,
               })}
             >
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="location"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+
               <DropdownMenuItem
                 className="px-4 py-1 md:p-0"
                 onSelect={(e) => {

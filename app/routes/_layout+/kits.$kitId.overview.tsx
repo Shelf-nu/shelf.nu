@@ -9,6 +9,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import { Tag } from "~/components/shared/tag";
 import When from "~/components/when/when";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
@@ -141,6 +142,17 @@ export default function KitOverview() {
             <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
               <CategoryBadge category={kit.category} />
             </div>
+          </li>
+        </When>
+
+        <When truthy={!!kit.location}>
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Location
+            </span>
+            <Tag key={kit?.location?.id} className="mb-0">
+              {kit?.location?.name ?? ""}
+            </Tag>
           </li>
         </When>
 
