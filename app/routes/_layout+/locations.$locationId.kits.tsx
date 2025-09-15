@@ -44,7 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.location,
-      action: PermissionAction.manageKits,
+      action: PermissionAction.read,
     });
 
     const searchParams = getCurrentSearchParams(request);
