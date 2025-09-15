@@ -1,36 +1,20 @@
-import type { Asset, Category, Tag, Location } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  LinksFunction,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import type { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/react";
+import { json, Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image/component";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
-import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
-import { CategoryBadge } from "~/components/assets/category-badge";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
-import ContextualModal from "~/components/layout/contextual-modal";
-import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { List } from "~/components/list";
-import { Filters } from "~/components/list/filters";
-import { SortBy } from "~/components/list/filters/sort-by";
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
 import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
-import { Td, Th } from "~/components/table";
-import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
@@ -54,23 +38,17 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-  const { locationId: id } = getParams(
-    params,
-    z.object({ locationId: z.string() }),
-    {
-      additionalData: { userId },
-    }
-  );
+const paramsSchema = z.object({ locationId: z.string() });
+
+export async function loader({ request, context, params }: LoaderFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
 
   try {
     const { organizationId, userOrganizations } = await requirePermission({
-      userId: authSession.userId,
+      userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.read,
@@ -82,9 +60,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { location, totalAssetsWithinLocation } = await getLocation({
+    const { location } = await getLocation({
       organizationId,
-      id,
+      id: locationId,
       page,
       perPage,
       search,
@@ -94,17 +72,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const totalItems = totalAssetsWithinLocation;
-    const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
-
     const header: HeaderData = {
       title: location.name,
       subHeading: location.id,
-    };
-
-    const modelName = {
-      singular: "asset",
-      plural: "assets",
     };
 
     // Use cached coordinates from database, or geocode and cache if not available
@@ -130,12 +100,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         location,
         header,
-        modelName,
-        items: location.assets,
-        page,
-        totalItems,
-        perPage,
-        totalPages,
         mapData,
       }),
       {
@@ -143,7 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     );
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, id });
+    const reason = makeShelfError(cause, { userId, locationId });
     throw json(error(reason), { status: reason.status });
   }
 }
@@ -197,33 +161,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationPage() {
   const { location, mapData } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
-  const userRoleCanManageAssets = userHasPermission({
-    roles,
-    entity: PermissionEntity.location,
-    action: PermissionAction.manageAssets,
-  });
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
+  const items = [
+    { to: "assets", content: "Assets" },
+    { to: "kits", content: "Kits" },
+  ];
+
   /**
    * When we are on the location.scan-assets route, we render an outlet on the whole layout.
    */
-  const shouldRenderFullOutlet =
-    currentRoute?.handle?.name === "location.scan-assets";
+  if (currentRoute?.handle?.name === "location.scan-assets-kits") {
+    return <Outlet />;
+  }
 
-  return shouldRenderFullOutlet ? (
-    <Outlet />
-  ) : (
+  return (
     <div>
       <Header
         slots={{
           "left-of-title": (
             <ImageWithPreview
               className="mr-2"
-              imageUrl={location?.imageUrl ?? undefined}
-              thumbnailUrl={location?.thumbnailUrl ?? undefined}
+              imageUrl={location.imageUrl ?? undefined}
+              thumbnailUrl={location.thumbnailUrl ?? undefined}
               alt={location.name}
               withPreview
             />
@@ -232,65 +194,16 @@ export default function LocationPage() {
       >
         <ActionsDropdown location={location} />
       </Header>
-      <ContextualModal />
-      <ContextualSidebar />
+
+      <HorizontalTabs items={items} />
 
       <div className="mt-4 block md:mx-0 lg:flex">
-        {/* Left column - assets list */}
-        <div className=" flex-1 md:overflow-hidden">
-          <TextualDivider text="Assets" className="mb-4 lg:hidden" />
-          <div className="flex flex-col md:gap-2">
-            <Filters
-              className="responsive-filters mb-2 lg:mb-0"
-              slots={{
-                "right-of-search": (
-                  <SortBy
-                    sortingOptions={ASSET_SORTING_OPTIONS}
-                    defaultSortingBy="createdAt"
-                  />
-                ),
-              }}
-            >
-              <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
-                <When truthy={userRoleCanManageAssets}>
-                  <Button
-                    icon="scan"
-                    variant="secondary"
-                    to="scan-assets"
-                    width="full"
-                  >
-                    Scan
-                  </Button>
-                  <Button
-                    to="manage-assets"
-                    variant="primary"
-                    width="full"
-                    className="whitespace-nowrap"
-                  >
-                    Manage assets
-                  </Button>
-                </When>
-              </div>
-            </Filters>
-            <List
-              className=""
-              ItemComponent={ListAssetContent}
-              headerChildren={
-                <>
-                  <Th>Category</Th>
-                  <Th>Tags</Th>
-                </>
-              }
-              customEmptyStateContent={{
-                title: "There are currently no assets at the location",
-                text: "Add assets in this location",
-                newButtonRoute: "manage-assets",
-                newButtonContent: "Add asset",
-              }}
-            />
-          </div>
+        {/* Left column */}
+        <div className="flex-1 md:overflow-hidden">
+          <Outlet />
         </div>
-        {/* Right column - Location info */}
+
+        {/* Right Column - Location info */}
         <div className="w-full md:w-[360px] lg:ml-4">
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">
@@ -348,63 +261,3 @@ export default function LocationPage() {
     </div>
   );
 }
-
-const ListAssetContent = ({
-  item,
-}: {
-  item: Asset & {
-    category: Pick<Category, "id" | "name" | "color"> | null;
-    tags?: Tag[];
-    location?: Location;
-  };
-}) => {
-  const { category, tags } = item;
-  return (
-    <>
-      <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="relative flex size-14 shrink-0 items-center justify-center">
-              <AssetImage
-                asset={{
-                  id: item.id,
-                  mainImage: item.mainImage,
-                  thumbnailImage: item.thumbnailImage,
-                  mainImageExpiration: item.mainImageExpiration,
-                }}
-                alt={item.title}
-                className="size-full rounded-[4px] border object-cover"
-                withPreview
-              />
-            </div>
-            <div className="min-w-[180px]">
-              <span className="word-break mb-1 block font-medium">
-                <Button
-                  to={`/assets/${item.id}`}
-                  variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
-                  target="_blank"
-                  onlyNewTabIconOnHover={true}
-                >
-                  {item.title}
-                </Button>
-              </span>
-              <AssetStatusBadge
-                id={item.id}
-                status={item.status}
-                availableToBook={item.availableToBook}
-              />
-            </div>
-          </div>
-        </div>
-      </Td>
-
-      <Td>
-        <CategoryBadge category={category} />
-      </Td>
-      <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
-      </Td>
-    </>
-  );
-};

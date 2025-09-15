@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { Barcode, Kit } from "@prisma/client";
-import { useActionData, useNavigation } from "@remix-run/react";
+import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -17,6 +17,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -33,10 +34,11 @@ export const NewKitFormSchema = z.object({
     .transform((value) => value?.trim()),
   category: z.string().optional(),
   qrId: z.string().optional(),
+  locationId: z.string().optional(),
 });
 
 type KitFormProps = Partial<
-  Pick<Kit, "name" | "description" | "categoryId">
+  Pick<Kit, "name" | "description" | "categoryId" | "locationId">
 > & {
   className?: string;
   saveButtonLabel?: string;
@@ -52,6 +54,7 @@ export default function KitsForm({
   qrId,
   categoryId,
   barcodes,
+  locationId,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -177,6 +180,63 @@ export default function KitsForm({
                 Create new category
               </Button>
             }
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel="Location"
+          subHeading={
+            <p>
+              A location is a place where an item is supposed to be located.
+              This is different than the last scanned location{" "}
+              <Link
+                to="/locations/new"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create locations
+              </Link>
+            </p>
+          }
+          className="border-b-0 py-[10px]"
+          required={zodFieldIsRequired(NewKitFormSchema.shape.locationId)}
+        >
+          <DynamicSelect
+            disabled={disabled}
+            fieldName="locationId"
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+            defaultValue={locationId ?? undefined}
+            model={{ name: "location", queryKey: "name" }}
+            contentLabel="Locations"
+            label="Location"
+            hideLabel
+            initialDataKey="locations"
+            countKey="totalLocations"
+            closeOnSelect
+            allowClear
+            extraContent={
+              <Button
+                to="/locations/new"
+                variant="link"
+                icon="plus"
+                className="w-full justify-start pt-4"
+                target="_blank"
+              >
+                Create new location
+              </Button>
+            }
+            renderItem={({ name, metadata }) => (
+              <div className="flex items-center gap-2">
+                {metadata?.thumbnailUrl ? (
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
+                    alt={metadata.name}
+                    className="size-6 rounded-[2px]"
+                  />
+                ) : null}
+                <div>{name}</div>
+              </div>
+            )}
           />
         </FormRow>
 

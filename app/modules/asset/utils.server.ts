@@ -17,7 +17,7 @@ export function getLocationUpdateNoteContent({
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
-  newLocation?: Location | null;
+  newLocation?: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
   assetName: string;
@@ -75,6 +75,37 @@ export function getCustomFieldUpdateNoteContent({
   }
 
   return message;
+}
+
+export function getKitLocationUpdateNoteContent({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetName,
+  isRemoving,
+}: {
+  currentLocation?: Pick<Location, "id" | "name"> | null;
+  newLocation?: Pick<Location, "id" | "name"> | null;
+  firstName: string;
+  lastName: string;
+  assetName: string;
+  isRemoving?: boolean;
+}) {
+  const baseMessage = getLocationUpdateNoteContent({
+    currentLocation,
+    newLocation,
+    firstName,
+    lastName,
+    assetName,
+    isRemoving,
+  });
+
+  if (isRemoving) {
+    return `${baseMessage} via parent kit removal`;
+  } else {
+    return `${baseMessage} via parent kit assignment`;
+  }
 }
 
 export const CurrentSearchParamsSchema = z.object({

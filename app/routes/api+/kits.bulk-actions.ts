@@ -3,6 +3,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
+import { KitBulkLocationUpdateSchema } from "~/components/kits/bulk-location-update-dialog";
 import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
@@ -10,6 +11,7 @@ import {
   bulkAssignKitCustody,
   bulkDeleteKits,
   bulkReleaseKitCustody,
+  bulkUpdateKitLocation,
 } from "~/modules/kit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -36,6 +38,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             "bulk-delete",
             "bulk-assign-custody",
             "bulk-release-custody",
+            "bulk-update-location",
           ]),
         })
         .and(CurrentSearchParamsSchema)
@@ -45,6 +48,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
       "bulk-assign-custody": PermissionAction.custody,
       "bulk-release-custody": PermissionAction.custody,
+      "bulk-update-location": PermissionAction.update,
     };
 
     const { organizationId, role } = await requirePermission({
@@ -151,6 +155,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
         sendNotification({
           title: "Kits are no longer in custody",
           message: "These kits are available again.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "bulk-update-location": {
+        const { kitIds, newLocationId, currentSearchParams } = parseData(
+          formData,
+          KitBulkLocationUpdateSchema.and(CurrentSearchParamsSchema)
+        );
+
+        await bulkUpdateKitLocation({
+          kitIds,
+          organizationId,
+          newLocationId,
+          currentSearchParams,
+          userId,
+        });
+
+        sendNotification({
+          title: "Kits location updated",
+          message: "These kits location has been updated successfully.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
