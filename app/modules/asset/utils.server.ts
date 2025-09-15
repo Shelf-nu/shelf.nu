@@ -4,6 +4,7 @@ import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { getParamsValues } from "~/utils/list";
+import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { parseFilters } from "./query.server";
 import type { AdvancedIndexAsset } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -209,9 +210,17 @@ export function detectCustomFieldChanges(
     const formatValue = (value: any) => {
       if (!value) return null;
       try {
-        // Import getCustomFieldDisplayValue dynamically to avoid circular imports
-        const { getCustomFieldDisplayValue } = require("~/utils/custom-fields");
-        return getCustomFieldDisplayValue(value);
+        const displayValue = getCustomFieldDisplayValue(value);
+
+        // Handle different return types from getCustomFieldDisplayValue
+        if (typeof displayValue === "string") {
+          return displayValue;
+        } else if (displayValue && typeof displayValue === "object") {
+          // For React nodes (multi-line text), use raw value
+          return String(value.raw || "");
+        }
+
+        return String(displayValue);
       } catch {
         return String(value.raw || value);
       }

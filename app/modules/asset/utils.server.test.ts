@@ -3,7 +3,6 @@ import {
   detectPotentialChanges,
   detectCustomFieldChanges,
   getCustomFieldUpdateNoteContent,
-  type CustomFieldChangeInfo,
 } from "./utils.server";
 
 // @vitest-environment node
@@ -13,6 +12,18 @@ import {
 vitest.mock("~/utils/custom-fields", () => ({
   getCustomFieldDisplayValue: vitest.fn((value: any) => {
     if (!value) return null;
+
+    // Simulate boolean field behavior
+    if (Object.hasOwnProperty.call(value, "valueBoolean")) {
+      return value.valueBoolean ? "Yes" : "No";
+    }
+
+    // Simulate multi-line text field behavior (returns React node object)
+    if (value.valueMultiLineText) {
+      return { type: "div", children: "rendered markdown" }; // Mock React node
+    }
+
+    // Default behavior
     if (typeof value === "string") return value;
     if (value.raw) return String(value.raw);
     return String(value);
@@ -514,5 +525,77 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe("");
+  });
+});
+
+describe("detectCustomFieldChanges - Display Value Formatting", () => {
+  const mockCustomFields = [
+    { id: "field1", name: "Is Active", type: "BOOLEAN" },
+    { id: "field2", name: "Description", type: "MULTILINE_TEXT" },
+  ];
+
+  it("should properly format boolean values in notes", () => {
+    const existingValues = [
+      {
+        id: "value1",
+        customFieldId: "field1",
+        value: { valueBoolean: true, raw: true },
+        customField: { id: "field1", name: "Is Active", type: "BOOLEAN" },
+      },
+    ];
+    const formValues = [
+      { id: "field1", value: { valueBoolean: false, raw: false } },
+    ];
+
+    const result = detectCustomFieldChanges(
+      existingValues,
+      formValues,
+      mockCustomFields
+    );
+
+    expect(result).toEqual([
+      {
+        customFieldName: "Is Active",
+        previousValue: "Yes",
+        newValue: "No",
+        isFirstTimeSet: false,
+      },
+    ]);
+  });
+
+  it("should handle multi-line text fields without [object Object]", () => {
+    const existingValues = [
+      {
+        id: "value1",
+        customFieldId: "field2",
+        value: { valueMultiLineText: true, raw: "Old markdown content" },
+        customField: {
+          id: "field2",
+          name: "Description",
+          type: "MULTILINE_TEXT",
+        },
+      },
+    ];
+    const formValues = [
+      {
+        id: "field2",
+        value: { valueMultiLineText: true, raw: "New markdown content" },
+      },
+    ];
+
+    const result = detectCustomFieldChanges(
+      existingValues,
+      formValues,
+      mockCustomFields
+    );
+
+    expect(result).toEqual([
+      {
+        customFieldName: "Description",
+        previousValue: "Old markdown content",
+        newValue: "New markdown content",
+        isFirstTimeSet: false,
+      },
+    ]);
   });
 });
