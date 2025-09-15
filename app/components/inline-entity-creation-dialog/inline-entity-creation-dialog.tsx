@@ -41,7 +41,7 @@ export default function InlineEntityCreationDialog({
           wrapperClassName="!z-[9999]"
           open={open}
           onClose={handleClose}
-          title={title}
+          title={<h4>{title}</h4>}
           className="md:!w-full md:!max-w-lg"
         >
           <div className="border-t px-6 py-5">
