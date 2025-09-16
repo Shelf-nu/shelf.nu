@@ -436,6 +436,7 @@ async function getAssets(params: {
    * */
   hideUnavailableToAddToKit?: boolean;
   assetKitFilter?: string | null;
+  availableToBookOnly?: boolean;
 }) {
   let {
     organizationId,
@@ -455,6 +456,7 @@ async function getAssets(params: {
     teamMemberIds,
     extraInclude,
     assetKitFilter,
+    availableToBookOnly,
   } = params;
 
   try {
@@ -462,6 +464,10 @@ async function getAssets(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
     let where: Prisma.AssetWhereInput = { organizationId };
+
+    if (availableToBookOnly) {
+      where.availableToBook = true;
+    }
 
     if (search) {
       const searchTerms = search
@@ -742,6 +748,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   assetIds,
   getBookings = false,
   canUseBarcodes = false,
+  availableToBookOnly = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -751,6 +758,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   assetIds?: string[];
   getBookings?: boolean;
   canUseBarcodes?: boolean;
+  availableToBookOnly?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -778,7 +786,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       organizationId,
       search,
       parsedFilters,
-      assetIds
+      assetIds,
+      availableToBookOnly
     );
     const { orderByClause, customFieldSortings } = parseSortingOptions(
       searchParams.getAll("sortBy")
@@ -1929,6 +1938,7 @@ export async function getPaginatedAndFilterableAssets({
       teamMemberIds,
       extraInclude,
       assetKitFilter,
+      availableToBookOnly: isSelfService,
     });
 
     const totalPages = Math.ceil(totalAssets / perPage);
