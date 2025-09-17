@@ -80,8 +80,8 @@ export function isAssetPartiallyCheckedIn(
     return false;
   }
 
-  // Only consider as "partially checked in" for active bookings
-  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
+  // Only consider as "partially checked in" for active & finished bookings
+  return ["ONGOING", "OVERDUE", "COMPLETE", "ARCHIVED"].includes(bookingStatus);
 }
 
 /**
