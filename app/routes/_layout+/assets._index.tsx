@@ -7,12 +7,9 @@ import type {
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
 import { z } from "zod";
-import { auditExpectedAssetsAtom, auditSessionAtom } from "~/atoms/qr-scanner";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";
-import AuditDrawer from "~/components/audit/audit-drawer";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
@@ -227,8 +224,6 @@ export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
-  const auditSession = useAtomValue(auditSessionAtom);
-  const expectedAssets = useAtomValue(auditExpectedAssetsAtom);
 
   return (
     <div className="relative">
@@ -254,16 +249,6 @@ export default function AssetIndexPage() {
           </>
         </When>
       </Header>
-      {auditSession ? (
-        <div className="mb-6">
-          <AuditDrawer
-            contextLabel="Selection"
-            contextName={auditSession.contextName ?? auditSession.name}
-            expectedAssets={expectedAssets}
-            defaultExpanded
-          />
-        </div>
-      ) : null}
       <AssetsList />
     </div>
   );

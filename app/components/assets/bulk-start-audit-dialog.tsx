@@ -1,14 +1,10 @@
 import { useEffect } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useNavigate } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
-import {
-  setAuditExpectedAssetsAtom,
-  startAuditSessionAtom,
-  type AuditSessionInfo,
-} from "~/atoms/qr-scanner";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -25,8 +21,7 @@ export const BulkStartAuditSchema = z.object({
 
 type StartAuditFetcherData = {
   success?: boolean;
-  auditSession?: AuditSessionInfo;
-  expectedAssets?: Array<{ id: string; name: string }>;
+  redirectTo?: string;
 };
 
 type StartAuditDialogContentProps = {
@@ -50,37 +45,16 @@ function StartAuditDialogContent({
   nameError,
   descriptionError,
 }: StartAuditDialogContentProps) {
-  const startAuditSession = useSetAtom(startAuditSessionAtom);
-  const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (!fetcherData?.success || !fetcherData.auditSession) {
+    if (!fetcherData?.success || !fetcherData.redirectTo) {
       return;
     }
 
-    const session = fetcherData.auditSession;
-
-    startAuditSession({
-      id: session.id,
-      name: session.name,
-      targetId: session.targetId,
-      contextType: session.contextType ?? "SELECTION",
-      contextName: session.contextName ?? session.name,
-      expectedAssetCount: session.expectedAssetCount,
-      foundAssetCount: session.foundAssetCount,
-      missingAssetCount: session.missingAssetCount,
-      unexpectedAssetCount: session.unexpectedAssetCount,
-    });
-
-    const expected = (fetcherData.expectedAssets ?? []).map((asset) => ({
-      id: asset.id,
-      name: asset.name,
-      type: "asset" as const,
-      auditStatus: "missing" as const,
-    }));
-
-    setExpectedAssets(expected);
-  }, [fetcherData, setExpectedAssets, startAuditSession]);
+    handleCloseDialog();
+    navigate(fetcherData.redirectTo);
+  }, [fetcherData, handleCloseDialog, navigate]);
 
   return (
     <div className="modal-content-wrapper">
@@ -145,7 +119,7 @@ export default function BulkStartAuditDialog() {
       description={`You're about to start an audit for ${selectedCount} asset${
         selectedCount === 1 ? "" : "s"
       }.`}
-      actionUrl="/api/audits.start"
+      actionUrl="/api/audits/start"
       arrayFieldId="assetIds"
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => (

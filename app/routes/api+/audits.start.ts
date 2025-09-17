@@ -36,7 +36,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const sanitizedDescription = description?.trim() || undefined;
 
-    const { session, expectedAssets } = await createAuditSession({
+    const { session } = await createAuditSession({
       name,
       description: sanitizedDescription,
       assetIds,
@@ -45,29 +45,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assigneeIds,
     });
 
-    const sessionPayload = {
-      id: session.id,
-      name: session.name,
-      targetId: session.targetId,
-      contextType:
-        typeof session.scopeMeta === "object"
-          ? (session.scopeMeta as Record<string, unknown>)?.contextType ?? null
-          : null,
-      contextName:
-        typeof session.scopeMeta === "object"
-          ? (session.scopeMeta as Record<string, unknown>)?.contextName ?? null
-          : null,
-      expectedAssetCount: session.expectedAssetCount,
-      foundAssetCount: session.foundAssetCount,
-      missingAssetCount: session.missingAssetCount,
-      unexpectedAssetCount: session.unexpectedAssetCount,
-    };
-
     return json(
       data({
         success: true,
-        auditSession: sessionPayload,
-        expectedAssets,
+        redirectTo: `/audits/${session.id}`,
       })
     );
   } catch (cause) {

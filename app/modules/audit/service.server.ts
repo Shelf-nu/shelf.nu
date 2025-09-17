@@ -7,6 +7,11 @@ import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Audit";
 
+export type AuditScopeMeta = {
+  contextType?: string | null;
+  contextName?: string | null;
+};
+
 export type CreateAuditSessionInput = {
   name: string;
   description?: string | null;
@@ -14,6 +19,7 @@ export type CreateAuditSessionInput = {
   organizationId: string;
   createdById: string;
   assigneeIds?: string[];
+  scopeMeta?: AuditScopeMeta | null;
 };
 
 export type AuditExpectedAsset = {
@@ -22,6 +28,11 @@ export type AuditExpectedAsset = {
 };
 
 export type CreateAuditSessionResult = {
+  session: AuditSession & { assignments: AuditAssignment[] };
+  expectedAssets: AuditExpectedAsset[];
+};
+
+export type GetAuditSessionResult = {
   session: AuditSession & { assignments: AuditAssignment[] };
   expectedAssets: AuditExpectedAsset[];
 };
@@ -36,6 +47,7 @@ export async function createAuditSession(
     organizationId,
     createdById,
     assigneeIds = [],
+    scopeMeta,
   } = input;
 
   const uniqueAssetIds = Array.from(new Set(assetIds));
@@ -83,6 +95,7 @@ export async function createAuditSession(
         createdById,
         expectedAssetCount: assets.length,
         missingAssetCount: assets.length,
+        scopeMeta: scopeMeta ?? undefined,
       },
     });
 
@@ -132,4 +145,63 @@ export async function createAuditSession(
   });
 
   return result;
+}
+
+export async function getAuditSessionDetails({
+  id,
+  organizationId,
+}: {
+  id: AuditSession["id"];
+  organizationId: string;
+}): Promise<GetAuditSessionResult> {
+  try {
+    const session = await db.auditSession.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+      include: {
+        assignments: true,
+        assets: {
+          include: {
+            asset: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { id, organizationId },
+        status: 404,
+        label,
+      });
+    }
+
+    const expectedAssets: AuditExpectedAsset[] = session.assets
+      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
+      .map((auditAsset) => ({
+        id: auditAsset.assetId,
+        name: auditAsset.asset?.title ?? "",
+      }));
+
+    return {
+      session,
+      expectedAssets,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to load audit session",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
 }
