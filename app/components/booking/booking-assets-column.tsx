@@ -203,7 +203,7 @@ export function BookingAssetsColumn() {
                             iconClassName="size-4"
                             content={
                               <p>
-                                Shows the date when the assset was checked in
+                                Shows the date when the asset was checked in
                                 via a partial check-in.
                               </p>
                             }
