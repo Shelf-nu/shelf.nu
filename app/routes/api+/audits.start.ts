@@ -20,8 +20,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
     });
 
     const formData = await request.formData();

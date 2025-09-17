@@ -29,97 +29,113 @@ type StartAuditFetcherData = {
   expectedAssets?: Array<{ id: string; name: string }>;
 };
 
+type StartAuditDialogContentProps = {
+  disabled: boolean;
+  handleCloseDialog: () => void;
+  fetcherError?: string;
+  fetcherData?: StartAuditFetcherData;
+  nameField: string;
+  descriptionField: string;
+  nameError?: string;
+  descriptionError?: string;
+};
+
+function StartAuditDialogContent({
+  disabled,
+  handleCloseDialog,
+  fetcherError,
+  fetcherData,
+  nameField,
+  descriptionField,
+  nameError,
+  descriptionError,
+}: StartAuditDialogContentProps) {
+  const startAuditSession = useSetAtom(startAuditSessionAtom);
+  const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
+
+  useEffect(() => {
+    if (!fetcherData?.success || !fetcherData.auditSession) {
+      return;
+    }
+
+    const session = fetcherData.auditSession;
+
+    startAuditSession({
+      id: session.id,
+      name: session.name,
+      targetId: session.targetId,
+      contextType: session.contextType ?? "SELECTION",
+      contextName: session.contextName ?? session.name,
+      expectedAssetCount: session.expectedAssetCount,
+      foundAssetCount: session.foundAssetCount,
+      missingAssetCount: session.missingAssetCount,
+      unexpectedAssetCount: session.unexpectedAssetCount,
+    });
+
+    const expected = (fetcherData.expectedAssets ?? []).map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      type: "asset" as const,
+      auditStatus: "missing" as const,
+    }));
+
+    setExpectedAssets(expected);
+  }, [fetcherData, setExpectedAssets, startAuditSession]);
+
+  return (
+    <div className="modal-content-wrapper">
+      <div className="flex flex-col gap-4">
+        <Input
+          name={nameField}
+          label="Audit name"
+          placeholder="Quarterly warehouse audit"
+          error={nameError}
+          required
+          disabled={disabled}
+        />
+
+        <Input
+          name={descriptionField}
+          label="Description"
+          placeholder="Add context that will help auditors (optional)."
+          inputType="textarea"
+          rows={5}
+          error={fetcherError || descriptionError}
+          disabled={disabled}
+        />
+      </div>
+
+      <div className="mt-6 flex gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          width="full"
+          disabled={disabled}
+          onClick={handleCloseDialog}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          variant="primary"
+          width="full"
+          disabled={disabled}
+        >
+          Start audit
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function BulkStartAuditDialog() {
   const selectedCount = useAtomValue(selectedBulkItemsCountAtom);
   const zo = useZorm("BulkStartAudit", BulkStartAuditSchema);
-  const StartAuditDialogContent = ({
-    disabled,
-    handleCloseDialog,
-    fetcherError,
-    fetcherData,
-  }: {
-    disabled: boolean;
-    handleCloseDialog: () => void;
-    fetcherError?: string;
-    fetcherData?: StartAuditFetcherData;
-  }) => {
-    const startAuditSession = useSetAtom(startAuditSessionAtom);
-    const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
 
-    useEffect(() => {
-      if (!fetcherData?.success || !fetcherData.auditSession) {
-        return;
-      }
-
-      const session = fetcherData.auditSession;
-
-      startAuditSession({
-        id: session.id,
-        name: session.name,
-        targetId: session.targetId,
-        contextType: session.contextType ?? "SELECTION",
-        contextName: session.contextName ?? session.name,
-        expectedAssetCount: session.expectedAssetCount,
-        foundAssetCount: session.foundAssetCount,
-        missingAssetCount: session.missingAssetCount,
-        unexpectedAssetCount: session.unexpectedAssetCount,
-      });
-
-      const expected = (fetcherData.expectedAssets ?? []).map((asset) => ({
-        id: asset.id,
-        name: asset.name,
-        type: "asset" as const,
-        auditStatus: "missing" as const,
-      }));
-
-      setExpectedAssets(expected);
-    }, [fetcherData, setExpectedAssets, startAuditSession]);
-
-    return (
-      <div className="modal-content-wrapper">
-        <div className="flex flex-col gap-4">
-          <Input
-            name={zo.fields.name()}
-            label="Audit name"
-            placeholder="Quarterly warehouse audit"
-            error={zo.errors.name()?.message}
-            required
-            disabled={disabled}
-          />
-
-          <Input
-            name={zo.fields.description()}
-            label="Description"
-            placeholder="Add context that will help auditors (optional)."
-            inputType="textarea"
-            rows={5}
-            error={fetcherError || zo.errors.description()?.message}
-            disabled={disabled}
-          />
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <Button
-            type="button"
-            variant="secondary"
-            width="full"
-            disabled={disabled}
-            onClick={handleCloseDialog}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            width="full"
-            disabled={disabled}
-          >
-            Start audit
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  const nameField = zo.fields.name();
+  const descriptionField = zo.fields.description();
+  const nameError = zo.errors.name()?.message;
+  const descriptionError = zo.errors.description()?.message;
 
   return (
     <BulkUpdateDialogContent
@@ -138,6 +154,10 @@ export default function BulkStartAuditDialog() {
           handleCloseDialog={handleCloseDialog}
           fetcherError={fetcherError}
           fetcherData={fetcherData as StartAuditFetcherData}
+          nameField={nameField}
+          descriptionField={descriptionField}
+          nameError={nameError}
+          descriptionError={descriptionError}
         />
       )}
     </BulkUpdateDialogContent>

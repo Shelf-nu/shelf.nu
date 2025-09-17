@@ -127,7 +127,15 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
-        <BulkStartAuditDialog />
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.audit,
+            action: PermissionAction.create,
+          })}
+        >
+          <BulkStartAuditDialog />
+        </When>
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -238,14 +246,22 @@ function ConditionalDropdown() {
                 </span>
               </Button>
             </DropdownMenuItem>
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="start-audit"
-                label="Start audit"
-                onClick={closeMenu}
-                disabled={isLoading}
-              />
-            </DropdownMenuItem>
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.create,
+              })}
+            >
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="start-audit"
+                  label="Start audit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+            </When>
 
             <When
               truthy={userHasPermission({
