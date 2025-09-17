@@ -167,3 +167,105 @@ export const clearScannedItemsAtom = atom(null, (_get, set) => {
 });
 
 /*******************************/
+
+/* AUDIT-SPECIFIC ATOMS */
+
+export type AuditSessionInfo = {
+  id: string;
+  targetId?: string | null;
+  contextType?: string | null;
+  contextName?: string | null;
+  expectedAssetCount: number;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+} | null;
+
+export type AuditAssetStatus = "found" | "missing" | "unexpected";
+
+export type AuditScannedItem = {
+  id: string;
+  name: string;
+  type: "asset" | "kit";
+  auditStatus: AuditAssetStatus;
+  expectedLocation?: string;
+  currentLocation?: string;
+};
+
+// Stores current audit session information
+export const auditSessionAtom = atom<AuditSessionInfo>(null);
+
+// Stores expected assets for the current audit target (location/kit)
+export const auditExpectedAssetsAtom = atom<AuditScannedItem[]>([]);
+
+// Derived atom that categorizes scanned items by audit status
+export const auditResultsAtom = atom((get) => {
+  const items = get(scannedItemsAtom);
+  const expectedAssets = get(auditExpectedAssetsAtom);
+  const sessionInfo = get(auditSessionAtom);
+
+  if (!sessionInfo) {
+    return {
+      found: [] as AuditScannedItem[],
+      missing: expectedAssets,
+      unexpected: [] as AuditScannedItem[],
+    };
+  }
+
+  // Create a map of expected asset IDs for quick lookup
+  const expectedAssetIds = new Set(expectedAssets.map((asset) => asset.id));
+
+  // Process scanned items
+  const scannedAssets: AuditScannedItem[] = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => {
+      const assetData = item!.data as AssetFromQr;
+      return {
+        id: assetData.id,
+        name: assetData.title,
+        type: "asset" as const,
+        auditStatus: expectedAssetIds.has(assetData.id)
+          ? ("found" as const)
+          : ("unexpected" as const),
+      } satisfies AuditScannedItem;
+    });
+
+  // Categorize assets
+  const found = scannedAssets.filter((asset) => asset.auditStatus === "found");
+  const unexpected = scannedAssets.filter(
+    (asset) => asset.auditStatus === "unexpected"
+  );
+  const foundIds = new Set(found.map((asset) => asset.id));
+  const missing = expectedAssets.filter((asset) => !foundIds.has(asset.id));
+
+  return {
+    found,
+    missing,
+    unexpected,
+  };
+});
+
+// Action atom to set expected assets for audit
+export const setAuditExpectedAssetsAtom = atom(
+  null,
+  (_get, set, assets: AuditScannedItem[]) => {
+    set(auditExpectedAssetsAtom, assets);
+  }
+);
+
+// Action atom to start an audit session
+export const startAuditSessionAtom = atom(
+  null,
+  (_get, set, sessionInfo: Exclude<AuditSessionInfo, null>) => {
+    set(auditSessionAtom, sessionInfo);
+    // Clear any existing scanned items when starting a new audit
+    set(scannedItemsAtom, {});
+  }
+);
+
+// Action atom to end an audit session
+export const endAuditSessionAtom = atom(null, (_get, set) => {
+  set(auditSessionAtom, null);
+  set(auditExpectedAssetsAtom, []);
+  set(scannedItemsAtom, {});
+});
