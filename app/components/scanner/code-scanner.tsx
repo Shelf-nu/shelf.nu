@@ -526,7 +526,7 @@ function CameraMode({
             setIsLoading(false);
           });
         }}
-        className="pointer-events-none size-full object-cover"
+        className="size-full object-cover"
       />
 
       <canvas
