@@ -24,6 +24,7 @@ import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
+import BulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -126,6 +127,7 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
+        <BulkStartAuditDialog />
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -235,6 +237,14 @@ function ConditionalDropdown() {
                   <Icon icon="download" /> Download QR Codes
                 </span>
               </Button>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="start-audit"
+                label="Start audit"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
             </DropdownMenuItem>
 
             <When

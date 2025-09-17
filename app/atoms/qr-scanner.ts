@@ -172,6 +172,7 @@ export const clearScannedItemsAtom = atom(null, (_get, set) => {
 
 export type AuditSessionInfo = {
   id: string;
+  name: string;
   targetId?: string | null;
   contextType?: string | null;
   contextName?: string | null;

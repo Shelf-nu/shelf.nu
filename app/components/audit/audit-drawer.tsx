@@ -1,5 +1,4 @@
-import { useMemo } from "react";
-import type React from "react";
+import React, { useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 
@@ -13,14 +12,18 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
-import { createBlockers, type BlockerConfig } from "~/components/scanner/drawer/blockers-factory";
+import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
+import {
+  createBlockers,
+  type BlockerConfig,
+} from "~/components/scanner/drawer/blockers-factory";
 import ConfigurableDrawer from "~/components/scanner/drawer/configurable-drawer";
 import {
   DefaultLoadingState,
   GenericItemRow,
 } from "~/components/scanner/drawer/generic-item-row";
-import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
 import { Progress } from "~/components/shared/progress";
+import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 
 const AuditSchema = z.object({
@@ -54,7 +57,9 @@ type AuditDrawerProps = {
   className?: string;
   style?: React.CSSProperties;
   headerContent?: React.ReactNode;
-  getAdditionalBlockers?: (args: AdditionalBlockerFactoryArgs) => BlockerConfig[];
+  getAdditionalBlockers?: (
+    args: AdditionalBlockerFactoryArgs
+  ) => BlockerConfig[];
   emptyStateContent?: (args: {
     expanded: boolean;
     auditSession: AuditSessionInfo;
@@ -87,20 +92,27 @@ export function AuditDrawer({
     [expectedAssets]
   );
 
-  const scannedAssets = useMemo(() => {
-    return Object.values(items)
-      .filter((item) => !!item && item.data && item.type === "asset")
-      .map((item) => ({
-        id: item!.data!.id,
-        name: item!.data!.title,
-        type: "asset" as const,
-        auditStatus: expectedAssetIds.has(item!.data!.id)
-          ? ("found" as const)
-          : ("unexpected" as const),
-      } satisfies AuditScannedItem));
-  }, [items, expectedAssetIds]);
+  const scannedAssets = useMemo(
+    () =>
+      Object.values(items)
+        .filter((item) => !!item && item.data && item.type === "asset")
+        .map((item) => {
+          const assetData = item!.data as AssetFromQr;
+          return {
+            id: assetData.id,
+            name: assetData.title,
+            type: "asset" as const,
+            auditStatus: expectedAssetIds.has(assetData.id)
+              ? ("found" as const)
+              : ("unexpected" as const),
+          } satisfies AuditScannedItem;
+        }),
+    [items, expectedAssetIds]
+  );
 
-  const foundAssets = scannedAssets.filter((asset) => asset.auditStatus === "found");
+  const foundAssets = scannedAssets.filter(
+    (asset) => asset.auditStatus === "found"
+  );
   const unexpectedAssets = scannedAssets.filter(
     (asset) => asset.auditStatus === "unexpected"
   );
@@ -270,7 +282,9 @@ export function AuditDrawer({
       );
 
   const shouldDisableSubmit =
-    hasBlockers || !auditSession || stats.foundCount + stats.unexpectedCount === 0;
+    hasBlockers ||
+    !auditSession ||
+    stats.foundCount + stats.unexpectedCount === 0;
 
   return (
     <ConfigurableDrawer
