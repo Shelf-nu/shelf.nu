@@ -24,6 +24,7 @@ import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
+import BulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -126,6 +127,15 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.audit,
+            action: PermissionAction.create,
+          })}
+        >
+          <BulkStartAuditDialog />
+        </When>
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -236,6 +246,22 @@ function ConditionalDropdown() {
                 </span>
               </Button>
             </DropdownMenuItem>
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.create,
+              })}
+            >
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="start-audit"
+                  label="Start audit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+            </When>
 
             <When
               truthy={userHasPermission({

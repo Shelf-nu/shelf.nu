@@ -55,28 +55,32 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-  assets            Asset[]
-  categories        Category[]
-  notes             Note[]
-  qrCodes           Qr[]
-  scans             Scan[]
-  tags              Tag[]
-  roles             Role[]
-  locations         Location[]
-  images            Image[]
-  organizations     Organization[]
-  customFields      CustomField[]
-  sentInvites       Invite[]           @relation("inviter")
-  receivedInvites   Invite[]           @relation("invitee")
-  teamMembers       TeamMember[]
-  userOrganizations UserOrganization[]
-  bookings          Booking[]          @relation("creator")
-  custodies         Booking[]          @relation("custodian")
-  createdKits       Kit[]
-  tierId            TierId             @default(free)
-  tier              Tier               @relation(fields: [tierId], references: [id])
-  assetReminders    AssetReminder[]
-  contact           UserContact?
+  assets             Asset[]
+  categories         Category[]
+  notes              Note[]
+  qrCodes            Qr[]
+  scans              Scan[]
+  tags               Tag[]
+  roles              Role[]
+  locations          Location[]
+  images             Image[]
+  organizations      Organization[]
+  customFields       CustomField[]
+  sentInvites        Invite[]           @relation("inviter")
+  receivedInvites    Invite[]           @relation("invitee")
+  teamMembers        TeamMember[]
+  userOrganizations  UserOrganization[]
+  bookings           Booking[]          @relation("creator")
+  custodies          Booking[]          @relation("custodian")
+  createdKits        Kit[]
+  tierId             TierId             @default(free)
+  tier               Tier               @relation(fields: [tierId], references: [id])
+  assetReminders     AssetReminder[]
+  contact            UserContact?
+  auditsCreated      AuditSession[]
+  auditAssignments   AuditAssignment[]
+  auditAssetsScanned AuditAsset[]
+  auditScans         AuditScan[]
 
   referralSource String? // "How did you hear about us?" field.
 
@@ -135,7 +139,7 @@ model Asset {
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
-  sequentialId        String?     // Sequential identifier for the asset (e.g., "SAM-0001")
+  sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Datetime
   createdAt DateTime @default(now())
@@ -162,7 +166,11 @@ model Asset {
   customFields AssetCustomFieldValue[]
   bookings     Booking[]
   reminders    AssetReminder[]
+  auditEntries AuditAsset[]
+  auditScans   AuditScan[]
 
+  // Unique constraint for organization-scoped sequential IDs
+  @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
   // Indexes for optimization of queries
@@ -176,8 +184,6 @@ model Asset {
   @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
   @@index([userId])
-  // Unique constraint for organization-scoped sequential IDs
-  @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
 }
 
 enum AssetStatus {
@@ -612,7 +618,8 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
-  
+  auditSessions      AuditSession[]
+
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
 
@@ -899,7 +906,7 @@ model Booking {
 
   assets Asset[]
 
-  tags Tag[]
+  tags            Tag[]
   partialCheckins PartialBookingCheckin[]
 
   // Datetime
@@ -941,33 +948,32 @@ model BookingSettings {
   @@index([organizationId])
 }
 
+model PartialBookingCheckin {
+  id String @id @default(cuid())
 
-  model PartialBookingCheckin {
-    id String @id @default(cuid())
+  // Track which assets were checked in during this session
+  assetIds     String[] // Array of asset IDs checked in
+  checkinCount Int // Number of assets checked in (for quick reference)
 
-    // Track which assets were checked in during this session
-    assetIds String[] // Array of asset IDs checked in
-    checkinCount Int   // Number of assets checked in (for quick reference)
+  // Metadata
+  checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
 
-    // Metadata
-    checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
+  // Relationships
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String
 
-    // Relationships
-    booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-    bookingId String
+  checkedInBy   User   @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
+  checkedInById String
 
-    checkedInBy   User @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
-    checkedInById String
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    // Timestamps
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    @@index([bookingId])
-    @@index([checkedInById])
-    @@index([checkinTimestamp])
-    @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
-  }
+  @@index([bookingId])
+  @@index([checkedInById])
+  @@index([checkinTimestamp])
+  @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+}
 
 model Kit {
   id String @id @default(cuid())
@@ -1117,8 +1123,8 @@ model Update {
   id String @id @default(cuid())
 
   title       String
-  content     String   // Markdown content
-  url         String?  // Optional URL to redirect to when clicked
+  content     String // Markdown content
+  url         String? // Optional URL to redirect to when clicked
   publishDate DateTime // When the update should be visible to users
   status      UpdateStatus @default(DRAFT)
 
@@ -1126,8 +1132,8 @@ model Update {
   targetRoles OrganizationRoles[]
 
   // Analytics
-  clickCount  Int @default(0)
-  viewCount   Int @default(0)
+  clickCount Int @default(0)
+  viewCount  Int @default(0)
 
   // Relations
   userReads UserUpdateRead[]
@@ -1162,4 +1168,132 @@ model UserUpdateRead {
   @@index([userId])
   @@index([updateId])
   @@index([readAt])
+}
+
+enum AuditStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAssetStatus {
+  PENDING
+  FOUND
+  MISSING
+  UNEXPECTED
+}
+
+enum AuditAssignmentRole {
+  LEAD
+  PARTICIPANT
+}
+
+model AuditSession {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+
+  targetId  String?
+  status    AuditStatus @default(PENDING)
+  scopeMeta Json?
+
+  expectedAssetCount   Int @default(0)
+  foundAssetCount      Int @default(0)
+  missingAssetCount    Int @default(0)
+  unexpectedAssetCount Int @default(0)
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  assignments AuditAssignment[]
+  assets      AuditAsset[]
+  scans       AuditScan[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([createdById])
+  @@index([status, createdAt])
+}
+
+model AuditAssignment {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  role AuditAssignmentRole?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditSessionId, userId])
+  @@index([userId])
+}
+
+model AuditAsset {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  expected Boolean          @default(true)
+  status   AuditAssetStatus @default(PENDING)
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  scannedAt DateTime?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scans AuditScan[]
+
+  @@unique([auditSessionId, assetId])
+  @@index([status])
+  @@index([scannedById])
+}
+
+model AuditScan {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  assetId String?
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  code String?
+
+  metadata Json?
+
+  scannedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([auditSessionId, scannedAt])
+  @@index([auditAssetId])
+  @@index([assetId])
 }

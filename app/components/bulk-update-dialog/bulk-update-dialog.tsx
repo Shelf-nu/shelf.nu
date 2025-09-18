@@ -48,7 +48,8 @@ type BulkDialogType =
   | "download-qr"
   | "partial-checkin"
   | "add-to-kit"
-  | "remove-from-kit";
+  | "remove-from-kit"
+  | "start-audit";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
