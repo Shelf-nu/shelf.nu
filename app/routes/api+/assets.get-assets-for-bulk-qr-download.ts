@@ -21,7 +21,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
@@ -53,7 +53,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
 
     const assets = await db.asset.findMany({
       where,
-      select: { id: true, title: true, createdAt: true },
+      select: { id: true, title: true, createdAt: true, sequentialId: true },
     });
 
     if (assets.length > 100) {
@@ -80,7 +80,12 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ assets: assetsWithQrObj }));
+    return json(
+      data({
+        assets: assetsWithQrObj,
+        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

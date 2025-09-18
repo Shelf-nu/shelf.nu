@@ -77,8 +77,10 @@ export default function BulkDownloadQrDialog({
         id: string;
         title: string;
         createdAt: string;
+        sequentialId: string | null;
         qr: QrDef;
       }>;
+      const qrIdDisplayPreference = response.qrIdDisplayPreference;
 
       const zip = new JSZip();
       const qrFolder = zip.folder("qr-codes");
@@ -86,7 +88,12 @@ export default function BulkDownloadQrDialog({
       /* Converting our React component to html so that we can later convert it into an image */
       const qrNodes = assets.map((asset) =>
         generateHtmlFromComponent(
-          <QrLabel data={{ qr: asset.qr }} title={asset.title} />
+          <QrLabel
+            data={{ qr: asset.qr }}
+            title={asset.title}
+            qrIdDisplayPreference={qrIdDisplayPreference}
+            sequentialId={asset.sequentialId}
+          />
         )
       );
 

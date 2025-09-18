@@ -43,6 +43,7 @@ export const CodePreviewDialog = forwardRef<
       type: BarcodeType;
       value: string;
     }>;
+    sequentialId?: string | null;
   }>({
     api: `/api/${item.type === "asset" ? "assets" : "kits"}/${
       item.id
@@ -111,6 +112,7 @@ export const CodePreviewDialog = forwardRef<
                     onCodeChange={setSelectedCode}
                     selectedBarcodeId={selectedBarcodeId}
                     onRefetchData={refetch}
+                    sequentialId={data?.sequentialId}
                   />
                 </Card>
               </When>

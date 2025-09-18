@@ -616,6 +616,9 @@ model Organization {
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
 
+  // QR code display preference - which ID to show on QR code labels
+  qrIdDisplayPreference QrIdDisplayPreference @default(QR_ID)
+
   // Indexes for foreign keys
   @@index([userId])
   @@index([ssoDetailsId])
@@ -641,6 +644,11 @@ model UserOrganization {
 enum OrganizationType {
   PERSONAL
   TEAM
+}
+
+enum QrIdDisplayPreference {
+  QR_ID    // Display the QR code ID (current default)
+  SAM_ID   // Display the sequential/SAM ID
 }
 
 enum OrganizationRoles {
