@@ -160,13 +160,6 @@ export async function simpleModeLoader({
     }),
   ]);
 
-  if (isSelfService) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-
   assets = await updateAssetsWithBookingCustodians(assets);
 
   const header: HeaderData = {
@@ -320,6 +313,7 @@ export async function advancedModeLoader({
       settings,
       getBookings: view === "availability",
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+      availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
@@ -351,13 +345,6 @@ export async function advancedModeLoader({
       organizationId,
     }),
   ]);
-
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
