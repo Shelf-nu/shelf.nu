@@ -15,7 +15,9 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import LocationOverview, { loader } from "./locations.$locationId.overview";
+import LocationOverview, {
+  loader,
+} from "~/routes/_layout+/locations.$locationId.overview";
 
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
@@ -31,6 +33,8 @@ const mockDateFormatter = vi.fn(() => "formatted-date");
 vi.mock("~/utils/client-hints", () => ({
   getClientHint: vi.fn(() => ({ locale: "en-GB", timeZone: "UTC" })),
   getDateTimeFormat: vi.fn(() => ({ format: mockDateFormatter })),
+  getDateTimeFormatFromHints: vi.fn(() => ({ format: mockDateFormatter })),
+  useHints: vi.fn(() => ({ locale: "en-GB", timeZone: "UTC" })),
 }));
 
 vi.mock("@remix-run/react", async () => {
@@ -71,8 +75,12 @@ describe("locations.$locationId.overview loader", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       userOrganizations: [],
-      currentOrganization: { id: "org-1", currency: "USD" as Currency },
-    });
+      currentOrganization: {
+        id: "org-1",
+        name: "Test Organization",
+        currency: "USD" as Currency,
+      },
+    } as any);
 
     getLocationMock.mockResolvedValue({
       location: {
@@ -80,7 +88,7 @@ describe("locations.$locationId.overview loader", () => {
         name: "Main Warehouse",
         createdAt: new Date("2024-01-01T12:34:56Z"),
       },
-    });
+    } as any);
 
     getLocationTotalValuationMock.mockResolvedValue(9876.54);
 

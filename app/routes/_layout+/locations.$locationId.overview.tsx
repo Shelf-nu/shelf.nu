@@ -4,6 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Card } from "~/components/shared/card";
+import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import {
   getLocation,
@@ -98,9 +99,29 @@ export default function LocationOverview() {
             Created
           </span>
           <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-            {location.createdAt}
+            <DateS date={location.createdAt} />
           </div>
         </li>
+        {location.address && (
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Address
+            </span>
+            <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+              {location.address}
+            </div>
+          </li>
+        )}
+        {location.description && (
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Description
+            </span>
+            <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+              {location.description}
+            </div>
+          </li>
+        )}
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-gray-900">
             Total value{" "}

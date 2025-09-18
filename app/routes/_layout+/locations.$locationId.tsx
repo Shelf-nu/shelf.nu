@@ -166,8 +166,8 @@ export default function LocationPage() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   const items = [
-    { to: "assets", content: "Assets" },
     { to: "overview", content: "Overview" },
+    { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
   ];
 
