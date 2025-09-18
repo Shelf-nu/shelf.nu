@@ -5,6 +5,7 @@ import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
 import { tw } from "~/utils/tw";
 import { Breadcrumbs } from "../breadcrumbs";
+import { CommandPaletteButton } from "../command-palette";
 import type { HeaderData } from "./types";
 
 type SlotKeys = "left-of-title" | "right-of-title" | "append-to-title";
@@ -40,9 +41,14 @@ export default function Header({
         <>
           <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:min-h-[67px] md:py-3">
             <Breadcrumbs />
-            {children && (
-              <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
-            )}
+            <div className="hidden items-center gap-3 md:flex">
+              <CommandPaletteButton className="w-auto md:w-auto" />
+              {children ? (
+                <div className="flex shrink-0 items-center gap-3">
+                  {children}
+                </div>
+              ) : null}
+            </div>
           </div>
           {children && (
             <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
