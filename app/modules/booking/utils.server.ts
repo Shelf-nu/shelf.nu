@@ -90,8 +90,24 @@ export function formatBookingsDates(bookings: Booking[], request: Request) {
  */
 export function calculatePartialCheckinProgress(
   totalAssets: number,
-  checkedInAssetIds: string[]
+  checkedInAssetIds: string[],
+  bookingStatus?: BookingStatus
 ) {
+  // For final booking statuses, always show 100% progress
+  if (
+    bookingStatus === BookingStatus.COMPLETE ||
+    bookingStatus === BookingStatus.ARCHIVED
+  ) {
+    return {
+      totalAssets,
+      checkedInCount: totalAssets,
+      uncheckedCount: 0,
+      progressPercentage: 100,
+      hasPartialCheckins: totalAssets > 0,
+      checkedInAssetIds,
+    };
+  }
+
   const checkedInCount = checkedInAssetIds.length;
   const uncheckedCount = totalAssets - checkedInCount;
   const progressPercentage =
