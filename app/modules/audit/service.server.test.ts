@@ -48,18 +48,18 @@ const mockDb = db as unknown as {
 };
 
 describe("audit service", () => {
-const defaultInput = {
-  name: "Quarterly warehouse audit",
-  description: "Check top 10 cameras",
-  assetIds: ["asset-1", "asset-2"],
-  organizationId: "org-1",
-  createdById: "user-1",
-  assigneeIds: ["user-2"],
-  scopeMeta: {
-    contextType: "SELECTION",
-    contextName: "Quarterly warehouse audit",
-  },
-};
+  const defaultInput = {
+    name: "Quarterly warehouse audit",
+    description: "Check top 10 cameras",
+    assetIds: ["asset-1", "asset-2"],
+    organizationId: "org-1",
+    createdById: "user-1",
+    assigneeIds: ["user-2"],
+    scopeMeta: {
+      contextType: "SELECTION",
+      contextName: "Quarterly warehouse audit",
+    },
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,42 +86,42 @@ const defaultInput = {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-   mockDb.auditSession.findUnique.mockResolvedValue({
-     id: "audit-1",
-     name: defaultInput.name,
-     description: defaultInput.description,
-     organizationId: defaultInput.organizationId,
-     createdById: defaultInput.createdById,
-     expectedAssetCount: 2,
-     foundAssetCount: 0,
-     missingAssetCount: 2,
-     unexpectedAssetCount: 0,
-     startedAt: null,
-     completedAt: null,
-     cancelledAt: null,
-     status: "PENDING",
-     scopeMeta: defaultInput.scopeMeta,
-     targetId: null,
-     createdAt: new Date(),
-     updatedAt: new Date(),
-     assignments: [
-       {
-         id: "assignment-1",
-         auditSessionId: "audit-1",
-         userId: "user-1",
-         role: AuditAssignmentRole.LEAD,
-         createdAt: new Date(),
-         updatedAt: new Date(),
-       },
-       {
-         id: "assignment-2",
-         auditSessionId: "audit-1",
-         userId: "user-2",
-         role: null,
-         createdAt: new Date(),
-         updatedAt: new Date(),
-       },
-     ],
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: "audit-1",
+      name: defaultInput.name,
+      description: defaultInput.description,
+      organizationId: defaultInput.organizationId,
+      createdById: defaultInput.createdById,
+      expectedAssetCount: 2,
+      foundAssetCount: 0,
+      missingAssetCount: 2,
+      unexpectedAssetCount: 0,
+      startedAt: null,
+      completedAt: null,
+      cancelledAt: null,
+      status: "PENDING",
+      scopeMeta: defaultInput.scopeMeta,
+      targetId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      assignments: [
+        {
+          id: "assignment-1",
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          role: AuditAssignmentRole.LEAD,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: "assignment-2",
+          auditSessionId: "audit-1",
+          userId: "user-2",
+          role: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
       assets: [],
     });
     mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
