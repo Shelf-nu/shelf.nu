@@ -19,9 +19,14 @@ export function generateWhereClause(
   organizationId: string,
   search: string | null,
   filters: Filter[],
-  assetIds?: string[]
+  assetIds?: string[],
+  availableToBookOnly = false
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
+
+  if (availableToBookOnly) {
+    whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  }
 
   // Add asset IDs filter if provided
   if (assetIds && assetIds.length > 0) {
