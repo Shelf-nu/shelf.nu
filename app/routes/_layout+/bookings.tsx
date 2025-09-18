@@ -1,6 +1,7 @@
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { Link, Outlet } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
+import ContextualModal from "~/components/layout/contextual-modal";
 
 export function loader() {
   return null;
@@ -26,7 +27,12 @@ export const handle = {
 };
 
 export default function BookingsPage() {
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <ContextualModal />
+    </>
+  );
 }
 
 export const ErrorBoundary = () => <ErrorContent />;

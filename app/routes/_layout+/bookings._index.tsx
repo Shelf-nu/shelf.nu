@@ -13,7 +13,6 @@ import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
 import { ErrorContent } from "~/components/errors";
 
-import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
@@ -326,7 +325,6 @@ export default function BookingsIndexPage({
           }
         />
       </ListContentWrapper>
-      <ContextualModal />
     </div>
   ) : (
     <Outlet />
