@@ -75,6 +75,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
@@ -394,10 +395,47 @@ export async function updateBasicBooking({
       }
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
     });
+
+    // Generate activity logs for changes
+    const changes: string[] = [];
+
+    if (name && name !== booking.name) {
+      changes.push(`name from **${booking.name}** to **${name}**`);
+    }
+    if (description !== undefined && description !== booking.description) {
+      const oldDesc = booking.description || "(empty)";
+      const newDesc = description || "(empty)";
+      changes.push(`description from **${oldDesc}** to **${newDesc}**`);
+    }
+    if (from && booking.from && from.getTime() !== booking.from.getTime()) {
+      changes.push(
+        `start date from **${booking.from.toISOString()}** to **${from.toISOString()}**`
+      );
+    }
+    if (to && booking.to && to.getTime() !== booking.to.getTime()) {
+      changes.push(
+        `end date from **${booking.to.toISOString()}** to **${to.toISOString()}**`
+      );
+    }
+    if (
+      custodianTeamMemberId &&
+      custodianTeamMemberId !== booking.custodianTeamMemberId
+    ) {
+      changes.push(`custodian assignment`);
+    }
+
+    if (changes.length > 0) {
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `Booking updated: ${changes.join(", ")}.`,
+      });
+    }
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -667,6 +705,12 @@ export async function reserveBooking({
         html,
       });
     }
+
+    // Add activity log for status change to RESERVED
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `Booking status changed from **${bookingFound.status}** to **${updatedBooking.status}**.`,
+    });
 
     return updatedBooking;
   } catch (cause) {
@@ -1293,6 +1337,14 @@ export async function updateBookingAssets({
       return b;
     });
 
+    // Add activity log for adding assets to booking
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `${assetIds.length} asset${
+        assetIds.length !== 1 ? "s" : ""
+      } added to booking.`,
+    });
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -1334,10 +1386,18 @@ export async function archiveBooking({
       });
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
     });
+
+    // Add activity log for booking archival
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `Booking archived. Status changed from **${booking.status}** to **${BookingStatus.ARCHIVED}**.`,
+    });
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1450,6 +1510,12 @@ export async function cancelBooking({
         html,
       });
     }
+
+    // Add activity log for booking cancellation
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `Booking cancelled. Status changed from **${bookingFound.status}** to **${BookingStatus.CANCELLED}**.`,
+    });
 
     return booking;
   } catch (cause) {
