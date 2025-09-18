@@ -79,6 +79,12 @@ model User {
   contact           UserContact?
 
   referralSource String? // "How did you hear about us?" field.
+  jobTitle       String?
+  teamSize       String?
+  companyName    String?
+  primaryUseCase String?
+  currentSolution String?
+  timeline       String?
 
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
