@@ -239,6 +239,19 @@ export async function getLocations(params: {
   }
 }
 
+export async function getLocationTotalValuation({
+  locationId,
+}: {
+  locationId: Location["id"];
+}) {
+  const result = await db.asset.aggregate({
+    _sum: { valuation: true },
+    where: { locationId },
+  });
+
+  return result._sum.valuation ?? 0;
+}
+
 export async function createLocation({
   name,
   description,
