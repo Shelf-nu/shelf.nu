@@ -12,6 +12,21 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+export type BulkQrDownloadLoaderData = {
+  assets: Array<{
+    id: string;
+    title: string;
+    sequentialId: string | null;
+    createdAt: Date;
+    qr: {
+      id: string;
+      src: string;
+      size: "small" | "cable" | "medium" | "large";
+    };
+  }>;
+  qrIdDisplayPreference: string;
+};
+
 /**
  * This API find all/some assets in current organization and returns the required data
  * for generating qr codes after validation.

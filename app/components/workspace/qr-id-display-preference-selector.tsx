@@ -40,7 +40,9 @@ export default function QrIdDisplayPreferenceSelector({
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectedPreference, setSelectedPreference] = useState(defaultValue);
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [selectedIndex, setSelectedIndex] = useState<number>(() =>
+    QR_ID_DISPLAY_OPTIONS.findIndex((option) => option.value === defaultValue)
+  );
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -109,7 +111,9 @@ export default function QrIdDisplayPreferenceSelector({
     <Popover
       open={isOpen}
       onOpenChange={(v) => {
-        scrollToIndex(selectedIndex);
+        if (v) {
+          scrollToIndex(selectedIndex);
+        }
         setIsOpen(v);
       }}
     >

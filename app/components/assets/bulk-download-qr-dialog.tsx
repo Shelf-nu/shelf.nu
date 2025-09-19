@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { toBlob } from "html-to-image";
 import { useAtomValue } from "jotai";
@@ -6,11 +6,12 @@ import JSZip from "jszip";
 import { DownloadIcon } from "lucide-react";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
+import useApiQuery from "~/hooks/use-api-query";
+import type { BulkQrDownloadLoaderData } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
 import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
 import { sanitizeFilename } from "~/utils/misc";
 import { QrLabel } from "../code-preview/code-preview";
-import type { QrDef } from "../code-preview/code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -38,6 +39,7 @@ export default function BulkDownloadQrDialog({
   const [downloadState, setDownloadState] = useState<DownloadState>({
     status: "idle",
   });
+  const [shouldFetchAssets, setShouldFetchAssets] = useState(false);
   const [searchParams] = useSearchParams();
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
@@ -51,36 +53,33 @@ export default function BulkDownloadQrDialog({
 
   function handleClose() {
     setDownloadState({ status: "idle" });
+    setShouldFetchAssets(false);
     onClose();
   }
 
-  async function handleBulkDownloadQr() {
-    if (isSelectingMoreThan100) {
-      return;
-    }
+  // Prepare API query parameters
+  const apiSearchParams = useMemo(() => {
+    if (selectedAssets.length === 0) return undefined;
 
-    const query = new URLSearchParams();
-
+    const query = new URLSearchParams(searchParams);
     selectedAssets.forEach((asset) => {
       query.append("assetIds", asset.id);
     });
+    return query;
+  }, [selectedAssets, searchParams]);
 
-    setDownloadState({ status: "loading" });
+  // Use useApiQuery to fetch assets data
+  const { data: apiResponse } = useApiQuery<BulkQrDownloadLoaderData>({
+    api: "/api/assets/get-assets-for-bulk-qr-download",
+    searchParams: apiSearchParams,
+    enabled: shouldFetchAssets && !isSelectingMoreThan100,
+  });
+
+  const processDownload = useCallback(async () => {
+    if (!apiResponse) return;
 
     try {
-      /* Getting all validated assets with qr object */
-      const response = await fetch(
-        `/api/assets/get-assets-for-bulk-qr-download?${query}&${searchParams}`
-      ).then((response) => response.json());
-
-      const assets = response.assets as Array<{
-        id: string;
-        title: string;
-        createdAt: string;
-        sequentialId: string | null;
-        qr: QrDef;
-      }>;
-      const qrIdDisplayPreference = response.qrIdDisplayPreference;
+      const { assets, qrIdDisplayPreference } = apiResponse;
 
       const zip = new JSZip();
       const qrFolder = zip.folder("qr-codes");
@@ -123,7 +122,17 @@ export default function BulkDownloadQrDialog({
       /* Appending qr code image to zip file */
       [firstQrImage, ...qrImages].forEach((qrImage, index) => {
         const asset = assets[index];
-        const filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
+
+        // Generate filename based on preference
+        let filename: string;
+        if (qrIdDisplayPreference === "SAM_ID" && asset.sequentialId) {
+          filename = `${asset.sequentialId}_${sanitizeFilename(asset.title)}_${
+            asset.qr.id
+          }.jpg`;
+        } else {
+          filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
+        }
+
         if (!qrImage) {
           return;
         }
@@ -153,6 +162,33 @@ export default function BulkDownloadQrDialog({
         status: "error",
         error: error instanceof Error ? error.message : "Something went wrong.",
       });
+    }
+  }, [apiResponse]);
+
+  // Trigger download when API response is ready
+  useEffect(() => {
+    if (
+      shouldFetchAssets &&
+      apiResponse &&
+      downloadState.status === "loading"
+    ) {
+      void processDownload();
+    }
+  }, [shouldFetchAssets, apiResponse, downloadState.status, processDownload]);
+
+  function handleBulkDownloadQr() {
+    if (isSelectingMoreThan100) {
+      return;
+    }
+
+    // Set loading state immediately
+    setDownloadState({ status: "loading" });
+
+    // Trigger the API call if not already done
+    if (!apiResponse) {
+      setShouldFetchAssets(true);
+    } else {
+      void processDownload();
     }
   }
 
