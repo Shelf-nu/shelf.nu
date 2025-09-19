@@ -17,6 +17,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -37,7 +38,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
-import type { AssetWithBooking } from "./bookings.$bookingId.manage-assets";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -47,43 +47,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      }
+    );
 
-    const asset = await db.asset
-      .findUnique({
-        where: { id: assetId },
-        select: {
-          custody: {
-            select: {
-              id: true,
-            },
-          },
-          bookings: {
-            where: {
-              status: {
-                in: [BookingStatus.RESERVED],
-              },
-            },
-            select: {
-              id: true,
-            },
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+      include: {
+        custody: {
+          select: {
+            id: true,
           },
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching asset. Please try again or contact support.",
-          additionalData: { userId, assetId, organizationId },
-          label: "Assets",
-        });
-      });
+        bookings: {
+          where: {
+            status: {
+              in: [BookingStatus.RESERVED],
+            },
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
 
     /** If the asset already has a custody, this page should not be visible */
     if (asset && asset.custody) {
@@ -142,14 +137,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      }
+    );
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     const { custodian } = parseData(
       await request.formData(),
@@ -193,7 +197,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const asset = await db.asset
       .update({
-        where: { id: assetId },
+        where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,
         data: {
           status: AssetStatus.IN_CUSTODY,
           custody: {
@@ -252,7 +256,7 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers } = useLoaderData<typeof loader>();
-  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const firstReservedBookingId = asset?.bookings?.[0]?.id;
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -314,12 +318,12 @@ export default function Custody() {
             <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
           ) : null}
 
-          {hasBookings ? (
+          {firstReservedBookingId ? (
             <WarningBox className="-mt-4 mb-8">
               <>
                 Asset is part of an{" "}
                 <Link
-                  to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
+                  to={`/bookings/${firstReservedBookingId}`}
                   className="underline"
                   target="_blank"
                 >
