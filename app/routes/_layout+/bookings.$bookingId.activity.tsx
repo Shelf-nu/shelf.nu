@@ -40,7 +40,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const booking = await getBooking({ id, organizationId });
+    const booking = await getBooking({ id, organizationId, request });
 
     const bookingNotes = await getBookingNotes({
       bookingId: id,

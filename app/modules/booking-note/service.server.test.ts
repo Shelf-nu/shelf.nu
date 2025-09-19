@@ -48,6 +48,7 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
+      //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
 
       const result = await createBookingNote({
@@ -87,6 +88,7 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
+      //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
 
       const result = await createBookingNote({
@@ -122,6 +124,7 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
+      //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
 
       const result = await createSystemBookingNote({
@@ -160,7 +163,9 @@ describe("BookingNote Service", () => {
         },
       ];
 
+      //@ts-expect-error missing vitest type
       mockDb.db.booking.findFirst.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.findMany.mockResolvedValue(mockNotes);
 
       const result = await getBookingNotes({
@@ -199,6 +204,7 @@ describe("BookingNote Service", () => {
     });
 
     it("should throw error when booking does not exist", async () => {
+      //@ts-expect-error missing vitest type
       mockDb.db.booking.findFirst.mockResolvedValue(null);
 
       await expect(

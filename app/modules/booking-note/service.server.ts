@@ -2,7 +2,7 @@ import type { Booking, BookingNote, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
-const label = "BookingNote";
+const label = "Booking";
 
 /** Creates a singular booking note */
 export function createBookingNote({
@@ -47,7 +47,7 @@ export function createBookingNote({
 }
 
 /** Creates a system-generated booking note for activity tracking */
-export async function createSystemBookingNote({
+export function createSystemBookingNote({
   content,
   bookingId,
 }: Pick<BookingNote, "content"> & {
@@ -90,7 +90,7 @@ export async function getBookingNotes({
       });
     }
 
-    return db.bookingNote.findMany({
+    return await db.bookingNote.findMany({
       where: {
         bookingId,
       },
@@ -119,14 +119,15 @@ export async function getBookingNotes({
   }
 }
 
-export function deleteBookingNote({
+export async function deleteBookingNote({
   id,
   userId,
 }: Pick<BookingNote, "id"> & { userId: User["id"] }) {
   try {
-    return db.bookingNote.deleteMany({
+    const result = await db.bookingNote.deleteMany({
       where: { id, userId },
     });
+    return result;
   } catch (cause) {
     throw new ShelfError({
       cause,

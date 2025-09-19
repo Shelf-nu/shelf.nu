@@ -304,6 +304,11 @@ export async function updateBasicBooking({
           id: true,
           status: true,
           custodianUserId: true,
+          custodianTeamMemberId: true,
+          name: true,
+          description: true,
+          from: true,
+          to: true,
         },
       })
       .catch((cause) => {
@@ -1258,6 +1263,16 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
+      // Also log to booking activity
+      await createSystemBookingNote({
+        bookingId: id,
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** partially checked in **${
+          assetIds.length
+        }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
+          bookingFound.name
+        }](/bookings/${id})**.`,
+      });
+
       // Get the updated booking with all original assets
       return tx.booking.findUniqueOrThrow({
         where: { id },
@@ -1340,9 +1355,9 @@ export async function updateBookingAssets({
     // Add activity log for adding assets to booking
     await createSystemBookingNote({
       bookingId: booking.id,
-      content: `${assetIds.length} asset${
+      content: `**${assetIds.length}** asset${
         assetIds.length !== 1 ? "s" : ""
-      } added to booking.`,
+      } added to booking **[${booking.name}](/bookings/${booking.id})**.`,
     });
 
     return booking;
@@ -2213,6 +2228,16 @@ export async function removeAssets({
       type: "UPDATE",
       userId,
       assetIds,
+    });
+
+    // Also log to booking activity
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `**${firstName?.trim()} ${lastName?.trim()}** removed **${
+        assetIds.length
+      }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
+        b.name
+      }](/bookings/${b.id})**.`,
     });
 
     return b;

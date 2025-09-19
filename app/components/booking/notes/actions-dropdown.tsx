@@ -1,7 +1,12 @@
 import { useFetcher, useParams } from "@remix-run/react";
 import { TrashIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { DropdownMenu } from "~/components/shared/dropdown";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuItem,
+} from "~/components/shared/dropdown";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -20,7 +25,7 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
   return (
     <AlertDialog>
       <DropdownMenu>
-        <DropdownMenu.Trigger className="outline-none focus-visible:border-0">
+        <DropdownMenuTrigger className="outline-none focus-visible:border-0">
           <span className="flex size-6 cursor-pointer items-center justify-center rounded-md p-1 text-gray-700 hover:bg-gray-50">
             <svg
               width="12"
@@ -43,23 +48,21 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
               />
             </svg>
           </span>
-        </DropdownMenu.Trigger>
+        </DropdownMenuTrigger>
 
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content
-            align="end"
-            className="order w-64 rounded-md border border-gray-300 bg-white p-1.5 text-right shadow-lg"
-          >
-            <AlertDialogTrigger asChild>
-              <DropdownMenu.Item className="cursor-pointer rounded px-4 py-1 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700">
-                <span className="flex items-center gap-2">
-                  <TrashIcon />
-                  Delete
-                </span>
-              </DropdownMenu.Item>
-            </AlertDialogTrigger>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
+        <DropdownMenuContent
+          align="end"
+          className="order w-64 rounded-md border border-gray-300 bg-white p-1.5 text-right shadow-lg"
+        >
+          <AlertDialogTrigger asChild>
+            <DropdownMenuItem className="cursor-pointer rounded px-4 py-1 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700">
+              <span className="flex items-center gap-2">
+                <TrashIcon />
+                Delete
+              </span>
+            </DropdownMenuItem>
+          </AlertDialogTrigger>
+        </DropdownMenuContent>
       </DropdownMenu>
 
       <AlertDialogContent>
