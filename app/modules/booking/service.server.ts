@@ -75,6 +75,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
@@ -303,6 +304,11 @@ export async function updateBasicBooking({
           id: true,
           status: true,
           custodianUserId: true,
+          custodianTeamMemberId: true,
+          name: true,
+          description: true,
+          from: true,
+          to: true,
         },
       })
       .catch((cause) => {
@@ -394,10 +400,50 @@ export async function updateBasicBooking({
       }
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
     });
+
+    // Generate activity logs for changes
+    const changes: string[] = [];
+
+    if (name && name !== booking.name) {
+      changes.push(`name from **${booking.name}** to **${name}**`);
+    }
+    if (description !== undefined && description !== booking.description) {
+      const oldDesc = booking.description || "(empty)";
+      const newDesc = description || "(empty)";
+      changes.push(`description from **${oldDesc}** to **${newDesc}**`);
+    }
+    if (from && booking.from && from.getTime() !== booking.from.getTime()) {
+      changes.push(
+        `start date from **${booking.from.toISOString()}** to **${from.toISOString()}**`
+      );
+    }
+    if (to && booking.to && to.getTime() !== booking.to.getTime()) {
+      changes.push(
+        `end date from **${booking.to.toISOString()}** to **${to.toISOString()}**`
+      );
+    }
+    if (
+      custodianTeamMemberId &&
+      custodianTeamMemberId !== booking.custodianTeamMemberId
+    ) {
+      changes.push(`custodian assignment`);
+    }
+
+    // BOOKING ACTIVITY LOG: Log detail changes
+    // Only creates activity note if there are actual changes
+    // Format: "Booking updated: field1 from X to Y, field2 from A to B."
+    if (changes.length > 0) {
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `Booking updated: ${changes.join(", ")}.`,
+      });
+    }
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -667,6 +713,12 @@ export async function reserveBooking({
         html,
       });
     }
+
+    // Add activity log for status change to RESERVED
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `Booking status changed from **${bookingFound.status}** to **${updatedBooking.status}**.`,
+    });
 
     return updatedBooking;
   } catch (cause) {
@@ -1214,6 +1266,18 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
+      // BOOKING ACTIVITY LOG: Log partial check-in activity
+      // This creates a system note (type: UPDATE) for the booking activity log
+      // Format follows markdown standards with bold text and booking links
+      await createSystemBookingNote({
+        bookingId: id,
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** partially checked in **${
+          assetIds.length
+        }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
+          bookingFound.name
+        }](/bookings/${id})**.`,
+      });
+
       // Get the updated booking with all original assets
       return tx.booking.findUniqueOrThrow({
         where: { id },
@@ -1293,6 +1357,16 @@ export async function updateBookingAssets({
       return b;
     });
 
+    // BOOKING ACTIVITY LOG: Log asset addition activity
+    // Creates system note when assets are added to a booking
+    // Includes asset count and booking link for context
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `**${assetIds.length}** asset${
+        assetIds.length !== 1 ? "s" : ""
+      } added to booking **[${booking.name}](/bookings/${booking.id})**.`,
+    });
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -1334,10 +1408,18 @@ export async function archiveBooking({
       });
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
     });
+
+    // Add activity log for booking archival
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `Booking archived. Status changed from **${booking.status}** to **${BookingStatus.ARCHIVED}**.`,
+    });
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1450,6 +1532,12 @@ export async function cancelBooking({
         html,
       });
     }
+
+    // Add activity log for booking cancellation
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `Booking cancelled. Status changed from **${bookingFound.status}** to **${BookingStatus.CANCELLED}**.`,
+    });
 
     return booking;
   } catch (cause) {
@@ -2147,6 +2235,18 @@ export async function removeAssets({
       type: "UPDATE",
       userId,
       assetIds,
+    });
+
+    // BOOKING ACTIVITY LOG: Log asset removal activity
+    // Creates system note when assets are removed from a booking
+    // Includes user attribution, asset count, and booking link
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `**${firstName?.trim()} ${lastName?.trim()}** removed **${
+        assetIds.length
+      }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
+        b.name
+      }](/bookings/${b.id})**.`,
     });
 
     return b;

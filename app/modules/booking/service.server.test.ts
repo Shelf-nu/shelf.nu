@@ -83,6 +83,11 @@ vitest.mock("~/database/db.server", () => ({
         lastName: "User",
       }),
     },
+    bookingNote: {
+      create: vitest.fn().mockResolvedValue({}),
+      findMany: vitest.fn().mockResolvedValue([]),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 1 }),
+    },
   },
 }));
 
@@ -96,6 +101,10 @@ vitest.mock("~/modules/qr/service.server", () => ({
 
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn(),
+}));
+
+vitest.mock("~/modules/booking-note/service.server", () => ({
+  createSystemBookingNote: vitest.fn().mockResolvedValue({}),
 }));
 
 vitest.mock("~/modules/user/service.server", () => ({

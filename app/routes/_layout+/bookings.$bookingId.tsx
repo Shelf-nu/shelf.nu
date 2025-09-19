@@ -52,6 +52,7 @@ import {
   updateBasicBooking,
 } from "~/modules/booking/service.server";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -703,6 +704,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           assetIds: booking.assets.map((a) => a.id),
         });
 
+        // Also log to booking activity
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out booking **${
+            booking.name
+          }**.`,
+        });
+
         sendNotification({
           title: "Booking checked-out",
           message: "Your booking has been checked-out successfully",
@@ -729,6 +738,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
+        });
+
+        // Also log to booking activity
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in booking **${
+            booking.name
+          }**.`,
         });
 
         sendNotification({
