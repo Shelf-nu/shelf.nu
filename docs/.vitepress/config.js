@@ -98,7 +98,6 @@ export default {
         text: "🗄️ Database",
         collapsed: true,
         items: [
-          { text: "Asset Search", link: "/asset-search" },
           { text: "Database Triggers", link: "/database-triggers" },
           { text: "Protected Indexes", link: "/protected-indexes" },
         ],

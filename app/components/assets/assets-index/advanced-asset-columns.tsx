@@ -192,6 +192,7 @@ export function AdvancedIndexColumn({
             title: item.title,
             qrId: item.qrId,
             type: "asset",
+            sequentialId: item.sequentialId,
           }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
@@ -506,6 +507,7 @@ function BarcodeColumn({
           title: item.title,
           qrId: item.qrId,
           type: "asset",
+          sequentialId: item.sequentialId,
         }}
         selectedBarcodeId={barcode.id}
         trigger={
@@ -526,6 +528,7 @@ function BarcodeColumn({
             item={{
               id: item.id,
               title: item.title,
+              sequentialId: item.sequentialId,
               qrId: item.qrId,
               type: "asset",
             }}

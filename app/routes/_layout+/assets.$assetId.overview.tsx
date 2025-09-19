@@ -615,6 +615,7 @@ export default function AssetOverview() {
                 name: asset.title,
                 type: "asset",
               }}
+              sequentialId={asset.sequentialId}
             />
           )}
           <When

@@ -2,6 +2,7 @@ import {
   type Organization,
   type Currency,
   OrganizationType,
+  type QrIdDisplayPreference,
 } from "@prisma/client";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -16,6 +17,7 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
+import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -29,6 +31,7 @@ import { Spinner } from "../shared/spinner";
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
+  qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   className?: string;
 }
 
@@ -42,17 +45,32 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
       : z.string().min(2, "Name is required"),
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
+    qrIdDisplayPreference: z.custom<QrIdDisplayPreference>(),
   });
 
-export const WorkspaceEditForms = ({ name, currency, className }: Props) => (
+export const WorkspaceEditForms = ({
+  name,
+  currency,
+  qrIdDisplayPreference,
+  className,
+}: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
-    <WorkspaceGeneralEditForms name={name} currency={currency} />
+    <WorkspaceGeneralEditForms
+      name={name}
+      currency={currency}
+      qrIdDisplayPreference={qrIdDisplayPreference}
+    />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
   </div>
 );
 
-const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
+const WorkspaceGeneralEditForms = ({
+  name,
+  currency,
+  qrIdDisplayPreference,
+  className,
+}: Props) => {
   const { organization, isPersonalWorkspace } = useLoaderData<typeof loader>();
 
   let schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
@@ -144,6 +162,26 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
             />
           </FormRow>
         </div>
+
+        <div>
+          <FormRow
+            rowLabel={"QR Code Display"}
+            className={"border-b-0"}
+            subHeading={
+              <p>
+                Choose which identifier is shown on QR code labels. You can
+                display either the QR code ID or the asset's SAM ID.
+              </p>
+            }
+          >
+            <InnerLabel hideLg>QR Code Display</InnerLabel>
+            <QrIdDisplayPreferenceSelector
+              name={zo.fields.qrIdDisplayPreference()}
+              defaultValue={qrIdDisplayPreference || "QR_ID"}
+            />
+          </FormRow>
+        </div>
+
         <div className="text-right">
           <Button
             type="submit"
