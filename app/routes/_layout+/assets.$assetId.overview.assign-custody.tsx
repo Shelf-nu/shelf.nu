@@ -173,21 +173,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const { id: custodianId, name: custodianName } = custodian;
 
-    if (isSelfService) {
-      const custodian = await db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: { id: true, userId: true },
-      });
+    // Validate that the custodian belongs to the same organization
+    const custodianTeamMember = await db.teamMember.findUnique({
+      where: {
+        id: custodianId,
+        organizationId, // Ensure custodian is from same org
+      },
+      select: { id: true, userId: true },
+    });
 
-      if (custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, assetId, custodianId },
-          label: "Assets",
-        });
-      }
+    if (!custodianTeamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, assetId, custodianId },
+        label: "Assets",
+        status: 404,
+      });
+    }
+
+    if (isSelfService && custodianTeamMember.userId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetId, custodianId },
+        label: "Assets",
+      });
     }
 
     /** In order to do it with a single query

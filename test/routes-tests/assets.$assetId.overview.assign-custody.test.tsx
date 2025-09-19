@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,6 +61,21 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+vi.mock("@remix-run/node", async () => {
+  const actual = await vi.importActual("@remix-run/node");
+  return {
+    ...actual,
+    redirect: vi.fn(() => new Response(null, { status: 302 })),
+    json: vi.fn(
+      (data, init) =>
+        new Response(JSON.stringify(data), {
+          status: init?.status || 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    ),
+  };
+});
+
 const mockAssetFindUnique = dbMocks.asset.findUnique;
 const mockAssetUpdate = dbMocks.asset.update;
 const mockTeamMemberFindMany = dbMocks.teamMember.findMany;
@@ -112,6 +127,10 @@ beforeEach(() => {
   mockTeamMemberFindMany.mockReset();
   mockTeamMemberCount.mockReset();
   mockTeamMemberFindUnique.mockReset();
+
+  // Reset service mocks
+  getAssetMock.mockReset();
+  requirePermissionMock.mockReset();
 
   getUserByIdMock.mockResolvedValue({
     id: "user-123",
@@ -192,6 +211,165 @@ describe("assets.$assetId.overview.assign-custody action", () => {
         organizationId: "org-1",
       })
     );
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("does not allow assigning custody to team members from different organizations", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+
+    // Asset validation passes (same org)
+    getAssetMock.mockResolvedValue({
+      id: "asset-123",
+      organizationId: "org-1",
+    } as any);
+
+    // Custodian validation fails (different org)
+    mockTeamMemberFindUnique.mockResolvedValue(null); // No team member found due to org filter
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({
+        id: "foreign-team-member-123",
+        name: "Foreign Team Member",
+      })
+    );
+
+    const request = new Request(
+      "https://example.com/assets/asset-123/overview/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect(response.status).toBe(404);
+
+    expect(getAssetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "asset-123",
+        organizationId: "org-1",
+      })
+    );
+
+    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
+      where: {
+        id: "foreign-team-member-123",
+        organizationId: "org-1", // Should filter by org
+      },
+      select: { id: true, userId: true },
+    });
+
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("allows assigning custody to team members from the same organization", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+
+    // Asset validation passes
+    getAssetMock.mockResolvedValue({
+      id: "asset-123",
+      organizationId: "org-1",
+    } as any);
+
+    // Custodian validation passes (same org)
+    mockTeamMemberFindUnique.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+
+    // Asset update succeeds
+    mockAssetUpdate.mockResolvedValue({
+      id: "asset-123",
+      title: "Test Asset",
+      status: "IN_CUSTODY",
+      user: {
+        firstName: "Test",
+        lastName: "User",
+      },
+    } as any);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+
+    const request = new Request(
+      "https://example.com/assets/asset-123/overview/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect(response.status).toBe(302); // Redirect on success
+
+    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
+      where: {
+        id: "team-member-123",
+        organizationId: "org-1",
+      },
+      select: { id: true, userId: true },
+    });
+
+    expect(mockAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-123", organizationId: "org-1" },
+      data: expect.objectContaining({
+        status: AssetStatus.IN_CUSTODY,
+        custody: {
+          create: {
+            custodian: { connect: { id: "team-member-123" } },
+          },
+        },
+      }),
+      include: expect.any(Object),
+    });
+
+    expect(createNoteMock).toHaveBeenCalled();
+  });
+
+  it("prevents self-service users from assigning custody to other team members", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.SELF_SERVICE,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+
+    getAssetMock.mockResolvedValue({
+      id: "asset-123",
+      organizationId: "org-1",
+    } as any);
+
+    // Valid team member from same org, but different user
+    mockTeamMemberFindUnique.mockResolvedValue({
+      id: "team-member-456",
+      userId: "other-user-456", // Different from current user
+    });
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-456", name: "Other Team Member" })
+    );
+
+    const request = new Request(
+      "https://example.com/assets/asset-123/overview/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect(response.status).toBe(500); // ShelfError defaults to 500
+
     expect(mockAssetUpdate).not.toHaveBeenCalled();
     expect(createNoteMock).not.toHaveBeenCalled();
   });
