@@ -22,6 +22,7 @@ type AssetQuickActionsProps = {
   style?: React.CSSProperties;
   asset: Pick<AssetsFromViewItem, "id" | "title" | "mainImage"> & {
     qrId: string;
+    sequentialId?: string | null;
   };
 };
 
@@ -66,6 +67,7 @@ export default function AssetQuickActions({
             title: asset.title,
             qrId: asset.qrId,
             type: "asset",
+            sequentialId: asset.sequentialId,
           }}
           trigger={
             <TooltipTrigger asChild>
