@@ -13,6 +13,10 @@ import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
+import {
+  CommandPaletteButton,
+  CommandPaletteRoot,
+} from "~/components/layout/command-palette";
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
@@ -225,53 +229,58 @@ export default function App() {
     ) : null;
 
   return (
-    <SidebarProvider defaultOpen={!minimizedSidebar}>
-      <AtomsResetHandler />
-      <AppSidebar />
-      <SidebarInset>
-        {disabledTeamOrg ? (
-          <NoSubscription />
-        ) : workspaceSwitching ? (
-          <div className="flex size-full flex-col items-center justify-center text-center">
-            <Spinner />
-            <p className="mt-2">Activating workspace...</p>
-          </div>
-        ) : (
-          <>
-            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
-              <Link to="." title="Home" className="block h-8">
-                <ShelfMobileLogo />
-              </Link>
-              <div className="flex items-center space-x-2">
-                <NavLink
-                  to="/scanner"
-                  title="Scan QR Code"
-                  className={({ isActive }) =>
-                    tw(
-                      "relative flex items-center justify-center px-2 transition",
-                      isActive ? "text-primary-600" : "text-gray-500"
-                    )
-                  }
-                >
-                  <ScanBarcodeIcon />
-                </NavLink>
-                <SidebarTrigger />
-              </div>
-            </header>
-            <Outlet />
-          </>
-        )}
-        <Toaster />
-        <ClientOnly fallback={null}>
-          {renderInstallPwaPromptOnMobile}
-        </ClientOnly>
+    <CommandPaletteRoot>
+      <SidebarProvider defaultOpen={!minimizedSidebar}>
+        <AtomsResetHandler />
+        <AppSidebar />
+        <SidebarInset>
+          {disabledTeamOrg ? (
+            <NoSubscription />
+          ) : workspaceSwitching ? (
+            <div className="flex size-full flex-col items-center justify-center text-center">
+              <Spinner />
+              <p className="mt-2">Activating workspace...</p>
+            </div>
+          ) : (
+            <>
+              <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+                <Link to="." title="Home" className="block h-8">
+                  <ShelfMobileLogo />
+                </Link>
+                <div className="flex items-center space-x-2">
+                  <CommandPaletteButton variant="icon" />
+                  <NavLink
+                    to="/scanner"
+                    title="Scan QR Code"
+                    className={({ isActive }) =>
+                      tw(
+                        "relative flex items-center justify-center px-2 transition",
+                        isActive ? "text-primary-600" : "text-gray-500"
+                      )
+                    }
+                  >
+                    <ScanBarcodeIcon />
+                  </NavLink>
+                  <SidebarTrigger />
+                </div>
+              </header>
+              <Outlet />
+            </>
+          )}
+          <Toaster />
+          <ClientOnly fallback={null}>
+            {renderInstallPwaPromptOnMobile}
+          </ClientOnly>
 
-        {/* Sequential ID Migration Modal */}
-        {needsSequentialIdMigration ? (
-          <SequentialIdMigrationModal organizationId={currentOrganizationId} />
-        ) : null}
-      </SidebarInset>
-    </SidebarProvider>
+          {/* Sequential ID Migration Modal */}
+          {needsSequentialIdMigration ? (
+            <SequentialIdMigrationModal
+              organizationId={currentOrganizationId}
+            />
+          ) : null}
+        </SidebarInset>
+      </SidebarProvider>
+    </CommandPaletteRoot>
   );
 }
 
