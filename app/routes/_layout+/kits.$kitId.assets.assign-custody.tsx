@@ -160,7 +160,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -181,21 +181,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const user = await getUserByID(userId);
 
-    if (isSelfService) {
-      const custodian = await db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: { id: true, userId: true },
-      });
+    // Validate that the custodian belongs to the same organization
+    const custodianTeamMember = await db.teamMember.findUnique({
+      where: {
+        id: custodianId,
+        organizationId, // Ensure custodian is from same org
+      },
+      select: { id: true, userId: true },
+    });
 
-      if (custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, kitId, custodianId },
-          label: "Kit",
-        });
-      }
+    if (!custodianTeamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+        status: 404,
+      });
+    }
+
+    if (isSelfService && custodianTeamMember.userId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+      });
     }
 
     const kit = await db.kit.update({

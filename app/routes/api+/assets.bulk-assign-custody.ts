@@ -34,21 +34,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      const teamMember = await db.teamMember.findUnique({
-        where: { id: custodian.id },
-        select: { id: true, userId: true },
-      });
+    // Validate that the custodian belongs to the same organization
+    const teamMember = await db.teamMember.findUnique({
+      where: {
+        id: custodian.id,
+        organizationId, // Ensure custodian is from same org
+      },
+      select: { id: true, userId: true },
+    });
 
-      if (teamMember?.userId !== userId) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, assetIds, custodian },
-          label: "Assets",
-        });
-      }
+    if (!teamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, assetIds, custodian },
+        label: "Assets",
+        status: 404,
+      });
+    }
+
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      teamMember.userId !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetIds, custodian },
+        label: "Assets",
+      });
     }
 
     await bulkCheckOutAssets({
