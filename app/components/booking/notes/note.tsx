@@ -6,6 +6,17 @@ import type { WithDateFields } from "~/modules/types";
 import { timeAgo } from "~/utils/time-ago";
 import { BookingActionsDropdown } from "./actions-dropdown";
 
+/**
+ * BOOKING NOTE TYPE DEFINITIONS
+ *
+ * BookingNoteWithDate extends the base BookingNote with UI-specific fields:
+ * - dateDisplay: Formatted date string for UI display
+ * - user: Optional user info for manual notes (system notes have no user)
+ *
+ * NOTE TYPES:
+ * - COMMENT: Manual user notes (show user attribution and actions)
+ * - UPDATE: System-generated activity logs (no user attribution, no actions)
+ */
 export type BookingNoteWithDate = WithDateFields<BookingNoteType, string> & {
   dateDisplay: string;
   user?: {

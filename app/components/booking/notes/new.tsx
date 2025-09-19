@@ -13,6 +13,7 @@ export const NewBookingNoteSchema = z.object({
   content: z.string().min(3, "Content is required"),
 });
 
+// Global editing state atom to maintain editor state across renders
 const isEditingAtom = atom(false);
 
 export const NewBookingNote = ({
@@ -28,20 +29,32 @@ export const NewBookingNote = ({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const isDone = fetcher.state === "idle" && fetcher.data != null;
 
-  /** Controls whether actions are disabled */
+  // Controls whether actions are disabled during form submission
   const [disabled, setDisabled] = useState<boolean>(false);
 
+  /**
+   * Handles form submission by disabling UI controls
+   * Prevents double submissions while optimistic UI is active
+   */
   function handleSubmit() {
-    /** Disabled the input and buttons while form is submitting */
     setDisabled(true);
   }
 
+  /**
+   * Smart blur handler that keeps editor open when clicking interactive elements
+   * Only collapses editor when clicking outside and content is empty
+   *
+   * SPECIAL HANDLING:
+   * - Markdown preview links (A tags)
+   * - Submit/Cancel buttons (BUTTON tags)
+   * - Markdown preview tabs (tabpanel role)
+   */
   const handelBlur = (
     e: ChangeEvent<HTMLTextAreaElement> & FocusEvent<HTMLTextAreaElement>
   ) => {
     const content = e.currentTarget.value;
 
-    /** This handles that the related target(element clicked on that causes the blur) is not a link(markdown info) or a button(submit/cancel buttons) */
+    // Check if user clicked on interactive elements that should keep editor open
     const clickedTargetILink =
       e?.relatedTarget?.tagName === "A" ||
       e?.relatedTarget?.tagName === "BUTTON" ||
@@ -49,11 +62,17 @@ export const NewBookingNote = ({
 
     if (clickedTargetILink) return;
 
+    // Only collapse editor if content is empty
     if (content === "") {
       setIsEditing(false);
     }
   };
 
+  /**
+   * Keyboard shortcut handler for quick submission
+   * Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) submits form
+   * Only works when content is not empty
+   */
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const content = event.currentTarget.value;
@@ -69,14 +88,14 @@ export const NewBookingNote = ({
     [fetcher]
   );
 
-  /** Focus the input when we are in edit mode */
+  // Auto-focus editor when entering edit mode for better UX
   useEffect(() => {
     if (isEditing) {
       editorRef?.current?.focus();
     }
   }, [isEditing]);
 
-  /** When submitting is done, set isEditing to false to close the editor */
+  // Auto-collapse editor when form submission completes
   useEffect(() => {
     setIsEditing(false);
   }, [isDone, setIsEditing]);

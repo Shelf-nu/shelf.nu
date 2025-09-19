@@ -433,6 +433,9 @@ export async function updateBasicBooking({
       changes.push(`custodian assignment`);
     }
 
+    // BOOKING ACTIVITY LOG: Log detail changes
+    // Only creates activity note if there are actual changes
+    // Format: "Booking updated: field1 from X to Y, field2 from A to B."
     if (changes.length > 0) {
       await createSystemBookingNote({
         bookingId: booking.id,
@@ -1263,7 +1266,9 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
-      // Also log to booking activity
+      // BOOKING ACTIVITY LOG: Log partial check-in activity
+      // This creates a system note (type: UPDATE) for the booking activity log
+      // Format follows markdown standards with bold text and booking links
       await createSystemBookingNote({
         bookingId: id,
         content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** partially checked in **${
@@ -1352,7 +1357,9 @@ export async function updateBookingAssets({
       return b;
     });
 
-    // Add activity log for adding assets to booking
+    // BOOKING ACTIVITY LOG: Log asset addition activity
+    // Creates system note when assets are added to a booking
+    // Includes asset count and booking link for context
     await createSystemBookingNote({
       bookingId: booking.id,
       content: `**${assetIds.length}** asset${
@@ -2230,7 +2237,9 @@ export async function removeAssets({
       assetIds,
     });
 
-    // Also log to booking activity
+    // BOOKING ACTIVITY LOG: Log asset removal activity
+    // Creates system note when assets are removed from a booking
+    // Includes user attribution, asset count, and booking link
     await createSystemBookingNote({
       bookingId: booking.id,
       content: `**${firstName?.trim()} ${lastName?.trim()}** removed **${

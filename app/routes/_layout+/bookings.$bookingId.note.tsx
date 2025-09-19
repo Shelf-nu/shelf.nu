@@ -21,12 +21,20 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/**
+ * Loader redirects to booking detail page
+ * Notes are loaded via the activity tab route instead
+ */
 export function loader({ params }: LoaderFunctionArgs) {
   const { bookingId } = getParams(params, z.object({ bookingId: z.string() }));
 
   return redirect(`/bookings/${bookingId}`);
 }
 
+/**
+ * Action handler for booking note operations
+ * Supports both creating new notes and deleting existing ones
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -35,6 +43,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    // Require permission for all note operations
     await requirePermission({
       userId,
       request,
@@ -46,6 +55,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
+        // Create new manual note (type: COMMENT)
         const payload = parseData(
           await request.formData(),
           NewBookingNoteSchema,
@@ -54,6 +64,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        // Provide immediate user feedback
         sendNotification({
           title: "Note created",
           message: "Your note has been created successfully",
@@ -61,6 +72,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
+        // Create note with user attribution
         await createBookingNote({
           content: payload.content,
           userId,
@@ -71,6 +83,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "DELETE": {
+        // Delete existing note (creator only)
         const { noteId } = parseData(
           await request.formData(),
           z.object({
@@ -79,6 +92,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           { additionalData: { userId, bookingId } }
         );
 
+        // Service layer enforces user can only delete their own notes
         await deleteBookingNote({
           id: noteId,
           userId,
