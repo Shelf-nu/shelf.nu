@@ -43,6 +43,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -494,11 +495,11 @@ export default function AssetOverview() {
                             />
                           ) : isLink(customFieldDisplayValue as string) ? (
                             <Button
-                              role="link"
-                              variant="link"
-                              className="text-gray text-start font-normal underline hover:text-gray-600"
+                              variant="link-gray"
                               target="_blank"
-                              to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+                              to={buildCustomFieldLinkHref(
+                                customFieldDisplayValue as string
+                              )}
                             >
                               {customFieldDisplayValue as string}
                             </Button>
