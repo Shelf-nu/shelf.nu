@@ -49,7 +49,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    return json(data({ qrObj, barcodes: asset.barcodes }));
+    return json(
+      data({
+        qrObj,
+        barcodes: asset.barcodes,
+        sequentialId: asset.sequentialId,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return json(error(reason), { status: reason.status });
