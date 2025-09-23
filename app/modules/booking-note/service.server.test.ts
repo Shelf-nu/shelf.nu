@@ -193,6 +193,7 @@ describe("BookingNote Service", () => {
         include: {
           user: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
             },

@@ -88,6 +88,11 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       deleteMany: vitest.fn().mockResolvedValue({ count: 1 }),
     },
+    tag: {
+      findMany: vitest
+        .fn()
+        .mockResolvedValue([{ name: "Tag 1" }, { name: "Tag 2" }]),
+    },
   },
 }));
 
@@ -337,7 +342,7 @@ describe("partialCheckinBooking", () => {
     // Verify notes created
     expect(noteService.createNotes).toHaveBeenCalledWith({
       content:
-        "**Test User** checked in via partial check-in for booking **[Test Booking](/bookings/booking-1)**.",
+        "**[Test User](/settings/team/users/user-1)** checked in via partial check-in.",
       type: "UPDATE",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -647,6 +652,7 @@ describe("updateBasicBooking", () => {
       id: "booking-1",
       status: BookingStatus.DRAFT,
       custodianUserId: "user-1",
+      tags: [{ id: "tag-3", name: "Old Tag" }], // Add existing tags
     });
 
     const updatedBooking = { ...mockBookingData, ...mockUpdateBookingParams };
@@ -684,6 +690,7 @@ describe("updateBasicBooking", () => {
       id: "booking-1",
       status: BookingStatus.ONGOING,
       custodianUserId: "user-1",
+      tags: [{ id: "tag-3", name: "Old Tag" }], // Add existing tags
     });
 
     const updatedBooking = { ...mockBookingData, name: "Updated Booking Name" };
