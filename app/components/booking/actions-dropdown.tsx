@@ -10,7 +10,7 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
   PermissionAction,

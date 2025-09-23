@@ -4,7 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import KitRow from "./kit-row";

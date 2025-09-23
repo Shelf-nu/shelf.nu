@@ -161,6 +161,7 @@ export async function getBookingNotes({
       include: {
         user: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
           },

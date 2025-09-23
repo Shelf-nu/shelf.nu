@@ -218,7 +218,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     } else {
       const manageAssetsUrl = `/bookings/${
         booking.id
-      }/manage-assets?${new URLSearchParams({
+      }/overview/manage-assets?${new URLSearchParams({
         bookingFrom: (booking.from as Date).toISOString(),
         bookingTo: (booking.to as Date).toISOString(),
         hideUnavailable: "true",

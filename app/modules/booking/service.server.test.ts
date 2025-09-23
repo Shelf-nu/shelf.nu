@@ -1520,6 +1520,7 @@ describe("extendBooking", () => {
       organizationId: "org-1",
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
+      userId: "user-1",
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -1547,6 +1548,7 @@ describe("extendBooking", () => {
         organizationId: "org-1",
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
+        userId: "user-1",
       })
     ).rejects.toThrow(ShelfError);
   });

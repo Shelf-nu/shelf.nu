@@ -7,6 +7,7 @@ import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
 import { NewBookingNoteSchema } from "~/components/booking/notes/new";
+import { ErrorContent } from "~/components/errors";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -28,7 +29,6 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
@@ -68,14 +68,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `${booking.name}'s activity`,
     };
-
     const notes = bookingNotes.map((note) => ({
       ...note,
       dateDisplay: getDateTimeFormat(request, {
         dateStyle: "short",
         timeStyle: "short",
       }).format(note.createdAt),
-      content: parseMarkdownToReact(note.content),
+      content: note.content, // Keep as string for client-side parsing
     }));
 
     return json(data({ booking: { ...booking, notes }, header }));
@@ -193,3 +192,5 @@ export default function BookingActivity() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

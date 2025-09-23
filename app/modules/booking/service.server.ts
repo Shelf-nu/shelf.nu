@@ -42,6 +42,13 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapDateForNote,
+  wrapAssetsForNote,
+  wrapKitsForNote,
+  wrapKitsWithDataForNote,
+  wrapAssetsWithDataForNote,
+} from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
 import {
@@ -280,6 +287,7 @@ export async function updateBasicBooking({
   description,
   organizationId,
   tags,
+  userId,
 }: Partial<
   Pick<
     Booking,
@@ -295,6 +303,7 @@ export async function updateBasicBooking({
 > &
   Pick<Booking, "id" | "organizationId"> & {
     tags: { id: string }[];
+    userId?: User["id"];
   }) {
   try {
     const booking = await db.booking
@@ -309,6 +318,12 @@ export async function updateBasicBooking({
           description: true,
           from: true,
           to: true,
+          tags: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -405,41 +420,83 @@ export async function updateBasicBooking({
       data: dataToUpdate,
     });
 
-    // Generate activity logs for changes
-    const changes: string[] = [];
+    // BOOKING ACTIVITY LOG: Create separate notes for each change
+    // This approach creates individual notes for each field change with proper user attribution
 
+    // Get user data for attribution if userId is provided
+    const user = userId ? await getUserByID(userId) : null;
+    const userLink = user
+      ? `**[${user.firstName?.trim()} ${user.lastName?.trim()}](/settings/team/users/${userId})**`
+      : "**System**";
+
+    // Check and log name changes
     if (name && name !== booking.name) {
-      changes.push(`name from **${booking.name}** to **${name}**`);
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
+      });
     }
+
+    // Check and log description changes
     if (description !== undefined && description !== booking.description) {
       const oldDesc = booking.description || "(empty)";
       const newDesc = description || "(empty)";
-      changes.push(`description from **${oldDesc}** to **${newDesc}**`);
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking description from **${oldDesc}** to **${newDesc}**.`,
+      });
     }
+
+    // Check and log start date changes
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
-      changes.push(
-        `start date from **${booking.from.toISOString()}** to **${from.toISOString()}**`
-      );
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking start date from **${wrapDateForNote(
+          booking.from
+        )}** to **${wrapDateForNote(from)}**.`,
+      });
     }
+
+    // Check and log end date changes
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
-      changes.push(
-        `end date from **${booking.to.toISOString()}** to **${to.toISOString()}**`
-      );
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking end date from **${wrapDateForNote(
+          booking.to
+        )}** to **${wrapDateForNote(to)}**.`,
+      });
     }
+
+    // Check and log custodian changes
     if (
       custodianTeamMemberId &&
       custodianTeamMemberId !== booking.custodianTeamMemberId
     ) {
-      changes.push(`custodian assignment`);
-    }
-
-    // BOOKING ACTIVITY LOG: Log detail changes
-    // Only creates activity note if there are actual changes
-    // Format: "Booking updated: field1 from X to Y, field2 from A to B."
-    if (changes.length > 0) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `Booking updated: ${changes.join(", ")}.`,
+        content: `${userLink} changed booking custodian assignment.`,
+      });
+    }
+
+    // Check and log tag changes
+    const oldTagIds = booking.tags.map((tag) => tag.id).sort();
+    const newTagIds = tags.map((tag) => tag.id).sort();
+
+    if (JSON.stringify(oldTagIds) !== JSON.stringify(newTagIds)) {
+      // Get tag names for better readability
+      const oldTagNames =
+        booking.tags.map((tag) => tag.name).join(", ") || "(none)";
+
+      // Get new tag names - we need to fetch them since we only have IDs
+      const newTags = await db.tag.findMany({
+        where: { id: { in: newTagIds } },
+        select: { name: true },
+      });
+      const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
       });
     }
 
@@ -471,6 +528,7 @@ export async function reserveBooking({
   hints,
   isSelfServiceOrBase,
   tags,
+  userId,
 }: Partial<
   Pick<
     Booking,
@@ -488,6 +546,7 @@ export async function reserveBooking({
     hints: ClientHint;
     isSelfServiceOrBase: boolean;
     tags: { id: string }[];
+    userId?: User["id"];
   }) {
   try {
     const bookingFound = await db.booking
@@ -715,10 +774,20 @@ export async function reserveBooking({
     }
 
     // Add activity log for status change to RESERVED
-    await createSystemBookingNote({
-      bookingId: updatedBooking.id,
-      content: `Booking status changed from **${bookingFound.status}** to **${updatedBooking.status}**.`,
-    });
+    if (userId) {
+      const user = await getUserByID(userId);
+      await createSystemBookingNote({
+        bookingId: updatedBooking.id,
+        content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** changed booking status from **${
+          bookingFound.status
+        }** to **${updatedBooking.status}**.`,
+      });
+    } else {
+      await createSystemBookingNote({
+        bookingId: updatedBooking.id,
+        content: `Booking status changed from **${bookingFound.status}** to **${updatedBooking.status}**.`,
+      });
+    }
 
     return updatedBooking;
   } catch (cause) {
@@ -1175,9 +1244,7 @@ export async function partialCheckinBooking({
       // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via explicit check-in scanner for booking **[${
-        bookingFound.name
-      }](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1256,9 +1323,7 @@ export async function partialCheckinBooking({
       });
 
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via partial check-in for booking **[${
-        bookingFound.name
-      }](/bookings/${bookingFound.id})**.`;
+      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via partial check-in.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1271,11 +1336,10 @@ export async function partialCheckinBooking({
       // Format follows markdown standards with bold text and booking links
       await createSystemBookingNote({
         bookingId: id,
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** partially checked in **${
-          assetIds.length
-        }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
-          bookingFound.name
-        }](/bookings/${id})**.`,
+        content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** partially checked in ${wrapAssetsForNote(
+          assetIds,
+          "checked in"
+        )}.`,
       });
 
       // Get the updated booking with all original assets
@@ -1312,9 +1376,11 @@ export async function updateBookingAssets({
   organizationId,
   assetIds,
   kitIds,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
   kitIds?: Kit["id"][];
+  userId?: User["id"];
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
@@ -1358,14 +1424,26 @@ export async function updateBookingAssets({
     });
 
     // BOOKING ACTIVITY LOG: Log asset addition activity
-    // Creates system note when assets are added to a booking
-    // Includes asset count and booking link for context
-    await createSystemBookingNote({
-      bookingId: booking.id,
-      content: `**${assetIds.length}** asset${
-        assetIds.length !== 1 ? "s" : ""
-      } added to booking **[${booking.name}](/bookings/${booking.id})**.`,
-    });
+    // Creates user-attributed note when assets are added to a booking
+    // Skip note creation if kits are involved - kit notes are created separately
+    if (!kitIds || kitIds.length === 0) {
+      if (userId) {
+        const user = await getUserByID(userId);
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** added ${wrapAssetsForNote(
+            assetIds,
+            "added"
+          )} to booking.`,
+        });
+      } else {
+        // Fallback for backward compatibility when userId is not provided
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `${wrapAssetsForNote(assetIds, "added")} added to booking.`,
+        });
+      }
+    }
 
     return booking;
   } catch (cause) {
@@ -1375,6 +1453,38 @@ export async function updateBookingAssets({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while updating booking assets.",
+    });
+  }
+}
+
+export async function createKitBookingNote({
+  bookingId,
+  kitIds,
+  kits = [],
+  userId,
+  action = "added",
+}: {
+  bookingId: string;
+  kitIds: string[];
+  kits?: Array<{ id: string; name: string }>;
+  userId?: string;
+  action?: string;
+}) {
+  const kitContent =
+    kits.length > 0
+      ? wrapKitsWithDataForNote(kits, action)
+      : wrapKitsForNote(kitIds, action);
+
+  if (userId) {
+    const user = await getUserByID(userId);
+    await createSystemBookingNote({
+      bookingId,
+      content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** ${action} ${kitContent} to booking.`,
+    });
+  } else {
+    await createSystemBookingNote({
+      bookingId,
+      content: `${kitContent} ${action} to booking.`,
     });
   }
 }
@@ -1554,7 +1664,10 @@ export async function cancelBooking({
 export async function revertBookingToDraft({
   id,
   organizationId,
-}: Pick<Booking, "id" | "organizationId">) {
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId?: User["id"];
+}) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -1584,6 +1697,22 @@ export async function revertBookingToDraft({
       data: { status: BookingStatus.DRAFT },
     });
 
+    // Add activity log for booking revert to draft
+    if (userId) {
+      const user = await getUserByID(userId);
+      await createSystemBookingNote({
+        bookingId: cancelledBooking.id,
+        content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** reverted booking status from **${
+          booking.status
+        }** to **${BookingStatus.DRAFT}**.`,
+      });
+    } else {
+      await createSystemBookingNote({
+        bookingId: cancelledBooking.id,
+        content: `Booking status reverted from **${booking.status}** to **${BookingStatus.DRAFT}**.`,
+      });
+    }
+
     /** Cancels all scheduled events */
     await cancelScheduler(cancelledBooking);
 
@@ -1604,9 +1733,11 @@ export async function extendBooking({
   organizationId,
   newEndDate,
   hints,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
+  userId: string;
 }) {
   try {
     const booking = await db.booking
@@ -1688,6 +1819,15 @@ export async function extendBooking({
         to: newEndDate,
       },
       include: BOOKING_INCLUDE_FOR_EMAIL,
+    });
+
+    // Add activity log for booking extension
+    const user = await getUserByID(userId);
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** extended booking from **${wrapDateForNote(
+        booking.to!
+      )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
 
     /** Send extended booking email */
@@ -2177,6 +2317,8 @@ export async function removeAssets({
   lastName,
   userId,
   kitIds = [],
+  kits = [],
+  assets = [],
   organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
@@ -2186,6 +2328,8 @@ export async function removeAssets({
   lastName: string;
   userId: string;
   kitIds?: Kit["id"][];
+  kits?: Array<{ id: string; name: string }>;
+  assets?: Array<{ id: string; title: string }>;
   organizationId: Booking["organizationId"];
 }) {
   try {
@@ -2229,25 +2373,38 @@ export async function removeAssets({
     }
 
     await createNotes({
-      content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
-        b.name
-      }](/bookings/${b.id})**.`,
+      content: `**[${firstName?.trim()} ${lastName?.trim()}](/settings/team/users/${userId})** removed asset from booking.`,
       type: "UPDATE",
       userId,
       assetIds,
     });
 
-    // BOOKING ACTIVITY LOG: Log asset removal activity
-    // Creates system note when assets are removed from a booking
-    // Includes user attribution, asset count, and booking link
-    await createSystemBookingNote({
-      bookingId: booking.id,
-      content: `**${firstName?.trim()} ${lastName?.trim()}** removed **${
-        assetIds.length
-      }** asset${assetIds.length !== 1 ? "s" : ""} from booking **[${
-        b.name
-      }](/bookings/${b.id})**.`,
-    });
+    // BOOKING ACTIVITY LOG: Log removal activity
+    // Creates system note when assets/kits are removed from a booking
+    // Includes user attribution, count, and booking link
+    if (kitIds && kitIds.length > 0) {
+      // If kits were removed, create note about kit removal
+      const kitContent =
+        kits.length > 0
+          ? wrapKitsWithDataForNote(kits, "removed")
+          : wrapKitsForNote(kitIds, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `**[${firstName?.trim()} ${lastName?.trim()}](/settings/team/users/${userId})** removed ${kitContent} from booking.`,
+      });
+    } else {
+      // Otherwise, create note about asset removal
+      const assetContent =
+        assets.length > 0
+          ? wrapAssetsWithDataForNote(assets, "removed")
+          : wrapAssetsForNote(assetIds, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `**[${firstName?.trim()} ${lastName?.trim()}](/settings/team/users/${userId})** removed ${assetContent} from booking.`,
+      });
+    }
 
     return b;
   } catch (cause) {
@@ -3052,9 +3209,7 @@ export async function bulkCancelBookings({
         .map((b) =>
           b.assets.map((asset) => ({
             assetId: asset.id,
-            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
-              b.name
-            }](/bookings/${b.id})**.`,
+            content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** cancelled booking.`,
             userId,
             type: "UPDATE" as const,
           }))

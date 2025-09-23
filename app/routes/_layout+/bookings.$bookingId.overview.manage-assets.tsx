@@ -372,6 +372,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets
+        userId,
       });
 
       /** We create notes for the newly added assets */
@@ -451,7 +452,7 @@ export default function AddAssetsToNewBooking() {
 
   const manageKitsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/manage-kits?${new URLSearchParams({
+      `/bookings/${booking.id}/overview/manage-kits?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),
