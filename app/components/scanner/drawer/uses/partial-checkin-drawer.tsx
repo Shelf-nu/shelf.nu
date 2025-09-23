@@ -16,7 +16,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId.checkin-assets";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkin-assets";
 import type {
   AssetFromQr,
   KitFromQr,

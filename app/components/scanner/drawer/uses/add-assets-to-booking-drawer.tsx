@@ -10,7 +10,7 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
