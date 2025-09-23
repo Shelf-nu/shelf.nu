@@ -103,7 +103,7 @@ export const NewBookingNote = ({
   return (
     <div ref={wrapperRef}>
       <fetcher.Form
-        action={`/bookings/${params.bookingId}/note`}
+        action={`/bookings/${params.bookingId}/activity`}
         method="post"
         ref={zo.ref}
         onSubmit={handleSubmit}

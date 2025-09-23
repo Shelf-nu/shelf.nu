@@ -1,17 +1,33 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type {
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
+import { NewBookingNoteSchema } from "~/components/booking/notes/new";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBooking } from "~/modules/booking/service.server";
-import { getBookingNotes } from "~/modules/booking-note/service.server";
+import {
+  getBookingNotes,
+  createBookingNote,
+  deleteBookingNote,
+} from "~/modules/booking-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -33,10 +49,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
+    // Parent route already enforces booking.read permission
+    // Only check bookingNote.read permission here
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.booking,
+      entity: PermissionEntity.bookingNote,
       action: PermissionAction.read,
     });
 
@@ -64,6 +82,81 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason));
+  }
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.bookingNote,
+      action: PermissionAction.create,
+    });
+
+    const method = getActionMethod(request);
+
+    switch (method) {
+      case "POST": {
+        const payload = parseData(
+          await request.formData(),
+          NewBookingNoteSchema,
+          {
+            additionalData: { userId, bookingId },
+          }
+        );
+
+        sendNotification({
+          title: "Note created",
+          message: "Your note has been created successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        await createBookingNote({
+          content: payload.content,
+          userId,
+          bookingId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "DELETE": {
+        const { noteId } = parseData(
+          await request.formData(),
+          z.object({
+            noteId: z.string(),
+          }),
+          { additionalData: { userId, bookingId } }
+        );
+
+        await deleteBookingNote({
+          id: noteId,
+          userId,
+        });
+
+        sendNotification({
+          title: "Note deleted",
+          message: "Your note has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+    }
+
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return json(error(reason), { status: reason.status });
   }
 }
 

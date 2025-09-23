@@ -76,7 +76,7 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <fetcher.Form
-            action={`/bookings/${params.bookingId}/note`}
+            action={`/bookings/${params.bookingId}/activity`}
             method="DELETE"
           >
             <input type="hidden" name="noteId" value={noteId} />
