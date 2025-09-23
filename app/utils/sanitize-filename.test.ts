@@ -53,4 +53,50 @@ describe("sanitizeFilename", () => {
     const result = sanitizeFilename("file---___name.jpg");
     expect(result).toBe("file_name.jpg");
   });
+
+  describe("extension sanitization", () => {
+    test("sanitizes malicious extension with quotes", () => {
+      const result = sanitizeFilename('photo.png"');
+      expect(result).toBe("photo.png");
+      expect(result).not.toContain('"');
+    });
+
+    test("sanitizes extension with slashes", () => {
+      const result = sanitizeFilename("avatar.png/..");
+      expect(result).toBe("avatar.png");
+      expect(result).not.toContain("/");
+      // The dot should still be present as part of the valid extension
+      expect(result).toContain(".");
+    });
+
+    test("sanitizes extension with semicolons", () => {
+      const result = sanitizeFilename("file.jpg;rm -rf /");
+      expect(result).toBe("file.jpgrmrf");
+      expect(result).not.toContain(";");
+      expect(result).not.toContain(" ");
+    });
+
+    test("sanitizes extension with special characters", () => {
+      const result = sanitizeFilename("image.png@#$%^&*()");
+      expect(result).toBe("image.png");
+      expect(result).not.toMatch(/[@#$%^&*()]/);
+    });
+
+    test("handles extension with only special characters", () => {
+      const result = sanitizeFilename("file.@#$%");
+      expect(result).toBe("file");
+      expect(result).not.toContain(".");
+    });
+
+    test("preserves valid extension characters", () => {
+      const result = sanitizeFilename("file.jpeg2");
+      expect(result).toBe("file.jpeg2");
+    });
+
+    test("handles multiple malicious characters in extension", () => {
+      const result = sanitizeFilename('document.pdf";\\/malicious');
+      expect(result).toBe("document.pdfmalicious");
+      expect(result).not.toMatch(/[";\\\/]/);
+    });
+  });
 });

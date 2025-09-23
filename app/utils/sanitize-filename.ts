@@ -20,9 +20,15 @@ export function sanitizeFilename(filename: string): string {
 
   // Extract the file extension first
   const lastDotIndex = filename.lastIndexOf(".");
-  const extension = lastDotIndex > -1 ? filename.slice(lastDotIndex) : "";
+  const rawExtension =
+    lastDotIndex > -1 ? filename.slice(lastDotIndex + 1) : "";
   const nameWithoutExtension =
     lastDotIndex > -1 ? filename.slice(0, lastDotIndex) : filename;
+
+  // Sanitize the extension by keeping only alphanumeric characters
+  const sanitizedExtension = rawExtension.replace(/[^a-zA-Z0-9]/g, "");
+  const extension =
+    sanitizedExtension.length > 0 ? `.${sanitizedExtension}` : "";
 
   // Sanitize the filename (without extension)
   const sanitized = nameWithoutExtension
