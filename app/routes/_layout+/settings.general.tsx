@@ -182,7 +182,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id } = payload;
+        const { name, currency, id, qrIdDisplayPreference } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -208,6 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
+          qrIdDisplayPreference,
         });
 
         sendNotification({
@@ -370,6 +371,7 @@ export default function GeneralPage() {
       <WorkspaceEditForms
         name={organization.name}
         currency={organization.currency}
+        qrIdDisplayPreference={organization.qrIdDisplayPreference}
       />
 
       <Card className={tw("mb-0")}>

@@ -12,6 +12,21 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+export type BulkQrDownloadLoaderData = {
+  assets: Array<{
+    id: string;
+    title: string;
+    sequentialId: string | null;
+    createdAt: Date;
+    qr: {
+      id: string;
+      src: string;
+      size: "small" | "cable" | "medium" | "large";
+    };
+  }>;
+  qrIdDisplayPreference: string;
+};
+
 /**
  * This API find all/some assets in current organization and returns the required data
  * for generating qr codes after validation.
@@ -21,7 +36,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
@@ -53,7 +68,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
 
     const assets = await db.asset.findMany({
       where,
-      select: { id: true, title: true, createdAt: true },
+      select: { id: true, title: true, createdAt: true, sequentialId: true },
     });
 
     if (assets.length > 100) {
@@ -80,7 +95,12 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ assets: assetsWithQrObj }));
+    return json(
+      data({
+        assets: assetsWithQrObj,
+        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
