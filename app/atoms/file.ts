@@ -4,6 +4,7 @@ import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
 } from "~/utils/constants";
+import { sanitizeFile } from "~/utils/sanitize-filename";
 import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
@@ -29,6 +30,19 @@ export const createValidateFileAtom = (options: {
           /** Clean the field */
           event.target.value = "";
           return options.sizeErrorMessage;
+        }
+
+        // Sanitize the filename to prevent content-disposition header issues
+        if (event.target.files) {
+          const sanitizedFile = sanitizeFile(file);
+
+          // If the filename was changed, we need to update the file input
+          if (sanitizedFile.name !== file.name) {
+            // Create a new DataTransfer to replace the file in the input
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(sanitizedFile);
+            event.target.files = dataTransfer.files;
+          }
         }
 
         return undefined;
