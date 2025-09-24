@@ -55,6 +55,8 @@ export async function resolveUserAction(
         .update({
           where: {
             id: teamMemberId,
+            organizationId,
+            deletedAt: null,
           },
           data: {
             deletedAt: new Date(),

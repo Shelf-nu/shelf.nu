@@ -137,23 +137,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.custody,
-      }
-    );
+    const { organizationId, role } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
+    });
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    await getAsset({
-      id: assetId,
-      organizationId,
-      userOrganizations,
-      request,
-    });
 
     const { custodian } = parseData(
       await request.formData(),

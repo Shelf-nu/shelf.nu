@@ -178,9 +178,15 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
-      userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
+    // Valid custodian from same org
+    mockTeamMemberFindUnique.mockResolvedValue({
+      id: "team-123",
+      userId: "user-456",
+    });
+
+    // Mock asset update to fail due to organization mismatch
     const unauthorizedError = new ShelfError({
       cause: null,
       label: "Assets",
@@ -188,7 +194,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       status: 404,
     });
 
-    getAssetMock.mockRejectedValue(unauthorizedError);
+    mockAssetUpdate.mockRejectedValue(unauthorizedError);
 
     const formData = new FormData();
     formData.set(
@@ -205,13 +211,11 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect(response.status).toBe(404);
 
-    expect(getAssetMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "asset-123",
-        organizationId: "org-1",
-      })
-    );
-    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(mockAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-123", organizationId: "org-1" },
+      data: expect.any(Object),
+      include: expect.any(Object),
+    });
     expect(createNoteMock).not.toHaveBeenCalled();
   });
 
@@ -249,13 +253,6 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect(response.status).toBe(404);
 
-    expect(getAssetMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "asset-123",
-        organizationId: "org-1",
-      })
-    );
-
     expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
       where: {
         id: "foreign-team-member-123",
@@ -273,12 +270,6 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       userOrganizations: [{ organizationId: "org-1" }],
-    } as any);
-
-    // Asset validation passes
-    getAssetMock.mockResolvedValue({
-      id: "asset-123",
-      organizationId: "org-1",
     } as any);
 
     // Custodian validation passes (same org)
