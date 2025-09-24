@@ -41,12 +41,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Validate that the asset belongs to the user's organization
-    const asset = await db.asset.findFirst({
-      where: { id: assetId, organizationId },
-      select: { id: true },
+    const asset = await db.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, organizationId: true },
     });
 
-    if (!asset) {
+    if (!asset || asset.organizationId !== organizationId) {
       throw new ShelfError({
         cause: null,
         message: "Asset not found or access denied",
