@@ -13,6 +13,7 @@ import {
   bulkReleaseKitCustody,
   bulkUpdateKitLocation,
 } from "~/modules/kit/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -86,21 +87,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkAssignKitCustodySchema
         );
 
-        if (isSelfService) {
-          const teamMember = await db.teamMember.findUnique({
-            where: { id: custodian.id },
-            select: { id: true, userId: true },
+        // Validate that the custodian belongs to the same organization
+        const teamMember = await getTeamMember({
+          id: custodian.id,
+          organizationId,
+          select: { id: true, userId: true },
+        }).catch((cause) => {
+          throw new ShelfError({
+            cause,
+            title: "Team member not found",
+            message: "The selected team member could not be found.",
+            additionalData: { userId, kitIds, custodian },
+            label: "Kit",
+            status: 404,
           });
+        });
 
-          if (teamMember?.userId !== userId) {
-            throw new ShelfError({
-              cause: null,
-              title: "Action not allowed",
-              message: "Self user can only assign custody to themselves only.",
-              additionalData: { userId, kitIds, custodian },
-              label: "Kit",
-            });
-          }
+        if (isSelfService && teamMember.userId !== userId) {
+          throw new ShelfError({
+            cause: null,
+            title: "Action not allowed",
+            message: "Self user can only assign custody to themselves only.",
+            additionalData: { userId, kitIds, custodian },
+            label: "Kit",
+          });
         }
 
         await bulkAssignKitCustody({

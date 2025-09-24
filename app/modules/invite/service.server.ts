@@ -584,7 +584,7 @@ export async function bulkInviteUsers({
       .map((user) => user.teamMemberId!);
 
     const teamMembers = await db.teamMember.findMany({
-      where: { id: { in: teamMemberIds } },
+      where: { id: { in: teamMemberIds }, organizationId },
       select: { id: true, userId: true },
     });
 
