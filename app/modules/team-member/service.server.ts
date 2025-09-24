@@ -411,11 +411,15 @@ export async function getTeamMember({
       });
     }
 
-    const teamMember = await db.teamMember.findUniqueOrThrow({
+    const queryOptions: Prisma.TeamMemberFindUniqueOrThrowArgs = {
       where: { id, organizationId },
-      ...(select ? { select } : {}),
-      ...(include ? { include } : {}),
-    });
+    };
+    if (select) {
+      queryOptions.select = select;
+    } else if (include) {
+      queryOptions.include = include;
+    }
+    const teamMember = await db.teamMember.findUniqueOrThrow(queryOptions);
 
     if (select) {
       return teamMember as TeamMemberWithSelect<typeof select>;
