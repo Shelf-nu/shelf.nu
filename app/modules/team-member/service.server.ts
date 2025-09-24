@@ -331,12 +331,62 @@ type GetTeamMemberArgsBase = {
   organizationId: Organization["id"];
 };
 
+/**
+ * Retrieves a team member by ID with organization validation.
+ * Supports flexible data fetching with select/include options.
+ *
+ * @param args - Base arguments containing team member ID and organization ID
+ * @returns Promise resolving to the complete TeamMember object
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456"
+ * });
+ * ```
+ */
 export async function getTeamMember(
   args: GetTeamMemberArgsBase
 ): Promise<TeamMember>;
+
+/**
+ * Retrieves a team member with specific field selection.
+ *
+ * @param args - Arguments with select object to specify which fields to return
+ * @returns Promise resolving to TeamMember with only selected fields
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456",
+ *   select: { id: true, userId: true }
+ * });
+ * ```
+ */
 export async function getTeamMember<T extends Prisma.TeamMemberSelect>(
   args: GetTeamMemberArgsBase & { select: T; include?: never }
 ): Promise<TeamMemberWithSelect<T>>;
+
+/**
+ * Retrieves a team member with related data included.
+ *
+ * @param args - Arguments with include object to specify which relations to include
+ * @returns Promise resolving to TeamMember with included relations
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456",
+ *   include: { user: true }
+ * });
+ * ```
+ */
 export async function getTeamMember<T extends Prisma.TeamMemberInclude>(
   args: GetTeamMemberArgsBase & { include: T; select?: never }
 ): Promise<TeamMemberWithInclude<T>>;
