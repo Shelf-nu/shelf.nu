@@ -6,6 +6,15 @@ import useApiQuery from "./use-api-query";
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+const waitForAsyncUpdate = (assertion: () => void | Promise<void>) =>
+  // Testing Library defaults to a 50ms polling interval to avoid pegging the CPU
+  // when you're waiting on timers. The hook under test resolves via microtasks
+  // (fetch mocks + state updates), so there's no benefit to that additional
+  // delay—the assertion will pass as soon as React flushes the update. Tightening
+  // the interval keeps the behaviour identical while cutting the per-assertion
+  // wait from 50ms down to ~1ms.
+  waitFor(assertion, { interval: 1 });
+
 describe("useApiQuery", () => {
   beforeEach(() => {
     mockFetch.mockClear();
@@ -56,7 +65,7 @@ describe("useApiQuery", () => {
     expect(result.current.isLoading).toBe(true);
     expect(mockFetch).toHaveBeenCalledWith("/api/test");
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
@@ -82,7 +91,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/assets?page=1&limit=10");
     });
   });
@@ -100,7 +109,7 @@ describe("useApiQuery", () => {
 
     expect(result.current.isLoading).toBe(true);
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
@@ -118,7 +127,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
@@ -145,7 +154,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.data).toEqual(mockData1);
     });
 
@@ -156,7 +165,7 @@ describe("useApiQuery", () => {
       result.current.refetch();
     });
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.data).toEqual(mockData2);
     });
 
@@ -180,14 +189,14 @@ describe("useApiQuery", () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/test1");
     });
 
     // Change the API endpoint
     rerender({ api: "/api/test2" });
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/test2");
     });
 
@@ -218,14 +227,14 @@ describe("useApiQuery", () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/test?page=1");
     });
 
     // Change search params
     rerender({ searchParams: searchParams2 });
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/test?page=2");
     });
 
@@ -255,7 +264,7 @@ describe("useApiQuery", () => {
     // Enable the query
     rerender({ enabled: true });
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/test");
     });
 
@@ -275,7 +284,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/health");
     });
   });
@@ -298,7 +307,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.data).toEqual(mockData);
     });
 
@@ -321,7 +330,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
@@ -345,7 +354,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(onSuccessMock).toHaveBeenCalledWith(mockData);
     });
 
@@ -366,7 +375,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(onErrorMock).toHaveBeenCalledWith(errorMessage);
     });
 
@@ -394,7 +403,7 @@ describe("useApiQuery", () => {
       })
     );
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(onSuccessMock).toHaveBeenCalledWith(mockData1);
     });
 
@@ -403,7 +412,7 @@ describe("useApiQuery", () => {
       result.current.refetch();
     });
 
-    await waitFor(() => {
+    await waitForAsyncUpdate(() => {
       expect(onSuccessMock).toHaveBeenCalledWith(mockData2);
     });
 
