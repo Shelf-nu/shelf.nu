@@ -1,7 +1,7 @@
 import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData, Outlet } from "@remix-run/react";
+import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -23,6 +23,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import type { RouteHandleWithName } from "~/modules/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
@@ -103,10 +104,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
 ];
 
-export const handle = {
-  breadcrumb: () => "single",
-};
-
 export default function AssetDetailsPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
@@ -127,32 +124,43 @@ export default function AssetDetailsPage() {
       ? [{ to: "activity", content: "Activity" }]
       : []),
   ];
+  const matches = useMatches();
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
+  const shouldHideHeader = [
+    "booking.overview.scan-assets",
+    "booking.overview.checkin-assets",
+  ].includes(currentRoute?.handle?.name);
 
   return (
     <div className="relative">
-      <Header
-        title={hasName ? name : booking.name}
-        subHeading={
-          <div
-            key={booking.status}
-            className="mt-1 flex flex-col items-start gap-2 md:flex-row md:items-center"
-          >
-            <BookingStatusBadge
-              status={booking.status}
-              custodianUserId={booking.custodianUserId || undefined}
-            />
-            <TimeRemaining
-              from={booking.from!}
-              to={booking.to!}
-              status={booking.status}
-            />
-          </div>
-        }
-        slots={{
-          "right-of-title": <AddToCalendar />,
-        }}
-      />
-      <HorizontalTabs items={items} />
+      {!shouldHideHeader && (
+        <>
+          <Header
+            title={hasName ? name : booking.name}
+            subHeading={
+              <div
+                key={booking.status}
+                className="mt-1 flex flex-col items-start gap-2 md:flex-row md:items-center"
+              >
+                <BookingStatusBadge
+                  status={booking.status}
+                  custodianUserId={booking.custodianUserId || undefined}
+                />
+                <TimeRemaining
+                  from={booking.from!}
+                  to={booking.to!}
+                  status={booking.status}
+                />
+              </div>
+            }
+            slots={{
+              "right-of-title": <AddToCalendar />,
+            }}
+          />
+          <HorizontalTabs items={items} />
+        </>
+      )}
       <div>
         <Outlet />
       </div>
