@@ -36,7 +36,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (teamMemberId) {
       const teamMember = await db.teamMember
         .findUnique({
-          where: { deletedAt: null, id: teamMemberId },
+          where: { deletedAt: null, id: teamMemberId, organizationId },
         })
         .catch((cause) => {
           throw new ShelfError({

@@ -147,23 +147,36 @@ export async function action({ context, request }: ActionFunctionArgs) {
       tags: commaSeparatedTags,
     } = payload;
 
+    // Validate that the custodian belongs to the same organization
+    const custodianFromDb = await db.teamMember.findFirst({
+      where: {
+        id: custodian.id,
+        organizationId, // Ensure custodian is from same org
+      },
+      select: { id: true, userId: true },
+    });
+
+    if (!custodianFromDb) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, custodian },
+        label: "Booking",
+        status: 404,
+      });
+    }
+
     /**
      * Validate if the user is self user and is assigning the booking to
      * him/herself only.
      */
-    if (isSelfServiceOrBase) {
-      const custodianFromDb = await db.teamMember.findFirst({
-        where: { id: custodian.id },
-        select: { id: true, userId: true },
+    if (isSelfServiceOrBase && custodianFromDb.userId !== userId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Self user can assign booking to themselves only.",
+        label: "Booking",
       });
-
-      if (custodianFromDb?.userId !== userId) {
-        throw new ShelfError({
-          cause: null,
-          message: "Self user can assign booking to themselves only.",
-          label: "Booking",
-        });
-      }
     }
 
     const from = DateTime.fromFormat(
