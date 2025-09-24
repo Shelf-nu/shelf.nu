@@ -2,9 +2,10 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { NewNoteSchema } from "~/components/assets/notes/new";
+import { db } from "~/database/db.server";
 import { createNote, deleteNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   data,
   error,
@@ -32,12 +33,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
+
+    // Validate that the asset belongs to the user's organization
+    const asset = await db.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!asset || asset.organizationId !== organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found or access denied",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 404,
+      });
+    }
 
     const method = getActionMethod(request);
 

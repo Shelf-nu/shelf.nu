@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ] = await Promise.all([
       db.kit
         .findFirstOrThrow({
-          where: { id: kitId },
+          where: { id: kitId, organizationId },
           select: {
             id: true,
             name: true,

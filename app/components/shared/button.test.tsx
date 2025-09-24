@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { Button } from "./button";
 
 vi.mock("@remix-run/react", async () => {
-  const actual = (await vi.importActual(
-    "@remix-run/react"
-  )) as Record<string, unknown>;
+  const actual = (await vi.importActual("@remix-run/react")) as Record<
+    string,
+    unknown
+  >;
 
   return {
     ...actual,
