@@ -2394,9 +2394,31 @@ export async function removeAssets({
 
     // BOOKING ACTIVITY LOG: Log removal activity
     // Creates system note when assets/kits are removed from a booking
-    // Includes user attribution, count, and booking link
-    if (kitIds && kitIds.length > 0) {
-      // If kits were removed, create note about kit removal
+    // Handles three cases: kits only, assets only, or both combined
+    const hasKits = kitIds && kitIds.length > 0;
+    // Check if we have standalone assets (not belonging to kits being removed)
+    const hasAssets = assets && assets.length > 0;
+
+    if (hasKits && hasAssets) {
+      // Both kits and assets removed - create combined note
+      const kitContent =
+        kits.length > 0
+          ? wrapKitsWithDataForNote(kits, "removed")
+          : wrapKitsForNote(kitIds, "removed");
+
+      const assetContent =
+        assets.length > 0
+          ? wrapAssetsWithDataForNote(assets, "removed")
+          : wrapAssetsForNote(assetIds, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} removed ${kitContent} and ${assetContent} from booking.`,
+      });
+    } else if (hasKits) {
+      // Only kits removed
       const kitContent =
         kits.length > 0
           ? wrapKitsWithDataForNote(kits, "removed")
@@ -2408,8 +2430,8 @@ export async function removeAssets({
           userForNotes
         )} removed ${kitContent} from booking.`,
       });
-    } else {
-      // Otherwise, create note about asset removal
+    } else if (hasAssets) {
+      // Only assets removed
       const assetContent =
         assets.length > 0
           ? wrapAssetsWithDataForNote(assets, "removed")
@@ -3292,31 +3314,106 @@ export async function addScannedAssetsToBooking({
   assetIds,
   bookingId,
   organizationId,
+  userId,
 }: {
   assetIds: Asset["id"][];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
+  userId: string;
 }) {
   try {
     const booking = await db.booking.findFirstOrThrow({
       where: { id: bookingId, organizationId },
     });
 
-    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
-     * If there are already checked out or in custody assets, the user wont be able to check out
-     */
-
-    /** Adding assets into booking */
-    return await db.$transaction(async (tx) => {
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
-      });
+    // Separate assets and kits from the scanned IDs
+    const assets = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, title: true },
     });
+
+    const kits = await db.kit.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, name: true, assets: { select: { id: true } } },
+    });
+
+    // Get asset IDs that belong to the selected kits to avoid double-connecting
+    const kitAssetIds = kits.flatMap((kit) =>
+      kit.assets.map((asset) => asset.id)
+    );
+
+    // Filter out assets that belong to the selected kits
+    const standaloneAssets = assets.filter(
+      (asset) => !kitAssetIds.includes(asset.id)
+    );
+
+    /** Adding assets to booking (both standalone and from kits) */
+    // Collect all asset IDs to connect (standalone assets + kit assets)
+    const allAssetIdsToConnect = [
+      ...standaloneAssets.map((asset) => asset.id),
+      ...kitAssetIds,
+    ];
+
+    const updatedBooking = await db.booking.update({
+      where: { id: booking.id },
+      data: {
+        assets: {
+          connect: allAssetIdsToConnect.map((id) => ({ id })),
+        },
+      },
+    });
+
+    // Create booking activity notes
+    const user = await getUserByID(userId);
+    const userForNotes = {
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      id: userId,
+    };
+
+    const hasKits = kits.length > 0;
+    const hasAssets = standaloneAssets.length > 0;
+
+    if (hasKits && hasAssets) {
+      // Both kits and assets added - create combined note
+      const kitContent = wrapKitsWithDataForNote(
+        kits.map((kit) => ({ id: kit.id, name: kit.name })),
+        "added"
+      );
+      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${kitContent} and ${assetContent} to booking.`,
+      });
+    } else if (hasKits) {
+      // Only kits added
+      const kitContent = wrapKitsWithDataForNote(
+        kits.map((kit) => ({ id: kit.id, name: kit.name })),
+        "added"
+      );
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${kitContent} to booking.`,
+      });
+    } else if (hasAssets) {
+      // Only assets added
+      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${assetContent} to booking.`,
+      });
+    }
+
+    return updatedBooking;
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -3326,7 +3423,7 @@ export async function addScannedAssetsToBooking({
     throw new ShelfError({
       cause,
       message,
-      additionalData: { assetIds, bookingId, organizationId },
+      additionalData: { assetIds, bookingId, organizationId, userId },
       label,
     });
   }

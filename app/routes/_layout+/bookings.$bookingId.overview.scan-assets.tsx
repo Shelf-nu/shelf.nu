@@ -114,9 +114,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds } = parseData(formData, addScannedAssetsToBookingSchema);
+    const { assetIds, kitIds } = parseData(
+      formData,
+      addScannedAssetsToBookingSchema
+    );
 
-    await addScannedAssetsToBooking({ bookingId, assetIds, organizationId });
+    // Combine asset IDs and kit IDs for the backend function
+    // The backend expects both asset and kit IDs in the assetIds parameter
+    const allIds = [...assetIds, ...kitIds];
+
+    await addScannedAssetsToBooking({
+      bookingId,
+      assetIds: allIds,
+      organizationId,
+      userId,
+    });
 
     sendNotification({
       title: "Assets added",
@@ -138,7 +150,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => "Scan QR codes to add to booking",
-  name: "booking.scan-assets",
+  name: "booking.overview.scan-assets",
 };
 
 export default function ScanAssetsForBookings() {

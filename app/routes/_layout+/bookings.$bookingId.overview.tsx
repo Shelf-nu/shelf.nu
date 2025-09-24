@@ -886,6 +886,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
           kitIds: [kitId],
           kits: [{ id: kit.id, name: kit.name }],
+          // Don't pass individual assets for note generation when removing a single kit
+          // The assets parameter is used for note content, not for actual removal
+          assets: [],
           organizationId,
         });
 
@@ -958,23 +961,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         /**
          * From frontend, we get both assetIds and kitIds,
-         * here we are separating them
+         * here we are separating them and excluding assets that belong to kits
          * */
-        const assetIds = await db.asset.findMany({
+        const assets = await db.asset.findMany({
           where: { id: { in: assetOrKitIds } },
           select: { id: true, title: true },
         });
 
-        const kitIds = await db.kit.findMany({
+        const kits = await db.kit.findMany({
           where: { id: { in: assetOrKitIds } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, assets: { select: { id: true } } },
         });
 
+        // Get asset IDs that belong to the selected kits
+        const kitAssetIds = kits.flatMap((kit) =>
+          kit.assets.map((asset) => asset.id)
+        );
+
+        // Filter out assets that belong to the selected kits to avoid double-counting
+        const standaloneAssets = assets.filter(
+          (asset) => !kitAssetIds.includes(asset.id)
+        );
+
+        // All asset IDs to be disconnected (standalone assets + kit assets)
+        const allAssetIdsToRemove = [
+          ...standaloneAssets.map((a) => a.id),
+          ...kitAssetIds,
+        ];
+
         const b = await removeAssets({
-          booking: { id, assetIds: assetIds.map((a) => a.id) },
-          kitIds: kitIds.map((k) => k.id),
-          kits: kitIds.map((kit) => ({ id: kit.id, name: kit.name })),
-          assets: assetIds.map((asset) => ({
+          booking: { id, assetIds: allAssetIdsToRemove },
+          kitIds: kits.map((k) => k.id),
+          kits: kits.map((kit) => ({ id: kit.id, name: kit.name })),
+          assets: standaloneAssets.map((asset) => ({
             id: asset.id,
             title: asset.title,
           })),
@@ -1014,8 +1033,8 @@ export default function BookingPage() {
 
   /**When we are on the booking.scan-assets route, we render an outlet */
   const shouldRenderOutlet = [
-    "booking.scan-assets",
-    "booking.checkin-assets",
+    "booking.overview.scan-assets",
+    "booking.overview.checkin-assets",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

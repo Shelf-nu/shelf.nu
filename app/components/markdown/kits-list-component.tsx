@@ -62,7 +62,7 @@ export function KitsListComponent({
         variant="link"
         to={`/kits/${data.kits[0].id}`}
         target="_blank"
-        className="h-auto p-0 text-black underline hover:no-underline"
+        className="h-auto p-0 text-black underline hover:text-primary"
       >
         {data.kits[0].name}
       </Button>
@@ -74,7 +74,7 @@ export function KitsListComponent({
       <PopoverTrigger asChild>
         <Button
           variant="link"
-          className="h-auto p-0 text-black underline hover:no-underline"
+          className="h-auto p-0 text-black underline hover:text-primary"
         >
           {displayText}
         </Button>

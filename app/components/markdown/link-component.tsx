@@ -15,7 +15,7 @@ export function LinkComponent({ to, text }: LinkComponentProps) {
       variant="link"
       to={to}
       target="_blank"
-      className="h-auto p-0 font-semibold text-black underline hover:no-underline"
+      className="h-auto p-0 font-semibold text-black underline hover:text-primary"
     >
       {text}
     </Button>

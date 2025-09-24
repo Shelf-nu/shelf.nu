@@ -63,7 +63,7 @@ export function AssetsListComponent({
         variant="link"
         to={`/assets/${data.assets[0].id}`}
         target="_blank"
-        className="h-auto p-0 text-black underline hover:no-underline"
+        className="h-auto p-0 text-black underline hover:text-primary"
       >
         {data.assets[0].title}
       </Button>
@@ -75,7 +75,7 @@ export function AssetsListComponent({
       <PopoverTrigger asChild>
         <Button
           variant="link"
-          className="h-auto p-0 text-black underline hover:no-underline"
+          className="h-auto p-0 text-black underline hover:text-primary"
         >
           {displayText}
         </Button>
