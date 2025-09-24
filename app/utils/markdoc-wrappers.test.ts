@@ -4,6 +4,8 @@ import {
   wrapKitsForNote,
   wrapAssetsWithDataForNote,
   wrapKitsWithDataForNote,
+  wrapUserLinkForNote,
+  wrapLinkForNote,
   extractDateTags,
   extractAssetsListTags,
   DATE_TAG_REGEX,
@@ -278,5 +280,111 @@ describe("markdoc-wrappers", () => {
         expect(matches).toHaveLength(0);
       });
     });
+  });
+});
+
+// User Link Wrapper Tests
+describe("wrapUserLinkForNote", () => {
+  it("should wrap user with both first and last name", () => {
+    const user = { id: "123", firstName: "John", lastName: "Doe" };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/123" text="John Doe" /%}`
+    );
+  });
+
+  it("should handle user with only first name", () => {
+    const user = { id: "456", firstName: "Jane", lastName: null };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/456" text="Jane" /%}`
+    );
+  });
+
+  it("should handle user with only last name", () => {
+    const user = { id: "789", firstName: null, lastName: "Smith" };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/789" text="Smith" /%}`
+    );
+  });
+
+  it("should handle user with empty names", () => {
+    const user = { id: "abc", firstName: "", lastName: "" };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/abc" text="Unknown User" /%}`
+    );
+  });
+
+  it("should handle user with null names", () => {
+    const user = { id: "def", firstName: null, lastName: null };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/def" text="Unknown User" /%}`
+    );
+  });
+
+  it("should trim whitespace from names", () => {
+    const user = { id: "ghi", firstName: "  John  ", lastName: "  Doe  " };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/ghi" text="John Doe" /%}`
+    );
+  });
+
+  it("should handle special characters in names", () => {
+    const user = { id: "jkl", firstName: "José", lastName: "García-López" };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/jkl" text="José García-López" /%}`
+    );
+  });
+
+  it("should handle names with quotes by escaping them", () => {
+    const user = {
+      id: "mno",
+      firstName: 'John "Johnny"',
+      lastName: "O'Malley",
+    };
+    const result = wrapUserLinkForNote(user);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/mno" text="John "Johnny" O'Malley" /%}`
+    );
+  });
+});
+
+// Generic Link Wrapper Tests
+describe("wrapLinkForNote", () => {
+  it("should wrap generic link with to and text", () => {
+    const result = wrapLinkForNote("/bookings/123", "My Booking");
+    expect(result).toBe(`{% link to="/bookings/123" text="My Booking" /%}`);
+  });
+
+  it("should handle asset links", () => {
+    const result = wrapLinkForNote("/assets/456", "Laptop Dell XPS");
+    expect(result).toBe(`{% link to="/assets/456" text="Laptop Dell XPS" /%}`);
+  });
+
+  it("should handle kit links", () => {
+    const result = wrapLinkForNote("/kits/789", "Camera Kit");
+    expect(result).toBe(`{% link to="/kits/789" text="Camera Kit" /%}`);
+  });
+
+  it("should handle links with special characters in text", () => {
+    const result = wrapLinkForNote("/bookings/abc", 'Booking "Special Event"');
+    expect(result).toBe(
+      `{% link to="/bookings/abc" text="Booking "Special Event"" /%}`
+    );
+  });
+
+  it("should handle external-style paths", () => {
+    const result = wrapLinkForNote(
+      "/settings/organization",
+      "Organization Settings"
+    );
+    expect(result).toBe(
+      `{% link to="/settings/organization" text="Organization Settings" /%}`
+    );
   });
 });

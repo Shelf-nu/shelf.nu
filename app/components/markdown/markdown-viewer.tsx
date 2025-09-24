@@ -7,6 +7,7 @@ import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { DateComponent } from "./date-component";
 import { KitsListComponent } from "./kits-list-component";
+import { LinkComponent } from "./link-component";
 
 /**
  * MarkdownViewer that supports both string content and RenderableTreeNodes
@@ -28,6 +29,7 @@ const defaultComponents = {
   DateComponent,
   AssetsListComponent,
   KitsListComponent,
+  LinkComponent,
 };
 
 export const MarkdownViewer = ({

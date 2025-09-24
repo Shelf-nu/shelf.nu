@@ -66,6 +66,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -377,7 +378,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       /** We create notes for the newly added assets */
       await createNotes({
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+        content: `${wrapUserLinkForNote(user!)} added asset to booking **[${
           b.name
         }](/bookings/${b.id})**.`,
         type: "UPDATE",

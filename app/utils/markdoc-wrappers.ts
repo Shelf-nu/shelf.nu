@@ -139,6 +139,41 @@ export function wrapAssetsWithDataForNote(
 }
 
 /**
+ * Creates a consistent user link for notes using Markdoc link tag
+ *
+ * @param user - User object with id, firstName, and lastName
+ * @returns String with link tag in Markdoc format
+ *
+ * Example: wrapUserLinkForNote({id: "123", firstName: "John", lastName: "Doe"})
+ * -> "{% link to=\"/settings/team/users/123\" text=\"John Doe\" /%}"
+ */
+export function wrapUserLinkForNote(user: {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+}): string {
+  const fullName = `${user.firstName?.trim() || ""} ${
+    user.lastName?.trim() || ""
+  }`.trim();
+  const displayName = fullName || "Unknown User";
+  return `{% link to="/settings/team/users/${user.id}" text="${displayName}" /%}`;
+}
+
+/**
+ * Creates a generic link for notes using Markdoc link tag
+ *
+ * @param to - URL path for the link
+ * @param text - Display text for the link
+ * @returns String with link tag in Markdoc format
+ *
+ * Example: wrapLinkForNote("/bookings/123", "My Booking")
+ * -> "{% link to=\"/bookings/123\" text=\"My Booking\" /%}"
+ */
+export function wrapLinkForNote(to: string, text: string): string {
+  return `{% link to="${to}" text="${text}" /%}`;
+}
+
+/**
  * Regular expression to match Markdoc assets_list tags in note content
  * Matches: {% assets_list count=3 ids="id1,id2,id3" action="added" /%}
  */

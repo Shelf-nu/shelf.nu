@@ -76,5 +76,23 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
+    link: {
+      render: "LinkComponent",
+      description:
+        "Renders a link that opens in a new tab with consistent styling",
+      attributes: {
+        to: {
+          type: String,
+          required: true,
+          description: "URL path for the link",
+        },
+        text: {
+          type: String,
+          required: true,
+          description: "Display text for the link",
+        },
+      },
+      selfClosing: true,
+    },
   },
 };
