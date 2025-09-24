@@ -209,7 +209,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     const kit = await db.kit.update({
-      where: { id: kitId },
+      where: { id: kitId, organizationId },
       data: {
         status: KitStatus.IN_CUSTODY,
         custody: { create: { custodian: { connect: { id: custodianId } } } },
@@ -225,7 +225,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        */
       ...kit.assets.map((asset) =>
         db.asset.update({
-          where: { id: asset.id },
+          where: { id: asset.id, organizationId },
           data: {
             status: AssetStatus.IN_CUSTODY,
             custody: {

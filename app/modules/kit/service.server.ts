@@ -1765,10 +1765,10 @@ export async function updateKitAssets({
       ];
     }
 
-    // Get all assets that should be in the kit (based on assetIds)
+    // Get all assets that should be in the kit (based on assetIds) with organization scoping
     const allAssetsForKit = await db.asset
       .findMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
           title: true,
@@ -1914,7 +1914,7 @@ export async function updateKitAssets({
       await Promise.all([
         ...assetsToInheritStatus.map((asset) =>
           db.asset.update({
-            where: { id: asset.id },
+            where: { id: asset.id, organizationId },
             data: {
               status: AssetStatus.IN_CUSTODY,
               custody: {
@@ -1949,7 +1949,7 @@ export async function updateKitAssets({
           where: { assetId: { in: removedAssets.map((a) => a.id) } },
         }),
         db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) } },
+          where: { id: { in: removedAssets.map((a) => a.id) }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
         db.note.createMany({

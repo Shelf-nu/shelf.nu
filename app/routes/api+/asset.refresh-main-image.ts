@@ -8,6 +8,11 @@ import { ShelfError } from "~/utils/error";
 import { data, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
@@ -158,9 +163,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       })
     );
 
-    // Get asset details
+    // Validate user has permission to access assets in their organization
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    // Get asset details with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUniqueOrThrow({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: {
         id: true,
         mainImage: true,

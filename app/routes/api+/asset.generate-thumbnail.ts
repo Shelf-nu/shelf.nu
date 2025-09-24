@@ -8,6 +8,11 @@ import { ShelfError } from "~/utils/error";
 import { data, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
@@ -24,9 +29,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       })
     );
 
-    // Use findUnique instead of findUniqueOrThrow to handle missing assets gracefully
+    // Validate user has permission to access assets in their organization
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    // Use findUnique with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUnique({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: {
         id: true,
         mainImage: true,
