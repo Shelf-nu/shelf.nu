@@ -127,7 +127,7 @@ describe("markdoc.config", () => {
 
   describe("tag completeness", () => {
     it("should have all expected tags", () => {
-      const expectedTags = ["date", "assets_list", "kits_list"];
+      const expectedTags = ["date", "assets_list", "kits_list", "link"];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
       expectedTags.forEach((tag) => {
@@ -136,7 +136,7 @@ describe("markdoc.config", () => {
     });
 
     it("should not have unexpected tags", () => {
-      const expectedTags = ["date", "assets_list", "kits_list"];
+      const expectedTags = ["date", "assets_list", "kits_list", "link"];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
       expect(actualTags).toHaveLength(expectedTags.length);
@@ -159,6 +159,10 @@ describe("markdoc.config", () => {
         String
       );
       expect((markdocConfig.tags as any).kits_list.attributes.action.type).toBe(
+        String
+      );
+      expect((markdocConfig.tags as any).link.attributes.to.type).toBe(String);
+      expect((markdocConfig.tags as any).link.attributes.text.type).toBe(
         String
       );
 
