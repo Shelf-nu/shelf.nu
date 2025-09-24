@@ -1,6 +1,7 @@
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
   CalendarCheck,
+  ClipboardList,
   MapPinIcon,
   MousePointerClick,
   Package,
@@ -114,6 +115,7 @@ export type IconType =
   | "lock"
   | "activate"
   | "deactivate"
+  | "start-audit"
   | "scan"
   | "tool"
   | "rows"
@@ -203,6 +205,7 @@ export const iconsMap: IconsMap = {
   "mouse-pointer-click": <MousePointerClick />,
   "add-to-kit": <PackagePlus />,
   "remove-from-kit": <PackageMinus />,
+  "start-audit": <ClipboardList />,
 };
 
 export default iconsMap;

@@ -12,11 +12,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { parseFilters } from "./query.server";
-import type {
-  AdvancedIndexAsset,
-  ICustomFieldValueJson,
-  AssetCustomFieldsValuesWithFields,
-} from "./types";
+import type { AdvancedIndexAsset, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 export function getLocationUpdateNoteContent({
