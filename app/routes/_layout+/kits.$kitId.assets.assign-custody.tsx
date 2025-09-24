@@ -24,6 +24,7 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -182,24 +183,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const user = await getUserByID(userId);
 
     // Validate that the custodian belongs to the same organization
-    const custodianTeamMember = await db.teamMember.findUnique({
-      where: {
-        id: custodianId,
-        organizationId, // Ensure custodian is from same org
-      },
+    const custodianTeamMember = await getTeamMember({
+      id: custodianId,
+      organizationId,
       select: { id: true, userId: true },
-    });
-
-    if (!custodianTeamMember) {
+    }).catch((cause) => {
       throw new ShelfError({
-        cause: null,
+        cause,
         title: "Team member not found",
         message: "The selected team member could not be found.",
         additionalData: { userId, kitId, custodianId },
         label: "Kit",
         status: 404,
       });
-    }
+    });
 
     if (isSelfService && custodianTeamMember.userId !== user.id) {
       throw new ShelfError({

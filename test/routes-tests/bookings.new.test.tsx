@@ -7,20 +7,18 @@ import { requirePermission } from "~/utils/roles.server";
 
 const dbMocks = vi.hoisted(() => {
   return {
-    teamMember: {
-      findFirst: vi.fn(),
-    },
     booking: {
       create: vi.fn(),
     },
   };
 });
 
+const teamMemberServiceMocks = vi.hoisted(() => ({
+  getTeamMember: vi.fn(),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
-    teamMember: {
-      findFirst: dbMocks.teamMember.findFirst,
-    },
     booking: {
       create: dbMocks.booking.create,
     },
@@ -37,6 +35,10 @@ vi.mock("~/modules/booking/service.server", () => ({
     from: new Date("2024-01-01T10:00:00Z"),
     to: new Date("2024-01-02T10:00:00Z"),
   }),
+}));
+
+vi.mock("~/modules/team-member/service.server", () => ({
+  getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
 vi.mock("~/modules/tag/service.server", () => ({
@@ -102,7 +104,7 @@ vi.mock("@remix-run/node", async () => {
 });
 
 const requirePermissionMock = vi.mocked(requirePermission);
-const mockTeamMemberFindFirst = dbMocks.teamMember.findFirst;
+const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
 const mockBookingCreate = dbMocks.booking.create;
 
 function createActionArgs(
@@ -122,7 +124,7 @@ function createActionArgs(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockTeamMemberFindFirst.mockReset();
+  mockGetTeamMember.mockReset();
   mockBookingCreate.mockReset();
   requirePermissionMock.mockReset();
 });
@@ -136,7 +138,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Custodian not found due to org filter
-    mockTeamMemberFindFirst.mockResolvedValue(null);
+    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
 
     const formData = new FormData();
     formData.set("name", "Test Booking");
@@ -159,11 +161,9 @@ describe("bookings/new - custodian assignment", () => {
 
     expect(response.status).toBe(404);
 
-    expect(mockTeamMemberFindFirst).toHaveBeenCalledWith({
-      where: {
-        id: "foreign-team-member-123",
-        organizationId: "org-1",
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "foreign-team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
 
@@ -178,7 +178,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org
-    mockTeamMemberFindFirst.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
     });
@@ -204,11 +204,9 @@ describe("bookings/new - custodian assignment", () => {
 
     expect(response.status).toBe(302); // Redirect on success
 
-    expect(mockTeamMemberFindFirst).toHaveBeenCalledWith({
-      where: {
-        id: "team-member-123",
-        organizationId: "org-1",
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
   });
@@ -221,7 +219,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, but different user
-    mockTeamMemberFindFirst.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });
@@ -258,7 +256,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, same user
-    mockTeamMemberFindFirst.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-123", // Same as current user
     });
@@ -293,7 +291,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, but different user (should fail for BASE role)
-    mockTeamMemberFindFirst.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });

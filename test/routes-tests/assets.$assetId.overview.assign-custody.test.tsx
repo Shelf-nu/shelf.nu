@@ -22,10 +22,13 @@ const dbMocks = vi.hoisted(() => {
     teamMember: {
       findMany: vi.fn(),
       count: vi.fn(),
-      findUnique: vi.fn(),
     },
   };
 });
+
+const teamMemberServiceMocks = vi.hoisted(() => ({
+  getTeamMember: vi.fn(),
+}));
 
 vi.mock("~/database/db.server", () => ({
   db: {
@@ -36,7 +39,6 @@ vi.mock("~/database/db.server", () => ({
     teamMember: {
       findMany: dbMocks.teamMember.findMany,
       count: dbMocks.teamMember.count,
-      findUnique: dbMocks.teamMember.findUnique,
     },
   },
 }));
@@ -51,6 +53,10 @@ vi.mock("~/modules/asset/service.server", () => ({
 
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
+}));
+
+vi.mock("~/modules/team-member/service.server", () => ({
+  getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
 vi.mock("~/modules/note/service.server", () => ({
@@ -80,7 +86,7 @@ const mockAssetFindUnique = dbMocks.asset.findUnique;
 const mockAssetUpdate = dbMocks.asset.update;
 const mockTeamMemberFindMany = dbMocks.teamMember.findMany;
 const mockTeamMemberCount = dbMocks.teamMember.count;
-const mockTeamMemberFindUnique = dbMocks.teamMember.findUnique;
+const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const getAssetMock = vi.mocked(getAsset);
@@ -126,7 +132,7 @@ beforeEach(() => {
   mockAssetUpdate.mockReset();
   mockTeamMemberFindMany.mockReset();
   mockTeamMemberCount.mockReset();
-  mockTeamMemberFindUnique.mockReset();
+  mockGetTeamMember.mockReset();
 
   // Reset service mocks
   getAssetMock.mockReset();
@@ -181,7 +187,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     } as any);
 
     // Valid custodian from same org
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-123",
       userId: "user-456",
     });
@@ -233,7 +239,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     } as any);
 
     // Custodian validation fails (different org)
-    mockTeamMemberFindUnique.mockResolvedValue(null); // No team member found due to org filter
+    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
 
     const formData = new FormData();
     formData.set(
@@ -253,11 +259,9 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect(response.status).toBe(404);
 
-    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: "foreign-team-member-123",
-        organizationId: "org-1", // Should filter by org
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "foreign-team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
 
@@ -273,7 +277,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     } as any);
 
     // Custodian validation passes (same org)
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
     });
@@ -304,11 +308,9 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect(response.status).toBe(302); // Redirect on success
 
-    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: "team-member-123",
-        organizationId: "org-1",
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
 
@@ -341,7 +343,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     } as any);
 
     // Valid team member from same org, but different user
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });
