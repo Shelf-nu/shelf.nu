@@ -1,50 +1,65 @@
 import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
+import type { QrIdDisplayPreference } from "@prisma/client";
 import {
   Popover,
   PopoverContent,
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
-import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
 
-type CurrencySelectorProps = {
+type QrIdDisplayPreferenceSelectorProps = {
   className?: string;
-  defaultValue: string;
+  defaultValue: QrIdDisplayPreference;
   name?: string;
 };
 
-export default function CurrencySelector({
+const QR_ID_DISPLAY_OPTIONS = [
+  {
+    value: "QR_ID" as const,
+    label: "QR Code ID",
+    description: "e.g., clm123abc...",
+  },
+  {
+    value: "SAM_ID" as const,
+    label: "SAM ID",
+    description: "e.g., SAM-0001",
+  },
+];
+
+export default function QrIdDisplayPreferenceSelector({
   className,
   defaultValue,
   name,
-}: CurrencySelectorProps) {
+}: QrIdDisplayPreferenceSelectorProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { curriences } = useLoaderData<typeof loader>();
 
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedCurrency, setSelectedCurrency] = useState(defaultValue);
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [selectedPreference, setSelectedPreference] = useState(defaultValue);
+  const [selectedIndex, setSelectedIndex] = useState<number>(() =>
+    QR_ID_DISPLAY_OPTIONS.findIndex((option) => option.value === defaultValue)
+  );
 
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredCurrencies = useMemo(() => {
+  const filteredOptions = useMemo(() => {
     if (!searchQuery) {
-      return curriences;
+      return QR_ID_DISPLAY_OPTIONS;
     }
 
-    return curriences.filter((currency) =>
-      currency.toLowerCase().includes(searchQuery.toLowerCase())
+    return QR_ID_DISPLAY_OPTIONS.filter(
+      (option) =>
+        option.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        option.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [curriences, searchQuery]);
+  }, [searchQuery]);
 
-  function handleSelect(currency: string) {
-    setSelectedCurrency(currency);
+  function handleSelect(preference: QrIdDisplayPreference) {
+    setSelectedPreference(preference);
     setIsOpen(false);
   }
 
@@ -52,7 +67,7 @@ export default function CurrencySelector({
   const scrollToIndex = (index: number) => {
     setTimeout(() => {
       const selectedElement = document.getElementById(
-        `currency-option-${index}`
+        `qr-preference-option-${index}`
       );
       if (selectedElement) {
         selectedElement.scrollIntoView({ block: "nearest" });
@@ -65,8 +80,7 @@ export default function CurrencySelector({
       case "ArrowDown":
         event.preventDefault();
         setSelectedIndex((prev) => {
-          const newIndex =
-            prev < filteredCurrencies.length - 1 ? prev + 1 : prev;
+          const newIndex = prev < filteredOptions.length - 1 ? prev + 1 : prev;
           scrollToIndex(newIndex);
           return newIndex;
         });
@@ -81,19 +95,25 @@ export default function CurrencySelector({
         break;
       case "Enter":
         event.preventDefault();
-        if (filteredCurrencies[selectedIndex]) {
-          setSelectedCurrency(filteredCurrencies[selectedIndex]);
+        if (filteredOptions[selectedIndex]) {
+          setSelectedPreference(filteredOptions[selectedIndex].value);
           setIsOpen(false);
         }
         break;
     }
   };
 
+  const selectedOption = QR_ID_DISPLAY_OPTIONS.find(
+    (option) => option.value === selectedPreference
+  );
+
   return (
     <Popover
       open={isOpen}
       onOpenChange={(v) => {
-        scrollToIndex(selectedIndex);
+        if (v) {
+          scrollToIndex(selectedIndex);
+        }
         setIsOpen(v);
       }}
     >
@@ -105,9 +125,14 @@ export default function CurrencySelector({
             className
           )}
         >
-          <span>{selectedCurrency}</span>
+          <span className="font-medium">
+            {selectedOption?.label}{" "}
+            <span className="text-sm font-normal text-gray-500">
+              ({selectedOption?.description})
+            </span>
+          </span>
           <ChevronDownIcon className="inline-block size-4 text-gray-500" />
-          <input type="hidden" name={name} value={selectedCurrency} />
+          <input type="hidden" name={name} value={selectedPreference} />
         </button>
       </PopoverTrigger>
       <PopoverPortal>
@@ -119,7 +144,7 @@ export default function CurrencySelector({
           <div className="flex items-center border-b">
             <SearchIcon className="ml-4 size-4 text-gray-500" />
             <input
-              placeholder="Search currency..."
+              placeholder="Search options..."
               className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
               value={searchQuery}
               onChange={(event) => {
@@ -128,32 +153,37 @@ export default function CurrencySelector({
               onKeyDown={handleKeyDown}
             />
           </div>
-          {filteredCurrencies.map((currency, index) => {
-            const isSelected = selectedCurrency === currency;
+          {filteredOptions.map((option, index) => {
+            const isSelected = selectedPreference === option.value;
             const isHovered = selectedIndex === index;
 
             return (
               <div
-                id={`currency-option-${index}`}
-                key={currency}
+                id={`qr-preference-option-${index}`}
+                key={option.value}
                 className={tw(
                   "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                   isHovered && "bg-gray-50"
                 )}
                 onClick={() => {
-                  handleSelect(currency);
+                  handleSelect(option.value);
                 }}
               >
-                <span>{currency}</span>
+                <span className="font-medium">
+                  {option.label}{" "}
+                  <span className="text-sm font-normal text-gray-500">
+                    ({option.description})
+                  </span>
+                </span>
                 <When truthy={isSelected}>
                   <CheckIcon className="size-4 text-primary" />
                 </When>
               </div>
             );
           })}
-          {filteredCurrencies.length === 0 && (
+          {filteredOptions.length === 0 && (
             <div className="px-4 py-2 text-sm text-gray-500">
-              No currency found
+              No options found
             </div>
           )}
         </PopoverContent>

@@ -98,7 +98,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const partialCheckinProgress = calculatePartialCheckinProgress(
       totalBookingAssets,
-      checkedInAssetIds
+      checkedInAssetIds,
+      booking.status
     );
 
     const title = `Scan assets to check in | ${booking.name}`;

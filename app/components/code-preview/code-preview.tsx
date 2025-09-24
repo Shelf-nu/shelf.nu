@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
@@ -56,6 +57,7 @@ interface CodePreviewProps {
   onCodeChange?: (code: CodeType | null) => void;
   selectedBarcodeId?: string;
   onRefetchData?: () => void; // Callback to refetch data when barcode is added
+  sequentialId?: string | null;
 }
 
 export const CodePreview = ({
@@ -68,11 +70,13 @@ export const CodePreview = ({
   onCodeChange,
   selectedBarcodeId,
   onRefetchData,
+  sequentialId,
 }: CodePreviewProps) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
@@ -255,6 +259,8 @@ export const CodePreview = ({
             ref={captureDivRef}
             data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
             title={item.name}
+            qrIdDisplayPreference={organization?.qrIdDisplayPreference}
+            sequentialId={sequentialId}
           />
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
@@ -310,11 +316,13 @@ export type QrDef = {
 interface QrLabelProps {
   data?: { qr?: QrDef };
   title: string;
+  qrIdDisplayPreference?: string;
+  sequentialId?: string | null;
 }
 
 export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
-    const { data, title } = props ?? {};
+    const { data, title, qrIdDisplayPreference, sequentialId } = props ?? {};
     return (
       <div
         style={{
@@ -353,7 +361,11 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
           />
         </figure>
         <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
-          <div style={{ fontWeight: 600 }}>{data?.qr?.id}</div>
+          <div style={{ fontWeight: 600 }}>
+            {qrIdDisplayPreference === "SAM_ID" && sequentialId
+              ? sequentialId
+              : data?.qr?.id}
+          </div>
           <div>
             Powered by{" "}
             <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>

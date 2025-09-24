@@ -143,6 +143,13 @@ const variants: Record<ButtonVariant, string> = {
   ),
 };
 
+const textualVariants = new Set<ButtonVariant>([
+  "link",
+  "link-gray",
+  "block-link",
+  "block-link-gray",
+]);
+
 /**
  * Style mappings for button sizes
  */
@@ -188,6 +195,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     const baseButtonClasses =
       variant === "inherit"
         ? "inline-flex items-center"
+        : textualVariants.has(variant as ButtonVariant)
+        ? "inline-flex items-start justify-start gap-2 text-left max-w-xl"
         : "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
 
     const isDisabled =
