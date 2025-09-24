@@ -111,7 +111,7 @@ describe("markdoc-wrappers", () => {
       const asset = { id: "asset-1", title: "Laptop" };
       const result = wrapAssetsWithDataForNote(asset, "added");
 
-      expect(result).toBe("**[Laptop](/assets/asset-1)**");
+      expect(result).toBe('{% link to="/assets/asset-1" text="Laptop" /%}');
     });
 
     it("should handle multiple assets with tag", () => {
@@ -130,7 +130,7 @@ describe("markdoc-wrappers", () => {
       const assets = [{ id: "asset-1", title: "Laptop" }];
       const result = wrapAssetsWithDataForNote(assets, "added");
 
-      expect(result).toBe("**[Laptop](/assets/asset-1)**");
+      expect(result).toBe('{% link to="/assets/asset-1" text="Laptop" /%}');
     });
 
     it("should handle empty array", () => {
@@ -146,7 +146,9 @@ describe("markdoc-wrappers", () => {
       const kit = { id: "kit-1", name: "Photography Kit" };
       const result = wrapKitsWithDataForNote(kit, "added");
 
-      expect(result).toBe("**[Photography Kit](/kits/kit-1)**");
+      expect(result).toBe(
+        '{% link to="/kits/kit-1" text="Photography Kit" /%}'
+      );
     });
 
     it("should handle multiple kits with tag", () => {
@@ -165,7 +167,9 @@ describe("markdoc-wrappers", () => {
       const kits = [{ id: "kit-1", name: "Photography Kit" }];
       const result = wrapKitsWithDataForNote(kits, "added");
 
-      expect(result).toBe("**[Photography Kit](/kits/kit-1)**");
+      expect(result).toBe(
+        '{% link to="/kits/kit-1" text="Photography Kit" /%}'
+      );
     });
   });
 

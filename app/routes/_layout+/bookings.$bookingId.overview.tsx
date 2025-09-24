@@ -800,12 +800,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        // Get the asset data for proper note generation
+        const asset = await db.asset.findUnique({
+          where: { id: assetId, organizationId },
+          select: { id: true, title: true },
+        });
+
         const b = await removeAssets({
           booking: { id, assetIds: [assetId as string] },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId,
           organizationId,
+          assets: asset ? [asset] : [],
         });
 
         sendNotification({

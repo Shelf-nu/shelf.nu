@@ -389,12 +389,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** If some assets were removed, we also need to handle those */
     if (removedAssetIds.length > 0) {
+      // Get the removed assets with their titles for proper note generation
+      const removedAssets = await db.asset.findMany({
+        where: {
+          id: { in: removedAssetIds },
+          organizationId,
+        },
+        select: { id: true, title: true },
+      });
+
       await removeAssets({
         booking: { id: bookingId, assetIds: removedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
         userId: authSession.userId,
         organizationId,
+        assets: removedAssets,
       });
     }
 

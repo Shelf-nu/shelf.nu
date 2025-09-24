@@ -2384,9 +2384,9 @@ export async function removeAssets({
     const userForNotes = { firstName, lastName, id: userId };
 
     await createNotes({
-      content: `**${wrapUserLinkForNote(
+      content: `${wrapUserLinkForNote(
         userForNotes
-      )}** removed asset from booking.`,
+      )} removed asset from booking.`,
       type: "UPDATE",
       userId,
       assetIds,

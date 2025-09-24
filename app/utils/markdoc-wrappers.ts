@@ -100,9 +100,9 @@ export function wrapKitsWithDataForNote(
   const count = kitArray.length;
 
   if (count === 1) {
-    // For single kit, create direct link to avoid loading flash
+    // For single kit, use link tag to ensure proper styling and new tab behavior
     const kit = kitArray[0];
-    return `**[${kit.name}](/kits/${kit.id})**`;
+    return `{% link to="/kits/${kit.id}" text="${kit.name}" /%}`;
   } else {
     // For multiple kits, use interactive component
     const idsString = kitArray.map((k) => k.id).join(",");
@@ -128,9 +128,9 @@ export function wrapAssetsWithDataForNote(
   const count = assetArray.length;
 
   if (count === 1) {
-    // For single asset, create direct link to avoid loading flash
+    // For single asset, use link tag to ensure proper styling and new tab behavior
     const asset = assetArray[0];
-    return `**[${asset.title}](/assets/${asset.id})**`;
+    return `{% link to="/assets/${asset.id}" text="${asset.title}" /%}`;
   } else {
     // For multiple assets, use interactive component
     const idsString = assetArray.map((a) => a.id).join(",");
